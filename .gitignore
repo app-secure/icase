@@ -1,0 +1,40 @@
+# Dependencias de paquetes
+node_modules/
+**/node_modules/
+
+# Variables de entorno y credenciales sensibles (API keys, passwords)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Archivos subidos en tiempo de ejecución (audios, PDFs procesados)
+icase-backend/uploads/*
+!icase-backend/uploads/.gitkeep
+
+# Salidas de compilación y bundles
+dist/
+dist-ssr/
+build/
+**/dist/
+
+# Archivos de registro y depuración
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Archivos de entorno de desarrollo y sistemas operativos
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Reportes de pruebas y cobertura
+coverage/

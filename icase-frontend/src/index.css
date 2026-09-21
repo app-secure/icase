@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #f8fafd;
+    color: #1f1f1f;
+    font-family: "Roboto", "YouTube Sans", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  *, button, input, textarea, select {
+    font-family: "Roboto", "YouTube Sans", Arial, sans-serif;
+  }
+  
+  #root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    text-align: left;
+    background-color: #f8fafd;
+  }
+}
+
+/* NotebookLM-style subtle scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Gemini AI Glowing & Shimmer Animations */
+@keyframes geminiPulseAura {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.95);
+    filter: blur(28px);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.15);
+    filter: blur(36px);
+  }
+}
+
+@keyframes geminiStarRotate {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes geminiWaveFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes geminiSkeletonShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.gemini-aura-glow {
+  background: radial-gradient(circle, rgba(66, 133, 244, 0.45) 0%, rgba(168, 85, 247, 0.35) 45%, rgba(236, 72, 153, 0.2) 70%, transparent 80%);
+  animation: geminiPulseAura 4s ease-in-out infinite;
+}
+
+.gemini-star-spin {
+  animation: geminiStarRotate 16s ease-in-out infinite;
+}
+
+.gemini-gradient-text {
+  background: linear-gradient(135deg, #1a73e8 0%, #8ab4f8 25%, #c58af9 60%, #ea4335 100%);
+  background-size: 250% 250%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: geminiWaveFlow 6s ease infinite;
+}
+
+.gemini-wave-bar {
+  background: linear-gradient(90deg, #1a73e8, #8ab4f8, #c58af9, #f28b82, #1a73e8);
+  background-size: 300% 100%;
+  animation: geminiWaveFlow 3s linear infinite;
+}
+
+.gemini-skeleton-loader {
+  background: linear-gradient(90deg, #f1f5f9 0%, #dbeafe 30%, #e9d5ff 50%, #f1f5f9 100%);
+  background-size: 200% 100%;
+  animation: geminiSkeletonShimmer 2s infinite ease-in-out;
+}
+
+/* Ocultar cualquier elemento de error inyectado por Mermaid en el DOM */
+.error-icon,
+.error-text,
+[id^="dmermaid"] {
+  display: none !important;
+}
+
+/* Auto-ajuste de diagramas para máxima legibilidad sin cortes laterales */
+.diagram-canvas-container {
+  display: flex;
+  align-items: center;
+  justify-content: safe center;
+  width: 100%;
+  min-height: 380px;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 1rem;
+  background-color: #ffffff;
+}
+
+.diagram-canvas-container svg {
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: 60vh !important;
+  object-fit: contain;
+  display: block;
+  margin: auto;
+}
+
+.diagram-canvas-container img {
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: 60vh !important;
+  object-fit: contain;
+  margin: auto;
+  display: block;
+}
+
