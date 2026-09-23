@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Bot, Send, Sparkles, X, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Bot, Send, X, CheckCircle2, AlertTriangle } from "lucide-react";
+import BrainGearsIcon from "./BrainGearsIcon";
 
 export default function FeedbackChat({ phaseName, onApplyCorrection, onClose }) {
   const [prompt, setPrompt] = useState("");
@@ -93,7 +94,7 @@ export default function FeedbackChat({ phaseName, onApplyCorrection, onClose }) 
             onClick={() => handleSend(item)}
             className="text-[11px] px-2.5 py-1 rounded bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border border-slate-700/60 transition-colors text-left flex items-center gap-1.5"
           >
-            <Sparkles size={11} className="text-indigo-400 shrink-0" />
+            <BrainGearsIcon size={12} className="text-indigo-400 shrink-0" />
             <span>{item}</span>
           </button>
         ))}

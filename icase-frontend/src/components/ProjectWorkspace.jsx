@@ -6,10 +6,13 @@ import DocumentViewer from "./DocumentViewer";
 import { Sparkles, ArrowRight, Layers, GitBranch, FileText, CheckCircle2 } from "lucide-react";
 import {
   createProjectApi,
+  updateProjectApi,
   uploadFuenteApi,
+  deleteFuenteApi,
   fetchFuentesApi,
   processWithAiApi,
-  approvePhaseApi
+  approvePhaseApi,
+  updateDiagramApi
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
 
@@ -280,10 +283,27 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
 };
 
 export default function ProjectWorkspace({
-  project,
+  project: rawProject,
+  user,
+  onLogout,
   onUpdateProject,
   onBackToDashboard
 }) {
+  const defaultEmptyProject = {
+    id: "draft-" + Date.now(),
+    name: "Proyecto sin nombre",
+    description: "",
+    currentPhase: 0,
+    isProcessed: false,
+    isAnalysisApproved: false,
+    isDiagramsApproved: false,
+    sources: [],
+    requirements: { functional: [], nonFunctional: [] },
+    diagrams: {}
+  };
+
+  const project = rawProject || defaultEmptyProject;
+
   const [isProcessing, setIsProcessing] = useState(false);
 
   // Subida / Eliminación de fuentes
@@ -302,8 +322,8 @@ export default function ProjectWorkspace({
 
     let updatedName = project.name;
     if (!updatedName || updatedName === "Proyecto sin nombre") {
-      const cleanName = newSource.name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-      updatedName = "Sistema para " + cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+      const cleanName = newSource.name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ").trim();
+      updatedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
     }
 
     // Si no existe ID en backend, crearlo para poder asociar y procesar fuentes de inmediato
@@ -347,12 +367,29 @@ export default function ProjectWorkspace({
     });
   };
 
-  const handleDeleteSource = (sourceId) => {
+  const handleDeleteSource = async (sourceId) => {
+    const sourceToDelete = (project.sources || []).find((s) => s.id === sourceId);
     const updatedSources = (project.sources || []).filter((s) => s.id !== sourceId);
+
+    // Actualizar estado local inmediatamente para respuesta instantánea de UI
     onUpdateProject({
       ...project,
       sources: updatedSources
     });
+
+    // Eliminar de MongoDB y disco en el backend para no dejar registros sucios
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    const targetId = sourceToDelete?.backendId || sourceToDelete?.id || sourceId;
+    const targetName = sourceToDelete?.name;
+
+    if (backendId || (targetId && targetId.length === 24)) {
+      try {
+        console.log(`[Workspace] Eliminando fuente de MongoDB: ${targetName || targetId}`);
+        await deleteFuenteApi(targetId, backendId, targetName);
+      } catch (err) {
+        console.warn("[Workspace] Error al borrar fuente en backend:", err);
+      }
+    }
   };
 
   const handleUpdateProjectName = (newName) => {
@@ -360,6 +397,12 @@ export default function ProjectWorkspace({
       ...project,
       name: newName
     });
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (backendId) {
+      updateProjectApi(backendId, { nombre: newName }).catch((err) => {
+        console.warn("[Workspace] Error persistiendo nombre de proyecto:", err);
+      });
+    }
   };
 
   // Botón "Procesar con IA" (Conectado con Backend y n8n)
@@ -369,8 +412,8 @@ export default function ProjectWorkspace({
     try {
       let updatedName = project.name;
       if ((!updatedName || updatedName === "Proyecto sin nombre") && project.sources?.length) {
-        const first = project.sources[0].name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-        updatedName = "Sistema para " + first.charAt(0).toUpperCase() + first.slice(1);
+        const first = project.sources[0].name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ").trim();
+        updatedName = first.charAt(0).toUpperCase() + first.slice(1);
       }
 
       // Asegurar que el proyecto esté registrado en el backend
@@ -435,19 +478,23 @@ export default function ProjectWorkspace({
 
       console.log("[Workspace] Resultado recibido de la IA:", aiResult);
 
-      // Adopción automática del título del sistema detectado por la IA según el dominio del sistema
+      // Adopción automática del título del sistema detectado por la IA según el dominio del sistema (sin prefijo Sistema de)
       const aiDetectedName = aiResult?.nombre_proyecto || aiResult?.proyecto_info?.nombre || aiResult?.nombre;
       if (aiDetectedName && aiDetectedName.trim()) {
-        updatedName = aiDetectedName.trim();
+        const cleanedName = aiDetectedName
+          .trim()
+          .replace(/^(Sistema de|Sistema para|Sistema|Software de|Software para|Aplicación de|Plataforma de)\s+/i, "")
+          .trim();
+        updatedName = cleanedName ? (cleanedName.charAt(0).toUpperCase() + cleanedName.slice(1)) : aiDetectedName.trim();
         console.log("[Workspace] Título asignado automáticamente por IA:", updatedName);
       } else {
         const sampleText = `${insumoBruto} ${(aiResult?.requerimientos || []).map(r => r.nombre + ' ' + r.descripcion).join(' ')}`;
         if (/hormig[oó]n|concretera|mixer|dosificaci/i.test(sampleText)) {
-          updatedName = "Sistema de Control Operativo y Dosificación para Planta de Hormigón";
+          updatedName = "Control Operativo y Dosificación para Planta de Hormigón";
         } else if (/hospital|cl[ií]nic|m[eé]dic|paciente/i.test(sampleText)) {
-          updatedName = "Sistema Integral de Gestión Hospitalaria";
+          updatedName = "Gestión Hospitalaria y Clínica";
         } else if (/facturaci[oó]n|punto de venta|inventario/i.test(sampleText)) {
-          updatedName = "Sistema de Gestión Comercial y Facturación";
+          updatedName = "Gestión Comercial y Facturación";
         }
       }
 
@@ -622,6 +669,7 @@ export default function ProjectWorkspace({
 
       onUpdateProject({
         ...project,
+        id: backendId,
         backendId,
         name: updatedName,
         sources: uniqueSources,
@@ -737,6 +785,7 @@ export default function ProjectWorkspace({
 
           onUpdateProject({
             ...project,
+            id: backendId,
             backendId,
             requirements: {
               functional: reqs?.functional || project.requirements?.functional || [],
@@ -768,7 +817,7 @@ export default function ProjectWorkspace({
 
   return (
     <div className="flex-1 flex h-full overflow-hidden bg-white">
-      {/* SECCIÓN IZQUIERDA: Fuentes (Google NotebookLM style) */}
+      {/* SECCIÓN IZQUIERDA: Fuentes y Chat de Ajustes a la IA */}
       <SourcesPanel
         sources={project.sources || []}
         onAddSource={handleAddSource}
@@ -778,19 +827,25 @@ export default function ProjectWorkspace({
         isProcessed={project.isProcessed}
         projectName={project.name}
         onUpdateProjectName={handleUpdateProjectName}
+        onBackToDashboard={onBackToDashboard}
+        user={user}
+        onLogout={onLogout}
+        onApplyAiCorrection={(prompt) => {
+          const activePhase = project.currentPhase === 2 ? "diagrams" : "analysis";
+          return handleApplyAiCorrection(activePhase, prompt);
+        }}
       />
 
-      {/* SECCIÓN DERECHA: Contenido Organizado con Scroll */}
-      <main className="flex-1 overflow-y-auto p-6 md:p-10 bg-white flex flex-col">
+      {/* SECCIÓN DERECHA: Contenido Organizado con Máximo Espacio de Visualización */}
+      <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0">
         {isProcessing ? (
-          /* Efecto Gemini en procesamiento (Feedback visual inmediato tanto al procesar como al reprocesar) */
+          /* Efecto Gemini en procesamiento */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
             <div className="w-full flex flex-col items-center space-y-4">
               <div className="w-48 h-48 rounded-full gemini-aura-glow absolute -z-10 pointer-events-none"></div>
               <h3 className="text-base font-semibold gemini-gradient-text tracking-normal">
                 {project.isProcessed ? "Reprocesando insumos y actualizando especificación..." : "Generando especificación y modelado..."}
               </h3>
-              {/* Línea de onda de gradiente en flujo */}
               <div className="w-56 h-1.5 rounded-full gemini-wave-bar shadow-xs"></div>
               <p className="text-xs text-slate-400 font-normal">
                 {project.isProcessed
@@ -798,7 +853,6 @@ export default function ProjectWorkspace({
                   : "Extrayendo requerimientos del sistema y modelando diagramas"}
               </p>
 
-              {/* Shimmer skeleton simulando tarjetas generándose */}
               <div className="w-full max-w-sm mt-4 space-y-2.5">
                 <div className="h-4 rounded-md gemini-skeleton-loader w-full"></div>
                 <div className="h-4 rounded-md gemini-skeleton-loader w-4/5 mx-auto"></div>
@@ -821,11 +875,11 @@ export default function ProjectWorkspace({
           <RequirementsView
             requirements={project.requirements}
             onApprovePhase={handleApproveAnalysis}
-            onApplyAiCorrection={(prompt) => handleApplyAiCorrection("analysis", prompt)}
             isApproved={project.isAnalysisApproved}
+            onApplyAiCorrection={(prompt) => handleApplyAiCorrection("analysis", prompt)}
           />
         ) : project.currentPhase === 2 ? (
-          /* FASE 2: Modelado (Diagramas PlantUML puros) */
+          /* FASE 2: Modelado (Diagramas PlantUML puros con máxima amplitud) */
           <DiagramsView
             diagrams={project.diagrams}
             onUpdateDiagramCode={(key, newCode) => {
@@ -840,10 +894,20 @@ export default function ProjectWorkspace({
                   }
                 }
               });
+
+              const diagId = project.diagrams?.[key]?.id;
+              if (diagId && diagId.length === 24) {
+                updateDiagramApi(diagId, {
+                  codigo_plantuml: newCode,
+                  codigo_mermaid: newCode
+                }).catch((err) => {
+                  console.warn("[Workspace] Error persistiendo código de diagrama:", err);
+                });
+              }
             }}
             onApprovePhase={handleApproveDiagrams}
-            onApplyAiCorrection={(prompt, diagKey) => handleApplyAiCorrection("diagrams", prompt, diagKey)}
             onBackToAnalysis={() => onUpdateProject({ ...project, currentPhase: 1 })}
+            onApplyAiCorrection={(prompt, diagKey) => handleApplyAiCorrection("diagrams", prompt, diagKey)}
           />
         ) : (
           /* FASE 3: Documento Consolidado */

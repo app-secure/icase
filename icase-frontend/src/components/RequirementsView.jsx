@@ -1,17 +1,16 @@
 import React, { useState } from "react";
-import { Check, Edit3, Send, Sparkles, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Check, CheckCircle2, Send } from "lucide-react";
+import BrainGearsIcon from "./BrainGearsIcon";
 
 export default function RequirementsView({
   requirements,
   onApprovePhase,
-  onApplyAiCorrection,
-  isApproved
+  isApproved,
+  onApplyAiCorrection
 }) {
-  const [showChat, setShowChat] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
-  const [lastCorrection, setLastCorrection] = useState(null);
-  const [errorMessage, setErrorMessage] = useState(null);
+  const [correctionFeedback, setCorrectionFeedback] = useState(null);
 
   const functional = requirements?.functional || [];
   // Filtrar cualquier requerimiento corrupto residual de fallback
@@ -25,184 +24,176 @@ export default function RequirementsView({
 
     const text = prompt;
     setIsFixing(true);
-    setErrorMessage(null);
-    setLastCorrection(null);
+    setCorrectionFeedback(null);
 
     try {
-      const res = await onApplyAiCorrection(text);
-      if (res && res.success === false) {
-        setErrorMessage(res.error || "La IA no pudo generar los requerimientos solicitados. Intente nuevamente.");
-      } else {
-        setLastCorrection(text);
-        setPrompt("");
+      if (onApplyAiCorrection) {
+        const res = await onApplyAiCorrection(text);
+        if (res && res.success === false) {
+          setCorrectionFeedback({ type: "error", message: res.error || "No se pudo aplicar el ajuste a los requerimientos." });
+        } else {
+          setCorrectionFeedback({ type: "success", message: `Ajuste aplicado: "${text}"` });
+          setPrompt("");
+        }
       }
     } catch (err) {
-      console.error("Error al aplicar corrección agéntica:", err);
-      setErrorMessage(err.message || "Error al conectar con el motor de IA.");
+      setCorrectionFeedback({ type: "error", message: err.message || "Error al conectar con la IA." });
     } finally {
       setIsFixing(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-white max-w-4xl mx-auto w-full">
-      {/* Upper Phase Indicator */}
-      <div className="pb-4 mb-6 border-b border-slate-100 flex items-center justify-between">
-        <div>
-          <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider block">
-            Fase 1: Análisis de Requerimientos
-          </span>
-          <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
-            Especificación de Requerimientos del Sistema
-          </h2>
-        </div>
+    <div className="w-full h-full flex flex-col min-h-0 bg-white">
+      {/* Contenedor scrolleable que abarca todo el ancho hasta el extremo derecho */}
+      <div className="w-full flex-1 overflow-y-auto min-h-0 px-6 md:px-12 pt-6 pb-4 flex flex-col">
+        <div className="max-w-5xl mx-auto w-full flex-1 flex flex-col min-h-0">
+          {/* Upper Phase Indicator */}
+          <div className="pb-4 mb-6 border-b border-slate-100 flex items-center justify-between shrink-0">
+            <div>
+              <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider block">
+                Fase 1: Análisis de Requerimientos
+              </span>
+              <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
+                Especificación de Requerimientos del Sistema
+              </h2>
+            </div>
 
-        {isApproved && (
-          <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-            <CheckCircle2 size={13} />
-            Fase Aprobada
-          </span>
-        )}
+            {isApproved && (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
+                <CheckCircle2 size={13} />
+                Fase Aprobada
+              </span>
+            )}
+          </div>
+
+          {/* Main Content Area */}
+          <div className="flex-1 space-y-6 text-slate-800 leading-relaxed text-[15px]">
+            {functional.length === 0 && nonFunctional.length === 0 ? (
+              <div className="py-16 text-center text-slate-400">
+                No hay contenido generado aún. Presiona "Procesar" en el panel izquierdo.
+              </div>
+            ) : (
+              <>
+                {/* Functional Requirements Block */}
+                <div className="space-y-4">
+                  <h3 className="text-base font-semibold text-slate-900 tracking-tight">
+                    Requerimientos Funcionales del Sistema:
+                  </h3>
+
+                  <div className="space-y-4 text-slate-700">
+                    {functional.map((rf, index) => (
+                      <div key={rf.id} className="flex items-start gap-3">
+                        <span className="font-semibold text-slate-800 text-sm mt-0.5">
+                          {index + 1}.
+                        </span>
+                        <div className="flex-1 space-y-1">
+                          <p>
+                            <strong className="text-slate-900 font-semibold">{rf.name}:</strong>{" "}
+                            {rf.description}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            <strong className="text-slate-700">Actores:</strong> {Array.isArray(rf.actors) ? rf.actors.join(", ") : rf.actors} • <strong className="text-slate-700">Prioridad:</strong> {rf.priority}
+                          </p>
+                          {rf.precondition && (
+                            <p className="text-xs text-slate-500">
+                              <strong className="text-slate-600">Precondición:</strong> {rf.precondition}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Non-Functional Requirements Block */}
+                <div className="space-y-4 pt-4 border-t border-slate-100">
+                  <h3 className="text-base font-semibold text-slate-900 tracking-tight">
+                    Requerimientos No Funcionales (Criterios de Calidad ISO 25010):
+                  </h3>
+
+                  <div className="space-y-4 text-slate-700">
+                    {nonFunctional.map((rnf, index) => (
+                      <div key={rnf.id} className="flex items-start gap-3">
+                        <span className="font-semibold text-slate-800 text-sm mt-0.5">
+                          {functional.length + index + 1}.
+                        </span>
+                        <div className="flex-1 space-y-1">
+                          <p>
+                            <strong className="text-slate-900 font-semibold">{rnf.category}:</strong>{" "}
+                            {rnf.description}
+                          </p>
+                          <p className="text-xs text-slate-600">
+                            <strong className="text-blue-700">Métrica cuantitativa:</strong> {rnf.metric} • <span className="text-slate-500">{rnf.compliance}</span>
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Main Content Area with Scroll (Editorial Text Style like Gemini / NotebookLM) */}
-      <div className="flex-1 overflow-y-auto pr-3 space-y-6 text-slate-800 leading-relaxed text-[15px]">
-        {functional.length === 0 && nonFunctional.length === 0 ? (
-          <div className="py-16 text-center text-slate-400">
-            No hay contenido generado aún. Presiona "Procesar" en el panel izquierdo.
-          </div>
-        ) : (
-          <>
-            {/* Functional Requirements Block */}
-            <div className="space-y-4">
-              <h3 className="text-base font-semibold text-slate-900 tracking-tight">
-                Requerimientos Funcionales del Sistema:
-              </h3>
-
-              <div className="space-y-4 text-slate-700">
-                {functional.map((rf, index) => (
-                  <div key={rf.id} className="flex items-start gap-3">
-                    <span className="font-semibold text-slate-800 text-sm mt-0.5">
-                      {index + 1}.
-                    </span>
-                    <div className="flex-1 space-y-1">
-                      <p>
-                        <strong className="text-slate-900 font-semibold">{rf.name}:</strong>{" "}
-                        {rf.description}
-                      </p>
-                      <div className="text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-0.5">
-                        <span><strong>Actores:</strong> {rf.actors?.join(", ")}</span>
-                        <span><strong>Prioridad:</strong> {rf.priority}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+      {/* Bottom Action Bar: Estático y fijo al fondo al extremo inferior */}
+      <div className="w-full shrink-0 border-t border-slate-200 bg-white z-10 px-6 md:px-12 py-3.5">
+        <div className="max-w-5xl mx-auto w-full flex flex-col gap-2">
+          {correctionFeedback && (
+            <div className={`text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 ${
+              correctionFeedback.type === "success" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"
+            }`}>
+              <span className="truncate">{correctionFeedback.message}</span>
+              <button
+                type="button"
+                onClick={() => setCorrectionFeedback(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold ml-2 text-xs cursor-pointer"
+              >
+                ×
+              </button>
             </div>
+          )}
 
-            {/* Non-Functional Requirements Block */}
-            <div className="space-y-4 pt-4 border-t border-slate-100">
-              <h3 className="text-base font-semibold text-slate-900 tracking-tight">
-                Requerimientos No Funcionales Cuantificables (Métricas):
-              </h3>
-
-              <div className="space-y-4 text-slate-700">
-                {nonFunctional.map((rnf, index) => (
-                  <div key={rnf.id} className="flex items-start gap-3">
-                    <span className="font-semibold text-slate-800 text-sm mt-0.5">
-                      {functional.length + index + 1}.
-                    </span>
-                    <div className="flex-1 space-y-1">
-                      <p>
-                        <strong className="text-slate-900 font-semibold">{rnf.category}:</strong>{" "}
-                        {rnf.description}
-                      </p>
-                      <p className="text-xs text-slate-600">
-                        <strong className="text-blue-700">Métrica cuantitativa:</strong> {rnf.metric} • <span className="text-slate-500">{rnf.compliance}</span>
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Correction Feedback Notification */}
-        {lastCorrection && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
-            <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
-            <span>
-              <strong>Ajuste incorporado por la IA:</strong> "{lastCorrection}"
-            </span>
-          </div>
-        )}
-
-        {/* Error Notification when AI fails to generate */}
-        {errorMessage && (
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
-            <AlertTriangle size={15} className="text-rose-600 shrink-0" />
-            <span>
-              <strong>No se pudo generar el ajuste:</strong> {errorMessage}
-            </span>
-          </div>
-        )}
-
-        {/* Inline Prompt / Chat Box when "Corregir" is clicked */}
-        {showChat && (
-          <div className="pt-3 border-t border-slate-200">
-            <form onSubmit={handleSendCorrection} className="flex gap-2">
+          <div className="flex items-center gap-3">
+            {/* Input de Ajustes IA redimensionado y elegante al lado del botón de aprobar */}
+            <form
+              onSubmit={handleSendCorrection}
+              className="flex-1 flex items-center bg-slate-50 hover:bg-slate-100/60 focus-within:bg-white border border-slate-300 focus-within:border-blue-500 rounded-full px-4 py-1.5 transition-all shadow-2xs"
+            >
+              <BrainGearsIcon size={16} className="text-blue-600 mr-2 shrink-0" />
               <input
                 type="text"
-                autoFocus
-                placeholder="Indícale a la IA cómo modificar, ampliar o hacer más entendibles los requerimientos (ej: 'debes aumentar más requerimientos', 'hazlo más entendible')..."
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                className="flex-1 bg-slate-50 border border-slate-300 rounded-full px-4 py-2 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600"
+                disabled={isFixing}
+                placeholder="Pide un ajuste a los requerimientos con IA (ej: 'añade módulo de facturación')..."
+                className="flex-1 bg-transparent text-xs text-slate-800 placeholder:text-slate-400 outline-none min-w-0"
               />
               <button
                 type="submit"
                 disabled={!prompt.trim() || isFixing}
-                className="px-4 py-2 bg-[#0b57d0] hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-xs font-medium flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                className="p-1 text-blue-600 hover:text-blue-700 disabled:text-slate-300 transition-colors cursor-pointer shrink-0 ml-1"
+                title="Aplicar ajuste a requerimientos"
               >
                 {isFixing ? (
-                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div className="w-3.5 h-3.5 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
                 ) : (
-                  <>
-                    <Send size={13} />
-                    <span>Enviar</span>
-                  </>
+                  <Send size={14} />
                 )}
               </button>
             </form>
+
+            {/* Botón Aprobar Fase */}
+            <button
+              type="button"
+              onClick={onApprovePhase}
+              className="px-5 py-2.5 bg-[#6D8196] hover:bg-[#5a6c7f] text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+            >
+              <Check size={14} />
+              <span>Aprobar Fase</span>
+            </button>
           </div>
-        )}
-      </div>
-
-      {/* Bottom Approval & Correction Bar */}
-      <div className="pt-4 mt-4 border-t border-slate-200 flex items-center justify-between">
-        <span className="text-xs text-slate-500">
-          Revisión del experto requerida para avanzar a la fase de diseño
-        </span>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowChat((prev) => !prev)}
-            className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Edit3 size={13} />
-            <span>{showChat ? "Ocultar chat" : "Corregir"}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onApprovePhase}
-            className="px-5 py-2 bg-[#0b57d0] hover:bg-blue-700 text-white rounded-full text-xs font-medium flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-          >
-            <Check size={14} />
-            <span>Aprobar Fase</span>
-          </button>
         </div>
       </div>
     </div>

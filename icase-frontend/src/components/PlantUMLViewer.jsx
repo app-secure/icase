@@ -127,7 +127,7 @@ export default function PlantUMLViewer({ code, title }) {
             className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-full border border-slate-200 text-xs transition-colors"
           >
             <Download size={12} />
-            <span>SVG</span>
+            <span>Ver</span>
           </button>
 
           <button

@@ -67,19 +67,23 @@ export default function PdfPreviewModal({ project, onClose }) {
         const checkPageBreak = (neededHeight) => {
           if (y + neededHeight > pageHeight - margin - 12) {
             doc.addPage();
-            y = margin;
-            // Encabezado formal de página
+            // Encabezado formal de página con espaciado equilibrado y línea ploma
+            const headerTextY = 11.5;
+            const headerLineY = 14.5;
             doc.setFont("helvetica", "normal");
             doc.setFontSize(7.5);
             doc.setTextColor(120, 120, 120);
             doc.text(
               `${project.name || "Sistema de Información"} • Documento de Especificación y Diseño`,
               margin,
-              y - 4
+              headerTextY
             );
             doc.setDrawColor(220, 220, 220);
             doc.setLineWidth(0.2);
-            doc.line(margin, y - 2, pageWidth - margin, y - 2);
+            doc.line(margin, headerLineY, pageWidth - margin, headerLineY);
+
+            // Espaciado adecuado para que el encabezado y la línea ploma no queden pegados al contenido
+            y = 23.5;
           }
         };
 
@@ -172,13 +176,23 @@ export default function PdfPreviewModal({ project, onClose }) {
           }
 
           // Salto de página antes si el bloque gráfico no cabe
-          checkPageBreak(h + 20);
+          checkPageBreak(h + 25);
 
           doc.setFont("helvetica", "bold");
           doc.setFontSize(10);
           doc.setTextColor(...COLOR_HEADING);
           doc.text(title, margin, y);
           y += 4.5;
+
+          const tieneNarrativa = descripcionTexto && typeof descripcionTexto === "string" && descripcionTexto.trim().length > 10;
+          if (tieneNarrativa) {
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8.5);
+            doc.setTextColor(...COLOR_TEXT);
+            const descLines = doc.splitTextToSize(descripcionTexto, maxLineWidth);
+            doc.text(descLines, margin, y);
+            y += descLines.length * 3.8 + 2.5;
+          }
 
           const x = margin + (maxLineWidth - w) / 2;
           try {
@@ -194,62 +208,45 @@ export default function PdfPreviewModal({ project, onClose }) {
 
             // Explicación operativa generada por la IA
             const listItems = Array.isArray(jerarquia) && jerarquia.length > 0 ? jerarquia : null;
-            const tieneNarrativa = descripcionTexto && typeof descripcionTexto === "string" && descripcionTexto.trim().length > 15;
 
-            if (listItems || tieneNarrativa) {
-              checkPageBreak(20);
+            if (listItems) {
+              checkPageBreak(22);
+              const cleanDiagramTitle = title.replace(/^\d+(\.\d+)*\s*/, "").trim();
+              const explanationTitle = `Descripción del ${cleanDiagramTitle}:`;
+
               doc.setFont("helvetica", "bold");
-              doc.setFontSize(8);
+              doc.setFontSize(8.5);
               doc.setTextColor(...COLOR_HEADING);
-              doc.text("Explicación del Funcionamiento del Sistema:", margin, y);
-              y += 4;
+              doc.text(explanationTitle, margin, y);
+              y += 4.5;
 
-              if (tieneNarrativa) {
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(7.5);
-                doc.setTextColor(...COLOR_TEXT);
-                const descLines = doc.splitTextToSize(descripcionTexto, maxLineWidth);
-                checkPageBreak(descLines.length * 3.4 + 2);
-                doc.text(descLines, margin, y);
-                y += descLines.length * 3.4 + 2.5;
-              }
-
-              if (listItems) {
-                listItems.forEach((item) => {
-                  if (typeof item === "string" && item.includes(":")) {
-                    const [prefix, ...rest] = item.split(":");
-                    const fullText = `• ${prefix.trim()}: ${rest.join(":")}`;
-                    const splitLines = doc.splitTextToSize(fullText, maxLineWidth);
-                    checkPageBreak(splitLines.length * 3.4 + 1.5);
-                    doc.setFont("helvetica", "normal");
-                    doc.setFontSize(7.5);
-                    doc.setTextColor(...COLOR_TEXT);
-                    doc.text(splitLines, margin, y);
-                    y += splitLines.length * 3.4;
-                  } else if (typeof item === "string") {
-                    const splitLines = doc.splitTextToSize(`• ${item}`, maxLineWidth);
-                    checkPageBreak(splitLines.length * 3.4 + 1.5);
-                    doc.setFont("helvetica", "normal");
-                    doc.setFontSize(7.5);
-                    doc.setTextColor(...COLOR_TEXT);
-                    doc.text(splitLines, margin, y);
-                    y += splitLines.length * 3.4;
-                  }
-                });
-                y += 3;
-              }
+              listItems.forEach((item) => {
+                if (typeof item === "string" && item.includes(":")) {
+                  const [prefix, ...rest] = item.split(":");
+                  const fullText = `• ${prefix.trim()}: ${rest.join(":")}`;
+                  const splitLines = doc.splitTextToSize(fullText, maxLineWidth);
+                  checkPageBreak(splitLines.length * 3.8 + 1.5);
+                  doc.setFont("helvetica", "normal");
+                  doc.setFontSize(8.5);
+                  doc.setTextColor(...COLOR_TEXT);
+                  doc.text(splitLines, margin, y);
+                  y += splitLines.length * 3.8;
+                } else if (typeof item === "string") {
+                  const splitLines = doc.splitTextToSize(`• ${item}`, maxLineWidth);
+                  checkPageBreak(splitLines.length * 3.8 + 1.5);
+                  doc.setFont("helvetica", "normal");
+                  doc.setFontSize(8.5);
+                  doc.setTextColor(...COLOR_TEXT);
+                  doc.text(splitLines, margin, y);
+                  y += splitLines.length * 3.8;
+                }
+              });
+              y += 3;
             }
           } catch (e) {
             console.warn("Error incrustando imagen en PDF:", e);
           }
         };
-
-        // --- ENCABEZADO FORMAL DEL DOCUMENTO ---
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(8);
-        doc.setTextColor(...COLOR_MUTED);
-        doc.text("DOCUMENTACIÓN TÉCNICA FORMAL • ESPECIFICACIÓN Y DISEÑO DE SOFTWARE (IEEE 830)", margin, y);
-        y += 6;
 
         // --- 1. TÍTULO DEL PROYECTO ---
         doc.setFont("helvetica", "bold");
@@ -262,12 +259,12 @@ export default function PdfPreviewModal({ project, onClose }) {
         doc.text(titleLines, margin, y);
         y += titleLines.length * 6 + 1.5;
 
-        // Metadatos y certificación
+        // Metadatos
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
         doc.setTextColor(...COLOR_MUTED);
         doc.text(
-          `Fecha de Emisión: ${new Date().toLocaleDateString("es-ES")}   |   Estado: REVISADO Y VALIDADO TÉCNICAMENTE`,
+          `Fecha de Emisión: ${new Date().toLocaleDateString("es-ES")}`,
           margin,
           y
         );
@@ -358,12 +355,16 @@ export default function PdfPreviewModal({ project, onClose }) {
           domainKeywords = ["Control Operacional", "Gestión de Procesos", "Trazabilidad de Datos", "Seguridad Transaccional"];
         }
 
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.setTextColor(...COLOR_TEXT);
-        const kwText = doc.splitTextToSize(domainKeywords.join("  •  "), maxLineWidth);
-        doc.text(kwText, margin, y);
-        y += kwText.length * 3.6 + 4;
+        domainKeywords.forEach((kw) => {
+          checkPageBreak(5);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.5);
+          doc.setTextColor(...COLOR_TEXT);
+          const splitKw = doc.splitTextToSize(`• ${kw}`, maxLineWidth);
+          doc.text(splitKw, margin + 2, y);
+          y += splitKw.length * 3.8;
+        });
+        y += 4;
 
         // --- 5. INTRODUCCIÓN ---
         checkPageBreak(25);
@@ -416,7 +417,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(11);
         doc.setTextColor(...COLOR_TITLE);
-        doc.text("7. Especificación de Requerimientos del Sistema (IEEE 830)", margin, y);
+        doc.text("7. Especificación de Requerimientos del Sistema", margin, y);
         y += 5.5;
 
         // 7.1 Requerimientos Funcionales
@@ -569,7 +570,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         doc.setFontSize(7);
         doc.setTextColor(...COLOR_MUTED);
         doc.text("Equipo de Ingeniería de Software", sign1X + signW / 2, y, { align: "center" });
-        doc.text("Validación Técnica Certificada", sign2X + signW / 2, y, { align: "center" });
+        doc.text("Firma de Aprobación", sign2X + signW / 2, y, { align: "center" });
 
         // --- NUMERACIÓN DE PÁGINAS FORMAL AL PIE ---
         const totalPages = doc.internal.getNumberOfPages();
@@ -579,7 +580,7 @@ export default function PdfPreviewModal({ project, onClose }) {
           doc.setFontSize(7);
           doc.setTextColor(140, 140, 140);
           doc.text(
-            `Página ${p} de ${totalPages}  •  Documento Técnico de Especificación y Diseño de Software (IEEE 830)`,
+            `Página ${p} de ${totalPages}  •  Documento Técnico de Especificación y Diseño del Sistema`,
             pageWidth / 2,
             pageHeight - 7,
             { align: "center" }

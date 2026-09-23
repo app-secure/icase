@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+:root {
+  --color-graphite: #4A4A4A;
+  --color-muted-gray: #CBCBCB;
+  --color-warm-ivory: #FFFFE3;
+  --color-slate-blue: #6D8196;
+  --color-rbix-purple: #7C3AED;
+  --color-rbix-green: #10B981;
+}
+
+.bg-slate-blue { background-color: #6D8196; }
+.text-slate-blue { color: #6D8196; }
+.border-slate-blue { border-color: #6D8196; }
+.bg-warm-ivory { background-color: #FFFFE3; }
+.text-graphite { color: #4A4A4A; }
+.bg-graphite { background-color: #4A4A4A; }
+.border-muted-gray { border-color: #CBCBCB; }
+
+.font-inter {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+.font-gemini {
+  font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
+}
+
 @layer base {
   body {
     margin: 0;

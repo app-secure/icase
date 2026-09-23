@@ -39,7 +39,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
       : cleanFunctional.slice(0, 7).map((rf) => rf.name.replace(/^(Gestión de|Control de|Registro de|Módulo de)\s*/i, ""))
   ).filter((k) => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
 
-  const renderDiagramExplanation = (diag) => {
+  const renderDiagramExplanation = (diag, defaultTitle = "Diagrama") => {
     if (!diag) return null;
     const jerarquia = Array.isArray(diag.descripcion_jerarquica) && diag.descripcion_jerarquica.length > 0
       ? diag.descripcion_jerarquica
@@ -48,22 +48,26 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
 
     if (!jerarquia && !narrativa) return null;
 
+    const rawTitle = diag.title || defaultTitle;
+    const cleanTitle = rawTitle.replace(/^\d+(\.\d+)*\s*/, "").trim();
+    const label = `Descripción del ${cleanTitle}`;
+
     return (
-      <div className="mt-3 text-xs text-slate-700 space-y-1.5">
-        <p className="font-bold text-slate-900 text-xs">Explicación del Funcionamiento del Sistema:</p>
+      <div className="mt-4 text-sm text-slate-700 space-y-2">
+        <p className="font-bold text-slate-900 text-sm">{label}:</p>
         {narrativa && (
-          <p className="text-xs text-slate-600 leading-relaxed mb-2">
+          <p className="text-sm text-slate-700 leading-relaxed mb-2">
             {narrativa}
           </p>
         )}
         {jerarquia && (
-          <ul className="list-disc pl-5 space-y-1 leading-relaxed">
+          <ul className="list-disc pl-5 space-y-1.5 leading-relaxed text-sm text-slate-700">
             {jerarquia.map((item, idx) => {
               if (typeof item === "string" && item.includes(":")) {
                 const [prefix, ...rest] = item.split(":");
                 return (
                   <li key={idx}>
-                    <strong className="text-slate-900">{prefix.trim()}:</strong>
+                    <strong className="text-slate-900 font-semibold">{prefix.trim()}:</strong>
                     <span>{rest.join(":")}</span>
                   </li>
                 );
@@ -77,92 +81,88 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white max-w-4xl mx-auto w-full">
-      {/* Top Controls Bar */}
-      <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onBackToDiagrams}
-            className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600 transition-colors flex items-center gap-1 text-xs cursor-pointer"
-          >
-            <ChevronLeft size={16} />
-            <span>Volver a Modelado</span>
-          </button>
-          <span className="text-slate-300">|</span>
-          <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5">
-            <CheckCircle2 size={13} />
-            Documento de Especificación del Sistema
-          </span>
-        </div>
+    <div className="w-full h-full flex flex-col min-h-0 bg-white">
+      {/* Contenedor scrolleable que abarca todo el ancho hasta el extremo derecho */}
+      <div className="w-full flex-1 overflow-y-auto min-h-0 px-6 md:px-12 pt-6 pb-12 flex flex-col">
+        <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col min-h-0">
+          {/* Top Controls Bar */}
+          <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200 shrink-0">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onBackToDiagrams}
+                className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600 transition-colors flex items-center gap-1 text-xs cursor-pointer"
+              >
+                <ChevronLeft size={16} />
+                <span>Volver a Modelado</span>
+              </button>
+              <span className="text-slate-300">|</span>
+              <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5">
+                <CheckCircle2 size={13} />
+                Documento de Especificación del Sistema
+              </span>
+            </div>
 
-        {/* Botón Principal: Previsualizar documento en PDF */}
-        <button
-          type="button"
-          onClick={() => setShowPdfModal(true)}
-          className="px-4 py-2 bg-[#0b57d0] hover:bg-blue-700 text-white rounded-full text-xs font-medium flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-        >
-          <FileText size={15} />
-          <span>Previsualizar documento en PDF</span>
-        </button>
-      </div>
-
-      {/* Main Document Body */}
-      <div className="flex-1 overflow-y-auto pr-4 space-y-8 text-slate-800 text-[15px] leading-relaxed">
-        {/* Cover & Title */}
-        <div className="border-b border-slate-200 pb-6">
-          <span className="text-xs font-mono text-slate-400 uppercase tracking-wider block mb-1">
-            DOCUMENTACIÓN TÉCNICA FORMAL • ESPECIFICACIÓN IEEE 830
-          </span>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">
-            1. {project.name}
-          </h1>
-          <p className="text-sm text-slate-600">
-            {project.description || `Especificación técnica formal y diseño preliminar para ${project.name || "el sistema"}.`}
-          </p>
-          <div className="mt-3 text-xs text-slate-400 flex items-center gap-4">
-            <span>Fecha de Emisión: {new Date().toLocaleDateString("es-ES")}</span>
-            <span>•</span>
-            <span className="text-emerald-700 font-medium">Validado por Experto en Software</span>
+            {/* Botón Principal: Previsualizar documento en PDF */}
+            <button
+              type="button"
+              onClick={() => setShowPdfModal(true)}
+              className="px-4 py-2 bg-[#0b57d0] hover:bg-blue-700 text-white rounded-full text-xs font-medium flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            >
+              <FileText size={15} />
+              <span>Previsualizar documento en PDF</span>
+            </button>
           </div>
-        </div>
 
-        {/* 2. Objetivos */}
-        <section className="space-y-3">
-          <h2 className="text-base font-bold text-slate-900">2. Objetivos</h2>
-          <div className="pl-4 space-y-3 text-sm text-slate-700">
-            <p>
-              <strong>2.1 General:</strong> {objetivosGenerales}
-            </p>
-            <div>
-              <strong>2.2 Específicos:</strong>
-              <ul className="list-disc pl-5 mt-1.5 space-y-1">
-                {objetivosEspecificos.map((obj, i) => (
-                  <li key={i}>{obj}</li>
+          {/* Main Document Body */}
+          <div className="space-y-8 text-slate-800 text-[15px] leading-relaxed">
+            {/* Cover & Title */}
+            <div className="border-b border-slate-200 pb-6">
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">
+                1. {project.name}
+              </h1>
+              <p className="text-sm text-slate-600">
+                {project.description || `Especificación técnica formal y diseño preliminar para ${project.name || "el sistema"}.`}
+              </p>
+              <div className="mt-3 text-xs text-slate-400">
+                <span>Fecha de Emisión: {new Date().toLocaleDateString("es-ES")}</span>
+              </div>
+            </div>
+
+            {/* 2. Objetivos */}
+            <section className="space-y-3">
+              <h2 className="text-base font-bold text-slate-900">2. Objetivos</h2>
+              <div className="pl-4 space-y-3 text-sm text-slate-700">
+                <p>
+                  <strong>2.1 General:</strong> {objetivosGenerales}
+                </p>
+                <div>
+                  <strong>2.2 Específicos:</strong>
+                  <ul className="list-disc pl-5 mt-1.5 space-y-1">
+                    {objetivosEspecificos.map((obj, i) => (
+                      <li key={i}>{obj}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </section>
+
+            {/* 3. Resumen */}
+            <section className="space-y-2">
+              <h2 className="text-base font-bold text-slate-900">3. Resumen</h2>
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                {resumenTexto}
+              </p>
+            </section>
+
+            {/* 4. Palabras Clave del Negocio / Dominio en Viñetas de Puntos Verticales */}
+            <section className="space-y-2">
+              <h2 className="text-base font-bold text-slate-900">4. Palabras Clave</h2>
+              <ul className="list-disc pl-5 text-sm text-slate-700 space-y-1">
+                {palabrasClave.map((kw, i) => (
+                  <li key={i}>{kw}</li>
                 ))}
               </ul>
-            </div>
-          </div>
-        </section>
-
-        {/* 3. Resumen */}
-        <section className="space-y-2">
-          <h2 className="text-base font-bold text-slate-900">3. Resumen</h2>
-          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-            {resumenTexto}
-          </p>
-        </section>
-
-        {/* 4. Palabras Clave del Negocio / Dominio */}
-        <section className="space-y-2">
-          <h2 className="text-base font-bold text-slate-900">4. Palabras Clave</h2>
-          <div className="flex flex-wrap gap-2 text-xs">
-            {palabrasClave.map((kw, i) => (
-              <span key={i} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-full border border-slate-200">
-                {kw}
-              </span>
-            ))}
-          </div>
-        </section>
+            </section>
 
         {/* 5. Introducción */}
         <section className="space-y-2">
@@ -354,7 +354,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             <h3 className="text-sm font-bold text-slate-800">
               8.1 Diagrama de Casos de Uso
             </h3>
-            <p className="text-xs text-slate-600">
+            <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.useCase?.description || "Modela las interacciones directas entre actores y los procesos operativos nodales del sistema."}
             </p>
             <StaticDiagram
@@ -362,7 +362,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               plantumlCode={project.diagrams?.useCase?.plantumlCode}
               caption="Figura 8.1: Diagrama de Casos de Uso del Sistema"
             />
-            {renderDiagramExplanation(project.diagrams?.useCase)}
+            {renderDiagramExplanation(project.diagrams?.useCase, "Diagrama de Casos de Uso")}
           </div>
 
           {/* 8.2 Clases de Dominio */}
@@ -370,7 +370,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             <h3 className="text-sm font-bold text-slate-800">
               8.2 Diagrama de Clases de Dominio
             </h3>
-            <p className="text-xs text-slate-600">
+            <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.classDiagram?.description || "Define la estructura de datos, atributos tipados, cardinalidad y relaciones del modelo operacional."}
             </p>
             <StaticDiagram
@@ -378,7 +378,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               plantumlCode={project.diagrams?.classDiagram?.plantumlCode}
               caption="Figura 8.2: Diagrama de Clases de Dominio y Entidades"
             />
-            {renderDiagramExplanation(project.diagrams?.classDiagram)}
+            {renderDiagramExplanation(project.diagrams?.classDiagram, "Diagrama de Clases de Dominio")}
           </div>
 
           {/* 8.3 Árbol de Navegación */}
@@ -386,7 +386,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             <h3 className="text-sm font-bold text-slate-800">
               8.3 Árbol de Navegación
             </h3>
-            <p className="text-xs text-slate-600">
+            <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.navigationTree?.description || "Organiza la navegación jerárquica de la solución estructurada en fases de operación y módulos de control."}
             </p>
             <StaticDiagram
@@ -394,7 +394,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               plantumlCode={project.diagrams?.navigationTree?.plantumlCode}
               caption="Figura 8.3: Árbol de Navegación del Sistema"
             />
-            {renderDiagramExplanation(project.diagrams?.navigationTree)}
+            {renderDiagramExplanation(project.diagrams?.navigationTree, "Árbol de Navegación")}
           </div>
 
           {/* 8.4 Arquitectura del Sistema */}
@@ -402,7 +402,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             <h3 className="text-sm font-bold text-slate-800">
               8.4 Diagrama de Arquitectura
             </h3>
-            <p className="text-xs text-slate-600">
+            <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.architecture?.description || "Modelo de arquitectura técnica integral en contenedores adaptado a las necesidades operativas del sistema."}
             </p>
             <StaticDiagram
@@ -410,10 +410,12 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               plantumlCode={project.diagrams?.architecture?.plantumlCode}
               caption="Figura 8.4: Diagrama de Arquitectura del Sistema"
             />
-            {renderDiagramExplanation(project.diagrams?.architecture)}
+            {renderDiagramExplanation(project.diagrams?.architecture, "Diagrama de Arquitectura")}
           </div>
         </section>
       </div>
+    </div>
+  </div>
 
       {/* Modal de Previsualización PDF Nativo */}
       {showPdfModal && (
