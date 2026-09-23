@@ -1,6 +1,7 @@
 class Proyecto {
-  constructor({ id, nombre, descripcion = '', insumo_bruto = '', estado_fase = 'analisis_pendiente', createdAt, updatedAt }) {
+  constructor({ id, usuario_id, nombre, descripcion = '', insumo_bruto = '', estado_fase = 'insumos_pendientes', createdAt, updatedAt }) {
     this.id = id;
+    this.usuario_id = usuario_id;
     this.nombre = nombre;
     this.descripcion = descripcion;
     this.insumo_bruto = insumo_bruto;

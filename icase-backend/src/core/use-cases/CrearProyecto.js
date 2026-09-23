@@ -5,16 +5,20 @@ class CrearProyecto {
     this.proyectoRepository = proyectoRepository;
   }
 
-  async ejecutar({ nombre, descripcion, insumo_bruto }) {
+  async ejecutar({ usuario_id, nombre, descripcion, insumo_bruto, parametros }) {
     const proyecto = new Proyecto({
+      usuario_id: usuario_id || null,
       nombre,
       descripcion,
       insumo_bruto: insumo_bruto || '',
-      estado_fase: 'analisis_pendiente'
+      estado_fase: 'insumos_pendientes'
     });
 
     proyecto.validar();
-    return await this.proyectoRepository.crear(proyecto);
+    return await this.proyectoRepository.crear({
+      ...proyecto,
+      parametros
+    });
   }
 }
 

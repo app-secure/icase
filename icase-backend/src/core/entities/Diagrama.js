@@ -9,6 +9,7 @@ class Diagrama {
     codigo_plantuml = '',
     aprobado = false,
     trazabilidad_rnf = [],
+    descripcion_jerarquica = [],
     createdAt,
     updatedAt
   }) {
@@ -21,6 +22,7 @@ class Diagrama {
     this.codigo_plantuml = codigo_plantuml;
     this.aprobado = aprobado;
     this.trazabilidad_rnf = Array.isArray(trazabilidad_rnf) ? trazabilidad_rnf : [trazabilidad_rnf].filter(Boolean);
+    this.descripcion_jerarquica = Array.isArray(descripcion_jerarquica) ? descripcion_jerarquica : (descripcion_jerarquica ? [descripcion_jerarquica] : []);
     this.createdAt = createdAt || new Date();
     this.updatedAt = updatedAt || new Date();
   }

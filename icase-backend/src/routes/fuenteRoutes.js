@@ -13,8 +13,16 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
+    let safeName = 'archivo';
+    try {
+      safeName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    } catch (e) {
+      safeName = file.originalname;
+    }
+    const ext = path.extname(safeName) || '';
+    const base = path.basename(safeName, ext).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
+    cb(null, `${uniqueSuffix}-${base}${ext}`);
   }
 });
 
@@ -34,6 +42,9 @@ function buildFuenteRoutes(fuenteController) {
   );
   router.delete('/fuentes/:id', (req, res) =>
     fuenteController.eliminar(req, res)
+  );
+  router.delete('/proyectos/:proyectoId/fuentes/:fuenteIdOrName', (req, res) =>
+    fuenteController.eliminarFuenteDeProyecto(req, res)
   );
 
   return router;

@@ -1,11 +1,15 @@
 const express = require('express');
+const { optionalAuthMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
 function buildProyectoRoutes(proyectoController) {
   const router = express.Router();
 
+  router.use(optionalAuthMiddleware);
+
   router.post('/', (req, res) => proyectoController.crear(req, res));
   router.get('/', (req, res) => proyectoController.listar(req, res));
   router.get('/:id', (req, res) => proyectoController.obtenerPorId(req, res));
+  router.put('/:id', (req, res) => proyectoController.actualizar(req, res));
   router.delete('/:id', (req, res) => proyectoController.eliminar(req, res));
   router.post('/:id/procesar-ia', (req, res) => proyectoController.procesarConIA(req, res));
   router.post('/:id/aprobar-fase', (req, res) => proyectoController.aprobarFase(req, res));

@@ -38,6 +38,10 @@ const DiagramaSchema = new mongoose.Schema({
   trazabilidad_rnf: {
     type: [String],
     default: []
+  },
+  descripcion_jerarquica: {
+    type: [String],
+    default: []
   }
 }, {
   timestamps: true,

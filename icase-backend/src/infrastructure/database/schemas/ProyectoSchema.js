@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const ProyectoSchema = new mongoose.Schema({
+  usuario_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Usuario',
+    index: true
+  },
   nombre: {
     type: String,
     required: true,

@@ -26,7 +26,9 @@ class ProyectoController {
   async crear(req, res) {
     try {
       const { nombre, descripcion, insumo_bruto, parametros } = req.body;
+      const usuario_id = req.usuario?.id || req.body.usuario_id || null;
       const proyecto = await this.crearProyectoUseCase.ejecutar({
+        usuario_id,
         nombre: nombre || 'Proyecto sin nombre',
         descripcion: descripcion || '',
         insumo_bruto: insumo_bruto || '',
@@ -40,17 +42,39 @@ class ProyectoController {
 
   async listar(req, res) {
     try {
-      const proyectos = await this.proyectoRepository.listar();
-      // Asociar fuentes a cada proyecto
-      const proyectosConFuentes = await Promise.all(
+      const filtro = {};
+      if (req.usuario?.id) {
+        filtro.usuario_id = req.usuario.id;
+      }
+      const proyectos = await this.proyectoRepository.listar(filtro);
+      // Asociar fuentes, requerimientos y diagramas a cada proyecto para persistencia completa
+      const proyectosCompletos = await Promise.all(
         proyectos.map(async (p) => {
-          const fuentes = this.fuenteRepository ? await this.fuenteRepository.listarPorProyecto(p.id) : [];
-          return { ...p, fuentes };
+          const [fuentes, requerimientos, diagramas] = await Promise.all([
+            this.fuenteRepository ? this.fuenteRepository.listarPorProyecto(p.id) : [],
+            this.requerimientoRepository ? this.requerimientoRepository.listarPorProyecto(p.id) : [],
+            this.diagramaRepository ? this.diagramaRepository.listarPorProyecto(p.id) : []
+          ]);
+          return { ...p, fuentes, requerimientos, diagramas };
         })
       );
-      res.json(proyectosConFuentes);
+      res.json(proyectosCompletos);
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  }
+
+  async actualizar(req, res) {
+    try {
+      const { id } = req.params;
+      const data = req.body;
+      const actualizado = await this.proyectoRepository.actualizar(id, data);
+      if (!actualizado) {
+        return res.status(404).json({ error: 'Proyecto no encontrado para actualizar' });
+      }
+      res.json(actualizado);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
     }
   }
 

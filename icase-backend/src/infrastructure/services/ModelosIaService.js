@@ -3,13 +3,11 @@ const fs = require('fs');
 const path = require('path');
 const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
 
-
 class ModelosIaService {
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.promptsDir = path.join(__dirname, '../prompts');
   }
-
 
   leerPrompt(archivo) {
     try {
@@ -19,7 +17,6 @@ class ModelosIaService {
       return '';
     }
   }
-
 
   construirPrompt({ insumo, contextoActualTexto, insumoAdicional }) {
     const plantilla = this.leerPrompt('plantilla_orquestador.md');
@@ -60,7 +57,7 @@ class ModelosIaService {
     if (!respuestaData) {
       console.warn('[ModelosIaService] Gemini no devolvió respuesta parseable. Usando estructuración de contingencia.');
       respuestaData = {
-        nombre_proyecto: payload.nombre_proyecto || 'Sistema de Información y Gestión Integral',
+        nombre_proyecto: this.limpiarNombreProyecto(payload.nombre_proyecto) || 'Gestión y Control Operativo',
         requerimientos: reqsActuales
       };
     }
@@ -86,7 +83,7 @@ class ModelosIaService {
               responseMimeType: 'application/json'
             }
           },
-          { timeout: 40000 }
+          { timeout: 45000 }
         );
 
         const rawText = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -101,7 +98,6 @@ class ModelosIaService {
     return null;
   }
 
-
   limpiarYParsearJson(str) {
     if (typeof str !== 'string') return str;
     let cleaned = str.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -113,9 +109,20 @@ class ModelosIaService {
     return JSON.parse(cleaned);
   }
 
+  limpiarNombreProyecto(rawName) {
+    if (!rawName || typeof rawName !== 'string') return '';
+    let cleaned = rawName.trim().replace(/^["'“”]+|["'“”]+$/g, '').trim();
+    // Elimina prefijos genéricos redundantes como "Sistema de ", "Sistema para ", etc.
+    cleaned = cleaned.replace(/^(Sistema de|Sistema para|Sistema|Software de|Software para|Aplicación de|Plataforma de|App de)\s+/i, '').trim();
+    if (cleaned.length > 0) {
+      cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    }
+    return cleaned;
+  }
 
   normalizarResultado(data) {
-    const safeProjectName = (data?.nombre_proyecto || 'Sistema de Información Integral').replace(/["“”]/g, "'");
+    const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
+    const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
     const requerimientos = Array.isArray(data?.requerimientos) ? data.requerimientos : [];
 
     let palabrasClave = Array.isArray(data?.palabras_clave)

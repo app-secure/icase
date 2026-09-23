@@ -11,7 +11,8 @@ class MongoDiagramaRepository extends IDiagramaRepository {
       codigo_mermaid: diag.codigo_mermaid,
       codigo_plantuml: diag.codigo_plantuml || diag.codigo_puml || '',
       aprobado: diag.aprobado,
-      trazabilidad_rnf: diag.trazabilidad_rnf
+      trazabilidad_rnf: diag.trazabilidad_rnf,
+      descripcion_jerarquica: diag.descripcion_jerarquica || []
     });
     const guardado = await nuevo.save();
     return guardado.toJSON();
@@ -26,7 +27,8 @@ class MongoDiagramaRepository extends IDiagramaRepository {
       codigo_mermaid: diag.codigo_mermaid,
       codigo_plantuml: diag.codigo_plantuml || diag.codigo_puml || '',
       aprobado: diag.aprobado,
-      trazabilidad_rnf: diag.trazabilidad_rnf
+      trazabilidad_rnf: diag.trazabilidad_rnf,
+      descripcion_jerarquica: diag.descripcion_jerarquica || []
     }));
     const guardados = await DiagramaModel.insertMany(docs);
     return guardados.map(g => g.toJSON());

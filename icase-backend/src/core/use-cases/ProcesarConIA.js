@@ -170,6 +170,7 @@ class ProcesarConIA {
           codigo_mermaid: cleanMermaid,
           codigo_plantuml: diagData.codigo_plantuml || diagData.codigo_puml || '',
           trazabilidad_rnf: Array.isArray(diagData.trazabilidad_rnf) ? diagData.trazabilidad_rnf : [],
+          descripcion_jerarquica: Array.isArray(diagData.descripcion_jerarquica) ? diagData.descripcion_jerarquica : (diagData.descripcion_jerarquica ? [diagData.descripcion_jerarquica] : []),
           aprobado: false
         });
         diagramasGenerados.push(diagEntity);
@@ -177,19 +178,38 @@ class ProcesarConIA {
       await this.diagramaRepository.crearMuchos(diagramasGenerados);
     }
 
-    // Si la IA identificó un nombre formal representativo para el sistema, actualizarlo en el proyecto
-    let nombreFinal = proyecto.nombre;
-    let descripcionFinal = proyecto.descripcion;
-    if (resultadoIA.nombre_proyecto && resultadoIA.nombre_proyecto.trim()) {
-      nombreFinal = resultadoIA.nombre_proyecto.trim();
-      const updates = { nombre: nombreFinal };
-      if (resultadoIA.descripcion_proyecto && resultadoIA.descripcion_proyecto.trim()) {
-        descripcionFinal = resultadoIA.descripcion_proyecto.trim();
-        updates.descripcion = descripcionFinal;
+    // Actualizar metadatos del proyecto generados o refinados por la IA sin prefijos genéricos redundantes
+    const cleanProjectName = (raw) => {
+      if (!raw || typeof raw !== 'string') return '';
+      let cleaned = raw.trim().replace(/^["'“”]+|["'“”]+$/g, '').trim();
+      cleaned = cleaned.replace(/^(Sistema de|Sistema para|Sistema|Software de|Software para|Aplicación de|Plataforma de|App de)\s+/i, '').trim();
+      if (cleaned.length > 0) {
+        cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
       }
-      await this.proyectoRepository.actualizar(proyectoId, updates);
-      console.log(`[ProcesarConIA] Nombre del proyecto actualizado automáticamente por IA a: "${nombreFinal}"`);
+      return cleaned;
+    };
+
+    let nombreFinal = cleanProjectName(resultadoIA.nombre_proyecto) || cleanProjectName(proyecto.nombre) || 'Gestión y Control Operativo';
+    let descripcionFinal = (resultadoIA.descripcion_proyecto && resultadoIA.descripcion_proyecto.trim()) || proyecto.descripcion;
+
+    const updates = {
+      nombre: nombreFinal,
+      descripcion: descripcionFinal,
+      estado_fase: 'analisis_pendiente'
+    };
+
+    if (resultadoIA.resumen && resultadoIA.resumen.trim()) updates.resumen = resultadoIA.resumen.trim();
+    if (resultadoIA.introduccion && resultadoIA.introduccion.trim()) updates.introduccion = resultadoIA.introduccion.trim();
+    if (resultadoIA.objetivo_general && resultadoIA.objetivo_general.trim()) updates.objetivo_general = resultadoIA.objetivo_general.trim();
+    if (Array.isArray(resultadoIA.objetivos_especificos) && resultadoIA.objetivos_especificos.length > 0) {
+      updates.objetivos_especificos = resultadoIA.objetivos_especificos;
     }
+    if (Array.isArray(resultadoIA.palabras_clave) && resultadoIA.palabras_clave.length > 0) {
+      updates.palabras_clave = resultadoIA.palabras_clave;
+    }
+
+    await this.proyectoRepository.actualizar(proyectoId, updates);
+    console.log(`[ProcesarConIA] Proyecto actualizado en MongoDB: "${nombreFinal}"`);
 
     return {
       proyecto_id: proyectoId,

@@ -3,6 +3,7 @@ const cors = require('cors');
 
 // Repositorios
 const MongoProyectoRepository = require('./interface-adapters/repositories/MongoProyectoRepository');
+const MongoUsuarioRepository = require('./interface-adapters/repositories/MongoUsuarioRepository');
 const MongoRequerimientoRepository = require('./interface-adapters/repositories/MongoRequerimientoRepository');
 const MongoDiagramaRepository = require('./interface-adapters/repositories/MongoDiagramaRepository');
 const MongoEstandarRepository = require('./interface-adapters/repositories/MongoEstandarRepository');
@@ -29,12 +30,14 @@ const ProyectoController = require('./interface-adapters/controllers/ProyectoCon
 const RequerimientoController = require('./interface-adapters/controllers/RequerimientoController');
 const DiagramaController = require('./interface-adapters/controllers/DiagramaController');
 const FuenteController = require('./interface-adapters/controllers/FuenteController');
+const AuthController = require('./interface-adapters/controllers/AuthController');
 
 // Rutas
 const buildProyectoRoutes = require('./routes/proyectoRoutes');
 const buildRequerimientoRoutes = require('./routes/requerimientoRoutes');
 const buildDiagramaRoutes = require('./routes/diagramaRoutes');
 const buildFuenteRoutes = require('./routes/fuenteRoutes');
+const buildAuthRoutes = require('./routes/authRoutes');
 
 function createApp() {
   const app = express();
@@ -45,6 +48,7 @@ function createApp() {
 
   // Inyección de Dependencias
   const proyectoRepo = new MongoProyectoRepository();
+  const usuarioRepo = new MongoUsuarioRepository();
   const requerimientoRepo = new MongoRequerimientoRepository();
   const diagramaRepo = new MongoDiagramaRepository();
   const estandarRepo = new MongoEstandarRepository();
@@ -110,6 +114,10 @@ function createApp() {
     fileIngestionService
   });
 
+  const authController = new AuthController({
+    usuarioRepository: usuarioRepo
+  });
+
   // Health check
   app.get('/health', (req, res) => {
     res.json({
@@ -120,6 +128,7 @@ function createApp() {
   });
 
   // Montaje de rutas
+  app.use('/auth', buildAuthRoutes(authController));
   app.use('/proyectos', buildProyectoRoutes(proyectoController));
   app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController));
   app.use('/diagramas', buildDiagramaRoutes(diagramaController));

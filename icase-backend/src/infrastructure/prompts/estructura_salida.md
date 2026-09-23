@@ -4,7 +4,7 @@ Tu respuesta debe ser EXCLUSIVAMENTE un objeto JSON válido, sin texto introduct
 
 ```json
 {
-  "nombre_proyecto": "Nombre formal y profesional del sistema detectado (sin comillas internas)",
+  "nombre_proyecto": "Nombre propio o comercial del producto SIN anteponer 'Sistema de' ni 'Sistema para' (ej: 'SmartMix - Gestión de Concreto Premezclado', 'SmartMix', 'FarmaVida')",
   "descripcion_proyecto": "Breve resumen ejecutivo del alcance del sistema",
   "resumen_ejecutivo": "Texto formal del resumen ejecutivo sobre la necesidad y solución del negocio",
   "introduccion": "Introducción formal sobre el contexto del negocio y justificación de la solución",
