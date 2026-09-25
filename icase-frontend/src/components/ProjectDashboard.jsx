@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+ import React, { useState, useRef, useEffect } from "react";
 import {
   Plus,
   FileText,
@@ -485,14 +485,7 @@ export default function ProjectDashboard({
           </div>
         )}
 
-        {/* Mensaje de búsqueda vacía */}
-        {filteredProjects.length === 0 && (
-          <div className="py-16 text-center text-slate-400 font-inter">
-            <FolderOpen size={36} className="mx-auto text-slate-300 mb-2" />
-            <p className="text-sm font-bold text-slate-600">No se encontraron proyectos con ese criterio de búsqueda.</p>
-            <p className="text-xs font-normal text-slate-400 mt-1">Prueba con otro término de búsqueda.</p>
-          </div>
-        )}
+
       </div>
 
       {/* Modal de confirmación con diseño inspirado en Google Gemini */}
