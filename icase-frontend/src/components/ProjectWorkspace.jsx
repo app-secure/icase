@@ -315,9 +315,9 @@ export default function ProjectWorkspace({
     let updatedSources;
     if (existingIndex >= 0) {
       updatedSources = [...currentSources];
-      updatedSources[existingIndex] = { ...currentSources[existingIndex], ...newSource };
+      updatedSources[existingIndex] = { ...currentSources[existingIndex], ...newSource, isUploading: true };
     } else {
-      updatedSources = [newSource, ...currentSources];
+      updatedSources = [{ ...newSource, isUploading: true }, ...currentSources];
     }
 
     let updatedName = project.name;
@@ -326,8 +326,18 @@ export default function ProjectWorkspace({
       updatedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
     }
 
-    // Si no existe ID en backend, crearlo para poder asociar y procesar fuentes de inmediato
     let backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+
+    // 1. Notificar inmediatamente la fuente para que aparezca en pantalla sin demoras
+    onUpdateProject({
+      ...project,
+      id: backendId || project.id,
+      backendId,
+      name: updatedName,
+      sources: updatedSources
+    });
+
+    // 2. Si no existe ID en backend, crearlo para poder asociar y procesar fuentes de inmediato
     if (!backendId) {
       try {
         const created = await createProjectApi({
@@ -336,34 +346,65 @@ export default function ProjectWorkspace({
         });
         if (created && (created.id || created._id)) {
           backendId = created.id || created._id;
+          // Actualizar inmediatamente con el nuevo backendId
+          onUpdateProject({
+            ...project,
+            id: backendId,
+            backendId,
+            name: updatedName,
+            sources: updatedSources
+          });
         }
       } catch (errCreate) {
         console.warn("[Workspace] Error inicializando proyecto en backend:", errCreate);
       }
     }
 
-    // Si viene archivo real, subir al backend para que extraiga el texto (PDF o Audio)
+    // 3. Si viene archivo real, subir al backend para que extraiga el texto (PDF o Audio)
     if (backendId && newSource.rawFile) {
       try {
         const uploaded = await uploadFuenteApi(backendId, newSource.rawFile);
         if (uploaded) {
-          newSource.uploaded = true;
-          newSource.rawFile = null; // No volver a subir en handleProcess
-          if (uploaded.texto_transcrito) {
-            newSource.contentSnippet = uploaded.texto_transcrito;
-            console.log(`[Workspace] Texto de fuente "${newSource.name}" extraído en backend (${uploaded.texto_transcrito.length} caracteres)`);
-          }
+          const finalSources = updatedSources.map((s) => {
+            if (s.name === newSource.name || s.id === newSource.id) {
+              return {
+                ...s,
+                id: uploaded.id || uploaded._id || s.id,
+                uploaded: true,
+                isUploading: false,
+                rawFile: null,
+                contentSnippet: uploaded.texto_transcrito || s.contentSnippet
+              };
+            }
+            return s;
+          });
+
+          onUpdateProject({
+            ...project,
+            id: backendId,
+            backendId,
+            name: updatedName,
+            sources: finalSources
+          });
+          return;
         }
       } catch (err) {
         console.warn("[Workspace] Error subiendo fuente al backend:", err);
       }
     }
 
+    // En caso de que no requiera upload de archivo o falle, quitar bandera isUploading
+    const finalizedSources = updatedSources.map((s) =>
+      s.name === newSource.name || s.id === newSource.id
+        ? { ...s, isUploading: false }
+        : s
+    );
     onUpdateProject({
       ...project,
-      backendId,
+      id: backendId || project.id,
+      backendId: backendId || project.backendId,
       name: updatedName,
-      sources: updatedSources
+      sources: finalizedSources
     });
   };
 

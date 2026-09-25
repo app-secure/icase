@@ -98,6 +98,15 @@ export default function SourcesPanel({
     });
   }, [sources]);
 
+  // Si uploadingItem está activo, no duplicarlo en la lista si ya fue agregado al estado del proyecto
+  const displayedSources = React.useMemo(() => {
+    if (!uploadingItem) return uniqueSources;
+    return uniqueSources.filter((s) => s.name !== uploadingItem.name);
+  }, [uniqueSources, uploadingItem]);
+
+  const totalSourcesCount = uniqueSources.length + (uploadingItem && !uniqueSources.some((s) => s.name === uploadingItem.name) ? 1 : 0);
+  const isAnySourceLoading = Boolean(uploadingItem) || uniqueSources.some((s) => s.isUploading);
+
   const getFileIcon = (type) => {
     switch (type) {
       case "audio":
@@ -155,15 +164,12 @@ export default function SourcesPanel({
       size: formattedSize,
       date: new Date().toLocaleDateString("es-ES"),
       rawFile: file,
-      contentSnippet: textContent
+      contentSnippet: textContent,
+      isUploading: true
     };
 
     try {
-      // Garantizar que la animación de carga se visualice fluidamente mientras se procesa la fuente
-      await Promise.all([
-        Promise.resolve(onAddSource(newSource)),
-        new Promise((resolve) => setTimeout(resolve, 900))
-      ]);
+      await onAddSource(newSource);
     } catch (err) {
       console.warn("Error cargando fuente:", err);
     } finally {
@@ -243,14 +249,14 @@ export default function SourcesPanel({
           <h3 className="text-sm font-bold text-slate-800 font-inter">Fuentes</h3>
           {/* Texto neutral sin pintar como solicitó el usuario */}
           <span className="text-xs font-normal text-slate-500 font-inter">
-            {uniqueSources.length + (uploadingItem ? 1 : 0)} cargadas
+            {totalSourcesCount} {totalSourcesCount === 1 ? "cargada" : "cargadas"}
           </span>
         </div>
 
         {/* Action Button: Cargar Insumos con altura reducida e icono de adjuntar */}
         <button
           type="button"
-          disabled={Boolean(uploadingItem)}
+          disabled={isAnySourceLoading}
           onClick={() => fileInputRef.current?.click()}
           className="w-full py-2 px-4 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 rounded-xl text-[15px] font-bold text-slate-800 hover:text-slate-950 flex items-center justify-center gap-2.5 transition-all shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-inter group"
         >
@@ -289,7 +295,7 @@ export default function SourcesPanel({
           </div>
         )}
 
-        {uniqueSources.length === 0 && !uploadingItem ? (
+        {displayedSources.length === 0 && !uploadingItem ? (
           <div className="py-12 px-4 text-center">
             <p className="text-xs font-bold text-slate-700 font-inter">Sin fuentes todavía</p>
             <p className="text-xs font-normal text-slate-500 mt-1 max-w-[200px] mx-auto font-inter">
@@ -298,7 +304,7 @@ export default function SourcesPanel({
           </div>
         ) : (
           <div className="space-y-1">
-            {uniqueSources.map((src) => (
+            {displayedSources.map((src) => (
               <div
                 key={src.id}
                 className="px-3 py-2.5 rounded-xl hover:bg-slate-200/50 transition-colors flex items-center justify-between gap-3 group cursor-pointer"
@@ -315,17 +321,35 @@ export default function SourcesPanel({
                   </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteSource(src.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 rounded-md hover:bg-slate-200/80 transition-all cursor-pointer shrink-0"
-                  title="Quitar fuente"
-                >
-                  <Trash2 size={14} />
-                </button>
+                {src.isUploading ? (
+                  <svg
+                    className="w-[20px] h-[20px] animate-spin text-[#1A73E8] shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="9.5"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeDasharray="44 20"
+                    />
+                  </svg>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSource(src.id);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 rounded-md hover:bg-slate-200/80 transition-all cursor-pointer shrink-0"
+                    title="Quitar fuente"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -337,7 +361,7 @@ export default function SourcesPanel({
         <button
           type="button"
           onClick={onProcess}
-          disabled={sources.length === 0 || isProcessing}
+          disabled={sources.length === 0 || isProcessing || isAnySourceLoading}
           className="w-full py-3 px-6 bg-[#0b57d0] hover:bg-[#0947a8] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:cursor-not-allowed font-inter hover:scale-[1.01] active:scale-[0.99]"
         >
           {isProcessing ? (

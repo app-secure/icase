@@ -252,14 +252,16 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
     const data = await fetchProjects();
     if (data && Array.isArray(data)) {
       const mapped = data.map(mapBackendProject);
-      setProjects(mapped);
-      if (mapped.length > 0 && !activeProjectId) {
-        setActiveProjectId(mapped[0].id);
-      }
+      setProjects((prev) => {
+        // Conservar borradores activos locales que aún no se hayan guardado en Mongo
+        const drafts = prev.filter((p) => p.id && p.id.startsWith("draft-"));
+        return [...mapped, ...drafts];
+      });
+      setActiveProjectId((curr) => curr || (mapped.length > 0 ? mapped[0].id : null));
     } else {
-      setProjects([]);
+      setProjects((prev) => prev.filter((p) => p.id && p.id.startsWith("draft-")));
     }
-  }, [token, mapBackendProject, activeProjectId]);
+  }, [token, mapBackendProject]);
 
   useEffect(() => {
     if (token) {
@@ -318,7 +320,7 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
   const activeProject =
     projects.find((p) => p.id === activeProjectId || (p.backendId && p.backendId === activeProjectId)) ||
     (activeProjectId && activeProjectId.startsWith("draft-")
-      ? createNewDraftProject(activeProjectId)
+      ? projects.find((p) => p.id && p.id.startsWith("draft-")) || createNewDraftProject(activeProjectId)
       : projects[0] || createNewDraftProject());
 
   const handleSelectProject = async (projectId) => {
@@ -374,20 +376,35 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
   };
 
   const handleUpdateProject = (updatedProject) => {
+    const targetId = updatedProject.backendId || updatedProject.id;
+    const normalizedProject = {
+      ...updatedProject,
+      id: targetId,
+      backendId: updatedProject.backendId || (targetId && targetId.length === 24 ? targetId : undefined)
+    };
+
     setProjects((prev) => {
-      const exists = prev.some((p) => p.id === updatedProject.id || (p.backendId && p.backendId === updatedProject.backendId));
-      if (exists) {
-        return prev.map((p) =>
-          p.id === updatedProject.id || (p.backendId && p.backendId === updatedProject.backendId)
-            ? { ...p, ...updatedProject }
-            : p
-        );
+      const index = prev.findIndex(
+        (p) =>
+          p.id === targetId ||
+          p.id === updatedProject.id ||
+          (normalizedProject.backendId && (p.backendId === normalizedProject.backendId || p.id === normalizedProject.backendId)) ||
+          (activeProjectId && (p.id === activeProjectId || p.backendId === activeProjectId))
+      );
+
+      if (index >= 0) {
+        const next = [...prev];
+        next[index] = {
+          ...next[index],
+          ...normalizedProject
+        };
+        return next;
       }
-      return [updatedProject, ...prev];
+      return [normalizedProject, ...prev];
     });
 
-    if (updatedProject.id) {
-      setActiveProjectId(updatedProject.id);
+    if (targetId) {
+      setActiveProjectId(targetId);
     }
   };
 
