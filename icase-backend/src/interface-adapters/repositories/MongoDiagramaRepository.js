@@ -44,6 +44,10 @@ class MongoDiagramaRepository extends IDiagramaRepository {
     return docs.map(d => d.toJSON());
   }
 
+  async obtenerPorProyecto(proyectoId) {
+    return this.listarPorProyecto(proyectoId);
+  }
+
   async actualizar(id, datos) {
     const doc = await DiagramaModel.findByIdAndUpdate(id, datos, { new: true });
     return doc ? doc.toJSON() : null;

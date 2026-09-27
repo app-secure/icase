@@ -242,7 +242,21 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
           description: navItem?.descripcion || "Mapa jerárquico de pantallas y módulos en WBS.",
           descripcion_jerarquica: navItem?.descripcion_jerarquica || []
         }
-      }
+      },
+      mockups: (p.diseno?.mockups || []).map(m => ({
+        nombre_pantalla: m.nombre_pantalla,
+        tipo: m.tipo,
+        descripcion: m.descripcion,
+        descripcion_jerarquica: m.descripcion_jerarquica || [],
+        elementos_visibles: m.elementos_visibles || [],
+        campos_formulario: m.campos_formulario || [],
+        acciones_principales: m.acciones_principales || [],
+        rf_trazabilidad: m.rf_trazabilidad || [],
+        preview_code: m.preview_code,
+        imagen_url: m.imagen_url,
+        estado: m.estado,
+        version: m.version
+      }))
     };
   }, []);
 
@@ -314,7 +328,8 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
     isDiagramsApproved: false,
     sources: [],
     requirements: { functional: [], nonFunctional: [] },
-    diagrams: {}
+    diagrams: {},
+    mockups: []
   });
 
   const activeProject =

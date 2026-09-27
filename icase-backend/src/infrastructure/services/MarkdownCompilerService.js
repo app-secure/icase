@@ -193,6 +193,43 @@ class MarkdownCompilerService {
       md += `\`\`\`plantuml\n${archCode}\n\`\`\`\n\n`;
     }
 
+    // 8.4 Wireframes y Mockups de Interfaz
+    md += `### 8.4 Wireframes y Mockups de Interfaz\n\n`;
+    if (diseno?.mockups && diseno.mockups.length > 0) {
+      for (const mockup of diseno.mockups) {
+        md += `#### ${mockup.nombre_pantalla}\n\n`;
+        md += `**Tipo:** ${mockup.tipo || 'N/A'}  \n`;
+        md += `**Descripción:** ${mockup.descripcion || 'Sin descripción'}  \n`;
+        if (mockup.descripcion_jerarquica && mockup.descripcion_jerarquica.length > 0) {
+          md += `**Descripción Jerárquica:**\n`;
+          for (const item of mockup.descripcion_jerarquica) {
+            md += `${item}\n`;
+          }
+          md += `\n`;
+        }
+        if (mockup.elementos_visibles && mockup.elementos_visibles.length > 0) {
+          md += `**Elementos Visibles:** ${mockup.elementos_visibles.join(', ')}  \n`;
+        }
+        if (mockup.campos_formulario && mockup.campos_formulario.length > 0) {
+          md += `**Campos de Formulario:**\n`;
+          for (const campo of mockup.campos_formulario) {
+            md += `- ${campo.nombre} (${campo.tipo})${campo.requerido ? ' *requerido*' : ''}${campo.validacion ? ` - ${campo.validacion}` : ''}\n`;
+          }
+          md += `\n`;
+        }
+        if (mockup.acciones_principales && mockup.acciones_principales.length > 0) {
+          md += `**Acciones Principales:** ${mockup.acciones_principales.join(', ')}  \n`;
+        }
+        if (mockup.rf_trazabilidad && mockup.rf_trazabilidad.length > 0) {
+          md += `**Trazabilidad RF:** ${mockup.rf_trazabilidad.join(', ')}  \n`;
+        }
+        md += `**Estado:** ${mockup.estado || 'generado'}  \n`;
+        md += `**Versión:** ${mockup.version || 1}  \n\n`;
+      }
+    } else {
+      md += `*No se han generado mockups para este proyecto.*\n\n`;
+    }
+
     md += `---\n\n`;
     md += `*Documento de Especificación Técnica de Software (IEEE 830 / ISO 29148)*\n`;
 
