@@ -23,7 +23,7 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
 
     expect(mockRepo.crear).toHaveBeenCalled();
     expect(resultado.id).toBe('proj-123');
-    expect(resultado.estado_fase).toBe('analisis_pendiente');
+    expect(resultado.estado_fase).toBe('insumos_pendientes');
   });
 
   test('ActualizarRequerimientoManual debe actualizar sin invocar IA', async () => {
@@ -101,7 +101,8 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
 
   test('ProcesarConIA debe enviar los 3 bloques mandatorios en el payload', async () => {
     const mockProjRepo = {
-      obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Acta de prueba' })
+      obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Acta de prueba' }),
+      actualizar: jest.fn().mockResolvedValue(true)
     };
     const mockReqRepo = {
       listarPorProyecto: jest.fn().mockResolvedValue([]),

@@ -117,14 +117,28 @@ class ProyectoController {
     }
   }
 
+  async obtenerModelosIA(req, res) {
+    try {
+      if (this.procesarConIAUseCase && typeof this.procesarConIAUseCase.obtenerModelosDisponibles === 'function') {
+        const info = await this.procesarConIAUseCase.obtenerModelosDisponibles();
+        return res.json(info);
+      }
+      res.json({ provider_defecto: 'auto', proveedores: [] });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
   async procesarConIA(req, res) {
     try {
       const { id } = req.params;
-      const { insumo_adicional, insumo_bruto } = req.body;
+      const { insumo_adicional, insumo_bruto, provider, modelo, proveedor, specificModel } = req.body;
       const resultado = await this.procesarConIAUseCase.ejecutar({
         proyectoId: id,
         insumoBrutoInput: insumo_bruto,
-        insumoAdicional: insumo_adicional
+        insumoAdicional: insumo_adicional,
+        provider: provider || modelo || proveedor || 'auto',
+        specificModel
       });
       res.json(resultado);
     } catch (err) {

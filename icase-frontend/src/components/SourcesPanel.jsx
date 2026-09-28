@@ -8,7 +8,9 @@ import {
   Trash2,
   ArrowRight,
   ArrowLeft,
-  Sparkles
+  Sparkles,
+  Cpu,
+  ChevronDown
 } from "lucide-react";
 import RbixLogo from "./RbixLogo";
 import BrainGearsIcon from "./BrainGearsIcon";
@@ -59,12 +61,25 @@ export default function SourcesPanel({
   isProcessed,
   projectName,
   onUpdateProjectName,
-  onBackToDashboard
+  onBackToDashboard,
+  selectedProvider,
+  onSelectProvider,
+  availableProviders = []
 }) {
   const [uploadingItem, setUploadingItem] = useState(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
+  const [localProvider, setLocalProvider] = useState("auto");
   const fileInputRef = useRef(null);
+
+  const currentProvider = selectedProvider !== undefined ? selectedProvider : localProvider;
+
+  const handleProviderChange = (val) => {
+    setLocalProvider(val);
+    if (onSelectProvider) {
+      onSelectProvider(val);
+    }
+  };
 
   const cleanProjectTitle = (name) => {
     if (!name || name === "Proyecto sin nombre") return "Nuevo Proyecto";
@@ -356,11 +371,51 @@ export default function SourcesPanel({
         )}
       </div>
 
-      {/* 4. ACTION BAR: Botón de Procesar / Reprocesar más grande y estilo píldora */}
-      <div className="p-2.5 border-t border-slate-200/80 bg-white/80 backdrop-blur-xs mt-auto shrink-0 z-10 relative">
+      {/* 4. ACTION BAR: Selector de IA / Modelo + Botón de Procesar / Reprocesar */}
+      <div className="p-3 border-t border-slate-200/80 bg-white/90 backdrop-blur-xs mt-auto shrink-0 z-10 relative space-y-2.5">
+        {/* Selector de IA / Modelo */}
+        <div>
+          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-inter flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Cpu size={13} className="text-blue-600" />
+              Proveedor / Modelo IA
+            </span>
+            {currentProvider !== 'auto' && (
+              <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                Seleccionado
+              </span>
+            )}
+          </label>
+          <div className="relative">
+            <select
+              value={currentProvider}
+              onChange={(e) => handleProviderChange(e.target.value)}
+              className="w-full text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:border-slate-400 rounded-xl px-3 py-2 pr-8 outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer shadow-2xs font-inter appearance-none"
+            >
+              {Array.isArray(availableProviders) && availableProviders.length > 0 ? (
+                availableProviders.map((p) => (
+                  <option key={p.id} value={p.id} disabled={p.disponible === false}>
+                    {p.nombre} {!p.disponible ? '(Sin API Key)' : ''}
+                  </option>
+                ))
+              ) : (
+                <>
+                  <option value="auto">🔀 Automático (Enrutamiento Inteligente)</option>
+                  <option value="groq">⚡ Groq Cloud (Llama 3 / Fast)</option>
+                  <option value="gemini">✨ Google Gemini (Gemini 1.5 Flash)</option>
+                  <option value="deepseek">🧠 DeepSeek API (DeepSeek Chat)</option>
+                </>
+              )}
+            </select>
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <ChevronDown size={14} />
+            </div>
+          </div>
+        </div>
+
         <button
           type="button"
-          onClick={onProcess}
+          onClick={() => onProcess(currentProvider)}
           disabled={sources.length === 0 || isProcessing || isAnySourceLoading}
           className="w-full py-3 px-6 bg-[#0b57d0] hover:bg-[#0947a8] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:cursor-not-allowed font-inter hover:scale-[1.01] active:scale-[0.99]"
         >

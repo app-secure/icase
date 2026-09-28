@@ -8,6 +8,7 @@ function buildProyectoRoutes(proyectoController) {
 
   router.post('/', (req, res) => proyectoController.crear(req, res));
   router.get('/', (req, res) => proyectoController.listar(req, res));
+  router.get('/modelos-ia', (req, res) => proyectoController.obtenerModelosIA(req, res));
   router.get('/:id', (req, res) => proyectoController.obtenerPorId(req, res));
   router.put('/:id', (req, res) => proyectoController.actualizar(req, res));
   router.delete('/:id', (req, res) => proyectoController.eliminar(req, res));
