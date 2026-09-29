@@ -85,35 +85,35 @@ class ModelosIaService {
       proveedores: [
         {
           id: 'auto',
-          nombre: 'Automático (Enrutamiento Inteligente)',
+          nombre: 'Automático',
           proveedor: 'Auto',
           descripcion: 'Enrutamiento dinámico optimizado con fallback automático entre proveedores',
           disponible: true
         },
         {
           id: 'groq',
-          nombre: 'Groq Cloud (Llama 3.3 70B / Ultra-Rápido)',
+          nombre: 'Groq Cloud',
           proveedor: 'Groq',
           descripcion: 'Modelos de código abierto de ultra-baja latencia (<2s)',
           disponible: Boolean(this.groqApiKey)
         },
         {
           id: 'gemini',
-          nombre: 'Google Gemini (Gemini 2.0 Flash)',
+          nombre: 'Google Gemini',
           proveedor: 'Gemini',
           descripcion: 'Gran capacidad de procesamiento y ventana multimodal',
           disponible: Boolean(this.geminiApiKey)
         },
         {
           id: 'deepseek',
-          nombre: 'DeepSeek API (DeepSeek Chat)',
+          nombre: 'DeepSeek API',
           proveedor: 'DeepSeek',
           descripcion: deepseekDesc,
           disponible: deepseekDisponible
         },
         {
           id: 'openrouter',
-          nombre: 'OpenRouter Fast (Llama 3.3 / Gemini 2.0)',
+          nombre: 'OpenRouter Fast',
           proveedor: 'OpenRouter',
           descripcion: 'Acceso unificado a modelos de alta velocidad sin esperas',
           disponible: Boolean(this.openrouterApiKey)

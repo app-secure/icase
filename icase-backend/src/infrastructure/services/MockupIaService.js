@@ -85,7 +85,7 @@ class MockupIaService {
       return null;
     }
 
-    const modelos = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-1.5-flash'];
+    const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 
     for (const modelName of modelos) {
       try {
@@ -123,36 +123,38 @@ class MockupIaService {
       return null;
     }
 
-    try {
-      console.log('[MockupIaService] Generando mockups con Groq (openai/gpt-oss-120b)...');
-      const url = 'https://api.groq.com/openai/v1/chat/completions';
+    const modelosGroq = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'];
+    for (const model of modelosGroq) {
+      try {
+        console.log(`[MockupIaService] Generando mockups con Groq (${model})...`);
+        const url = 'https://api.groq.com/openai/v1/chat/completions';
 
-      const res = await axios.post(
-        url,
-        {
-          model: 'openai/gpt-oss-120b',
-          messages: [{ role: 'user', content: prompt }],
-          reasoning_effort: 'low',
-          max_tokens: 16000,
-          response_format: { type: 'json_object' },
-          temperature: 0.35
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.groqApiKey}`,
-            'Content-Type': 'application/json'
+        const res = await axios.post(
+          url,
+          {
+            model: model,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 16000,
+            response_format: { type: 'json_object' },
+            temperature: 0.35
           },
-          timeout: 90000
-        }
-      );
+          {
+            headers: {
+              'Authorization': `Bearer ${this.groqApiKey}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 90000
+          }
+        );
 
-      const content = res.data?.choices?.[0]?.message?.content;
-      if (content) {
-        console.log('[MockupIaService] Generación exitosa con Groq');
-        return content;
+        const content = res.data?.choices?.[0]?.message?.content;
+        if (content) {
+          console.log(`[MockupIaService] Generación exitosa con Groq (${model})`);
+          return content;
+        }
+      } catch (err) {
+        console.warn(`[MockupIaService] Groq (${model}) falló:`, err.response?.data?.error?.message || err.message);
       }
-    } catch (err) {
-      console.warn('[MockupIaService] Groq falló:', err.response?.data?.error?.message || err.message);
     }
     return null;
   }
@@ -261,8 +263,26 @@ class MockupIaService {
   _mockupValido(mockup) {
     if (!mockup || typeof mockup !== 'object') return false;
     if (!mockup.preview_code || typeof mockup.preview_code !== 'string') return false;
-    const code = mockup.preview_code.trim().toLowerCase();
-    return code.startsWith('<!doctype html') || (code.startsWith('<html') && code.includes('</html>'));
+    const code = mockup.preview_code.trim();
+    if (!code) return false;
+
+    // Si no contiene la etiqueta html completa pero contiene HTML válido, envolverlo automáticamente
+    if (!code.toLowerCase().includes('<html')) {
+      mockup.preview_code = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${mockup.nombre_pantalla || 'Mockup'}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-slate-50 min-h-screen p-6 font-['Inter']">
+${code}
+</body>
+</html>`;
+    }
+    return true;
   }
 }
 

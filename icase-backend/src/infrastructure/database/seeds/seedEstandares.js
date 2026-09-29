@@ -2,15 +2,15 @@ const Estandar = require('../schemas/EstandarSchema');
 
 const estandaresBase = [
   {
-    categoria: 'IEEE-830',
+    categoria: 'ISO/IEC/IEEE 29148:2018',
     clave: 'ESTRUCTURA_RF',
-    definicion: 'Especificación de Requerimientos de Software IEEE 830 para Requerimientos Funcionales.',
-    regla_medibilidad: 'Debe contener identificador único RF-XX, nombre, descripción precisa de la función que el sistema debe hacer, prioridad, actores, precondiciones y poscondiciones.',
+    definicion: 'Especificación de Requisitos de Software bajo el estándar internacional ISO/IEC/IEEE 29148:2018 (Evolución y sustitución de IEEE 830).',
+    regla_medibilidad: 'Debe contener identificador único RF-XX, nombre, declaración formal normativa con sintaxis "El sistema DEBE...", prioridad, actores, precondiciones y poscondiciones.',
     ejemplos: [
       {
         identificador: 'RF-01',
         nombre: 'Registro de Clientes',
-        descripcion: 'El sistema debe permitir registrar nuevos clientes capturando cédula, nombres, teléfono y correo.',
+        descripcion: 'El sistema DEBE permitir registrar nuevos clientes capturando cédula, nombres, teléfono y correo, validando la unicidad del documento.',
         prioridad: 'Alta',
         actores: ['Administrador', 'Recepcionista'],
         precondiciones: 'Usuario autenticado en el sistema.',
@@ -19,7 +19,7 @@ const estandaresBase = [
       {
         identificador: 'RF-02',
         nombre: 'Generación de Reportes de Inventario',
-        descripcion: 'El sistema debe generar reporte de existencias filtrado por sucursal y rango de fechas.',
+        descripcion: 'El sistema DEBE generar un reporte consolidado de existencias filtrado por sucursal y rango de fechas en un tiempo no mayor a 1.2 segundos.',
         prioridad: 'Media',
         actores: ['Supervisor'],
         precondiciones: 'Existencia de productos en catálogo.',

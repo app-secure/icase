@@ -3,6 +3,21 @@ import { ChevronLeft, CheckCircle2, FileText } from "lucide-react";
 import StaticDiagram from "./StaticDiagram";
 import PdfPreviewModal from "./PdfPreviewModal";
 
+const formatScreenName = (str) => {
+  if (!str) return "";
+  return str
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+};
+
+const capitalizeFirst = (text) => {
+  if (!text) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
 export default function DocumentViewer({ project, onBackToDiagrams }) {
   const [showPdfModal, setShowPdfModal] = useState(false);
 
@@ -188,14 +203,21 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
           )}
         </section>
 
-        {/* 7. Especificación de Requerimientos en Formato Tabular Formal */}
+        {/* 7. Especificación de Requerimientos en Formato Tabular Formal (ISO/IEC/IEEE 29148:2018) */}
         <section className="space-y-6 pt-4 border-t border-slate-200">
-          <h2 className="text-base font-bold text-slate-900">7. Especificación de Requerimientos del Sistema</h2>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="text-base font-bold text-slate-900">
+              7. Especificación de Requisitos del Sistema
+            </h2>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+              Estándar Internacional ISO/IEC/IEEE 29148:2018
+            </span>
+          </div>
 
           {/* 7.1 Requerimientos Funcionales */}
           <div className="space-y-4">
             <h3 className="text-sm font-bold text-slate-800">
-              7.1 Especificación de Requerimientos Funcionales
+              7.1 Especificación de Requerimientos Funcionales (Sintaxis Normativa)
             </h3>
             <div className="space-y-6">
               {cleanFunctional.map((rf, idx) => (
@@ -422,20 +444,20 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               {project.mockups.map((mockup, idx) => (
                 <div key={mockup.nombre_pantalla || idx} className="space-y-3">
                   <h3 className="text-sm font-bold text-slate-800">
-                    9.{idx + 1} {mockup.nombre_pantalla}
+                    9.{idx + 1} {formatScreenName(mockup.nombre_pantalla)}
                   </h3>
                   <p className="text-sm text-slate-700 leading-relaxed">
-                    {mockup.descripcion || "Mockup de interfaz de usuario."}
+                    {capitalizeFirst(mockup.descripcion) || "Mockup de interfaz de usuario."}
                   </p>
                   <div className="border border-slate-300 rounded-lg overflow-hidden shadow-2xs bg-white">
                     <iframe
                       srcDoc={mockup.preview_code}
                       sandbox="allow-scripts allow-same-origin"
                       className="w-full h-[600px] border-0"
-                      title={`Mockup: ${mockup.nombre_pantalla}`}
+                      title={`Mockup: ${formatScreenName(mockup.nombre_pantalla)}`}
                     />
                   </div>
-                  {renderDiagramExplanation(mockup, `Mockup ${mockup.nombre_pantalla}`)}
+                  {renderDiagramExplanation(mockup, `Mockup ${formatScreenName(mockup.nombre_pantalla)}`)}
                 </div>
               ))}
             </div>

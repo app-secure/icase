@@ -290,21 +290,25 @@ export async function updateDiagramApi(diagramId, data) {
 }
 
 // === MOCKUPS ===
-export async function generateMockupsApi(projectId, pantallas = [], insumoAdicional = '') {
+export async function generateMockupsApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null) {
   try {
     const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/generar`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ pantallas, insumoAdicional })
+      body: JSON.stringify({ pantallas, insumoAdicional, requerimientos })
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || 'Error generando mockups');
+      throw new Error(errData.error || `Error ${res.status}: Fallo en la generación de mockups.`);
     }
     return await res.json();
   } catch (err) {
     console.warn('[API] Error generando mockups:', err.message);
-    return null;
+    return {
+      mockups: [],
+      error: err.message,
+      advertencias: [err.message]
+    };
   }
 }
 
@@ -355,4 +359,20 @@ export async function deleteMockupApi(projectId, nombrePantalla) {
     return null;
   }
 }
+
+export async function syncProjectRequirementsApi(projectId, requerimientosList) {
+  try {
+    const res = await fetch(`${API_URL}/requerimientos/proyecto/${projectId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ requerimientos: requerimientosList })
+    });
+    if (!res.ok) throw new Error('Error al sincronizar requerimientos en base de datos');
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Error sincronizando requerimientos:', err.message);
+    return null;
+  }
+}
+
 

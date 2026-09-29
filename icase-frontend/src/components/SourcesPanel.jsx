@@ -194,7 +194,7 @@ export default function SourcesPanel({
   };
 
   return (
-    <aside className="w-80 md:w-88 bg-[#F8FAFD] border-r border-slate-200/90 flex flex-col h-full shrink-0 select-none overflow-hidden font-inter relative shadow-xs">
+    <aside className="w-64 md:w-72 bg-[#F8FAFD] border-r border-slate-200/90 flex flex-col h-full shrink-0 select-none overflow-hidden font-inter relative shadow-xs">
       {/* Fondo técnico elegante y luminoso con cuadrícula fina y sutil resplandor ambiental */}
       <div
         className="absolute inset-0 pointer-events-none -z-0"
@@ -378,7 +378,7 @@ export default function SourcesPanel({
           <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-inter flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <Cpu size={13} className="text-blue-600" />
-              Proveedor / Modelo IA
+              Proveedor
             </span>
             {currentProvider !== 'auto' && (
               <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
@@ -393,17 +393,21 @@ export default function SourcesPanel({
               className="w-full text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:border-slate-400 rounded-xl px-3 py-2 pr-8 outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer shadow-2xs font-inter appearance-none"
             >
               {Array.isArray(availableProviders) && availableProviders.length > 0 ? (
-                availableProviders.map((p) => (
-                  <option key={p.id} value={p.id} disabled={p.disponible === false}>
-                    {p.nombre} {!p.disponible ? '(Sin API Key)' : ''}
-                  </option>
-                ))
+                availableProviders.map((p) => {
+                  const cleanName = (p.nombre || '').replace(/\s*\([^)]*\)/g, '').trim();
+                  return (
+                    <option key={p.id} value={p.id} disabled={p.disponible === false}>
+                      {cleanName || p.nombre}{!p.disponible ? ' — Sin API Key' : ''}
+                    </option>
+                  );
+                })
               ) : (
                 <>
-                  <option value="auto">🔀 Automático (Enrutamiento Inteligente)</option>
-                  <option value="groq">⚡ Groq Cloud (Llama 3 / Fast)</option>
-                  <option value="gemini">✨ Google Gemini (Gemini 1.5 Flash)</option>
-                  <option value="deepseek">🧠 DeepSeek API (DeepSeek Chat)</option>
+                  <option value="auto">Automático</option>
+                  <option value="groq">Groq Cloud</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="deepseek">DeepSeek API</option>
+                  <option value="openrouter">OpenRouter Fast</option>
                 </>
               )}
             </select>

@@ -16,18 +16,29 @@ class GenerarMockups {
     this.validator = new MockupValidatorService();
   }
 
-  async ejecutar({ proyectoId, pantallas = [], insumoAdicional = '' }) {
+  async ejecutar({ proyectoId, pantallas = [], insumoAdicional = '', requerimientosLocales = null }) {
     const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
     if (!proyecto) {
       throw new Error(`Proyecto con ID ${proyectoId} no encontrado.`);
     }
 
     const reqRepo = this.requerimientoRepository;
-    const requerimientos = typeof reqRepo.listarPorProyecto === 'function'
+    let requerimientos = typeof reqRepo.listarPorProyecto === 'function'
       ? await reqRepo.listarPorProyecto(proyectoId)
       : typeof reqRepo.obtenerPorProyecto === 'function'
         ? await reqRepo.obtenerPorProyecto(proyectoId)
         : [];
+
+    if ((!requerimientos || requerimientos.length === 0) && requerimientosLocales) {
+      if (Array.isArray(requerimientosLocales)) {
+        requerimientos = requerimientosLocales;
+      } else if (requerimientosLocales.functional || requerimientosLocales.nonFunctional) {
+        requerimientos = [
+          ...(requerimientosLocales.functional || []).map((r, i) => ({ ...r, tipo: 'RF', identificador: r.identificador || r.id || `RF-${String(i + 1).padStart(2, '0')}`, nombre: r.name || r.nombre })),
+          ...(requerimientosLocales.nonFunctional || []).map((r, i) => ({ ...r, tipo: 'RNF', identificador: r.identificador || r.id || `RNF-${String(i + 1).padStart(2, '0')}`, nombre: r.category || r.nombre }))
+        ];
+      }
+    }
 
     const diagRepo = this.diagramaRepository;
     const diagramas = typeof diagRepo.listarPorProyecto === 'function'
@@ -36,7 +47,7 @@ class GenerarMockups {
         ? await diagRepo.obtenerPorProyecto(proyectoId)
         : [];
 
-    const contextoProyecto = this._construirContexto(requerimientos, diagramas);
+    const contextoProyecto = this._construirContexto(requerimientos, diagramas, proyecto);
 
     const resultadoIa = await this.mockupIaService.generarMockups({
       contextoProyecto,
@@ -69,24 +80,45 @@ class GenerarMockups {
     };
   }
 
-  _construirContexto(requerimientos, diagramas) {
-    const rfAltas = requerimientos
-      .filter(r => (r.tipo || '').toUpperCase() === 'RF' && (r.prioridad || '').toLowerCase() === 'alta')
-      .map(r => `- [${r.identificador}] ${r.nombre} (${r.prioridad}): ${r.descripcion}`)
+  _construirContexto(requerimientos, diagramas, proyecto = {}) {
+    const rfList = requerimientos
+      .filter(r => (r.tipo || '').toUpperCase() === 'RF')
+      .map(r => `- [${r.identificador}] ${r.nombre} (Prioridad: ${r.prioridad || 'Media'} | Actores: ${Array.isArray(r.actores) ? r.actores.join(', ') : (r.actores || 'Usuario')}): ${r.descripcion}`)
       .join('\n');
 
-    const rfOtras = requerimientos
-      .filter(r => (r.tipo || '').toUpperCase() === 'RF' && (r.prioridad || '').toLowerCase() !== 'alta')
-      .map(r => `- [${r.identificador}] ${r.nombre} (${r.prioridad}): ${r.descripcion}`)
+    const rnfList = requerimientos
+      .filter(r => (r.tipo || '').toUpperCase() === 'RNF')
+      .map(r => `- [${r.identificador}] ${r.nombre}: ${r.metrica_medible || r.descripcion}`)
       .join('\n');
 
+    const diagClases = diagramas.find(d => d.tipo === 'clases' || d.tipo === 'clases_dominio');
+    const diagCasosUso = diagramas.find(d => d.tipo === 'casos_de_uso' || d.tipo === 'casos_uso');
     const arbolNav = diagramas.find(d => d.tipo === 'arbol_navegacion' || d.tipo === 'navegacion' || d.tipo === 'wbs');
-    let navegacionTexto = '';
+    const diagArqui = diagramas.find(d => d.tipo === 'arquitectura');
+
+    let seccionesDiagramas = '';
+    if (diagClases) {
+      seccionesDiagramas += `\n\nDIAGRAMA DE CLASES DEL DOMINIO (ENTIDADES Y ATRIBUTOS TIPADOS OBLIGATORIOS PARA FORMULARIOS Y TABLAS):\n${diagClases.codigo_plantuml || diagClases.codigo_mermaid || 'No disponible'}`;
+    }
+    if (diagCasosUso) {
+      seccionesDiagramas += `\n\nDIAGRAMA DE CASOS DE USO (ACTORES Y PROCESOS CLAVE):\n${diagCasosUso.codigo_plantuml || diagCasosUso.codigo_mermaid || 'No disponible'}`;
+    }
     if (arbolNav) {
-      navegacionTexto = `\nÁRBOL DE NAVEGACIÓN (nivel 3):\n${arbolNav.codigo_plantuml || arbolNav.codigo_mermaid || 'No disponible'}`;
+      seccionesDiagramas += `\n\nÁRBOL DE NAVEGACIÓN Y PANTALLAS (WBS):\n${arbolNav.codigo_plantuml || arbolNav.codigo_mermaid || 'No disponible'}`;
+    }
+    if (diagArqui) {
+      seccionesDiagramas += `\n\nARQUITECTURA DEL SISTEMA:\n${diagArqui.codigo_plantuml || diagArqui.codigo_mermaid || 'No disponible'}`;
     }
 
-    return `REQUERIMIENTOS FUNCIONALES PRIORIDAD ALTA:\n${rfAltas || 'Ninguno'}\n\nREQUERIMIENTOS FUNCIONALES OTROS:\n${rfOtras || 'Ninguno'}${navegacionTexto}`;
+    return `SISTEMA / PROYECTO: "${proyecto.nombre || 'Sistema de Información'}"
+DESCRIPCIÓN DEL NEGOCIO: ${proyecto.descripcion || 'Sin descripción'}
+
+REQUERIMIENTOS FUNCIONALES (ISO/IEC/IEEE 29148:2018):
+${rfList || 'Sin requerimientos funcionales'}
+
+REQUERIMIENTOS NO FUNCIONALES:
+${rnfList || 'Sin requerimientos no funcionales'}
+${seccionesDiagramas}`;
   }
 
   _mergeMockups(existentes, nuevos, pantallasSolicitadas) {

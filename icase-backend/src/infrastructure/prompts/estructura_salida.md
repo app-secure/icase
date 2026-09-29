@@ -29,20 +29,20 @@ Tu respuesta debe ser EXCLUSIVAMENTE un objeto JSON válido, sin texto introduct
     {
       "tipo": "RF",
       "identificador": "RF-01",
-      "nombre": "Nombre descriptivo del proceso del negocio",
-      "descripcion": "Detalle técnico de la funcionalidad",
+      "nombre": "Nombre conciso del proceso (ej: Registro y Apertura de Mesas)",
+      "descripcion": "Declaración normativa estricta ISO/IEC/IEEE 29148:2018: 'El sistema DEBE permitir al mesero seleccionar una mesa libre y asignarla registrando el número de comensales en menos de 1.0s.'",
       "dependencias": "Ninguna",
       "prioridad": "Alta",
-      "actores": ["Operador Principal"],
-      "precondiciones": "Usuario autenticado",
-      "poscondiciones": "Registro persistido"
+      "actores": ["Mesero", "Administrador"],
+      "precondiciones": "Usuario autenticado y mesa con estado Disponible",
+      "poscondiciones": "Mesa registrada con estado Ocupada y comanda inicial creada en base de datos"
     },
     {
       "tipo": "RNF",
       "identificador": "RNF-01",
-      "nombre": "Criterio de Calidad (ej: Tiempo de Respuesta)",
-      "descripcion": "Condición de calidad obligatoria",
-      "metrica_medible": "Métrica cuantitativa numérica exacta (ej: latencia <= 0.8s, uptime >= 99.95%)",
+      "nombre": "Rendimiento y Tiempo de Respuesta",
+      "descripcion": "El sistema DEBE procesar las transacciones y consultas de datos garantizando una latencia inferior a los umbrales máximos establecidos.",
+      "metrica_medible": "Tiempo de respuesta <= 0.8s en el 98% de transacciones concurrentes bajo carga de 100 usuarios activos",
       "dependencias": "Ninguna",
       "prioridad": "Alta"
     }

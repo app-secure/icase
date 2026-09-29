@@ -1,53 +1,23 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState } from "react";
 import {
-  LogIn,
-  LayoutDashboard,
-  List,
-  FileText,
-  BarChart3,
-  Settings,
-  Monitor,
-  Tablet,
-  Smartphone,
   Download,
   Copy,
   RotateCcw,
   Plus,
-  Code,
   Layout,
-  Check,
-  Send,
   Loader2,
   AlertCircle,
-  X
+  Check
 } from "lucide-react";
-import BrainGearsIcon from "./BrainGearsIcon";
 import { generateMockupsApi } from "../services/api";
 
-const ICON_MAP = {
-  login: LogIn,
-  dashboard: LayoutDashboard,
-  list: List,
-  form: FileText,
-  detail: FileText,
-  chart: BarChart3,
-  settings: Settings,
-  otro: Layout
-};
-
-const VIEWPORTS = [
-  { key: "desktop", label: "Escritorio (1280px)", width: 1280, icon: Monitor },
-  { key: "tablet", label: "Tablet (768px)", width: 768, icon: Tablet },
-  { key: "mobile", label: "Móvil (390px)", width: 390, icon: Smartphone }
-];
-
 const prepareMockupHtml = (rawHtml) => {
-  if (!rawHtml) return '';
+  if (!rawHtml) return "";
   let html = rawHtml;
 
   // Asegurar Tailwind CDN
-  if (!html.includes('cdn.tailwindcss.com')) {
-    if (html.includes('<head>')) {
+  if (!html.includes("cdn.tailwindcss.com")) {
+    if (html.includes("<head>")) {
       html = html.replace(/<head>/i, '<head>\n  <script src="https://cdn.tailwindcss.com"></script>');
     } else {
       html = `<script src="https://cdn.tailwindcss.com"></script>\n` + html;
@@ -55,9 +25,9 @@ const prepareMockupHtml = (rawHtml) => {
   }
 
   // Asegurar Google Fonts Inter
-  if (!html.includes('fonts.googleapis.com')) {
+  if (!html.includes("fonts.googleapis.com")) {
     const fontsLink = `  <link rel="preconnect" href="https://fonts.googleapis.com">\n  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">\n`;
-    if (html.includes('<head>')) {
+    if (html.includes("<head>")) {
       html = html.replace(/<head>/i, `<head>\n${fontsLink}`);
     }
   }
@@ -78,26 +48,6 @@ const prepareMockupHtml = (rawHtml) => {
     input, select, textarea, button {
       font-family: inherit;
     }
-    .bg-slate-50 { background-color: #f8fafc; }
-    .bg-slate-100 { background-color: #f1f5f9; }
-    .bg-white { background-color: #ffffff; }
-    .text-slate-900 { color: #0f172a; }
-    .text-slate-800 { color: #1e293b; }
-    .text-slate-700 { color: #334155; }
-    .text-slate-600 { color: #475569; }
-    .text-slate-500 { color: #64748b; }
-    .text-slate-400 { color: #94a3b8; }
-    .border-slate-200 { border-color: #e2e8f0; }
-    .border-slate-300 { border-color: #cbd5e1; }
-    .rounded-2xl { border-radius: 1rem; }
-    .rounded-xl { border-radius: 0.75rem; }
-    .rounded-lg { border-radius: 0.5rem; }
-    .rounded-full { border-radius: 9999px; }
-    .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.15); }
-    .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.04); }
-    .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04); }
-    .shadow-md { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.04); }
-    .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
     input[type="text"], input[type="email"], input[type="password"], select, textarea {
       outline: none;
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -111,16 +61,16 @@ const prepareMockupHtml = (rawHtml) => {
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
     button:hover {
-      filter: brightness(1.05);
+      filter: brightness(1.03);
     }
     button:active {
-      transform: scale(0.98);
+      transform: scale(0.99);
     }
   </style>
   `;
 
-  if (!html.includes('icase-modern-styles')) {
-    if (html.includes('</head>')) {
+  if (!html.includes("icase-modern-styles")) {
+    if (html.includes("</head>")) {
       html = html.replace(/<\/head>/i, `${modernStyles}\n</head>`);
     } else {
       html = modernStyles + html;
@@ -128,7 +78,7 @@ const prepareMockupHtml = (rawHtml) => {
   }
 
   // Configuración de colores primarios y tipografía en Tailwind
-  if (!html.includes('tailwind.config')) {
+  if (!html.includes("tailwind.config")) {
     const tailwindConfig = `
   <script>
     tailwind.config = {
@@ -155,7 +105,7 @@ const prepareMockupHtml = (rawHtml) => {
     }
   </script>
     `;
-    if (html.includes('</head>')) {
+    if (html.includes("</head>")) {
       html = html.replace(/<\/head>/i, `${tailwindConfig}\n</head>`);
     }
   }
@@ -163,95 +113,96 @@ const prepareMockupHtml = (rawHtml) => {
   return html;
 };
 
+// Formatear y capitalizar nombres de pantalla (ej: reserva-mesas-sillas -> Reserva-Mesas-Sillas)
+const formatScreenName = (str) => {
+  if (!str) return "";
+  return str
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+};
+
+const capitalizeFirst = (text) => {
+  if (!text) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
 export default function MockupsView({
   mockups = [],
   onUpdateMockup,
-  onApprovePhase,
-  onBackToDiagrams,
-  projectId
+  projectId,
+  selectedScreen = 0,
+  onSelectScreen,
+  requirements = null
 }) {
-  const [selectedScreen, setSelectedScreen] = useState(0);
-  const [viewMode, setViewMode] = useState("visual");
-  const [viewport, setViewport] = useState("desktop");
-  const [prompt, setPrompt] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isRegenerating, setIsRegenerating] = useState(false);
-  const [correctionFeedback, setCorrectionFeedback] = useState(null);
-  const [generatePrompt, setGeneratePrompt] = useState("");
+  const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [feedback, setFeedback] = useState(null);
 
-  const currentMockup = mockups[selectedScreen];
-  const currentViewport = VIEWPORTS.find(v => v.key === viewport) || VIEWPORTS[0];
+  const currentMockup = mockups[selectedScreen] || mockups[0] || null;
 
-  const handleSendCorrection = async (e) => {
-    e?.preventDefault();
-    if (!prompt.trim() || !projectId) return;
-
-    const text = prompt;
-    setCorrectionFeedback(null);
-    setIsRegenerating(true);
+  const handleGenerateAll = async () => {
+    if (isGeneratingAll) return;
+    if (!projectId) {
+      setFeedback({
+        type: "error",
+        message: "No se encontró el ID del proyecto. Por favor procesa tus fuentes primero en la Fase 1."
+      });
+      return;
+    }
+    setIsGeneratingAll(true);
+    setFeedback(null);
 
     try {
-      const pantallasToUpdate = currentMockup ? [currentMockup.nombre_pantalla] : [];
-      const result = await generateMockupsApi(projectId, pantallasToUpdate, text);
+      const result = await generateMockupsApi(projectId, [], "", requirements);
       if (result && result.mockups && result.mockups.length > 0) {
-        setCorrectionFeedback({ type: "success", message: `Ajuste aplicado correctamente con IA` });
-        setPrompt("");
+        setFeedback({ type: "success", message: `Generados ${result.mockups.length} mockups exitosamente con IA.` });
         if (onUpdateMockup) {
           onUpdateMockup(result.mockups);
         }
-      } else {
-        setCorrectionFeedback({ type: "error", message: "La IA no devolvió mockups para este ajuste." });
-      }
-    } catch (err) {
-      setCorrectionFeedback({ type: "error", message: err.message || "Error al aplicar ajuste con IA." });
-    } finally {
-      setIsRegenerating(false);
-    }
-  };
-
-  const handleGenerateAll = async () => {
-    if (isGeneratingAll || !projectId) return;
-    setIsGeneratingAll(true);
-    setCorrectionFeedback(null);
-
-    try {
-      const result = await generateMockupsApi(projectId, [], '');
-      if (result && result.mockups && result.mockups.length > 0) {
-        setCorrectionFeedback({ type: "success", message: `Generados ${result.mockups.length} mockups exitosamente` });
-        if (onUpdateMockup) {
-          onUpdateMockup(result.mockups);
+        if (onSelectScreen) {
+          onSelectScreen(0);
         }
       } else {
         const errorMsg = result?.advertencias?.length
-          ? result.advertencias.join(', ')
-          : "No se generaron mockups. Verifica que el proyecto tenga requerimientos.";
-        setCorrectionFeedback({ type: "error", message: errorMsg });
+          ? result.advertencias.join(", ")
+          : (result?.error || "No se generaron mockups. Intenta de nuevo.");
+        setFeedback({ type: "error", message: errorMsg });
       }
     } catch (err) {
-      setCorrectionFeedback({ type: "error", message: err.message || "Error generando mockups" });
+      setFeedback({ type: "error", message: err.message || "Error al generar mockups con IA." });
     } finally {
       setIsGeneratingAll(false);
     }
   };
 
   const handleRegenerateScreen = async () => {
-    if (!currentMockup || isRegenerating || !projectId) return;
+    if (!currentMockup || isRegenerating) return;
+    if (!projectId) {
+      setFeedback({
+        type: "error",
+        message: "No se encontró el ID del proyecto en el servidor."
+      });
+      return;
+    }
     setIsRegenerating(true);
-    setCorrectionFeedback(null);
+    setFeedback(null);
 
     try {
-      const result = await generateMockupsApi(projectId, [currentMockup.nombre_pantalla], '');
+      const result = await generateMockupsApi(projectId, [currentMockup.nombre_pantalla], "", requirements);
       if (result && result.mockups && result.mockups.length > 0) {
-        setCorrectionFeedback({ type: "success", message: `Mockup ${currentMockup.nombre_pantalla} regenerado exitosamente` });
+        setFeedback({ type: "success", message: `Mockup "${currentMockup.nombre_pantalla}" regenerado con éxito.` });
         if (onUpdateMockup) {
           onUpdateMockup(result.mockups);
         }
       } else {
-        setCorrectionFeedback({ type: "error", message: "No se pudo regenerar el mockup." });
+        setFeedback({ type: "error", message: result?.error || "No se pudo regenerar esta pantalla." });
       }
     } catch (err) {
-      setCorrectionFeedback({ type: "error", message: err.message || "Error al regenerar mockup." });
+      setFeedback({ type: "error", message: err.message || "Error al regenerar pantalla." });
     } finally {
       setIsRegenerating(false);
     }
@@ -271,314 +222,220 @@ export default function MockupsView({
   const handleCopyHtml = () => {
     if (!currentMockup) return;
     navigator.clipboard.writeText(currentMockup.preview_code);
-    setCorrectionFeedback({ type: "success", message: "HTML copiado al portapapeles" });
-  };
-
-  const handleIframeLoad = () => {
-    // Iframe loaded successfully
-  };
-
-  const handleIframeError = () => {
-    setCorrectionFeedback({ type: "error", message: "Error cargando el mockup en el iframe" });
+    setFeedback({ type: "success", message: "Código HTML copiado al portapapeles." });
   };
 
   return (
-    <div className="w-full h-full flex flex-col min-h-0 bg-white">
-      <div className="w-full flex-1 overflow-y-auto min-h-0 px-6 md:px-12 pt-6 pb-4 flex flex-col">
-        <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col min-h-0">
-          {/* Upper Phase Indicator */}
-          <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
-            <div>
-              <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider block">
-                Fase 2: Modelado del Software
-              </span>
-              <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
-                Wireframes y Mockups de Interfaz
-              </h2>
-            </div>
-
-            <button
-              onClick={onBackToDiagrams}
-              className="text-xs text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
-            >
-              ← Volver a Diagramas
-            </button>
-          </div>
-
-          {/* Screen Pills + Viewport Selector */}
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
-            <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
-              {mockups.map((m, idx) => {
-                const Icon = ICON_MAP[m.tipo] || Layout;
-                const isSelected = selectedScreen === idx;
-                return (
-                  <button
-                    key={m.nombre_pantalla}
-                    onClick={() => setSelectedScreen(idx)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
-                      isSelected
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                    title={`${m.tipo} • ${m.estado} v${m.version}`}
-                  >
-                    <Icon size={14} />
-                    <span className="truncate max-w-[120px]">{m.nombre_pantalla}</span>
-                    {m.estado === 'editado' && (
-                      <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 rounded">EDIT</span>
-                    )}
-                  </button>
-                );
-              })}
-              {mockups.length < 6 && (
-                <button
-                  onClick={handleGenerateAll}
-                  disabled={isGeneratingAll}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200"
-                >
-                  <Plus size={14} />
-                  <span>Generar mockups</span>
-                  {isGeneratingAll && <Loader2 size={12} className="animate-spin" />}
-                </button>
-              )}
-            </div>
-
-            {/* Viewport Selector + View Mode */}
-            <div className="flex items-center gap-2 shrink-0">
-              <select
-                value={viewport}
-                onChange={(e) => setViewport(e.target.value)}
-                className="px-3 py-1.5 text-xs font-medium bg-slate-100 border border-slate-200 rounded-full cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {VIEWPORTS.map(v => (
-                  <option key={v.key} value={v.key}>{v.label}</option>
-                ))}
-              </select>
-
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-full">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("visual")}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                    viewMode === "visual"
-                      ? "bg-white text-slate-900 shadow-2xs"
-                      : "text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  Diseño
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("code")}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                    viewMode === "code"
-                      ? "bg-white text-slate-900 shadow-2xs"
-                      : "text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  Código
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Mockup Description */}
-          {currentMockup && (
-            <div className="pb-3 text-xs text-slate-600 border-b border-slate-100 mb-3 shrink-0">
-              <p className="leading-relaxed whitespace-normal break-words">
-                <strong className="text-slate-800 font-semibold">{currentMockup.nombre_pantalla}:</strong>{" "}
-                {currentMockup.descripcion}
-              </p>
-              {currentMockup.descripcion_jerarquica && currentMockup.descripcion_jerarquica.length > 0 && (
-                <ul className="list-disc pl-5 mt-1.5 space-y-1 text-[11px] text-slate-500">
-                  {currentMockup.descripcion_jerarquica.map((item, i) => (
-                    <li key={i}>{item}</li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex flex-wrap gap-2 mt-2 text-[10px]">
-                {currentMockup.rf_trazabilidad && currentMockup.rf_trazabilidad.length > 0 && (
-                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded border border-blue-200">
-                    RF: {currentMockup.rf_trazabilidad.join(", ")}
-                  </span>
-                )}
-                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded border border-slate-200">
-                  Estado: {currentMockup.estado} v{currentMockup.version}
-                </span>
-                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded border border-slate-200">
-                  Tipo: {currentMockup.tipo}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Main Canvas Area */}
-          <div className="flex-1 flex flex-col min-h-[460px] relative mb-2">
-            {currentMockup ? (
-              viewMode === "visual" ? (
-                <div className="flex-1 border border-slate-200 rounded-2xl bg-slate-100/60 p-2 md:p-4 flex flex-col relative overflow-hidden min-h-[580px]">
-                  <div
-                    style={{
-                      width: `${currentViewport.width}px`,
-                      maxWidth: "100%",
-                      margin: "0 auto",
-                      height: "100%"
-                    }}
-                    className="flex-1 flex flex-col min-h-[560px] w-full"
-                  >
-                    <iframe
-                      srcDoc={prepareMockupHtml(currentMockup.preview_code)}
-                      sandbox="allow-scripts allow-same-origin"
-                      className="w-full flex-1 min-h-[560px] border border-slate-200/80 rounded-2xl bg-white shadow-md transition-all"
-                      title={`Mockup: ${currentMockup.nombre_pantalla}`}
-                      onLoad={handleIframeLoad}
-                      onError={handleIframeError}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col min-h-[460px] bg-slate-50 border border-slate-200 rounded-2xl p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-mono text-slate-500">HTML Source</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleDownloadHtml}
-                        className="px-2 py-1 text-[10px] text-slate-500 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors flex items-center gap-1"
-                        title="Descargar HTML"
-                      >
-                        <Download size={12} />
-                        <span>Descargar</span>
-                      </button>
-                      <button
-                        onClick={handleCopyHtml}
-                        className="px-2 py-1 text-[10px] text-slate-500 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors flex items-center gap-1"
-                        title="Copiar HTML"
-                      >
-                        <Copy size={12} />
-                        <span>Copiar</span>
-                      </button>
-                    </div>
-                  </div>
-                  <textarea
-                    value={currentMockup.preview_code}
-                    onChange={(e) => {
-                      const newCode = e.target.value;
-                      const debouncedUpdate = setTimeout(() => {
-                        if (onUpdateMockup && currentMockup) {
-                          onUpdateMockup(currentMockup.nombre_pantalla, newCode);
-                        }
-                      }, 800);
-                      return () => clearTimeout(debouncedUpdate);
-                    }}
-                    rows={16}
-                    className="flex-1 w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-600 resize-none leading-relaxed"
-                    spellCheck="false"
-                  />
-                </div>
-              )
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-slate-50 border border-slate-200 rounded-2xl">
-                <Layout className="w-16 h-16 text-slate-300 mb-4" />
-                <h3 className="text-lg font-medium text-slate-700 mb-2">No hay mockups generados</h3>
-                <p className="text-sm text-slate-500 mb-6 max-w-md">
-                  Genera los wireframes y mockups de interfaz para visualizar las pantallas clave del sistema.
-                </p>
-                <button
-                  onClick={handleGenerateAll}
-                  disabled={isGeneratingAll}
-                  className="px-5 py-2.5 bg-[#0b57d0] hover:bg-[#0947a8] text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                >
-                  <Plus size={14} />
-                  <span>Generar mockups</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Screen Actions */}
-          {currentMockup && (
-            <div className="flex items-center gap-3 mb-4 shrink-0">
-              <button
-                onClick={handleRegenerateScreen}
-                disabled={isRegenerating}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border border-slate-200"
-              >
-                <RotateCcw size={14} />
-                <span>Regenerar esta pantalla</span>
-                {isRegenerating && <Loader2 size={12} className="animate-spin" />}
-              </button>
-              <button
-                onClick={handleDownloadHtml}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border border-slate-200"
-              >
-                <Download size={14} />
-                <span>Descargar HTML</span>
-              </button>
-              <button
-                onClick={handleCopyHtml}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer border border-slate-200"
-              >
-                <Copy size={14} />
-                <span>Copiar</span>
-              </button>
-            </div>
-          )}
-
+    <div className="w-full flex-1 flex flex-col min-h-0">
+      {/* Feedback contextual temporal */}
+      {feedback && (
+        <div
+          className={`mb-3 text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 shrink-0 ${
+            feedback.type === "success"
+              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+              : "bg-red-50 text-red-700 border border-red-200"
+          }`}
+        >
+          <span>{feedback.message}</span>
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            className="text-slate-400 hover:text-slate-600 font-bold ml-2 text-xs cursor-pointer"
+          >
+            ×
+          </button>
         </div>
-      </div>
+      )}
 
-      {/* Bottom Approval Bar */}
-      <div className="w-full shrink-0 border-t border-slate-200 bg-white z-10 px-6 md:px-12 py-3.5">
-        <div className="max-w-6xl mx-auto w-full flex flex-col gap-2">
-          {correctionFeedback && (
-            <div className={`text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 ${
-              correctionFeedback.type === "success" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"
-            }`}>
-              <span className="truncate">{correctionFeedback.message}</span>
+      {/* Barra de Controles: Selector elegante en <select> + Acciones */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
+        <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Layout size={14} className="text-blue-600" />
+            <label className="text-xs font-semibold text-slate-700">Pantalla:</label>
+          </div>
+
+          {mockups.length > 0 ? (
+            <select
+              value={selectedScreen}
+              onChange={(e) => {
+                const idx = Number(e.target.value);
+                if (onSelectScreen) onSelectScreen(idx);
+              }}
+              className="bg-white border border-slate-300 hover:border-slate-400 text-slate-800 text-xs rounded-xl px-3 py-1.5 font-medium shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer max-w-xs md:max-w-md truncate"
+            >
+              {mockups.map((m, idx) => (
+                <option key={m.nombre_pantalla || idx} value={idx}>
+                  {idx + 1}. {formatScreenName(m.nombre_pantalla)} ({capitalizeFirst(m.tipo || "interfaz")})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-xs text-slate-400 italic">Sin mockups generados aún</span>
+          )}
+
+          <button
+            type="button"
+            onClick={handleGenerateAll}
+            disabled={isGeneratingAll}
+            className="px-3.5 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 cursor-pointer transition-colors shrink-0"
+          >
+            <Plus size={13} />
+            <span>{mockups.length > 0 ? "Regenerar todos" : "Generar mockups"}</span>
+            {isGeneratingAll && <Loader2 size={12} className="animate-spin" />}
+          </button>
+
+          {currentMockup && (
+            <button
+              type="button"
+              onClick={handleRegenerateScreen}
+              disabled={isRegenerating}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer transition-colors shrink-0"
+              title="Regenerar con IA solo esta pantalla"
+            >
+              <RotateCcw size={13} />
+              <span>Regenerar actual</span>
+              {isRegenerating && <Loader2 size={12} className="animate-spin" />}
+            </button>
+          )}
+        </div>
+
+        {/* Controles de vista: Gráfico / Código y acciones */}
+        {currentMockup && (
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
               <button
                 type="button"
-                onClick={() => setCorrectionFeedback(null)}
-                className="text-slate-400 hover:text-slate-600 font-bold ml-2 text-xs cursor-pointer"
+                onClick={() => setViewMode("visual")}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  viewMode === "visual"
+                    ? "bg-white text-slate-900 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
               >
-                ×
+                Diseño
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("code")}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                  viewMode === "code"
+                    ? "bg-white text-slate-900 shadow-2xs"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                Código
               </button>
             </div>
-          )}
-
-          <div className="flex items-center gap-3">
-            <form
-              onSubmit={handleSendCorrection}
-              className="flex-1 flex items-center bg-slate-50 hover:bg-slate-100/60 focus-within:bg-white border border-slate-300 focus-within:border-blue-500 rounded-full px-4 py-1.5 transition-all shadow-2xs"
-            >
-              <BrainGearsIcon size={16} className="text-blue-600 mr-2 shrink-0" />
-              <input
-                type="text"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Pide un ajuste a este mockup con IA (ej: 'agrega modo oscuro', 'cambia color primario')..."
-                className="flex-1 bg-transparent text-xs text-slate-800 placeholder:text-slate-400 outline-none min-w-0"
-              />
-              <button
-                type="submit"
-                disabled={!prompt.trim()}
-                className="p-1 text-blue-600 hover:text-blue-700 disabled:text-slate-300 transition-colors cursor-pointer shrink-0 ml-1"
-                title="Aplicar ajuste al mockup"
-              >
-                <Send size={14} />
-              </button>
-            </form>
 
             <button
               type="button"
-              onClick={onApprovePhase}
-              className="px-5 py-2.5 bg-[#0b57d0] hover:bg-[#0947a8] text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+              onClick={handleDownloadHtml}
+              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              title="Descargar archivo HTML del mockup"
             >
-              <Check size={14} />
-              <span>Aprobar Mockups</span>
+              <Download size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyHtml}
+              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              title="Copiar código HTML"
+            >
+              <Copy size={14} />
             </button>
           </div>
-        </div>
+        )}
       </div>
+
+      {/* Área del Mockup: 100% ajustada al ancho de la sección derecha sin contenedor limitante */}
+      <div className="w-full flex-1 flex flex-col min-h-[580px] relative mb-3">
+        {currentMockup ? (
+          viewMode === "visual" ? (
+            <div className="w-full flex-1 flex flex-col min-h-[580px] bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+              <iframe
+                srcDoc={prepareMockupHtml(currentMockup.preview_code)}
+                sandbox="allow-scripts allow-same-origin"
+                className="w-full flex-1 min-h-[580px] border-0"
+                title={`Mockup: ${currentMockup.nombre_pantalla}`}
+              />
+            </div>
+          ) : (
+            <div className="w-full flex-1 flex flex-col min-h-[580px] bg-slate-50 border border-slate-200 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-mono text-slate-500">HTML & Tailwind Source</span>
+                <span className="text-[11px] text-slate-400">Edición directa</span>
+              </div>
+              <textarea
+                value={currentMockup.preview_code}
+                onChange={(e) => {
+                  const newCode = e.target.value;
+                  if (onUpdateMockup) {
+                    onUpdateMockup(currentMockup.nombre_pantalla, newCode);
+                  }
+                }}
+                rows={20}
+                className="flex-1 w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-600 resize-none leading-relaxed"
+                spellCheck="false"
+              />
+            </div>
+          )
+        ) : (
+          <div className="w-full flex-1 flex flex-col items-center justify-center text-center p-12 bg-slate-50 border border-slate-200 rounded-2xl min-h-[480px]">
+            <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-4 shadow-xs">
+              <Layout size={28} />
+            </div>
+            <h3 className="text-base font-semibold text-slate-800 mb-1">
+              Wireframes y Mockups de Interfaz
+            </h3>
+            <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+              Genera pantallas hiper-específicas alineadas a los Requerimientos ISO/IEC/IEEE 29148:2018 y a las Clases de Dominio del sistema usando el botón de la barra superior.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* DESCRIPCIÓN DEL MOCKUP: Con el mismo estilo limpio, numerado y tipográfico de los requerimientos */}
+      {currentMockup && (
+        <div className="pt-4 mt-2 border-t border-slate-200/80 space-y-2 text-slate-700 text-sm shrink-0">
+          <div className="flex items-start gap-3">
+            <span className="font-semibold text-slate-800 text-sm mt-0.5">
+              {(selectedScreen + 1)}.
+            </span>
+            <div className="flex-1 space-y-1.5">
+              <p className="leading-relaxed">
+                <strong className="text-slate-900 font-semibold">{formatScreenName(currentMockup.nombre_pantalla)}:</strong>{" "}
+                {capitalizeFirst(currentMockup.descripcion)}
+              </p>
+
+              <p className="text-xs text-slate-500">
+                <strong className="text-slate-700">Tipo:</strong> {capitalizeFirst(currentMockup.tipo || "interfaz")} •{" "}
+                <strong className="text-slate-700">RF Cubiertos:</strong> {currentMockup.rf_trazabilidad?.join(", ") || "N/A"} •{" "}
+                <strong className="text-slate-700">Estado:</strong> {capitalizeFirst(currentMockup.estado || "generado")} (v{currentMockup.version || 1})
+              </p>
+
+              {currentMockup.descripcion_jerarquica && currentMockup.descripcion_jerarquica.length > 0 && (
+                <div className="pt-1 space-y-1 text-xs text-slate-600">
+                  <p className="font-semibold text-slate-700">Estructura y Trazabilidad Operativa:</p>
+                  <ul className="list-disc pl-5 space-y-0.5">
+                    {currentMockup.descripcion_jerarquica.map((item, i) => {
+                      const cleanItem = String(item).replace(/^[•\-\*]\s*/, "");
+                      return <li key={i}>{cleanItem}</li>;
+                    })}
+                  </ul>
+                </div>
+              )}
+
+              {currentMockup.acciones_principales && currentMockup.acciones_principales.length > 0 && (
+                <p className="text-xs text-slate-500 pt-0.5">
+                  <strong className="text-slate-700">Acciones del usuario:</strong>{" "}
+                  {currentMockup.acciones_principales.join(", ")}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

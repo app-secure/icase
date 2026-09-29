@@ -33,6 +33,22 @@ function getImageSize(dataUrl) {
   });
 }
 
+// Helpers de formato y capitalización para títulos y etiquetas (IEEE / APA)
+const formatScreenName = (str) => {
+  if (!str) return "";
+  return str
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+};
+
+const capitalizeFirst = (text) => {
+  if (!text) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+
 export default function PdfPreviewModal({ project, onClose }) {
   const [pdfUrl, setPdfUrl] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -57,9 +73,7 @@ export default function PdfPreviewModal({ project, onClose }) {
           orientation: "portrait",
           unit: "mm",
           format: "a4"
-        });
-
-        const margin = 18;
+        });        const margin = 18;
         let y = margin;
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
@@ -68,69 +82,250 @@ export default function PdfPreviewModal({ project, onClose }) {
         const checkPageBreak = (neededHeight) => {
           if (y + neededHeight > pageHeight - margin - 12) {
             doc.addPage();
-            // Encabezado formal de página con espaciado equilibrado y línea ploma
-            const headerTextY = 11.5;
-            const headerLineY = 14.5;
+            // Encabezado formal IEEE de página
+            const headerTextY = 11;
+            const headerLineY = 13.5;
             doc.setFont("helvetica", "normal");
-            doc.setFontSize(7.5);
-            doc.setTextColor(120, 120, 120);
+            doc.setFontSize(8.5);
+            doc.setTextColor(100, 116, 139);
             doc.text(
-              `${project.name || "Sistema de Información"} • Documento de Especificación y Diseño`,
+              `ISO/IEC/IEEE 29148:2018 • ${project.name || "Sistema de Información"} • Especificación Técnica`,
               margin,
               headerTextY
             );
-            doc.setDrawColor(220, 220, 220);
-            doc.setLineWidth(0.2);
+            doc.setDrawColor(203, 213, 225);
+            doc.setLineWidth(0.25);
             doc.line(margin, headerLineY, pageWidth - margin, headerLineY);
 
-            // Espaciado adecuado para que el encabezado y la línea ploma no queden pegados al contenido
-            y = 23.5;
+            // Espaciado adecuado para que el encabezado no quede pegado al contenido
+            y = 22;
           }
         };
 
-        // Paleta formal neutra (sin azules informales, estilo entregable de consultoría)
-        const COLOR_TITLE = [17, 24, 39];      // #111827 Charcoal profundo
-        const COLOR_HEADING = [31, 41, 55];    // #1f2937 Gris muy oscuro
-        const COLOR_TEXT = [55, 65, 81];        // #374151 Texto principal
-        const COLOR_MUTED = [107, 114, 128];    // #6b7280 Metadatos
-        const COLOR_LINE = [209, 213, 219];     // #d1d5db Líneas divisorias
-        const COLOR_TABLE_HEADER = [31, 41, 55];
+        // Paleta formal neutra de ingeniería (estilo IEEE Transactions / Entregable de Consultoría)
+        const COLOR_TITLE = [15, 23, 42];        // #0f172a Slate 900
+        const COLOR_HEADING = [30, 41, 59];      // #1e293b Slate 800
+        const COLOR_TEXT = [51, 65, 85];         // #334155 Slate 700 (Legible y nítido)
+        const COLOR_MUTED = [100, 116, 139];     // #64748b Slate 500
+        const COLOR_LINE = [203, 213, 225];      // #cbd5e1 Slate 300
+        const COLOR_TABLE_HEADER = [30, 41, 59];  // #1e293b
+        const COLOR_PRIMARY = [11, 87, 208];     // #0b57d0 Azul formal IEEE
 
-        // Función para tablas formales de especificación (IEEE 830)
+        // --- HELPERS DE TIPOGRAFÍA Y FORMATO PROFESIONAL ---
+
+        // Título de Sección Principal (Nivel 1)
+        const drawSectionHeader = (titleText) => {
+          checkPageBreak(25);
+          if (y > margin + 5) {
+            y += 4; // Espacio previo de separación entre secciones
+          }
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(13.5);
+          doc.setTextColor(...COLOR_TITLE);
+          doc.text(titleText, margin, y);
+          y += 3;
+          doc.setDrawColor(...COLOR_LINE);
+          doc.setLineWidth(0.3);
+          doc.line(margin, y, pageWidth - margin, y);
+          y += 5.5;
+        };
+
+        // Título de Subsección (Nivel 2)
+        const drawSubSectionHeader = (subTitleText) => {
+          checkPageBreak(18);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(11);
+          doc.setTextColor(...COLOR_HEADING);
+          doc.text(subTitleText, margin, y);
+          y += 4.5;
+        };
+
+        // Párrafo estándar con interlineado confortable a escala 100%
+        const drawParagraph = (text) => {
+          if (!text) return;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(10);
+          doc.setTextColor(...COLOR_TEXT);
+          const lines = doc.splitTextToSize(text, maxLineWidth);
+          checkPageBreak(lines.length * 4.8 + 3);
+          doc.text(lines, margin, y);
+          y += lines.length * 4.8 + 3.5;
+        };
+
+        // Viñeta ideal con Sangría Francesa (Hanging Indent)
+        // El punto queda a la izquierda y el texto nunca se mete debajo del punto
+        const drawBulletItem = (text, indent = 4) => {
+          if (!text) return;
+          const bulletX = margin + indent;
+          const textX = bulletX + 5;
+          const textW = maxLineWidth - indent - 5;
+          const lineHeight = 4.8;
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9.8);
+          const lines = doc.splitTextToSize(text, textW);
+          checkPageBreak(lines.length * lineHeight + 2);
+
+          // Punto de viñeta
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.setTextColor(...COLOR_PRIMARY);
+          doc.text("•", bulletX, y);
+
+          // Texto sangrado línea por línea
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9.8);
+          doc.setTextColor(...COLOR_TEXT);
+          for (let i = 0; i < lines.length; i++) {
+            doc.text(lines[i], textX, y + i * lineHeight);
+          }
+
+          y += lines.length * lineHeight + 2.5;
+        };
+
+        // Viñeta estructurada con prefijo en negrita (ej: "• Componentes: ...")
+        const drawStructuredBullet = (prefix, text, indent = 4) => {
+          if (!prefix && !text) return;
+          const bulletX = margin + indent;
+          const textX = bulletX + 5;
+          const textW = maxLineWidth - indent - 5;
+          const lineHeight = 4.8;
+
+          if (!text) {
+            drawBulletItem(prefix, indent);
+            return;
+          }
+
+          const prefixStr = `${prefix}: `;
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9.8);
+          const prefixW = doc.getTextWidth(prefixStr);
+
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9.8);
+
+          // Si el prefijo cabe en la primera línea con espacio razonable para texto:
+          if (prefixW < textW - 35) {
+            const words = text.split(/\s+/).filter(Boolean);
+            let firstLineWords = [];
+            let remainingWords = [];
+            let currentFirstLineStr = "";
+
+            for (let i = 0; i < words.length; i++) {
+              const candidate = currentFirstLineStr ? `${currentFirstLineStr} ${words[i]}` : words[i];
+              if (prefixW + doc.getTextWidth(candidate) <= textW - 2) {
+                currentFirstLineStr = candidate;
+                firstLineWords.push(words[i]);
+              } else {
+                remainingWords = words.slice(i);
+                break;
+              }
+            }
+
+            const restText = remainingWords.join(" ");
+            const remainingLines = restText ? doc.splitTextToSize(restText, textW) : [];
+            const totalLinesCount = 1 + remainingLines.length;
+
+            checkPageBreak(totalLinesCount * lineHeight + 2);
+
+            // Viñeta
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(10);
+            doc.setTextColor(...COLOR_PRIMARY);
+            doc.text("•", bulletX, y);
+
+            // Prefijo en negrita
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9.8);
+            doc.setTextColor(...COLOR_HEADING);
+            doc.text(prefixStr, textX, y);
+
+            // Texto continuado de primera línea
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9.8);
+            doc.setTextColor(...COLOR_TEXT);
+            if (currentFirstLineStr) {
+              doc.text(currentFirstLineStr, textX + prefixW, y);
+            }
+
+            // Siguientes líneas
+            for (let i = 0; i < remainingLines.length; i++) {
+              doc.text(remainingLines[i], textX, y + (i + 1) * lineHeight);
+            }
+
+            y += totalLinesCount * lineHeight + 2.5;
+          } else {
+            // Si el prefijo es largo, imprimirlo y luego el texto
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9.8);
+            const prefixLines = doc.splitTextToSize(prefixStr, textW);
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9.8);
+            const textLines = doc.splitTextToSize(text, textW);
+
+            const totalLinesCount = prefixLines.length + textLines.length;
+            checkPageBreak(totalLinesCount * lineHeight + 2);
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(10);
+            doc.setTextColor(...COLOR_PRIMARY);
+            doc.text("•", bulletX, y);
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9.8);
+            doc.setTextColor(...COLOR_HEADING);
+            for (let i = 0; i < prefixLines.length; i++) {
+              doc.text(prefixLines[i], textX, y + i * lineHeight);
+            }
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9.8);
+            doc.setTextColor(...COLOR_TEXT);
+            const startYText = y + prefixLines.length * lineHeight;
+            for (let i = 0; i < textLines.length; i++) {
+              doc.text(textLines[i], textX, startYText + i * lineHeight);
+            }
+
+            y += totalLinesCount * lineHeight + 2.5;
+          }
+        };
+
+        // Función para tablas formales de especificación (IEEE / APA)
         const drawSpecificationTable = (tableTitle, rows) => {
-          const col1W = 46;
+          const col1W = 50;
           const col2W = maxLineWidth - col1W;
-          const rowPadding = 2;
-          const lineHeight = 3.6;
+          const rowPadding = 2.8;
+          const lineHeight = 4.4;
 
-          let estimatedTableH = 7;
+          let estimatedTableH = 8;
           const preparedRows = rows.map(([label, val]) => {
             const valStr = String(val || "N/A");
-            const wrapped = doc.splitTextToSize(valStr, col2W - 4);
-            const rowH = Math.max(6.5, wrapped.length * lineHeight + rowPadding * 2);
+            const wrapped = doc.splitTextToSize(valStr, col2W - 6);
+            const rowH = Math.max(7.5, wrapped.length * lineHeight + rowPadding * 2);
             estimatedTableH += rowH;
             return { label, wrapped, rowH };
           });
 
-          checkPageBreak(Math.min(estimatedTableH, 45));
+          checkPageBreak(Math.min(estimatedTableH, 50));
 
-          // Encabezado de la tabla
+          // Encabezado de la tabla estilo IEEE
           doc.setFillColor(...COLOR_TABLE_HEADER);
-          doc.rect(margin, y, maxLineWidth, 6, "F");
+          doc.rect(margin, y, maxLineWidth, 7.5, "F");
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(8);
+          doc.setFontSize(9.5);
           doc.setTextColor(255, 255, 255);
-          doc.text(tableTitle, margin + 3, y + 4.2);
-          y += 6;
+          doc.text(tableTitle.toUpperCase(), margin + 4, y + 5.2);
+          y += 7.5;
 
           doc.setDrawColor(...COLOR_LINE);
-          doc.setLineWidth(0.2);
+          doc.setLineWidth(0.25);
 
-          preparedRows.forEach(({ label, wrapped, rowH }) => {
+          preparedRows.forEach(({ label, wrapped, rowH }, idx) => {
             checkPageBreak(rowH + 2);
 
-            // Celda etiqueta (gris claro neutro)
-            doc.setFillColor(249, 250, 251);
+            // Celda etiqueta (gris neutro alternado)
+            doc.setFillColor(idx % 2 === 0 ? 248 : 255, idx % 2 === 0 ? 250 : 255, idx % 2 === 0 ? 252 : 255);
             doc.rect(margin, y, col1W, rowH, "FD");
 
             // Celda valor (blanco)
@@ -139,20 +334,20 @@ export default function PdfPreviewModal({ project, onClose }) {
 
             // Texto etiqueta
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(7.5);
+            doc.setFontSize(9);
             doc.setTextColor(...COLOR_HEADING);
-            doc.text(label, margin + 2.5, y + 4.2);
+            doc.text(label, margin + 3.5, y + 5);
 
-            // Texto valor
+            // Texto valor (9.5pt legible al 100%)
             doc.setFont("helvetica", "normal");
-            doc.setFontSize(7.5);
+            doc.setFontSize(9.5);
             doc.setTextColor(...COLOR_TEXT);
-            doc.text(wrapped, margin + col1W + 2.5, y + 4);
+            doc.text(wrapped, margin + col1W + 3.5, y + 4.8);
 
             y += rowH;
           });
 
-          y += 4;
+          y += 5.5;
         };
 
         // Redimensionamiento inteligente de diagramas sin deformación y con explicación operativa
@@ -160,9 +355,9 @@ export default function PdfPreviewModal({ project, onClose }) {
           if (!imgData) return;
           const size = await getImageSize(imgData);
 
-          // Escalar proporcionalmente garantizando que quepa en el ancho útil y altura moderada
+          // Escalar proporcionalmente cubriendo el ancho útil y con altura generosa y equilibrada
           const maxW = maxLineWidth;
-          const maxAllowedH = 82; // Altura máxima para permitir que la explicación entre en la misma página
+          const maxAllowedH = 115;
           let w = size.width;
           let h = size.height;
           const ratio = w / h;
@@ -177,69 +372,51 @@ export default function PdfPreviewModal({ project, onClose }) {
           }
 
           // Salto de página antes si el bloque gráfico no cabe
-          checkPageBreak(h + 25);
+          checkPageBreak(h + 30);
 
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(10);
+          doc.setFontSize(11);
           doc.setTextColor(...COLOR_HEADING);
           doc.text(title, margin, y);
-          y += 4.5;
+          y += 5;
 
           const tieneNarrativa = descripcionTexto && typeof descripcionTexto === "string" && descripcionTexto.trim().length > 10;
           if (tieneNarrativa) {
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(8.5);
-            doc.setTextColor(...COLOR_TEXT);
-            const descLines = doc.splitTextToSize(descripcionTexto, maxLineWidth);
-            doc.text(descLines, margin, y);
-            y += descLines.length * 3.8 + 2.5;
+            drawParagraph(descripcionTexto);
           }
 
           const x = margin + (maxLineWidth - w) / 2;
           try {
             doc.addImage(imgData, "PNG", x, y, w, h);
-            y += h + 3.5;
+            y += h + 4;
 
-            // Epígrafe formal
-            doc.setFont("helvetica", "italic");
-            doc.setFontSize(7.5);
-            doc.setTextColor(...COLOR_MUTED);
+            // Epígrafe formal IEEE / APA (9pt centrado)
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.setTextColor(...COLOR_HEADING);
             doc.text(caption, pageWidth / 2, y, { align: "center" });
-            y += 5.5;
+            y += 6.5;
 
             // Explicación operativa generada por la IA
             const listItems = Array.isArray(jerarquia) && jerarquia.length > 0 ? jerarquia : null;
 
             if (listItems) {
-              checkPageBreak(22);
+              checkPageBreak(25);
               const cleanDiagramTitle = title.replace(/^\d+(\.\d+)*\s*/, "").trim();
-              const explanationTitle = `Descripción del ${cleanDiagramTitle}:`;
+              const explanationTitle = `Descripción Operativa del ${cleanDiagramTitle}:`;
 
               doc.setFont("helvetica", "bold");
-              doc.setFontSize(8.5);
+              doc.setFontSize(10);
               doc.setTextColor(...COLOR_HEADING);
               doc.text(explanationTitle, margin, y);
-              y += 4.5;
+              y += 5;
 
               listItems.forEach((item) => {
                 if (typeof item === "string" && item.includes(":")) {
                   const [prefix, ...rest] = item.split(":");
-                  const fullText = `• ${prefix.trim()}: ${rest.join(":")}`;
-                  const splitLines = doc.splitTextToSize(fullText, maxLineWidth);
-                  checkPageBreak(splitLines.length * 3.8 + 1.5);
-                  doc.setFont("helvetica", "normal");
-                  doc.setFontSize(8.5);
-                  doc.setTextColor(...COLOR_TEXT);
-                  doc.text(splitLines, margin, y);
-                  y += splitLines.length * 3.8;
+                  drawStructuredBullet(prefix.trim(), rest.join(":").trim());
                 } else if (typeof item === "string") {
-                  const splitLines = doc.splitTextToSize(`• ${item}`, maxLineWidth);
-                  checkPageBreak(splitLines.length * 3.8 + 1.5);
-                  doc.setFont("helvetica", "normal");
-                  doc.setFontSize(8.5);
-                  doc.setTextColor(...COLOR_TEXT);
-                  doc.text(splitLines, margin, y);
-                  y += splitLines.length * 3.8;
+                  drawBulletItem(item.trim());
                 }
               });
               y += 3;
@@ -249,104 +426,69 @@ export default function PdfPreviewModal({ project, onClose }) {
           }
         };
 
-        // --- 1. TÍTULO DEL PROYECTO ---
+        // --- 1. PORTADA / CABECERA TÉCNICA ---
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(14);
+        doc.setFontSize(16.5);
         doc.setTextColor(...COLOR_TITLE);
         const titleLines = doc.splitTextToSize(
-          `1. ${project.name || "Sistema de Información y Control Operativo"}`,
+          `1. Especificación de Requisitos de Software (SRS): ${project.name || "Sistema de Información"}`,
           maxLineWidth
         );
         doc.text(titleLines, margin, y);
-        y += titleLines.length * 6 + 1.5;
+        y += titleLines.length * 6.8 + 2.5;
 
-        // Metadatos
+        // Metadatos formales IEEE
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
+        doc.setFontSize(8.5);
         doc.setTextColor(...COLOR_MUTED);
         doc.text(
-          `Fecha de Emisión: ${new Date().toLocaleDateString("es-ES")}`,
+          `Fecha de Emisión: ${new Date().toLocaleDateString("es-ES", { year: "numeric", month: "long", day: "numeric" })}   |   Normativa: ISO/IEC/IEEE 29148:2018   |   Estado: Aprobado`,
           margin,
           y
         );
-        y += 4.5;
+        y += 5.5;
 
-        // Línea divisoria formal
+        // Línea divisoria formal única y limpia
         doc.setDrawColor(...COLOR_LINE);
-        doc.setLineWidth(0.25);
+        doc.setLineWidth(0.3);
         doc.line(margin, y, pageWidth - margin, y);
-        y += 6;
+        y += 6.5;
 
         // --- 2. OBJETIVOS ---
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("2. Objetivos del Proyecto", margin, y);
-        y += 4.5;
+        drawSectionHeader("2. Objetivos del Proyecto");
 
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(8);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("2.1 Objetivo General:", margin, y);
-        y += 3.5;
-
-        doc.setFont("helvetica", "normal");
+        drawSubSectionHeader("2.1 Objetivo General:");
         const objGenText = project.objetivos?.general ||
-          `Desarrollar y formalizar la arquitectura y especificación del sistema ${project.name || "institucional"}, asegurando integridad transaccional, alta disponibilidad y cumplimiento estricto de las necesidades del negocio.`;
-        const objGen = doc.splitTextToSize(objGenText, maxLineWidth);
-        doc.text(objGen, margin, y);
-        y += objGen.length * 3.6 + 3;
+          `Desarrollar y formalizar la arquitectura y especificación técnica del sistema ${project.name || "institucional"}, asegurando integridad transaccional, alta disponibilidad y cumplimiento estricto de las necesidades del negocio.`;
+        drawParagraph(objGenText);
 
-        doc.setFont("helvetica", "bold");
-        doc.text("2.2 Objetivos Específicos:", margin, y);
-        y += 3.5;
-        doc.setFont("helvetica", "normal");
+        drawSubSectionHeader("2.2 Objetivos Específicos:");
         const objEsp = Array.isArray(project.objetivos?.especificos) && project.objetivos.especificos.length > 0
           ? project.objetivos.especificos
           : [
-              `Levantar y especificar los requerimientos funcionales y no funcionales cuantificables para ${project.name || "el sistema"}.`,
+              `Levantar y formalizar los requerimientos funcionales y no funcionales cuantificables para ${project.name || "el sistema"}.`,
               "Diseñar la arquitectura lógica en capas delimitando responsabilidades de frontera, negocio y persistencia.",
               "Modelar los casos de uso nucleares, entidades del modelo de datos y el flujo de navegación modular."
             ];
         objEsp.forEach((item) => {
-          const splitItem = doc.splitTextToSize(`• ${item}`, maxLineWidth);
-          doc.text(splitItem, margin, y);
-          y += splitItem.length * 3.5;
+          drawBulletItem(item);
         });
-        y += 4;
+        y += 3;
 
         // --- 3. RESUMEN EJECUTIVO ---
-        checkPageBreak(25);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("3. Resumen Ejecutivo", margin, y);
-        y += 4.5;
-
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.setTextColor(...COLOR_TEXT);
-        const resumenText = doc.splitTextToSize(
+        drawSectionHeader("3. Resumen Ejecutivo");
+        const resumenText =
           project.resumen_ejecutivo || project.resumenEjecutivo || project.description ||
-            `El proyecto ${project.name} contempla la implementación de una solución informática para la automatización, gestión y control operativo de sus procesos fundamentales. La presente especificación establece las bases analíticas y arquitectónicas para su desarrollo e integración técnica.`,
-          maxLineWidth
-        );
-        doc.text(resumenText, margin, y);
-        y += resumenText.length * 3.6 + 4;
+          `El proyecto ${project.name || "Sistema"} contempla la implementación de una solución informática para la automatización, gestión y control operativo de sus procesos fundamentales. La presente especificación establece las bases analíticas y arquitectónicas para su desarrollo e integración técnica.`;
+        drawParagraph(resumenText);
 
         // --- 4. PALABRAS CLAVE DEL NEGOCIO / DOMINIO ---
-        checkPageBreak(20);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("4. Palabras Clave del Negocio / Dominio", margin, y);
-        y += 4.5;
+        drawSectionHeader("4. Palabras Clave del Negocio / Dominio");
 
         const cleanFunctional = (project.requirements?.functional || []).filter(
           (rf) => !rf.name?.includes("Ajuste Validado por Experto")
         );
 
-        // Palabras clave del negocio (nunca de herramientas CASE)
         let domainKeywords = Array.isArray(project.palabras_clave) && project.palabras_clave.length > 0
           ? project.palabras_clave
           : cleanFunctional.slice(0, 6).map((rf) => rf.name.replace(/^(Gestión de|Control de|Registro de|Módulo de)\s*/i, ""));
@@ -357,76 +499,34 @@ export default function PdfPreviewModal({ project, onClose }) {
         }
 
         domainKeywords.forEach((kw) => {
-          checkPageBreak(5);
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(8.5);
-          doc.setTextColor(...COLOR_TEXT);
-          const splitKw = doc.splitTextToSize(`• ${kw}`, maxLineWidth);
-          doc.text(splitKw, margin + 2, y);
-          y += splitKw.length * 3.8;
+          drawBulletItem(kw);
         });
-        y += 4;
+        y += 3;
 
         // --- 5. INTRODUCCIÓN ---
-        checkPageBreak(25);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("5. Introducción", margin, y);
-        y += 4.5;
-
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.setTextColor(...COLOR_TEXT);
-        const introText = doc.splitTextToSize(
+        drawSectionHeader("5. Introducción");
+        const introText =
           project.introduccion ||
-            "En el desarrollo formal de software de misión crítica, una adecuada especificación formal previene desviaciones presupuestarias, fallos de integración y cuellos de botella. El presente documento técnico estructura los requerimientos a partir de los insumos provistos por los expertos del dominio, asegurando consistencia, trazabilidad y conformidad.",
-          maxLineWidth
-        );
-        doc.text(introText, margin, y);
-        y += introText.length * 3.6 + 4;
+          "En el desarrollo formal de software de misión crítica, una adecuada especificación formal previene desviaciones presupuestarias, fallos de integración y cuellos de botella. El presente documento técnico estructura los requerimientos a partir de los insumos provistos por los expertos del dominio, asegurando consistencia, trazabilidad y conformidad.";
+        drawParagraph(introText);
 
         // --- 6. FUENTES E INSUMOS ANALIZADOS ---
-        checkPageBreak(25);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("6. Fuentes e Insumos Analizados", margin, y);
-        y += 4.5;
-
+        drawSectionHeader("6. Fuentes e Insumos Analizados");
         const sources = project.sources || [];
         if (sources.length > 0) {
           sources.forEach((s) => {
-            checkPageBreak(6);
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(8);
-            doc.setTextColor(...COLOR_TEXT);
-            doc.text(`• ${s.name} (${s.type || "Documento"})`, margin + 2, y);
-            y += 4;
+            drawBulletItem(`${s.name} (${s.type || "Documento"})`);
           });
         } else {
-          doc.setFont("helvetica", "italic");
-          doc.setFontSize(8);
-          doc.setTextColor(...COLOR_MUTED);
-          doc.text("Insumos de requerimientos provistos directamente durante la sesión de análisis técnico.", margin, y);
-          y += 4;
+          drawParagraph("Insumos de requerimientos provistos directamente durante la sesión de análisis técnico.");
         }
-        y += 4;
+        y += 3;
 
         // --- 7. ANÁLISIS DE REQUERIMIENTOS ---
-        checkPageBreak(30);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.setTextColor(...COLOR_TITLE);
-        doc.text("7. Especificación de Requerimientos del Sistema", margin, y);
-        y += 5.5;
+        drawSectionHeader("7. Especificación de Requisitos del Sistema (ISO/IEC/IEEE 29148:2018)");
 
         // 7.1 Requerimientos Funcionales
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("7.1 Requerimientos Funcionales (RF)", margin, y);
-        y += 4.5;
+        drawSubSectionHeader("7.1 Requerimientos Funcionales (RF)");
 
         if (cleanFunctional.length > 0) {
           cleanFunctional.forEach((rf, i) => {
@@ -449,12 +549,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         }
 
         // 7.2 Requisitos No Funcionales
-        checkPageBreak(25);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("7.2 Requerimientos No Funcionales (RNF)", margin, y);
-        y += 4.5;
+        drawSubSectionHeader("7.2 Requerimientos No Funcionales (RNF)");
 
         const cleanNonFunctional = (project.requirements?.nonFunctional || []).filter(
           (rnf) =>
@@ -482,12 +577,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         }
 
         // --- 8. MODELADO Y DIAGRAMAS DE SOFTWARE ---
-        checkPageBreak(30);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.setTextColor(...COLOR_TITLE);
-        doc.text("8. Modelado y Diagramas de Software", margin, y);
-        y += 5.5;
+        drawSectionHeader("8. Modelado y Diagramas de Software");
 
         // 8.1 Casos de Uso
         if (useCaseImg) {
@@ -535,31 +625,18 @@ export default function PdfPreviewModal({ project, onClose }) {
 
         // --- 9. WIREFRAMES Y MOCKUPS DE INTERFAZ ---
         if (project.mockups && project.mockups.length > 0) {
-          checkPageBreak(30);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(11);
-          doc.setTextColor(...COLOR_TITLE);
-          doc.text("9. Wireframes y Mockups de Interfaz", margin, y);
-          y += 5.5;
+          drawSectionHeader("9. Wireframes y Prototipos de Interfaz");
 
           for (let i = 0; i < project.mockups.length; i++) {
             const mockup = project.mockups[i];
             if (!mockup.preview_code) continue;
 
-            checkPageBreak(40);
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9.5);
-            doc.setTextColor(...COLOR_HEADING);
-            doc.text(`9.${i + 1} ${mockup.nombre_pantalla}`, margin, y);
-            y += 4.5;
+            checkPageBreak(45);
+            const formattedScreen = formatScreenName(mockup.nombre_pantalla);
+            drawSubSectionHeader(`9.${i + 1} ${formattedScreen} (${capitalizeFirst(mockup.tipo || "interfaz")})`);
 
             if (mockup.descripcion) {
-              doc.setFont("helvetica", "normal");
-              doc.setFontSize(8);
-              doc.setTextColor(...COLOR_TEXT);
-              const descLines = doc.splitTextToSize(mockup.descripcion, maxLineWidth);
-              doc.text(descLines, margin, y);
-              y += descLines.length * 3.6 + 3;
+              drawParagraph(capitalizeFirst(mockup.descripcion));
             }
 
             // Renderizar mockup HTML en iframe (para que Tailwind CDN y CSS ejecuten correctamente)
@@ -779,92 +856,87 @@ sidebar, .sidebar { background: #1e293b; color: white; }
               doc.addImage(mockupImgData, "PNG", xMm, y, wMm, hMm);
               y += hMm + 4;
 
-              // Epígrafe
-              doc.setFont("helvetica", "italic");
-              doc.setFontSize(7.5);
-              doc.setTextColor(...COLOR_MUTED);
-              doc.text(`Figura 9.${i + 1}: Mockup de ${mockup.nombre_pantalla} (${mockup.tipo || "pantalla"})`, pageWidth / 2, y, { align: "center" });
-              y += 5;
+              // Epígrafe formal IEEE / APA (9pt centrado)
+              doc.setFont("helvetica", "bold");
+              doc.setFontSize(9);
+              doc.setTextColor(...COLOR_HEADING);
+              doc.text(`Figura 9.${i + 1}. Prototipo de Interfaz: ${formattedScreen}.`, pageWidth / 2, y, { align: "center" });
+              y += 6;
 
               // Trazabilidad RF
               if (mockup.rf_trazabilidad && mockup.rf_trazabilidad.length > 0) {
                 doc.setFont("helvetica", "normal");
-                doc.setFontSize(7.5);
+                doc.setFontSize(8.5);
                 doc.setTextColor(...COLOR_MUTED);
                 doc.text(`Trazabilidad RF: ${mockup.rf_trazabilidad.join(", ")}`, margin, y);
-                y += 4;
+                y += 5;
               }
             } else {
-              // Fallback: tabla de especificación textual
+              // Fallback: tabla de especificación textual IEEE
               const rows = [
-                ["Pantalla", mockup.nombre_pantalla],
-                ["Tipo", mockup.tipo || "N/A"],
-                ["Descripción", mockup.descripcion || "N/A"],
+                ["Pantalla", formattedScreen],
+                ["Tipo", capitalizeFirst(mockup.tipo || "interfaz")],
+                ["Descripción", capitalizeFirst(mockup.descripcion || "N/A")],
                 ["Elementos visibles", (mockup.elementos_visibles || []).join(", ") || "N/A"],
                 ["Campos formulario", (mockup.campos_formulario || []).map(c => c.nombre || c).join(", ") || "N/A"],
                 ["Acciones principales", (mockup.acciones_principales || []).join(", ") || "N/A"],
                 ["RF trazabilidad", (mockup.rf_trazabilidad || []).join(", ") || "N/A"],
-                ["Estado", mockup.estado || "generado"],
+                ["Estado", capitalizeFirst(mockup.estado || "generado")],
                 ["Versión", String(mockup.version || 1)]
               ];
-              drawSpecificationTable(`Mockup: ${mockup.nombre_pantalla}`, rows);
+              drawSpecificationTable(`Mockup: ${formattedScreen}`, rows);
             }
           }
         }
 
         // --- 10. CERTIFICACIÓN Y APROBACIÓN TÉCNICA ---
-        checkPageBreak(35);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10.5);
-        doc.setTextColor(...COLOR_HEADING);
-        doc.text("10. Certificación y Aprobación Técnica", margin, y);
-        y += 4.5;
+        checkPageBreak(45);
+        drawSectionHeader("10. Certificación y Aprobación Técnica");
 
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(7.5);
-        doc.setTextColor(...COLOR_TEXT);
-        const certText = doc.splitTextToSize(
-          "El presente documento técnico de especificación de requisitos y diseño preliminar ha sido generado y validado conforme a los estándares de ingeniería de software para especificaciones formales y modelado de procesos.",
-          maxLineWidth
-        );
-        doc.text(certText, margin, y);
-        y += certText.length * 3.5 + 12;
+        const certText =
+          "El presente documento técnico de especificación de requisitos y diseño preliminar ha sido formalmente estructurado y validado conforme a los estándares internacionales de ingeniería de software ISO/IEC/IEEE 29148:2018 para especificaciones formales y modelado de sistemas.";
+        drawParagraph(certText);
+        y += 10;
 
         // Firmas formales
-        const signW = 60;
-        const sign1X = margin + 15;
-        const sign2X = pageWidth - margin - signW - 15;
+        const signW = 65;
+        const sign1X = margin + 12;
+        const sign2X = pageWidth - margin - signW - 12;
 
         doc.setDrawColor(...COLOR_LINE);
+        doc.setLineWidth(0.3);
         doc.line(sign1X, y, sign1X + signW, y);
         doc.line(sign2X, y, sign2X + signW, y);
-        y += 4;
+        y += 4.5;
 
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(7.5);
+        doc.setFontSize(9);
         doc.setTextColor(...COLOR_HEADING);
         doc.text("Analista de Requisitos", sign1X + signW / 2, y, { align: "center" });
         doc.text("Arquitecto / Diseñador de Software", sign2X + signW / 2, y, { align: "center" });
-        y += 3.5;
+        y += 4;
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(7);
+        doc.setFontSize(8.5);
         doc.setTextColor(...COLOR_MUTED);
         doc.text("Equipo de Ingeniería de Software", sign1X + signW / 2, y, { align: "center" });
-        doc.text("Firma de Aprobación", sign2X + signW / 2, y, { align: "center" });
+        doc.text("Firma de Aprobación Formal", sign2X + signW / 2, y, { align: "center" });
 
-        // --- NUMERACIÓN DE PÁGINAS FORMAL AL PIE ---
+        // --- NUMERACIÓN DE PÁGINAS FORMAL AL PIE CON LÍNEA DIVISORIA IEEE ---
         const totalPages = doc.internal.getNumberOfPages();
         for (let p = 1; p <= totalPages; p++) {
           doc.setPage(p);
           doc.setFont("helvetica", "normal");
-          doc.setFontSize(7);
-          doc.setTextColor(140, 140, 140);
+          doc.setFontSize(8.5);
+          doc.setTextColor(148, 163, 184);
+          doc.setDrawColor(226, 232, 240);
+          doc.setLineWidth(0.25);
+          doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
           doc.text(
-            `Página ${p} de ${totalPages}  •  Documento Técnico de Especificación y Diseño del Sistema`,
-            pageWidth / 2,
-            pageHeight - 7,
-            { align: "center" }
+            "ICASE CASE Tool • Documentación Técnica Oficial ISO/IEC/IEEE 29148:2018",
+            margin,
+            pageHeight - 7.5
           );
+          doc.text(`Página ${p} de ${totalPages}`, pageWidth - margin, pageHeight - 7.5, { align: "right" });
         }
 
         // Finalizar y crear URL del Blob

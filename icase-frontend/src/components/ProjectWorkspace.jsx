@@ -15,7 +15,8 @@ import {
   updateDiagramApi,
   fetchAiModelsApi,
   fetchMockupsApi,
-  updateMockupApi
+  updateMockupApi,
+  syncProjectRequirementsApi
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
 
@@ -988,6 +989,22 @@ export default function ProjectWorkspace({
           /* FASE 1: Análisis (Requerimientos en texto estructurado limpio) */
           <RequirementsView
             requirements={project.requirements}
+            onUpdateRequirements={(newReqs) => {
+              onUpdateProject({
+                ...project,
+                requirements: newReqs
+              });
+              const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+              if (backendId) {
+                const flatList = [
+                  ...(newReqs.functional || []).map((r, i) => ({ ...r, tipo: 'RF', identificador: r.identificador || r.id || `RF-0${i + 1}` })),
+                  ...(newReqs.nonFunctional || []).map((r, i) => ({ ...r, tipo: 'RNF', identificador: r.identificador || r.id || `RNF-0${i + 1}` }))
+                ];
+                syncProjectRequirementsApi(backendId, flatList).catch((err) => {
+                  console.warn("[Workspace] Error persistiendo requerimientos editados:", err);
+                });
+              }
+            }}
             onApprovePhase={handleApproveAnalysis}
             isApproved={project.isAnalysisApproved}
             onApplyAiCorrection={(prompt) => handleApplyAiCorrection("analysis", prompt)}
@@ -1025,6 +1042,7 @@ export default function ProjectWorkspace({
             onBackToAnalysis={() => onUpdateProject({ ...project, currentPhase: 1 })}
             onApplyAiCorrection={(prompt, diagKey) => handleApplyAiCorrection("diagrams", prompt, diagKey)}
             projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}
+            requirements={project.requirements}
           />
         ) : (
           /* FASE 3: Documento Consolidado */

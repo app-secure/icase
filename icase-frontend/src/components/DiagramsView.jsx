@@ -11,6 +11,7 @@ import {
 import BrainGearsIcon from "./BrainGearsIcon";
 import PlantUMLViewer from "./PlantUMLViewer";
 import MockupsView from "./MockupsView";
+import { generateMockupsApi } from "../services/api";
 
 export default function DiagramsView({
   diagrams,
@@ -20,10 +21,12 @@ export default function DiagramsView({
   onApprovePhase,
   onBackToAnalysis,
   onApplyAiCorrection,
-  projectId
+  projectId,
+  requirements = null
 }) {
   const [selectedKey, setSelectedKey] = useState("useCase");
   const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
+  const [selectedScreen, setSelectedScreen] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
   const [correctionFeedback, setCorrectionFeedback] = useState(null);
@@ -43,6 +46,49 @@ export default function DiagramsView({
     description: "Pendiente de procesamiento."
   };
 
+  const activeMockup = mockups[selectedScreen] || mockups[0] || null;
+
+  // Determinar la etiqueta y placeholder contextual del chat inteligente
+  const getContextInfo = () => {
+    switch (selectedKey) {
+      case "useCase":
+        return {
+          badge: "Casos de Uso",
+          placeholder: "Pide un ajuste a Casos de Uso con IA (ej: 'añade actor Cocinero y proceso KDS')..."
+        };
+      case "architecture":
+        return {
+          badge: "Arquitectura C4",
+          placeholder: "Pide un ajuste a la Arquitectura con IA (ej: 'agrega Redis para caché y gateway Nginx')..."
+        };
+      case "classDiagram":
+        return {
+          badge: "Clases de Dominio",
+          placeholder: "Pide un ajuste a Clases con IA (ej: 'añade entidad Factura con atributos monto y fecha')..."
+        };
+      case "navigationTree":
+        return {
+          badge: "Árbol WBS",
+          placeholder: "Pide un ajuste al Árbol WBS con IA (ej: 'incluye submódulo de reportes de cierre')..."
+        };
+      case "mockups":
+        return {
+          badge: activeMockup ? `Mockup: ${activeMockup.nombre_pantalla}` : "Mockups UI",
+          placeholder: activeMockup
+            ? `Pide un ajuste a "${activeMockup.nombre_pantalla}" con IA (ej: 'añade modal de pago y filtros')...`
+            : "Pide un ajuste a los mockups con IA (ej: 'añade pantalla de comandas')..."
+        };
+      default:
+        return {
+          badge: "Modelado",
+          placeholder: "Pide un ajuste al modelo con IA..."
+        };
+    }
+  };
+
+  const contextInfo = getContextInfo();
+
+  // Envío inteligente: enruta la corrección según el artefacto activo
   const handleSendCorrection = async (e) => {
     e?.preventDefault();
     if (!prompt.trim() || isFixing) return;
@@ -52,17 +98,51 @@ export default function DiagramsView({
     setCorrectionFeedback(null);
 
     try {
-      if (onApplyAiCorrection) {
-        const res = await onApplyAiCorrection(text, selectedKey);
-        if (res && res.success === false) {
-          setCorrectionFeedback({ type: "error", message: res.error || "No se pudo aplicar el ajuste al diagrama." });
-        } else {
-          setCorrectionFeedback({ type: "success", message: `Ajuste aplicado: "${text}"` });
+      if (selectedKey === "mockups") {
+        // Enrutamiento inteligente a Mockup AI Service
+        if (!projectId) {
+          throw new Error("No se encontró el ID del proyecto para procesar mockups.");
+        }
+        const pantallasTarget = activeMockup ? [activeMockup.nombre_pantalla] : [];
+        const result = await generateMockupsApi(projectId, pantallasTarget, text);
+        if (result && result.mockups && result.mockups.length > 0) {
+          setCorrectionFeedback({
+            type: "success",
+            message: `Ajuste aplicado exitosamente al mockup con IA: "${text}"`
+          });
+          if (onUpdateMockups) {
+            onUpdateMockups(result.mockups);
+          }
           setPrompt("");
+        } else {
+          setCorrectionFeedback({
+            type: "error",
+            message: "La IA no devolvió mockups para este ajuste. Intenta reformular."
+          });
+        }
+      } else {
+        // Enrutamiento inteligente a Diagramas PlantUML
+        if (onApplyAiCorrection) {
+          const res = await onApplyAiCorrection(text, selectedKey);
+          if (res && res.success === false) {
+            setCorrectionFeedback({
+              type: "error",
+              message: res.error || "No se pudo aplicar el ajuste al diagrama."
+            });
+          } else {
+            setCorrectionFeedback({
+              type: "success",
+              message: `Ajuste aplicado al diagrama [${contextInfo.badge}]: "${text}"`
+            });
+            setPrompt("");
+          }
         }
       }
     } catch (err) {
-      setCorrectionFeedback({ type: "error", message: err.message || "Error al conectar con la IA." });
+      setCorrectionFeedback({
+        type: "error",
+        message: err.message || "Error al conectar con la IA."
+      });
     } finally {
       setIsFixing(false);
     }
@@ -73,14 +153,16 @@ export default function DiagramsView({
       {/* Contenedor scrolleable que abarca todo el ancho hasta el extremo derecho */}
       <div className="w-full flex-1 overflow-y-auto min-h-0 px-6 md:px-12 pt-6 pb-4 flex flex-col">
         <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col min-h-0">
-          {/* Upper Phase Indicator */}
+          {/* Cabecera superior unificada de Fase 2 */}
           <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
             <div>
               <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider block">
-                Fase 2: Modelado del Software
+                Fase 2: Modelado del Software & Wireframes
               </span>
               <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
-                Diagramas UML & Arquitectura en Código Puro
+                {selectedKey === "mockups"
+                  ? "Wireframes y Mockups de Interfaz del Sistema"
+                  : "Diagramas UML & Arquitectura en Código Puro"}
               </h2>
             </div>
 
@@ -92,7 +174,7 @@ export default function DiagramsView({
             </button>
           </div>
 
-          {/* Fila Superior: Árboles de navegación (Tabs) a la izquierda + Botones Gráfico/Código en la esquina derecha */}
+          {/* Fila Superior: Tabs de navegación (Casos de Uso, Arquitectura, Clases, WBS, Mockups) */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
             <div className="flex flex-wrap items-center gap-2">
               {options.map((opt) => {
@@ -101,7 +183,10 @@ export default function DiagramsView({
                 return (
                   <button
                     key={opt.key}
-                    onClick={() => setSelectedKey(opt.key)}
+                    onClick={() => {
+                      setSelectedKey(opt.key);
+                      setCorrectionFeedback(null);
+                    }}
                     className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
                       isSelected
                         ? "bg-slate-900 text-white shadow-xs"
@@ -115,40 +200,44 @@ export default function DiagramsView({
               })}
             </div>
 
-            {/* Selector Vista Gráfica / Código Fuente ubicado en la esquina derecha superior */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-full shrink-0">
-              <button
-                type="button"
-                onClick={() => setViewMode("visual")}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "visual"
-                    ? "bg-white text-slate-900 shadow-2xs"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                Gráfico
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("code")}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "code"
-                    ? "bg-white text-slate-900 shadow-2xs"
-                  : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                Código
-              </button>
-            </div>
+            {/* Selector Vista Gráfica / Código (solo para diagramas PlantUML; Mockups maneja su propio toggle) */}
+            {selectedKey !== "mockups" && (
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-full shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("visual")}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+                    viewMode === "visual"
+                      ? "bg-white text-slate-900 shadow-2xs"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  Gráfico
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("code")}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
+                    viewMode === "code"
+                      ? "bg-white text-slate-900 shadow-2xs"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  Código
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Descripción del Diagrama: Texto completo que baja de línea libremente sin puntos suspensivos */}
-          <div className="pb-3 text-xs text-slate-600 border-b border-slate-100 mb-3 shrink-0">
-            <p className="leading-relaxed whitespace-normal break-words">
-              <strong className="text-slate-800 font-semibold">{currentDiagram.title}:</strong>{" "}
-              {currentDiagram.description}
-            </p>
-          </div>
+          {/* Descripción del Diagrama (para diagramas PlantUML) */}
+          {selectedKey !== "mockups" && (
+            <div className="pb-3 text-xs text-slate-600 border-b border-slate-100 mb-3 shrink-0">
+              <p className="leading-relaxed whitespace-normal break-words">
+                <strong className="text-slate-800 font-semibold">{currentDiagram.title}:</strong>{" "}
+                {currentDiagram.description}
+              </p>
+            </div>
+          )}
 
           {/* Main Canvas Area */}
           <div className="flex-1 flex flex-col min-h-[460px] relative mb-2">
@@ -156,12 +245,13 @@ export default function DiagramsView({
               <MockupsView
                 mockups={mockups}
                 onUpdateMockup={onUpdateMockups}
-                onApprovePhase={onApprovePhase}
-                onBackToDiagrams={onBackToAnalysis}
                 projectId={projectId}
+                selectedScreen={selectedScreen}
+                onSelectScreen={setSelectedScreen}
+                requirements={requirements}
               />
             ) : viewMode === "visual" ? (
-              <div className="flex-1 border border-slate-200 rounded-2xl bg-[#fafafa] flex flex-col relative overflow-hidden">
+              <div className="flex-1 flex flex-col relative min-h-0">
                 <PlantUMLViewer
                   key={selectedKey + (currentDiagram.plantumlCode || currentDiagram.code)}
                   code={currentDiagram.plantumlCode || currentDiagram.code}
@@ -189,13 +279,17 @@ export default function DiagramsView({
         </div>
       </div>
 
-      {/* Bottom Approval Bar: Estático y fijo al fondo al extremo inferior */}
+      {/* CHAT INTELIGENTE UNIFICADO: Detecta automáticamente el diagrama o mockup activo */}
       <div className="w-full shrink-0 border-t border-slate-200 bg-white z-10 px-6 md:px-12 py-3.5">
         <div className="max-w-6xl mx-auto w-full flex flex-col gap-2">
           {correctionFeedback && (
-            <div className={`text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 ${
-              correctionFeedback.type === "success" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-700 border border-red-200"
-            }`}>
+            <div
+              className={`text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 ${
+                correctionFeedback.type === "success"
+                  ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                  : "bg-red-50 text-red-700 border border-red-200"
+              }`}
+            >
               <span className="truncate">{correctionFeedback.message}</span>
               <button
                 type="button"
@@ -208,25 +302,32 @@ export default function DiagramsView({
           )}
 
           <div className="flex items-center gap-3">
-            {/* Input de Ajustes IA redimensionado y elegante al lado del botón de aprobar */}
+            {/* Input de Ajustes IA Inteligente y Contextual */}
             <form
               onSubmit={handleSendCorrection}
-              className="flex-1 flex items-center bg-slate-50 hover:bg-slate-100/60 focus-within:bg-white border border-slate-300 focus-within:border-blue-500 rounded-full px-4 py-1.5 transition-all shadow-2xs"
+              className="flex-1 flex items-center bg-slate-50 hover:bg-slate-100/60 focus-within:bg-white border border-slate-300 focus-within:border-blue-500 rounded-full px-3 py-1.5 transition-all shadow-2xs"
             >
               <BrainGearsIcon size={16} className="text-blue-600 mr-2 shrink-0" />
+
+              {/* Badge Contextual que indica el artefacto exacto que se está refinando */}
+              <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100/80 text-blue-700 border border-blue-200/80 shrink-0 mr-2 max-w-[160px] truncate">
+                {contextInfo.badge}
+              </span>
+
               <input
                 type="text"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 disabled={isFixing}
-                placeholder="Pide un ajuste a este diagrama con IA (ej: 'agrega el actor Supervisor')..."
+                placeholder={contextInfo.placeholder}
                 className="flex-1 bg-transparent text-xs text-slate-800 placeholder:text-slate-400 outline-none min-w-0"
               />
+
               <button
                 type="submit"
                 disabled={!prompt.trim() || isFixing}
                 className="p-1 text-blue-600 hover:text-blue-700 disabled:text-slate-300 transition-colors cursor-pointer shrink-0 ml-1"
-                title="Aplicar ajuste al diagrama"
+                title={`Aplicar ajuste con IA a ${contextInfo.badge}`}
               >
                 {isFixing ? (
                   <div className="w-3.5 h-3.5 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
@@ -236,14 +337,14 @@ export default function DiagramsView({
               </button>
             </form>
 
-            {/* Botón Aprobar Diagramas */}
+            {/* Botón de Aprobación Escalonada: Modelado -> Mockups -> Documento */}
             <button
               type="button"
-              onClick={onApprovePhase}
+              onClick={selectedKey !== "mockups" ? () => setSelectedKey("mockups") : onApprovePhase}
               className="px-5 py-2.5 bg-[#0b57d0] hover:bg-[#0947a8] text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
             >
               <Check size={14} />
-              <span>Aprobar Diagramas</span>
+              <span>{selectedKey !== "mockups" ? "Aprobar Modelado y Pasar a Mockups" : "Aprobar y Pasar a Documento"}</span>
             </button>
           </div>
         </div>

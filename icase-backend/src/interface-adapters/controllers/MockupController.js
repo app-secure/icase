@@ -16,12 +16,13 @@ class MockupController {
         return res.status(400).json({ error: 'proyectoId es requerido' });
       }
 
-      const { pantallas = [], insumoAdicional = '' } = req.body;
+      const { pantallas = [], insumoAdicional = '', requerimientos = null } = req.body;
 
       const resultado = await this.generarMockupsUseCase.ejecutar({
         proyectoId,
         pantallas,
-        insumoAdicional
+        insumoAdicional,
+        requerimientosLocales: requerimientos
       });
 
       const mockups = Array.isArray(resultado) ? resultado : (resultado.mockups || []);
