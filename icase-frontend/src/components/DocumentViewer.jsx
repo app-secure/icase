@@ -413,6 +413,36 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             {renderDiagramExplanation(project.diagrams?.architecture, "Diagrama de Arquitectura")}
           </div>
         </section>
+
+        {/* 9. Wireframes y Mockups de Interfaz */}
+        <section className="space-y-8 pt-4 border-t border-slate-200">
+          <h2 className="text-base font-bold text-slate-900">9. Wireframes y Mockups de Interfaz</h2>
+          {project.mockups && project.mockups.length > 0 ? (
+            <div className="space-y-8">
+              {project.mockups.map((mockup, idx) => (
+                <div key={mockup.nombre_pantalla || idx} className="space-y-3">
+                  <h3 className="text-sm font-bold text-slate-800">
+                    9.{idx + 1} {mockup.nombre_pantalla}
+                  </h3>
+                  <p className="text-sm text-slate-700 leading-relaxed">
+                    {mockup.descripcion || "Mockup de interfaz de usuario."}
+                  </p>
+                  <div className="border border-slate-300 rounded-lg overflow-hidden shadow-2xs bg-white">
+                    <iframe
+                      srcDoc={mockup.preview_code}
+                      sandbox="allow-scripts allow-same-origin"
+                      className="w-full h-[600px] border-0"
+                      title={`Mockup: ${mockup.nombre_pantalla}`}
+                    />
+                  </div>
+                  {renderDiagramExplanation(mockup, `Mockup ${mockup.nombre_pantalla}`)}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500 italic">No se han generado mockups para este proyecto.</p>
+          )}
+        </section>
       </div>
     </div>
   </div>
