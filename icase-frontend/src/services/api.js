@@ -209,24 +209,39 @@ export async function deleteFuenteApi(fuenteId, proyectoId = null, nombreArchivo
 }
 
 // === PROCESAMIENTO CON IA ===
-export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '') {
+export async function fetchAiModelsApi() {
+  try {
+    const res = await fetch(`${API_URL}/proyectos/modelos-ia`, {
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) throw new Error('Error al obtener modelos de IA');
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Error al consultar modelos de IA:', err.message);
+    return null;
+  }
+}
+
+export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null) {
   try {
     const res = await fetch(`${API_URL}/proyectos/${projectId}/procesar-ia`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         insumo_bruto: insumoBruto,
-        insumo_adicional: insumoAdicional
+        insumo_adicional: insumoAdicional,
+        provider,
+        specificModel
       })
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.error || 'Error en procesamiento agéntico');
+      throw new Error(data.error || 'Error en procesamiento con IA');
     }
-    return await res.json();
+    return data;
   } catch (err) {
     console.error('[API] Error al procesar con IA:', err.message);
-    return null;
+    throw err;
   }
 }
 

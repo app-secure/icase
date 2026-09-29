@@ -18,7 +18,14 @@ class ProcesarConIA {
     this.aiOrchestratorService = aiOrchestratorService;
   }
 
-  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '' }) {
+  async obtenerModelosDisponibles() {
+    if (this.aiOrchestratorService && typeof this.aiOrchestratorService.obtenerModelosDisponibles === 'function') {
+      return await this.aiOrchestratorService.obtenerModelosDisponibles();
+    }
+    return { provider_defecto: 'auto', proveedores: [] };
+  }
+
+  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null }) {
     const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
     if (!proyecto) {
       throw new Error(`Proyecto con ID ${proyectoId} no encontrado.`);
@@ -86,6 +93,8 @@ class ProcesarConIA {
       nombre_proyecto: proyecto.nombre,
       insumo_bruto: insumoBruto,
       insumo_adicional: insumoAdicional,
+      provider,
+      specificModel,
       diccionario_estandares: estandares,
       contexto_proyecto: contextoProyecto
     };

@@ -13,7 +13,7 @@ import {
   processWithAiApi,
   approvePhaseApi,
   updateDiagramApi,
-  generateMockupsApi,
+  fetchAiModelsApi,
   fetchMockupsApi,
   updateMockupApi
 } from "../services/api";
@@ -308,6 +308,23 @@ export default function ProjectWorkspace({
   const project = rawProject || defaultEmptyProject;
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
+  const [availableProviders, setAvailableProviders] = useState([]);
+
+  React.useEffect(() => {
+    fetchAiModelsApi()
+      .then((data) => {
+        if (data?.proveedores?.length) {
+          setAvailableProviders(data.proveedores);
+          const defaultProvId = data.provider_defecto || "auto";
+          const matchProv = data.proveedores.find((p) => p.id === defaultProvId && p.disponible !== false);
+          setSelectedAiProvider(matchProv ? matchProv.id : "auto");
+        }
+      })
+      .catch((err) => {
+        console.warn("[Workspace] Error consultando modelos de IA:", err);
+      });
+  }, []);
 
   // Subida / Eliminación de fuentes
   const handleAddSource = async (newSource) => {
@@ -450,7 +467,8 @@ export default function ProjectWorkspace({
   };
 
   // Botón "Procesar con IA" (Conectado con Backend y n8n)
-  const handleProcess = async () => {
+  const handleProcess = async (targetProvider) => {
+    const providerToUse = targetProvider || selectedAiProvider || 'auto';
     setIsProcessing(true);
 
     try {
@@ -512,12 +530,19 @@ export default function ProjectWorkspace({
         }
       }
 
-      console.log("[Workspace] Enviando a procesar con IA. Insumo length:", insumoBruto.length, "backendId:", backendId);
+      console.log(`[Workspace] Enviando a procesar con IA (${providerToUse}). Insumo length: ${insumoBruto.length}, backendId: ${backendId}`);
 
-      // Invocación al endpoint de IA del backend enviando el insumo completo
+      // Invocación al endpoint de IA del backend enviando el insumo completo y el proveedor seleccionado
       let aiResult = null;
       if (backendId) {
-        aiResult = await processWithAiApi(backendId, insumoBruto);
+        try {
+          aiResult = await processWithAiApi(backendId, insumoBruto, '', providerToUse);
+        } catch (errAi) {
+          console.error("[Workspace] Error en procesamiento con IA:", errAi.message);
+          alert(`⚠️ ${errAi.message}`);
+          setIsProcessing(false);
+          return;
+        }
       }
 
       console.log("[Workspace] Resultado recibido de la IA:", aiResult);
@@ -908,7 +933,10 @@ export default function ProjectWorkspace({
         sources={project.sources || []}
         onAddSource={handleAddSource}
         onDeleteSource={handleDeleteSource}
-        onProcess={handleProcess}
+        onProcess={(prov) => handleProcess(prov)}
+        selectedProvider={selectedAiProvider}
+        onSelectProvider={setSelectedAiProvider}
+        availableProviders={availableProviders}
         isProcessing={isProcessing}
         isProcessed={project.isProcessed}
         projectName={project.name}

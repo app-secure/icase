@@ -5,6 +5,7 @@ const axios = require('axios');
 class FileIngestionService {
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
+    this.groqApiKey = process.env.GROQ_API_KEY || '';
   }
 
   /**
@@ -63,13 +64,13 @@ class FileIngestionService {
       console.warn('[FileIngestionService] Error parseando con pdf-parse:', errPdf.message);
     }
 
-    // 3. Extracción asistida con Gemini Multimodal (capaz de leer cualquier PDF estructurado o escaneado)
+    // 2. Extracción asistida con Gemini Multimodal (capaz de leer cualquier PDF estructurado o escaneado)
     if (this.geminiApiKey) {
       try {
         console.log(`[FileIngestionService] Intentando extracción de PDF mediante Gemini Multimodal...`);
         const base64Pdf = dataBuffer.toString('base64');
         const response = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.geminiApiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${this.geminiApiKey}`,
           {
             contents: [
               {
@@ -100,15 +101,22 @@ class FileIngestionService {
       }
     }
 
-    // 4. Contingencia segura final
+    // 3. Contingencia segura final
     const baseName = path.basename(filePath);
     return `[Documento PDF Ingerido: ${baseName}]\nContiene la documentación formal, requerimientos y especificaciones del sistema analizado para el levantamiento de ingeniería de software.`;
   }
 
   async _transcribirAudio(file) {
+    console.log(`[FileIngestionService] Procesando audio ${file.originalname} (tamaño: ${(file.size / 1024).toFixed(1)} KB)...`);
+
+    // 1. Intentar transcripción con Groq Whisper (ultra rápido)
+    if (this.groqApiKey) {
+      const groqResult = await this._transcribirConGroqWhisper(file.path, file.originalname);
+      if (groqResult) return groqResult;
+    }
+
+    // 2. Intentar transcripción con Gemini Multimodal
     const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
-    
-    // Normalizar MIME type para el modelo multimodal de Gemini
     let mimeType = 'audio/mp3';
     if (['m4a', 'mp4', 'aac'].includes(ext) || file.mimetype?.includes('mp4') || file.mimetype?.includes('m4a')) {
       mimeType = 'audio/mp4';
@@ -122,14 +130,12 @@ class FileIngestionService {
       mimeType = 'audio/flac';
     }
 
-    console.log(`[FileIngestionService] Procesando audio ${file.originalname} (MIME: ${mimeType}, tamaño: ${(file.size / 1024).toFixed(1)} KB)...`);
-
     if (this.geminiApiKey) {
       try {
         const audioBuffer = await fs.promises.readFile(file.path);
         const base64Audio = audioBuffer.toString('base64');
 
-        const modelsToTry = ['gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-1.5-flash'];
+        const modelsToTry = ['gemini-2.0-flash', 'gemini-flash-lite-latest', 'gemini-1.5-flash'];
         let transcription = null;
 
         for (const modelName of modelsToTry) {
@@ -166,14 +172,53 @@ class FileIngestionService {
           }
         }
       } catch (err) {
-        console.warn('[FileIngestionService] Advertencia al procesar audio:', err.message);
+        console.warn('[FileIngestionService] Advertencia al procesar audio con Gemini:', err.message);
       }
     }
 
-    // Si Gemini no puede procesar el audio directamente (por tamaño o límites de API)
+    // 3. Contingencia
     const cleanName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
     return `[Audio Ingerido: ${file.originalname}]\nGrabación de entrevista de levantamiento de requisitos para el proyecto "${cleanName}". Contiene las especificaciones operativas, reglas de negocio y necesidades del cliente expresadas durante la sesión.`;
+  }
+
+  async _transcribirConGroqWhisper(filePath, originalname) {
+    try {
+      console.log(`[FileIngestionService] Intentando transcripción con Groq Whisper (whisper-large-v3-turbo)...`);
+      const fileBuffer = await fs.promises.readFile(filePath);
+      const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+
+      const postData = [];
+      postData.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3-turbo\r\n`));
+      postData.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\nes\r\n`));
+      postData.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${originalname}"\r\nContent-Type: application/octet-stream\r\n\r\n`));
+      postData.push(fileBuffer);
+      postData.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+      const payloadBuffer = Buffer.concat(postData);
+
+      const response = await axios.post(
+        'https://api.groq.com/openai/v1/audio/transcriptions',
+        payloadBuffer,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.groqApiKey}`,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`
+          },
+          timeout: 45000
+        }
+      );
+
+      const text = response.data?.text;
+      if (text && text.trim().length > 10) {
+        console.log(`[FileIngestionService] Audio transcrito exitosamente con Groq Whisper (${text.length} caracteres)`);
+        return text.trim();
+      }
+    } catch (errGroq) {
+      console.warn('[FileIngestionService] Error en transcripción Groq Whisper:', errGroq.response?.data?.error?.message || errGroq.message);
+    }
+    return null;
   }
 }
 
 module.exports = FileIngestionService;
+

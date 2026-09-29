@@ -54,15 +54,34 @@ npm run dev
 
 El backend se iniciará en **`http://localhost:5000`**.
 
-#### 📦 Librerías principales del Backend:
-Al ejecutar `npm install` se descargan las siguientes librerías:
+#### 📦 Arquitectura Multi-IA y Librerías del Backend:
+Al ejecutar `npm install` se descargan las librerías necesarias para el sistema:
 * **`express`**: Servidor web y creación de las rutas API REST.
 * **`mongoose`**: Conexión y gestión de la base de datos MongoDB.
-* **`axios`**: Para comunicarse directamente con la API de Google Gemini.
-* **`multer`**: Para recibir y guardar los archivos subidos (audios, PDFs, textos).
-* **`pdf-parse`**: Para extraer el texto de documentos PDF.
-* **`cors`**: Permite la comunicación segura entre el frontend y el backend.
-* **`dotenv`**: Para cargar variables de entorno (claves de API, puertos).
+* **`axios`**: Cliente HTTP para integración resiliente con APIs de Inteligencia Artificial (**DeepSeek API**, **Google Gemini**, **Groq Cloud**).
+* **`multer`**: Para recibir y procesar la subida de insumos (audios, PDFs, archivos de texto).
+* **`pdf-parse`**: Para extracción directa de texto de documentos PDF.
+* **`cors`**: Manejo de políticas de origen cruzado entre frontend y backend.
+* **`dotenv`**: Gestión segura de variables de entorno e identidades de proveedores de IA.
+
+---
+
+### 🤖 Configuración y Orquestación Multi-IA (DeepSeek API + Google Gemini)
+
+El proyecto soporta **Orquestación Híbrida Inteligente** (*Smart Routing & Failover*):
+
+1. **DeepSeek API (`deepseek-chat` / `deepseek-reasoner`)**: Modelo principal de pago/consumo por tokens. Proporciona máxima precisión analítica en requerimientos IEEE 830 y generación JSON estructurada a bajo costo.
+2. **Google Gemini (`gemini-2.0-flash` / `gemini-1.5-flash`)**: Motor multimodal encargado de la ingesta de documentos PDF complejos/escaneados, procesamiento directo de archivos de audio de alta duración y fallback para prompts masivos (>22,000 caracteres).
+3. **Groq Cloud / OpenAI / OpenRouter**: Fallback secundario ultra-rápido para redundancia en alta disponibilidad.
+
+Para cambiar de proveedor en `.env`:
+```env
+AI_PROVIDER=deepseek    # Opciones: 'deepseek', 'gemini', 'groq', 'auto'
+DEEPSEEK_API_KEY=tu_clave_deepseek
+DEEPSEEK_MODEL=deepseek-chat
+GEMINI_API_KEY=tu_clave_gemini
+```
+
 
 ---
 
