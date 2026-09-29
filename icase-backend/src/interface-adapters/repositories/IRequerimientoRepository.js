@@ -3,6 +3,7 @@ class IRequerimientoRepository {
   async crearMuchos(requerimientos) { throw new Error('Método no implementado'); }
   async obtenerPorId(id) { throw new Error('Método no implementado'); }
   async listarPorProyecto(proyectoId) { throw new Error('Método no implementado'); }
+  async obtenerPorProyecto(proyectoId) { throw new Error('Método no implementado'); }
   async actualizar(id, datos) { throw new Error('Método no implementado'); }
   async eliminarPorProyecto(proyectoId) { throw new Error('Método no implementado'); }
 }

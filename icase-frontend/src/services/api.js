@@ -289,3 +289,70 @@ export async function updateDiagramApi(diagramId, data) {
   }
 }
 
+// === MOCKUPS ===
+export async function generateMockupsApi(projectId, pantallas = [], insumoAdicional = '') {
+  try {
+    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/generar`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ pantallas, insumoAdicional })
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Error generando mockups');
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Error generando mockups:', err.message);
+    return null;
+  }
+}
+
+export async function fetchMockupsApi(projectId) {
+  try {
+    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}`, {
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) throw new Error('Error al obtener mockups');
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Error al obtener mockups:', err.message);
+    return { mockups: [] };
+  }
+}
+
+export async function updateMockupApi(projectId, nombrePantalla, previewCode) {
+  try {
+    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {
+      method: 'PUT',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ previewCode })
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Error al actualizar mockup');
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Error al actualizar mockup:', err.message);
+    return null;
+  }
+}
+
+export async function deleteMockupApi(projectId, nombrePantalla) {
+  try {
+    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'Error al eliminar mockup');
+    }
+    return await res.json();
+  } catch (err) {
+    console.warn('[API] Error al eliminar mockup:', err.message);
+    return null;
+  }
+}
+

@@ -13,7 +13,13 @@ import {
   processWithAiApi,
   approvePhaseApi,
   updateDiagramApi,
+<<<<<<< HEAD
   fetchAiModelsApi
+=======
+  generateMockupsApi,
+  fetchMockupsApi,
+  updateMockupApi
+>>>>>>> origin/main
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
 
@@ -882,6 +888,48 @@ export default function ProjectWorkspace({
     };
   };
 
+  const handleUpdateMockups = async (nombrePantalla, previewCode) => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!backendId) return null;
+
+    try {
+      // Direct mockups array update
+      if (Array.isArray(nombrePantalla)) {
+        onUpdateProject({
+          ...project,
+          mockups: nombrePantalla
+        });
+        return { mockups: nombrePantalla };
+      }
+
+      // Special signal to refresh mockups from backend
+      if (nombrePantalla === '__refresh__') {
+        const result = await fetchMockupsApi(backendId);
+        if (result && result.mockups) {
+          onUpdateProject({
+            ...project,
+            mockups: result.mockups
+          });
+        }
+        return result;
+      }
+
+      const result = await updateMockupApi(backendId, nombrePantalla, previewCode);
+      if (result) {
+        onUpdateProject({
+          ...project,
+          mockups: project.mockups.map(m =>
+            m.nombre_pantalla === nombrePantalla ? result : m
+          )
+        });
+      }
+      return result;
+    } catch (err) {
+      console.warn("[Workspace] Error actualizando mockup:", err.message);
+      return null;
+    }
+  };
+
   return (
     <div className="flex-1 flex h-full overflow-hidden bg-white">
       {/* SECCIÓN IZQUIERDA: Fuentes y Chat de Ajustes a la IA */}
@@ -952,6 +1000,8 @@ export default function ProjectWorkspace({
           /* FASE 2: Modelado (Diagramas PlantUML puros con máxima amplitud) */
           <DiagramsView
             diagrams={project.diagrams}
+            mockups={project.mockups || []}
+            onUpdateMockups={handleUpdateMockups}
             onUpdateDiagramCode={(key, newCode) => {
               onUpdateProject({
                 ...project,
@@ -978,6 +1028,7 @@ export default function ProjectWorkspace({
             onApprovePhase={handleApproveDiagrams}
             onBackToAnalysis={() => onUpdateProject({ ...project, currentPhase: 1 })}
             onApplyAiCorrection={(prompt, diagKey) => handleApplyAiCorrection("diagrams", prompt, diagKey)}
+            projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}
           />
         ) : (
           /* FASE 3: Documento Consolidado */

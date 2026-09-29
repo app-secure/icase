@@ -5,17 +5,22 @@ import {
   Box,
   Compass,
   Check,
-  Send
+  Send,
+  Layout
 } from "lucide-react";
 import BrainGearsIcon from "./BrainGearsIcon";
 import PlantUMLViewer from "./PlantUMLViewer";
+import MockupsView from "./MockupsView";
 
 export default function DiagramsView({
   diagrams,
+  mockups = [],
+  onUpdateMockups,
   onUpdateDiagramCode,
   onApprovePhase,
   onBackToAnalysis,
-  onApplyAiCorrection
+  onApplyAiCorrection,
+  projectId
 }) {
   const [selectedKey, setSelectedKey] = useState("useCase");
   const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
@@ -27,7 +32,8 @@ export default function DiagramsView({
     { key: "useCase", label: "Casos de Uso", icon: GitBranch },
     { key: "architecture", label: "Arquitectura", icon: Network },
     { key: "classDiagram", label: "Clases de Dominio", icon: Box },
-    { key: "navigationTree", label: "Árbol de Navegación", icon: Compass }
+    { key: "navigationTree", label: "Árbol de Navegación", icon: Compass },
+    { key: "mockups", label: "Mockups", icon: Layout }
   ];
 
   const currentDiagram = diagrams?.[selectedKey] || {
@@ -146,7 +152,15 @@ export default function DiagramsView({
 
           {/* Main Canvas Area */}
           <div className="flex-1 flex flex-col min-h-[460px] relative mb-2">
-            {viewMode === "visual" ? (
+            {selectedKey === "mockups" ? (
+              <MockupsView
+                mockups={mockups}
+                onUpdateMockup={onUpdateMockups}
+                onApprovePhase={onApprovePhase}
+                onBackToDiagrams={onBackToAnalysis}
+                projectId={projectId}
+              />
+            ) : viewMode === "visual" ? (
               <div className="flex-1 border border-slate-200 rounded-2xl bg-[#fafafa] flex flex-col relative overflow-hidden">
                 <PlantUMLViewer
                   key={selectedKey + (currentDiagram.plantumlCode || currentDiagram.code)}

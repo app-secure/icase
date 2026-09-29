@@ -19,10 +19,23 @@ const DisenoSchema = new mongoose.Schema({
   },
   mockups: [{
     nombre_pantalla: String,
+    tipo: String,
+    descripcion: String,
+    descripcion_jerarquica: [String],
     elementos_visibles: [String],
-    diseno_menus: String,
-    campos_formulario: [String],
-    preview_code: String
+    campos_formulario: [{
+      nombre: String,
+      tipo: String,
+      requerido: Boolean,
+      validacion: String
+    }],
+    acciones_principales: [String],
+    rf_trazabilidad: [String],
+    preview_code: { type: String, default: '' },
+    imagen_url: String,
+    estado: { type: String, enum: ['generado', 'editado', 'aprobado'], default: 'generado' },
+    version: { type: Number, default: 1 },
+    advertencias_validacion: [String]
   }],
   arbol_navegacion: {
     descripcion: { type: String, default: '' },

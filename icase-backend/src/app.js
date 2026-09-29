@@ -17,6 +17,9 @@ const PlantUMLValidatorService = require('./infrastructure/services/PlantUMLVali
 const MarkdownCompilerService = require('./infrastructure/services/MarkdownCompilerService');
 const ContextProcessorService = require('./infrastructure/services/ContextProcessorService');
 const FileIngestionService = require('./infrastructure/services/FileIngestionService');
+const MockupIaService = require('./infrastructure/services/MockupIaService');
+const MockupValidatorService = require('./infrastructure/services/MockupValidatorService');
+const MockupImageService = require('./infrastructure/services/MockupImageService');
 
 // Casos de Uso
 const CrearProyecto = require('./core/use-cases/CrearProyecto');
@@ -24,6 +27,8 @@ const ProcesarConIA = require('./core/use-cases/ProcesarConIA');
 const ActualizarRequerimientoManual = require('./core/use-cases/ActualizarRequerimientoManual');
 const ActualizarDiagramaManual = require('./core/use-cases/ActualizarDiagramaManual');
 const AprobarFase = require('./core/use-cases/AprobarFase');
+const GenerarMockups = require('./core/use-cases/GenerarMockups');
+const ActualizarMockupManual = require('./core/use-cases/ActualizarMockupManual');
 
 // Controladores
 const ProyectoController = require('./interface-adapters/controllers/ProyectoController');
@@ -31,6 +36,7 @@ const RequerimientoController = require('./interface-adapters/controllers/Requer
 const DiagramaController = require('./interface-adapters/controllers/DiagramaController');
 const FuenteController = require('./interface-adapters/controllers/FuenteController');
 const AuthController = require('./interface-adapters/controllers/AuthController');
+const MockupController = require('./interface-adapters/controllers/MockupController');
 
 // Rutas
 const buildProyectoRoutes = require('./routes/proyectoRoutes');
@@ -38,6 +44,7 @@ const buildRequerimientoRoutes = require('./routes/requerimientoRoutes');
 const buildDiagramaRoutes = require('./routes/diagramaRoutes');
 const buildFuenteRoutes = require('./routes/fuenteRoutes');
 const buildAuthRoutes = require('./routes/authRoutes');
+const buildMockupRoutes = require('./routes/mockupRoutes');
 
 function createApp() {
   const app = express();
@@ -61,6 +68,9 @@ function createApp() {
   const markdownCompiler = new MarkdownCompilerService();
   const contextProcessor = new ContextProcessorService();
   const fileIngestionService = new FileIngestionService();
+  const mockupIaService = new MockupIaService();
+  const mockupValidator = new MockupValidatorService();
+  const mockupImageService = new MockupImageService();
 
   const crearProyectoUseCase = new CrearProyecto({ proyectoRepository: proyectoRepo });
   const procesarConIAUseCase = new ProcesarConIA({
@@ -82,6 +92,16 @@ function createApp() {
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo
+  });
+  const generarMockupsUseCase = new GenerarMockups({
+    proyectoRepository: proyectoRepo,
+    requerimientoRepository: requerimientoRepo,
+    diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo,
+    mockupIaService
+  });
+  const actualizarMockupManualUseCase = new ActualizarMockupManual({
+    disenoRepository: disenoRepo
   });
 
   const proyectoController = new ProyectoController({
@@ -118,6 +138,12 @@ function createApp() {
     usuarioRepository: usuarioRepo
   });
 
+  const mockupController = new MockupController({
+    generarMockupsUseCase,
+    actualizarMockupManualUseCase,
+    disenoRepository: disenoRepo
+  });
+
   // Health check
   app.get('/health', (req, res) => {
     res.json({
@@ -133,6 +159,7 @@ function createApp() {
   app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController));
   app.use('/diagramas', buildDiagramaRoutes(diagramaController));
   app.use('/', buildFuenteRoutes(fuenteController));
+  app.use('/mockups', buildMockupRoutes(mockupController));
 
   return {
     app,
