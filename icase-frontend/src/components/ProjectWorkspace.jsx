@@ -13,13 +13,9 @@ import {
   processWithAiApi,
   approvePhaseApi,
   updateDiagramApi,
-<<<<<<< HEAD
-  fetchAiModelsApi
-=======
-  generateMockupsApi,
+  fetchAiModelsApi,
   fetchMockupsApi,
   updateMockupApi
->>>>>>> origin/main
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
 
