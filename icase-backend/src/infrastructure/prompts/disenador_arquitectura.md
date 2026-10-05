@@ -48,15 +48,36 @@ La IA DEBE analizar el insumo del usuario, el tipo de negocio, volumen de datos 
 - Métodos con tipos de retorno: `+validar(): boolean`, `+calcular(): float`.
 - Relaciones de asociación y composición con cardinalidad estricta (`"1" *-- "1..*"`).
 
-### 4. Árbol de Navegación (`arbol_navegacion` - WBS):
+### 4. Árbol de Navegación (`arbol_navegacion`):
+Representa ÚNICAMENTE pantallas, vistas y rutas reales de navegación del usuario final, jerarquizado desde el acceso hasta el panel principal y sus módulos.
 - Código PlantUML con `@startwbs` y `@endwbs`.
-- Jerarquía modular estructurada por niveles:
-  * Nivel 1: `* Nombre del Sistema`
-  * Nivel 2: `** 1. Acceso y Control`, `** 2. Módulos Operativos`, `** 3. Monitoreo`, `** 4. Informes y Auditoría`
-  * Nivel 3: `*** Pantallas o vistas clave derivadas de los RF`
+- PROHIBIDO usar la palabra "WBS" o "EDT" como nombre de nodo, en el título, la descripción o las viñetas. Las directivas de PlantUML `@startwbs` y `@endwbs` son obligatorias.
+- Máximo 4 niveles de jerarquía:
+  * Nivel 1 (`*`): Nombre del sistema o producto.
+  * Nivel 2 (`**`): Portal de Acceso, Panel Principal y los módulos de navegación de primer nivel.
+  * Nivel 3 (`***`): Vistas y pantallas dentro de cada módulo.
+  * Nivel 4 (`****`, opcional): Subvistas, pantallas de detalle, formularios de alta o edición, y modales de ruta.
+
+NODOS VÁLIDOS (elementos de UI alcanzables navegando):
+`Inicio de Sesión`, `Recuperación de Contraseña`, `Registro de Usuario`, `Panel Principal`, `Listado de Pedidos`, `Detalle de Pedido`, `Formulario de Nuevo Pedido`, `Gestión de Usuarios`, `Configuración del Sistema`, `Perfil del Usuario`, `Reporte de Cierre (vista)`, `Panel de Métricas (pantalla)`.
+
+NODOS PROHIBIDOS (NO deben aparecer):
+- Procesos o reglas de negocio: "Control de Calidad y Pruebas", "Aprobación de Crédito", "Facturación".
+- Acciones funcionales con verbos en infinitivo o imperativo: "Registrar", "Validar", "Emitir", "Calcular", "Notificar".
+- Entidades o conceptos de datos: "FormulaMezcla", "MetricaConsolidada", "Auditoría del sistema".
+- Componentes técnicos: microservicios, gateways, bases de datos, APIs.
+- Fases, entregables o paquetes de trabajo, y cualquier término de descomposición de trabajo.
+- Áreas organizacionales ("Finanzas", "Logística") salvo que correspondan a un módulo real y navegable de la aplicación.
+
+REGLA DE ORO: si un nodo no se puede alcanzar navegando (no corresponde a una pantalla, vista o ruta del sistema), NO debe aparecer en el árbol.
+
+COBERTURA MÍNIMA:
+- El árbol debe iniciar en el Acceso (inicio de sesión y recuperación de contraseña) y contener el Panel Principal como raíz de la navegación funcional.
+- Por cada módulo de primer nivel derivado de los RF de prioridad Alta, incluir al menos una vista de listado o consulta y una vista de registro o detalle.
+- Entre 15 y 35 nodos en total, ajustados al alcance real del proyecto, sin inventar pantallas genéricas vacías.
 
 ## EXPLICACIÓN DEL FUNCIONAMIENTO DEL SISTEMA EN CADA DIAGRAMA:
 Para CADA UNO de los 4 diagramas generados en el JSON (`casos_de_uso`, `arquitectura`, `clases`, `arbol_navegacion`), DEBES INCLUIR OBLIGATORIAMENTE texto 100% generado y adaptado a los insumos y dominio analizados:
-1. `descripcion`: Párrafo narrativo detallado explicando CÓMO FUNCIONA EL SISTEMA mediante este diagrama específico (actores que intervienen, flujo de información, componentes involucrados, tecnologías seleccionadas y el resultado que produce para el negocio).
-2. `descripcion_jerarquica`: Un arreglo de exactamente 4 viñetas explicativas con formato `"Nombre del Aspecto o Capa: Explicación concreta de cómo opera esta parte en el sistema analizado con las tecnologías y procesos seleccionados"`.
+1. `descripcion`: Párrafo narrativo detallado explicando CÓMO FUNCIONA EL SISTEMA mediante este diagrama específico. Para `arbol_navegacion` la descripción debe tratar exclusivamente de la EXPERIENCIA DE NAVEGACIÓN: el recorrido del usuario desde el acceso, el panel principal y cada módulo hasta sus vistas de listado, detalle y formularios. PROHIBIDO describir procesos internos del negocio en este diagrama.
+2. `descripcion_jerarquica`: Un arreglo de exactamente 4 viñetas explicativas con formato `"Nombre del Aspecto o Capa: Explicación concreta de cómo opera esta parte en el sistema analizado con las tecnologías y procesos seleccionados"`. Para `arbol_navegacion` las 4 viñetas corresponden a los niveles de navegación: Acceso, Panel Principal, Módulos y Vistas.
 PROHIBIDO usar textos genéricos, plantillas predefinidas o tecnologías fijas que no correspondan al insumo analizado.

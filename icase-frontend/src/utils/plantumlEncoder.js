@@ -36,7 +36,7 @@ export function sanitizePlantUML(code) {
         return l.replace(/["“”]/g, "'");
       }
 
-      // 6. Directivas WBS jerárquicas (* Sistema "Nombre")
+      // 6. Directivas de árbol jerárquico (* Sistema "Nombre")
       if (trimmed.startsWith("*")) {
         return l.replace(/["“”]/g, "'");
       }

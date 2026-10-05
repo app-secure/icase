@@ -39,7 +39,7 @@ export default function MermaidViewer({ code, title }) {
         return;
       }
 
-      if (code.includes("@startuml") || code.includes("@startwbs")) {
+      if (/@start[a-z]+/i.test(code)) {
         if (isMounted) {
           setRenderError("Este diagrama usa sintaxis PlantUML. Selecciona 'PlantUML / C4' arriba para visualizarlo.");
           setSvgContent("");

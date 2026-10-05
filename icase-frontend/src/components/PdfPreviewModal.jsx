@@ -468,7 +468,7 @@ export default function PdfPreviewModal({ project, onClose }) {
           : [
               `Levantar y formalizar los requerimientos funcionales y no funcionales cuantificables para ${project.name || "el sistema"}.`,
               "Diseñar la arquitectura lógica en capas delimitando responsabilidades de frontera, negocio y persistencia.",
-              "Modelar los casos de uso nucleares, entidades del modelo de datos y el flujo de navegación modular."
+              "Modelar los casos de uso nucleares, entidades del modelo de datos y el mapa de pantallas y rutas de navegación del sistema."
             ];
         objEsp.forEach((item) => {
           drawBulletItem(item);

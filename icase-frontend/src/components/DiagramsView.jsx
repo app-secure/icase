@@ -68,8 +68,8 @@ export default function DiagramsView({
         };
       case "navigationTree":
         return {
-          badge: "Árbol WBS",
-          placeholder: "Pide un ajuste al Árbol WBS con IA (ej: 'incluye submódulo de reportes de cierre')..."
+          badge: "Árbol de Navegación",
+          placeholder: "Pide un ajuste al Árbol de Navegación con IA (ej: 'incluye la pantalla de reportes de cierre')..."
         };
       case "mockups":
         return {
@@ -174,7 +174,7 @@ export default function DiagramsView({
             </button>
           </div>
 
-          {/* Fila Superior: Tabs de navegación (Casos de Uso, Arquitectura, Clases, WBS, Mockups) */}
+          {/* Fila Superior: Tabs de navegación (Casos de Uso, Arquitectura, Clases, Árbol de Navegación, Mockups) */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
             <div className="flex flex-wrap items-center gap-2">
               {options.map((opt) => {

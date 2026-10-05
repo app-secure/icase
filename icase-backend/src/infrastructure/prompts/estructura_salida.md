@@ -86,15 +86,15 @@ Tu respuesta debe ser EXCLUSIVAMENTE un objeto JSON válido, sin texto introduct
     },
     {
       "tipo": "arbol_navegacion",
-      "titulo": "Árbol de Navegación del Sistema (WBS)",
-      "descripcion": "Explicación de la experiencia de usuario y flujo de navegación: cómo los operadores se desplazan desde el acceso hasta los módulos de captura, control y reportes.",
+      "titulo": "Árbol de Navegación del Sistema",
+      "descripcion": "Mapa de la experiencia de navegación del usuario: recorrido desde el portal de acceso y el panel principal hasta las vistas de listado, detalle y formularios de cada módulo de la aplicación.",
       "descripcion_jerarquica": [
-        "Módulo de Autenticación: Pantallas de acceso seguro, validación de permisos y recuperación.",
-        "Módulos Operativos Principales: Interfaces de captura y registro continuo del flujo de trabajo.",
-        "Tableros de Control y Monitoreo: Vistas en tiempo real para supervisión de estados y alertas.",
-        "Consolidación y Cierre: Módulos de emisión de comprobantes, métricas y auditoría gerencial."
+        "Acceso: Pantallas de inicio de sesión y recuperación de contraseña que dan entrada al sistema.",
+        "Panel Principal: Pantalla raíz que concentra el acceso rápido a los módulos de navegación de primer nivel.",
+        "Módulos: Agrupaciones de navegación que corresponderán a cada requerimiento funcional de prioridad Alta.",
+        "Vistas: Pantallas de listado, detalle y formularios de registro dentro de cada módulo, alcanzables desde el panel principal."
       ],
-      "codigo_plantuml": "@startwbs\\n* Sistema\\n** 1. Acceso\\n** 2. Operaciones\\n@endwbs"
+      "codigo_plantuml": "@startwbs\\n* SmartMix\\n** Portal de Acceso\\n*** Inicio de Sesión\\n*** Recuperación de Contraseña\\n** Panel Principal\\n*** Tablero de Operación (vista general)\\n*** Alertas y Notificaciones\\n** Módulo de Pedidos\\n*** Listado de Pedidos\\n*** Detalle de Pedido\\n*** Formulario de Nuevo Pedido\\n** Módulo de Despacho\\n*** Listado de Despachos\\n*** Programación de Entrega\\n** Módulo de Calidad\\n*** Listado de Pruebas\\n*** Registro de Muestra\\n** Administración\\n*** Gestión de Usuarios\\n*** Gestión de Roles y Permisos\\n*** Configuración del Sistema\\n@endwbs"
     }
   ]
 }

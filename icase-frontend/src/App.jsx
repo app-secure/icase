@@ -24,7 +24,7 @@ export default function App() {
     const cuItem = diags.find((d) => d.tipo === "casos_de_uso" || d.tipo === "casos_uso");
     const archItem = diags.find((d) => d.tipo === "arquitectura");
     const classItem = diags.find((d) => d.tipo === "clases" || d.tipo === "clases_dominio" || d.tipo === "entidad_relacion");
-    const navItem = diags.find((d) => d.tipo === "arbol_navegacion" || d.tipo === "navegacion" || d.tipo === "wbs");
+    const navItem = diags.find((d) => ["arbol_navegacion", "navegacion"].includes(d.tipo));
 
     // Extraer actores dinámicos de los RF reales
     const rfList = reqs.filter((r) => (r.tipo || "").toUpperCase() === "RF");
@@ -116,9 +116,10 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
       `@enduml`;
 
     const defNavPlant =
-      `@startwbs\n* ${safePName}\n** Acceso y Seguridad\n*** Inicio de Sesión\n** Módulos Principales\n` +
-      (rfList.slice(0, 4).map((r) => `*** ${r.nombre.replace(/[*_#]/g, "").trim()}`).join("\n") || `*** Panel de Control`) +
-      `\n** Auditoría y Reportes\n*** Métricas del Sistema\n@endwbs`;
+      `@startmindmap\n* ${safePName}\n** Portal de Acceso\n*** Inicio de Sesión\n*** Recuperación de Contraseña\n` +
+      `** Panel Principal\n*** Tablero Principal\n*** Alertas y Notificaciones\n` +
+      `** Módulo Principal\n*** Listado de Registros\n*** Detalle de Registro\n*** Formulario de Nuevo Registro\n` +
+      `** Administración\n*** Gestión de Usuarios\n*** Gestión de Roles y Permisos\n*** Configuración del Sistema\n@endmindmap`;
 
     // Deduplicar fuentes
     const seenNames = new Set();
@@ -235,11 +236,11 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         },
         navigationTree: {
           id: navItem?.id || navItem?._id || "diag-nav",
-          title: navItem?.titulo || "Árbol de Navegación del Sistema (WBS)",
+          title: navItem?.titulo || "Árbol de Navegación del Sistema",
           type: "navegacion",
-          code: navItem?.codigo_mermaid && !navItem.codigo_mermaid.includes("@start") ? navItem.codigo_mermaid : "graph TD\n  Root[Sistema] --> M1[Acceso]\n  Root --> M2[Operaciones]",
+          code: navItem?.codigo_mermaid && !navItem.codigo_mermaid.includes("@start") ? navItem.codigo_mermaid : "graph TD\n  Inicio[\"Inicio de Sesión\"] --> Recuperacion[\"Recuperación de Contraseña\"]\n  Inicio --> Dashboard[\"Panel Principal\"]\n  Dashboard --> ModPrincipal[\"Módulo Principal\"]\n  ModPrincipal --> Listado[\"Listado de Registros\"]\n  ModPrincipal --> Detalle[\"Detalle de Registro\"]\n  Dashboard --> Administracion[\"Administración\"]\n  Administracion --> Usuarios[\"Gestión de Usuarios\"]\n  Administracion --> Configuracion[\"Configuración del Sistema\"]",
           plantumlCode: sanitizePlantUML(navItem?.codigo_plantuml) || defNavPlant,
-          description: navItem?.descripcion || "Mapa jerárquico de pantallas y módulos en WBS.",
+          description: navItem?.descripcion || "Mapa jerárquico de pantallas y rutas de navegación.",
           descripcion_jerarquica: navItem?.descripcion_jerarquica || []
         }
       },

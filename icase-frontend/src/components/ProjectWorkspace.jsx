@@ -160,22 +160,26 @@ UsuarioSistema "1" -- "*" MetricaConsolidada : emite
 @enduml`;
 
     case "navigationTree":
-      return `@startwbs
+      return `@startmindmap
 * ${safeName}
-** Acceso y Seguridad
+** Portal de Acceso
 *** Inicio de Sesión
 *** Recuperación de Contraseña
-** Operaciones Principales
-*** Módulo de Control y Registro
-*** Módulo de Despacho y Logística
-*** Control de Calidad y Pruebas
-** Liquidación y Finanzas
-*** Emisión de Comprobantes
-*** Reporte de Cierre de Caja
-** Auditoría y Configuración
-*** Consolidado Diario de Métricas
-*** Gestión de Roles y Usuarios
-@endwbs`;
+** Panel Principal
+*** Tablero Principal
+*** Alertas y Notificaciones
+** Módulo de Pedidos
+*** Listado de Pedidos
+*** Detalle de Pedido
+*** Formulario de Nuevo Pedido
+** Módulo de Despacho
+*** Listado de Despachos
+*** Programación de Entrega
+** Administración
+*** Gestión de Usuarios
+*** Gestión de Roles y Permisos
+*** Configuración del Sistema
+@endmindmap`;
 
     default:
       return `@startuml\nactor Usuario\nrectangle Sistema {\n  usecase Proceso\n}\nUsuario --> Proceso\n@enduml`;
@@ -222,7 +226,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
     const ucDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("caso"));
     const archDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arqui"));
     const classDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("clase") || (d.tipo || "").toLowerCase().includes("entidad") || (d.tipo || "").toLowerCase().includes("dominio"));
-    const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav") || (d.tipo || "").toLowerCase().includes("wbs"));
+    const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav"));
 
     const extractPuml = (diagObj, typeKey) => {
       const code = diagObj?.codigo_plantuml || diagObj?.codigo_puml || diagObj?.plantumlCode;
@@ -271,7 +275,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       },
       navigationTree: {
         id: "diag-nav",
-        title: (navDiag?.titulo || "Árbol de Navegación del Sistema (WBS)").replace(/\s*\([^)]*\)/g, '').trim(),
+        title: (navDiag?.titulo || "Árbol de Navegación del Sistema").replace(/\s*\([^)]*\)/g, '').trim(),
         type: "navegacion",
         code: extractPuml(navDiag, "navigationTree"),
         plantumlCode: extractPuml(navDiag, "navigationTree"),
@@ -713,17 +717,22 @@ export default function ProjectWorkspace({
           },
           navigationTree: {
             id: "diag-nav",
-            title: "Árbol de Navegación del Sistema (WBS)",
+            title: "Árbol de Navegación del Sistema",
             type: "navegacion",
             plantumlCode: generateDefaultPuml("navigationTree", updatedName),
             code: `graph TD
-    Inicio["Login / Autenticación"] --> Dashboard["Tablero Principal"]
-    Dashboard --> ModOperativo["Módulo de Operación"]
+    Inicio["Inicio de Sesión"] --> Recuperacion["Recuperación de Contraseña"]
+    Inicio --> Dashboard["Panel Principal"]
+    Dashboard --> ModPedidos["Módulo de Pedidos"]
+    ModPedidos --> ListadoPedidos["Listado de Pedidos"]
+    ModPedidos --> DetallePedido["Detalle de Pedido"]
     Dashboard --> ModDespacho["Módulo de Despacho"]
-    Dashboard --> ModCaja["Módulo de Liquidación"]
-    Dashboard --> ModReportes["Módulo de Auditoría"]
+    ModDespacho --> ListadoDespachos["Listado de Despachos"]
+    Dashboard --> Administracion["Administración"]
+    Administracion --> Usuarios["Gestión de Usuarios"]
+    Administracion --> Configuracion["Configuración del Sistema"]
 `,
-            description: "Estructura jerárquica de pantallas del sistema en WBS."
+            description: "Mapa jerárquico de pantallas y rutas de navegación del sistema."
           }
         };
       }
