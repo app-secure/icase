@@ -55,7 +55,7 @@ class MockupIaService {
     }
 
     return {
-      mockups: mockupsValidos.slice(0, 6),
+      mockups: mockupsValidos,
       proveedorUsado,
       advertencias
     };
@@ -64,10 +64,12 @@ class MockupIaService {
   _construirPromptCompleto(promptBase, contextoProyecto, pantallas, insumoAdicional) {
     let prompt = promptBase;
 
-    prompt = prompt.replace('{{CONTEXTO_PROYECTO}}', contextoProyecto || 'Sin contexto previo.');
+    prompt = prompt.split('{{CONTEXTO_PROYECTO}}').join(contextoProyecto || 'Sin contexto previo.');
 
     if (pantallas.length > 0) {
       prompt += `\n\nPANTALLAS SOLICITADAS EXPLÍCITAMENTE (genera SOLO estas, en este orden):\n${pantallas.map(p => `- ${p}`).join('\n')}`;
+    } else {
+      prompt += `\n\nSIN PANTALLAS SOLICITADAS: sigue el listado "PANTALLAS A DISEÑAR" derivado del Árbol de Navegación, respetando su orden. No substitutes ese listado por los Requerimientos Funcionales.`;
     }
 
     if (insumoAdicional) {

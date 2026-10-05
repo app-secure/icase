@@ -389,7 +389,7 @@ export default function MockupsView({
               Wireframes y Mockups de Interfaz
             </h3>
             <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-              Genera pantallas hiper-específicas alineadas a los Requerimientos ISO/IEC/IEEE 29148:2018 y a las Clases de Dominio del sistema usando el botón de la barra superior.
+              Genera una pantalla por cada nodo del Árbol de Navegación del sistema, respetando su ruta y módulo, y completando sus campos con los Requerimientos ISO/IEC/IEEE 29148:2018 y las Clases de Dominio.
             </p>
           </div>
         )}
