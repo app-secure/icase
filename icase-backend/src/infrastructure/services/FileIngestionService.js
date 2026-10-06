@@ -1,11 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const AiModelConfig = require('./AiModelConfig');
 
 class FileIngestionService {
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
+    this.geminiModels = AiModelConfig.ingestion.gemini();
+    this.whisperModel = AiModelConfig.ingestion.whisper();
+    this.modelosDeshabilitados = new Set();
   }
 
   /**
@@ -68,30 +72,12 @@ class FileIngestionService {
     if (this.geminiApiKey) {
       try {
         console.log(`[FileIngestionService] Intentando extracción de PDF mediante Gemini Multimodal...`);
-        const base64Pdf = dataBuffer.toString('base64');
-        const response = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${this.geminiApiKey}`,
-          {
-            contents: [
-              {
-                parts: [
-                  {
-                    text: 'Actúa como un extractor documental técnico en ingeniería de software. Extrae y transcribe todo el contenido textual, tablas, listas de requerimientos, especificaciones y notas contenidas en este documento PDF. Devuelve únicamente el texto completo con total fidelidad.'
-                  },
-                  {
-                    inline_data: {
-                      mime_type: 'application/pdf',
-                      data: base64Pdf
-                    }
-                  }
-                ]
-              }
-            ]
-          },
-          { timeout: 60000 }
-        );
-
-        const candidate = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        const candidate = await this._generarConGeminiMultimodal({
+          buffer: dataBuffer,
+          mimeType: 'application/pdf',
+          prompt: 'Extrae fielmente todo el texto, tablas, requisitos, especificaciones y notas de este PDF. Devuelve únicamente el contenido extraído.',
+          timeout: 60000
+        });
         if (candidate && candidate.trim().length > 10) {
           console.log(`[FileIngestionService] PDF extraído exitosamente con Gemini Multimodal (${candidate.length} caracteres)`);
           return candidate.trim();
@@ -101,9 +87,7 @@ class FileIngestionService {
       }
     }
 
-    // 3. Contingencia segura final
-    const baseName = path.basename(filePath);
-    return `[Documento PDF Ingerido: ${baseName}]\nContiene la documentación formal, requerimientos y especificaciones del sistema analizado para el levantamiento de ingeniería de software.`;
+    throw new Error(`No fue posible extraer contenido verificable del PDF "${path.basename(filePath)}". Revisa el archivo o configura un modelo multimodal disponible.`);
   }
 
   async _transcribirAudio(file) {
@@ -133,62 +117,32 @@ class FileIngestionService {
     if (this.geminiApiKey) {
       try {
         const audioBuffer = await fs.promises.readFile(file.path);
-        const base64Audio = audioBuffer.toString('base64');
-
-        const modelsToTry = ['gemini-2.0-flash', 'gemini-flash-lite-latest', 'gemini-1.5-flash'];
-        let transcription = null;
-
-        for (const modelName of modelsToTry) {
-          try {
-            const response = await axios.post(
-              `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.geminiApiKey}`,
-              {
-                contents: [
-                  {
-                    parts: [
-                      {
-                        text: 'Actúa como un transcriptor experto en ingeniería de software. Transcribe todo el audio de esta reunión/entrevista de levantamiento de requisitos. Devuelve únicamente el texto transcrito con total fidelidad técnica y detalle de los problemas y procesos mencionados.'
-                      },
-                      {
-                        inline_data: {
-                          mime_type: mimeType,
-                          data: base64Audio
-                        }
-                      }
-                    ]
-                  }
-                ]
-              },
-              { timeout: 45000 }
-            );
-
-            transcription = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (transcription && transcription.trim().length > 10) {
-              console.log(`[FileIngestionService] Transcripción completada exitosamente con ${modelName} (${transcription.length} caracteres)`);
-              return transcription.trim();
-            }
-          } catch (modelErr) {
-            console.warn(`[FileIngestionService] Falló modelo ${modelName} para audio:`, modelErr.response?.data?.error?.message || modelErr.message);
-          }
+        const transcription = await this._generarConGeminiMultimodal({
+          buffer: audioBuffer,
+          mimeType,
+          prompt: 'Transcribe fielmente este audio de levantamiento de requisitos. Devuelve únicamente la transcripción, conservando problemas, procesos y reglas de negocio.',
+          timeout: 60000
+        });
+        if (transcription && transcription.trim().length > 10) {
+          console.log(`[FileIngestionService] Transcripción Gemini completada (${transcription.length} caracteres)`);
+          return transcription.trim();
         }
       } catch (err) {
         console.warn('[FileIngestionService] Advertencia al procesar audio con Gemini:', err.message);
       }
     }
 
-    // 3. Contingencia
-    const cleanName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
-    return `[Audio Ingerido: ${file.originalname}]\nGrabación de entrevista de levantamiento de requisitos para el proyecto "${cleanName}". Contiene las especificaciones operativas, reglas de negocio y necesidades del cliente expresadas durante la sesión.`;
+    throw new Error(`No fue posible transcribir el audio "${file.originalname}". Configura Groq Whisper o un modelo Gemini multimodal disponible.`);
   }
 
   async _transcribirConGroqWhisper(filePath, originalname) {
     try {
-      console.log(`[FileIngestionService] Intentando transcripción con Groq Whisper (whisper-large-v3-turbo)...`);
+      console.log(`[FileIngestionService] Intentando transcripción con Groq Whisper (${this.whisperModel})...`);
       const fileBuffer = await fs.promises.readFile(filePath);
       const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
 
       const postData = [];
-      postData.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-large-v3-turbo\r\n`));
+      postData.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${this.whisperModel}\r\n`));
       postData.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\nes\r\n`));
       postData.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${originalname}"\r\nContent-Type: application/octet-stream\r\n\r\n`));
       postData.push(fileBuffer);
@@ -217,6 +171,41 @@ class FileIngestionService {
       console.warn('[FileIngestionService] Error en transcripción Groq Whisper:', errGroq.response?.data?.error?.message || errGroq.message);
     }
     return null;
+  }
+
+  async _generarConGeminiMultimodal({ buffer, mimeType, prompt, timeout }) {
+    const base64 = buffer.toString('base64');
+    for (const modelName of this.geminiModels) {
+      if (this.modelosDeshabilitados.has(modelName)) continue;
+      try {
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.geminiApiKey}`,
+          {
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64 } }
+              ]
+            }]
+          },
+          { timeout }
+        );
+        const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text?.trim()) return text.trim();
+      } catch (error) {
+        const mensaje = error.response?.data?.error?.message || error.message;
+        console.warn(`[FileIngestionService] Gemini ${modelName} falló:`, mensaje);
+        if (this._esModeloNoDisponible(error)) this.modelosDeshabilitados.add(modelName);
+        if (error.response?.status === 401 || error.response?.status === 403) break;
+      }
+    }
+    return null;
+  }
+
+  _esModeloNoDisponible(error) {
+    const status = error.response?.status;
+    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    return status === 404 || /no longer available|does not exist|not found/.test(mensaje);
   }
 }
 

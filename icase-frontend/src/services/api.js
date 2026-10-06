@@ -14,7 +14,7 @@ export function getStoredUser() {
   try {
     const raw = localStorage.getItem('icase_user');
     return raw ? JSON.parse(raw) : null;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -184,6 +184,32 @@ export async function fetchFuentesApi(projectId) {
   }
 }
 
+export async function updateFuenteApi(fuenteId, changes) {
+  const res = await fetch(`${API_URL}/fuentes/${fuenteId}`, {
+    method: 'PATCH',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(changes)
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'Error al actualizar los detalles de la fuente');
+  }
+  return await res.json();
+}
+
+export async function suggestFuenteMetadataApi(fuenteId, provider = 'auto') {
+  const res = await fetch(`${API_URL}/fuentes/${fuenteId}/sugerir-metadatos`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ provider })
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'No fue posible sugerir los metadatos con IA');
+  }
+  return await res.json();
+}
+
 export async function deleteFuenteApi(fuenteId, proyectoId = null, nombreArchivo = null) {
   try {
     let url = `${API_URL}/fuentes/${fuenteId}`;
@@ -222,7 +248,7 @@ export async function fetchAiModelsApi() {
   }
 }
 
-export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null) {
+export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo') {
   try {
     const res = await fetch(`${API_URL}/proyectos/${projectId}/procesar-ia`, {
       method: 'POST',
@@ -231,7 +257,8 @@ export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicio
         insumo_bruto: insumoBruto,
         insumo_adicional: insumoAdicional,
         provider,
-        specificModel
+        specificModel,
+        objetivo
       })
     });
     const data = await res.json().catch(() => ({}));
@@ -247,18 +274,16 @@ export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicio
 
 // === FASES Y DOCUMENTO ===
 export async function approvePhaseApi(projectId, fase) {
-  try {
-    const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
-      method: 'POST',
-      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ fase, aprobar_todos: true })
-    });
-    if (!res.ok) throw new Error('Error al aprobar fase');
-    return await res.json();
-  } catch (err) {
-    console.warn('[API] Error al aprobar fase:', err.message);
-    return null;
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ fase, aprobar_todos: true })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Error al aprobar fase');
   }
+  return await res.json();
 }
 
 export async function fetchDocumentoConsolidado(projectId) {
@@ -312,6 +337,35 @@ export async function generateMockupsApi(projectId, pantallas = [], insumoAdicio
   }
 }
 
+export async function startMockupJobApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null) {
+  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ pantallas, insumoAdicional, requerimientos })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo iniciar la generación de mockups.');
+  return data;
+}
+
+export async function fetchMockupJobApi(jobId) {
+  const res = await fetch(`${API_URL}/mockups/trabajos/${jobId}`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar la generación.');
+  return data;
+}
+
+export async function fetchLatestMockupJobApi(projectId) {
+  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos/ultimo`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo recuperar la generación activa.');
+  return data;
+}
+
 export async function fetchMockupsApi(projectId) {
   try {
     const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}`, {
@@ -323,6 +377,27 @@ export async function fetchMockupsApi(projectId) {
     console.warn('[API] Error al obtener mockups:', err.message);
     return { mockups: [] };
   }
+}
+
+export async function updateMockupDesignSystemApi(projectId, sistemaDiseno) {
+  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/sistema-diseno`, {
+    method: 'PUT',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ sistemaDiseno })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo guardar la paleta.');
+  return data;
+}
+
+export async function suggestMockupDesignSystemApi(projectId) {
+  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/sugerir-paleta`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo generar una sugerencia de paleta.');
+  return data;
 }
 
 export async function updateMockupApi(projectId, nombrePantalla, previewCode) {

@@ -4,7 +4,7 @@ import ProjectDashboard from "./components/ProjectDashboard";
 import ProjectWorkspace from "./components/ProjectWorkspace";
 import AuthView from "./components/AuthView";
 import LoadingOverlay from "./components/LoadingOverlay";
-import { fetchProjects, fetchProjectById, createProjectApi, deleteProjectApi, getAuthToken, getStoredUser, clearAuth } from "./services/api";
+import { fetchProjects, fetchProjectById, deleteProjectApi, getAuthToken, getStoredUser, clearAuth } from "./services/api";
 import { sanitizePlantUML } from "./utils/plantumlEncoder";
 
 export default function App() {
@@ -24,7 +24,7 @@ export default function App() {
     const cuItem = diags.find((d) => d.tipo === "casos_de_uso" || d.tipo === "casos_uso");
     const archItem = diags.find((d) => d.tipo === "arquitectura");
     const classItem = diags.find((d) => d.tipo === "clases" || d.tipo === "clases_dominio" || d.tipo === "entidad_relacion");
-    const navItem = diags.find((d) => d.tipo === "arbol_navegacion" || d.tipo === "navegacion" || d.tipo === "wbs");
+    const navItem = diags.find((d) => ["arbol_navegacion", "navegacion"].includes(d.tipo));
 
     // Extraer actores dinámicos de los RF reales
     const rfList = reqs.filter((r) => (r.tipo || "").toUpperCase() === "RF");
@@ -116,9 +116,10 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
       `@enduml`;
 
     const defNavPlant =
-      `@startwbs\n* ${safePName}\n** Acceso y Seguridad\n*** Inicio de Sesión\n** Módulos Principales\n` +
-      (rfList.slice(0, 4).map((r) => `*** ${r.nombre.replace(/[*_#]/g, "").trim()}`).join("\n") || `*** Panel de Control`) +
-      `\n** Auditoría y Reportes\n*** Métricas del Sistema\n@endwbs`;
+      `@startmindmap\n* ${safePName}\n** Portal de Acceso\n*** Inicio de Sesión\n*** Recuperación de Contraseña\n` +
+      `** Panel Principal\n*** Tablero Principal\n*** Alertas y Notificaciones\n` +
+      `** Módulo Principal\n*** Listado de Registros\n*** Detalle de Registro\n*** Formulario de Nuevo Registro\n` +
+      `** Administración\n*** Gestión de Usuarios\n*** Gestión de Roles y Permisos\n*** Configuración del Sistema\n@endmindmap`;
 
     // Deduplicar fuentes
     const seenNames = new Set();
@@ -133,9 +134,17 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         id: f.id || f._id,
         name: f.nombre_archivo || "Archivo de entrada",
         type: f.tipo || "txt",
+        category: f.categoria || (f.tipo === "audio" ? "audios" : f.tipo === "pdf" ? "documentos" : "textos"),
+        contentType: f.tipo_contenido || "",
+        description: f.descripcion || "",
+        authorOrigin: f.autor_origen || "",
+        documentDate: f.fecha_documento || "",
+        tags: Array.isArray(f.etiquetas) ? f.etiquetas : [],
+        transcriptionVerified: Boolean(f.transcripcion_verificada),
+        aiMetadata: Boolean(f.metadatos_generados_ia),
         size: f.tamanio || "10 KB",
         date: new Date(f.createdAt || Date.now()).toLocaleDateString("es-ES"),
-        contentSnippet: f.texto_transcrito?.slice(0, 160) || ""
+        contentSnippet: f.texto_transcrito || ""
       }));
 
     const hasRealRequirements = (reqs || []).length > 0;
@@ -167,14 +176,15 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
       updatedAt: new Date(p.updatedAt || Date.now()).toLocaleDateString("es-ES"),
       currentPhase: !isProcessed
         ? 0
-        : p.estado_fase === "finalizado" || p.estado_fase === "diseno_aprobado"
+        : ["finalizado", "diseno_aprobado", "mockups_aprobados"].includes(p.estado_fase)
         ? 3
-        : p.estado_fase === "analisis_aprobado" || p.estado_fase === "diseno_pendiente"
+        : ["analisis_aprobado", "diseno_pendiente", "diagramas_aprobados", "mockups_pendientes"].includes(p.estado_fase)
         ? 2
         : 1,
       isProcessed,
-      isAnalysisApproved: isProcessed && ["analisis_aprobado", "diseno_pendiente", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
-      isDiagramsApproved: isProcessed && ["diseno_aprobado", "finalizado"].includes(p.estado_fase),
+      isAnalysisApproved: isProcessed && ["analisis_aprobado", "diseno_pendiente", "diagramas_aprobados", "mockups_pendientes", "mockups_aprobados", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
+      isDiagramsApproved: isProcessed && ["diagramas_aprobados", "mockups_pendientes", "mockups_aprobados", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
+      isMockupsApproved: isProcessed && ["mockups_aprobados", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
       sources: fuentesUnicas,
       requirements: {
         functional: reqs
@@ -235,16 +245,24 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         },
         navigationTree: {
           id: navItem?.id || navItem?._id || "diag-nav",
-          title: navItem?.titulo || "Árbol de Navegación del Sistema (WBS)",
+          title: navItem?.titulo || "Árbol de Navegación del Sistema",
           type: "navegacion",
-          code: navItem?.codigo_mermaid && !navItem.codigo_mermaid.includes("@start") ? navItem.codigo_mermaid : "graph TD\n  Root[Sistema] --> M1[Acceso]\n  Root --> M2[Operaciones]",
+          code: navItem?.codigo_mermaid && !navItem.codigo_mermaid.includes("@start") ? navItem.codigo_mermaid : "graph TD\n  Inicio[\"Inicio de Sesión\"] --> Recuperacion[\"Recuperación de Contraseña\"]\n  Inicio --> Dashboard[\"Panel Principal\"]\n  Dashboard --> ModPrincipal[\"Módulo Principal\"]\n  ModPrincipal --> Listado[\"Listado de Registros\"]\n  ModPrincipal --> Detalle[\"Detalle de Registro\"]\n  Dashboard --> Administracion[\"Administración\"]\n  Administracion --> Usuarios[\"Gestión de Usuarios\"]\n  Administracion --> Configuracion[\"Configuración del Sistema\"]",
           plantumlCode: sanitizePlantUML(navItem?.codigo_plantuml) || defNavPlant,
-          description: navItem?.descripcion || "Mapa jerárquico de pantallas y módulos en WBS.",
+          description: navItem?.descripcion || "Mapa jerárquico de pantallas y rutas de navegación.",
           descripcion_jerarquica: navItem?.descripcion_jerarquica || []
         }
       },
       mockups: (p.diseno?.mockups || []).map(m => ({
+        pantalla_id: m.pantalla_id,
         nombre_pantalla: m.nombre_pantalla,
+        nombre_visible: m.nombre_visible,
+        flujo: m.flujo,
+        modulo: m.modulo,
+        ruta: m.ruta,
+        plataforma: m.plataforma,
+        roles: m.roles || [],
+        shell: m.shell,
         tipo: m.tipo,
         descripcion: m.descripcion,
         descripcion_jerarquica: m.descripcion_jerarquica || [],
@@ -255,7 +273,10 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         preview_code: m.preview_code,
         imagen_url: m.imagen_url,
         estado: m.estado,
-        version: m.version
+        version: m.version,
+        estado_calidad: m.estado_calidad,
+        errores_validacion: m.errores_validacion || [],
+        advertencias_validacion: m.advertencias_validacion || []
       }))
     };
   }, []);
@@ -326,6 +347,7 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
     isProcessed: false,
     isAnalysisApproved: false,
     isDiagramsApproved: false,
+    isMockupsApproved: false,
     sources: [],
     requirements: { functional: [], nonFunctional: [] },
     diagrams: {},

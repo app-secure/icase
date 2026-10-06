@@ -39,7 +39,7 @@ export default function MermaidViewer({ code, title }) {
         return;
       }
 
-      if (code.includes("@startuml") || code.includes("@startwbs")) {
+      if (/@start[a-z]+/i.test(code)) {
         if (isMounted) {
           setRenderError("Este diagrama usa sintaxis PlantUML. Selecciona 'PlantUML / C4' arriba para visualizarlo.");
           setSvgContent("");
@@ -58,7 +58,7 @@ export default function MermaidViewer({ code, title }) {
         if (isMounted) {
           setSvgContent(svg);
         }
-      } catch (err) {
+      } catch {
         document.querySelectorAll('.error-icon, [id^="dmermaid"]').forEach((el) => el.remove());
         if (isMounted) {
           setRenderError("Sintaxis Mermaid en ajuste. Puedes revisar el diagrama en PlantUML / C4 o editar el código fuente.");

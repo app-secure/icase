@@ -8,6 +8,8 @@ class ProcesarConIA {
     diagramaRepository,
     estandarRepository,
     fuenteRepository,
+    disenoRepository,
+    plantumlValidatorService,
     aiOrchestratorService
   }) {
     this.proyectoRepository = proyectoRepository;
@@ -15,6 +17,8 @@ class ProcesarConIA {
     this.diagramaRepository = diagramaRepository;
     this.estandarRepository = estandarRepository;
     this.fuenteRepository = fuenteRepository;
+    this.disenoRepository = disenoRepository;
+    this.plantumlValidatorService = plantumlValidatorService;
     this.aiOrchestratorService = aiOrchestratorService;
   }
 
@@ -25,10 +29,17 @@ class ProcesarConIA {
     return { provider_defecto: 'auto', proveedores: [] };
   }
 
-  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null }) {
+  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo' }) {
     const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
     if (!proyecto) {
       throw new Error(`Proyecto con ID ${proyectoId} no encontrado.`);
+    }
+    const objetivoNormalizado = ['requisitos', 'diagramas', 'completo'].includes(objetivo) ? objetivo : 'completo';
+    if (objetivoNormalizado === 'diagramas') {
+      const estadosPermitidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
+      if (!estadosPermitidos.has(proyecto.estado_fase)) {
+        throw new Error('Los requisitos deben estar aprobados antes de generar los diagramas.');
+      }
     }
 
     // 1. Insumo bruto: usar el enviado directamente o el registrado en base de datos
@@ -43,13 +54,23 @@ class ProcesarConIA {
         if (Array.isArray(fuentesBd) && fuentesBd.length > 0) {
           const textoFuentes = fuentesBd
             .filter(f => f.texto_transcrito && f.texto_transcrito.trim().length > 0)
-            .map(f => `[Fuente Ingerida: ${f.nombre_archivo} (${f.tipo})]\n${f.texto_transcrito}`)
-            .join('\n\n');
+            .map(f => {
+              const metadatos = [
+                `Archivo: ${f.nombre_archivo}`,
+                `Categoría: ${f.categoria || f.tipo}`,
+                `Tipo de contenido: ${f.tipo_contenido || 'Sin especificar'}`,
+                f.descripcion ? `Descripción aportada por el usuario: ${f.descripcion}` : '',
+                f.autor_origen ? `Autor u origen: ${f.autor_origen}` : '',
+                f.fecha_documento ? `Fecha del contenido: ${f.fecha_documento}` : '',
+                Array.isArray(f.etiquetas) && f.etiquetas.length ? `Etiquetas: ${f.etiquetas.join(', ')}` : '',
+                f.tipo === 'audio' ? `Transcripción revisada por el usuario: ${f.transcripcion_verificada ? 'sí' : 'no'}` : ''
+              ].filter(Boolean).join('\n');
+              return `[Fuente enriquecida]\n${metadatos}\n\n[Contenido extraído]\n${f.texto_transcrito}`;
+            })
+            .join('\n\n---\n\n');
           if (textoFuentes) {
-            // Priorizar siempre las transcripciones fidedignas de la base de datos
-            textoBase = textoBase && textoBase.trim().length > 100 && !textoBase.includes('%PDF')
-              ? `${textoBase}\n\n${textoFuentes}`
-              : textoFuentes;
+            // La versión persistida contiene la transcripción corregida y los metadatos más recientes.
+            textoBase = textoFuentes;
           }
         }
       } catch (errFuentes) {
@@ -95,6 +116,7 @@ class ProcesarConIA {
       insumo_adicional: insumoAdicional,
       provider,
       specificModel,
+      objetivo: objetivoNormalizado,
       diccionario_estandares: estandares,
       contexto_proyecto: contextoProyecto
     };
@@ -102,9 +124,65 @@ class ProcesarConIA {
     // Llamada única a n8n / IA
     const resultadoIA = await this.aiOrchestratorService.procesar(payload);
 
-    // Persistir requerimientos retornados
+    if (objetivoNormalizado === 'requisitos' && (!resultadoIA.requerimientos || resultadoIA.requerimientos.length === 0)) {
+      throw new Error('La IA no devolvió requerimientos válidos. Se conservaron los datos existentes.');
+    }
+    if (objetivoNormalizado === 'diagramas') {
+      const diagramasValidos = (resultadoIA.diagramas || []).filter((diagrama) => {
+        const codigo = String(diagrama.codigo_plantuml || '');
+        return codigo.includes('@start') && !codigo.includes('No hay diagrama disponible') && !codigo.includes('No hay diagrama de navegación disponible');
+      });
+      if (diagramasValidos.length < 4) {
+        throw new Error('La IA no devolvió los cuatro diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
+      }
+      if (this.plantumlValidatorService) {
+        const errores = diagramasValidos
+          .map((diagrama) => ({ tipo: diagrama.tipo, resultado: this.plantumlValidatorService.validar(diagrama.codigo_plantuml, diagrama.tipo) }))
+          .filter(({ resultado }) => !resultado.valido);
+        if (errores.length) {
+          const detalle = errores.map(({ tipo, resultado }) => `${tipo}: ${resultado.error}`).join(' | ');
+          throw new Error(`La IA devolvió diagramas con problemas de estructura o legibilidad. ${detalle}`);
+        }
+      }
+      const casosUso = diagramasValidos.find((diagrama) => String(diagrama.tipo).toLowerCase().includes('caso'));
+      if (casosUso) {
+        const normalizarActor = (value) => String(value || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, ' ')
+          .trim();
+        const actoresRequeridos = [...new Set(requerimientosPrevios
+          .filter((requisito) => String(requisito.tipo || '').toUpperCase() === 'RF')
+          .flatMap((requisito) => Array.isArray(requisito.actores) ? requisito.actores : [requisito.actores])
+          .flatMap((actor) => String(actor || '').split(/[,;|]/))
+          .map(normalizarActor)
+          .filter(Boolean))];
+        const codigoCasosUso = String(casosUso.codigo_plantuml || '');
+        const actoresDiagramados = [...codigoCasosUso.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s]+))(?:\s+as\s+([\w.]+))?/gim)]
+          .map((match) => ({ nombre: normalizarActor(match[1] || match[2]), alias: match[3] || match[2] }))
+          .filter((actor) => actor.nombre);
+        const faltantes = actoresRequeridos.filter((actor) => !actoresDiagramados.some(({ nombre }) => nombre === actor || nombre.includes(actor) || actor.includes(nombre)));
+        if (faltantes.length) {
+          throw new Error(`El diagrama de casos de uso omitió actores definidos en los requisitos aprobados: ${faltantes.join(', ')}. Reintenta la generación para obtener trazabilidad completa.`);
+        }
+        const actoresSinRelacion = actoresDiagramados
+          .filter(({ alias }) => {
+            const aliasEscapado = String(alias || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (!aliasEscapado) return true;
+            return !new RegExp(`^\\s*${aliasEscapado}\\s*(?:--+|\\.\\.+|<[-.]+|[-.]+>)`, 'im').test(codigoCasosUso) &&
+              !new RegExp(`(?:--+|\\.\\.+|<[-.]+|[-.]+>)\\s*${aliasEscapado}\\s*$`, 'im').test(codigoCasosUso);
+          })
+          .map(({ nombre }) => nombre);
+        if (actoresSinRelacion.length) {
+          throw new Error(`El diagrama de casos de uso contiene actores sin interacción: ${actoresSinRelacion.join(', ')}.`);
+        }
+      }
+    }
+
+    // Persistir requerimientos únicamente durante la fase de análisis.
     const requerimientosGenerados = [];
-    if (resultadoIA.requerimientos && Array.isArray(resultadoIA.requerimientos)) {
+    if (objetivoNormalizado !== 'diagramas' && resultadoIA.requerimientos && Array.isArray(resultadoIA.requerimientos)) {
       // Reemplazamos requerimientos no aprobados previos o anexamos
       await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
 
@@ -138,11 +216,16 @@ class ProcesarConIA {
         requerimientosGenerados.push(reqEntity);
       }
       await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
+      // Cualquier modelado anterior queda obsoleto al regenerar los requisitos.
+      await this.diagramaRepository.eliminarPorProyecto(proyectoId);
+      if (this.disenoRepository && typeof this.disenoRepository.invalidarDerivados === 'function') {
+        await this.disenoRepository.invalidarDerivados(proyectoId);
+      }
     }
 
-    // Persistir diagramas retornados
+    // Persistir diagramas únicamente después de aprobar el análisis.
     const diagramasGenerados = [];
-    if (resultadoIA.diagramas && Array.isArray(resultadoIA.diagramas)) {
+    if (objetivoNormalizado !== 'requisitos' && resultadoIA.diagramas && Array.isArray(resultadoIA.diagramas)) {
       await this.diagramaRepository.eliminarPorProyecto(proyectoId);
 
       for (const diagData of resultadoIA.diagramas) {
@@ -204,7 +287,7 @@ class ProcesarConIA {
     const updates = {
       nombre: nombreFinal,
       descripcion: descripcionFinal,
-      estado_fase: 'analisis_pendiente'
+      estado_fase: objetivoNormalizado === 'diagramas' ? 'diseno_pendiente' : 'analisis_pendiente'
     };
 
     if (resultadoIA.resumen && resultadoIA.resumen.trim()) updates.resumen = resultadoIA.resumen.trim();
@@ -224,6 +307,7 @@ class ProcesarConIA {
       proyecto_id: proyectoId,
       nombre_proyecto: nombreFinal,
       descripcion_proyecto: descripcionFinal,
+      objetivo: objetivoNormalizado,
       requerimientos: await this.requerimientoRepository.listarPorProyecto(proyectoId),
       diagramas: await this.diagramaRepository.listarPorProyecto(proyectoId)
     };

@@ -468,7 +468,7 @@ export default function PdfPreviewModal({ project, onClose }) {
           : [
               `Levantar y formalizar los requerimientos funcionales y no funcionales cuantificables para ${project.name || "el sistema"}.`,
               "Diseñar la arquitectura lógica en capas delimitando responsabilidades de frontera, negocio y persistencia.",
-              "Modelar los casos de uso nucleares, entidades del modelo de datos y el flujo de navegación modular."
+              "Modelar los casos de uso nucleares, entidades del modelo de datos y el mapa de pantallas y rutas de navegación del sistema."
             ];
         objEsp.forEach((item) => {
           drawBulletItem(item);
@@ -656,14 +656,14 @@ export default function PdfPreviewModal({ project, onClose }) {
                 document.body.appendChild(iframe);
 
                 const timeout = setTimeout(() => {
-                  try { document.body.removeChild(iframe); } catch(_) {}
+                  try { document.body.removeChild(iframe); } catch {}
                   resolve(null);
                 }, 12000);
 
                 const tryCapture = (attempts) => {
                   if (attempts <= 0) {
                     clearTimeout(timeout);
-                    try { document.body.removeChild(iframe); } catch(_) {}
+                    try { document.body.removeChild(iframe); } catch {}
                     resolve(null);
                     return;
                   }
@@ -693,11 +693,11 @@ export default function PdfPreviewModal({ project, onClose }) {
                       allowTaint: false
                     }).then(canvas => {
                       clearTimeout(timeout);
-                      try { document.body.removeChild(iframe); } catch(_) {}
+                      try { document.body.removeChild(iframe); } catch {}
                       resolve(canvas.toDataURL("image/png", 0.92));
                     }).catch(() => {
                       clearTimeout(timeout);
-                      try { document.body.removeChild(iframe); } catch(_) {}
+                      try { document.body.removeChild(iframe); } catch {}
                       resolve(null);
                     });
                   } else {
@@ -841,7 +841,6 @@ sidebar, .sidebar { background: #1e293b; color: white; }
               const maxW = maxLineWidth;
               let w = size.width;
               let h = size.height;
-              const ratio = w / h;
               // Convertir px a mm (aprox 3.7795 px/mm a 96dpi)
               const pxToMm = (px) => px * 0.264583;
               let wMm = Math.min(pxToMm(w), maxW);

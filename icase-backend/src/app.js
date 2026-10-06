@@ -10,16 +10,14 @@ const MongoEstandarRepository = require('./interface-adapters/repositories/Mongo
 const MongoFuenteRepository = require('./interface-adapters/repositories/MongoFuenteRepository');
 const MongoCasoDeUsoRepository = require('./interface-adapters/repositories/MongoCasoDeUsoRepository');
 const MongoDisenoRepository = require('./interface-adapters/repositories/MongoDisenoRepository');
+const MongoTrabajoGeneracionRepository = require('./interface-adapters/repositories/MongoTrabajoGeneracionRepository');
 
 // Servicios
 const ModelosIaService = require('./infrastructure/services/ModelosIaService');
 const PlantUMLValidatorService = require('./infrastructure/services/PlantUMLValidatorService');
 const MarkdownCompilerService = require('./infrastructure/services/MarkdownCompilerService');
-const ContextProcessorService = require('./infrastructure/services/ContextProcessorService');
 const FileIngestionService = require('./infrastructure/services/FileIngestionService');
 const MockupIaService = require('./infrastructure/services/MockupIaService');
-const MockupValidatorService = require('./infrastructure/services/MockupValidatorService');
-const MockupImageService = require('./infrastructure/services/MockupImageService');
 
 // Casos de Uso
 const CrearProyecto = require('./core/use-cases/CrearProyecto');
@@ -62,15 +60,13 @@ function createApp() {
   const fuenteRepo = new MongoFuenteRepository();
   const casoDeUsoRepo = new MongoCasoDeUsoRepository();
   const disenoRepo = new MongoDisenoRepository();
+  const trabajoGeneracionRepo = new MongoTrabajoGeneracionRepository();
 
   const modelosIaService = new ModelosIaService();
   const plantumlValidator = new PlantUMLValidatorService();
   const markdownCompiler = new MarkdownCompilerService();
-  const contextProcessor = new ContextProcessorService();
   const fileIngestionService = new FileIngestionService();
   const mockupIaService = new MockupIaService();
-  const mockupValidator = new MockupValidatorService();
-  const mockupImageService = new MockupImageService();
 
   const crearProyectoUseCase = new CrearProyecto({ proyectoRepository: proyectoRepo });
   const procesarConIAUseCase = new ProcesarConIA({
@@ -79,6 +75,8 @@ function createApp() {
     diagramaRepository: diagramaRepo,
     estandarRepository: estandarRepo,
     fuenteRepository: fuenteRepo,
+    disenoRepository: disenoRepo,
+    plantumlValidatorService: plantumlValidator,
     aiOrchestratorService: modelosIaService
   });
   const actualizarRequerimientoManualUseCase = new ActualizarRequerimientoManual({
@@ -91,7 +89,8 @@ function createApp() {
   const aprobarFaseUseCase = new AprobarFase({
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
-    diagramaRepository: diagramaRepo
+    diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo
   });
   const generarMockupsUseCase = new GenerarMockups({
     proyectoRepository: proyectoRepo,
@@ -131,7 +130,8 @@ function createApp() {
   const fuenteController = new FuenteController({
     fuenteRepository: fuenteRepo,
     proyectoRepository: proyectoRepo,
-    fileIngestionService
+    fileIngestionService,
+    modelosIaService
   });
 
   const authController = new AuthController({
@@ -141,7 +141,8 @@ function createApp() {
   const mockupController = new MockupController({
     generarMockupsUseCase,
     actualizarMockupManualUseCase,
-    disenoRepository: disenoRepo
+    disenoRepository: disenoRepo,
+    trabajoGeneracionRepository: trabajoGeneracionRepo
   });
 
   // Health check

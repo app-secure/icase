@@ -132,13 +132,14 @@ class ProyectoController {
   async procesarConIA(req, res) {
     try {
       const { id } = req.params;
-      const { insumo_adicional, insumo_bruto, provider, modelo, proveedor, specificModel } = req.body;
+      const { insumo_adicional, insumo_bruto, provider, modelo, proveedor, specificModel, objetivo } = req.body;
       const resultado = await this.procesarConIAUseCase.ejecutar({
         proyectoId: id,
         insumoBrutoInput: insumo_bruto,
         insumoAdicional: insumo_adicional,
         provider: provider || modelo || proveedor || 'auto',
-        specificModel
+        specificModel,
+        objetivo: objetivo || 'completo'
       });
       res.json(resultado);
     } catch (err) {
@@ -206,6 +207,13 @@ class ProyectoController {
       const proyecto = await this.proyectoRepository.obtenerPorId(id);
       if (!proyecto) {
         return res.status(404).json({ error: 'Proyecto no encontrado' });
+      }
+
+      const estadosConDocumento = new Set(['mockups_aprobados', 'diseno_aprobado', 'finalizado']);
+      if (proyecto.estado_fase && !estadosConDocumento.has(proyecto.estado_fase)) {
+        return res.status(409).json({
+          error: 'Debes aprobar los mockups antes de generar el documento consolidado.'
+        });
       }
 
       const [requerimientos, diagramas, fuentes, casosDeUso, diseno] = await Promise.all([

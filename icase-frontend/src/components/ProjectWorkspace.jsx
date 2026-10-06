@@ -3,11 +3,12 @@ import SourcesPanel from "./SourcesPanel";
 import RequirementsView from "./RequirementsView";
 import DiagramsView from "./DiagramsView";
 import DocumentViewer from "./DocumentViewer";
-import { Sparkles, ArrowRight, Layers, GitBranch, FileText, CheckCircle2 } from "lucide-react";
 import {
   createProjectApi,
   updateProjectApi,
   uploadFuenteApi,
+  updateFuenteApi,
+  suggestFuenteMetadataApi,
   deleteFuenteApi,
   fetchFuentesApi,
   processWithAiApi,
@@ -34,7 +35,17 @@ const extractInsumoBruto = async (sources) => {
       }
     }
     if (text && text.trim()) {
-      insumoBruto += `[Fuente: ${s.name} (${s.type})]\n${text.trim()}\n\n`;
+      const sourceContext = [
+        `Archivo: ${s.name}`,
+        `Categoría: ${s.category || s.type}`,
+        `Tipo de contenido: ${s.contentType || "Sin especificar"}`,
+        s.description ? `Descripción aportada por el usuario: ${s.description}` : "",
+        s.authorOrigin ? `Autor u origen: ${s.authorOrigin}` : "",
+        s.documentDate ? `Fecha del contenido: ${s.documentDate}` : "",
+        s.tags?.length ? `Etiquetas: ${s.tags.join(", ")}` : "",
+        s.type === "audio" ? `Transcripción revisada por el usuario: ${s.transcriptionVerified ? "sí" : "no"}` : ""
+      ].filter(Boolean).join("\n");
+      insumoBruto += `[Fuente enriquecida]\n${sourceContext}\n\n[Contenido extraído]\n${text.trim()}\n\n---\n\n`;
     }
   }
   return insumoBruto.trim();
@@ -160,22 +171,26 @@ UsuarioSistema "1" -- "*" MetricaConsolidada : emite
 @enduml`;
 
     case "navigationTree":
-      return `@startwbs
+      return `@startmindmap
 * ${safeName}
-** Acceso y Seguridad
+** Portal de Acceso
 *** Inicio de Sesión
 *** Recuperación de Contraseña
-** Operaciones Principales
-*** Módulo de Control y Registro
-*** Módulo de Despacho y Logística
-*** Control de Calidad y Pruebas
-** Liquidación y Finanzas
-*** Emisión de Comprobantes
-*** Reporte de Cierre de Caja
-** Auditoría y Configuración
-*** Consolidado Diario de Métricas
-*** Gestión de Roles y Usuarios
-@endwbs`;
+** Panel Principal
+*** Tablero Principal
+*** Alertas y Notificaciones
+** Módulo de Pedidos
+*** Listado de Pedidos
+*** Detalle de Pedido
+*** Formulario de Nuevo Pedido
+** Módulo de Despacho
+*** Listado de Despachos
+*** Programación de Entrega
+** Administración
+*** Gestión de Usuarios
+*** Gestión de Roles y Permisos
+*** Configuración del Sistema
+@endmindmap`;
 
     default:
       return `@startuml\nactor Usuario\nrectangle Sistema {\n  usecase Proceso\n}\nUsuario --> Proceso\n@enduml`;
@@ -222,7 +237,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
     const ucDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("caso"));
     const archDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arqui"));
     const classDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("clase") || (d.tipo || "").toLowerCase().includes("entidad") || (d.tipo || "").toLowerCase().includes("dominio"));
-    const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav") || (d.tipo || "").toLowerCase().includes("wbs"));
+    const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav"));
 
     const extractPuml = (diagObj, typeKey) => {
       const code = diagObj?.codigo_plantuml || diagObj?.codigo_puml || diagObj?.plantumlCode;
@@ -271,7 +286,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       },
       navigationTree: {
         id: "diag-nav",
-        title: (navDiag?.titulo || "Árbol de Navegación del Sistema (WBS)").replace(/\s*\([^)]*\)/g, '').trim(),
+        title: (navDiag?.titulo || "Árbol de Navegación del Sistema").replace(/\s*\([^)]*\)/g, '').trim(),
         type: "navegacion",
         code: extractPuml(navDiag, "navigationTree"),
         plantumlCode: extractPuml(navDiag, "navigationTree"),
@@ -301,6 +316,7 @@ export default function ProjectWorkspace({
     isProcessed: false,
     isAnalysisApproved: false,
     isDiagramsApproved: false,
+    isMockupsApproved: false,
     sources: [],
     requirements: { functional: [], nonFunctional: [] },
     diagrams: {}
@@ -309,8 +325,10 @@ export default function ProjectWorkspace({
   const project = rawProject || defaultEmptyProject;
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isGeneratingDiagrams, setIsGeneratingDiagrams] = useState(false);
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
+  const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(project.currentPhase >= 2);
 
   React.useEffect(() => {
     fetchAiModelsApi()
@@ -394,7 +412,14 @@ export default function ProjectWorkspace({
                 uploaded: true,
                 isUploading: false,
                 rawFile: null,
-                contentSnippet: uploaded.texto_transcrito || s.contentSnippet
+                contentSnippet: uploaded.texto_transcrito || s.contentSnippet,
+                category: uploaded.categoria || s.category,
+                contentType: uploaded.tipo_contenido || s.contentType || "",
+                description: uploaded.descripcion || s.description || "",
+                authorOrigin: uploaded.autor_origen || s.authorOrigin || "",
+                documentDate: uploaded.fecha_documento || s.documentDate || "",
+                tags: Array.isArray(uploaded.etiquetas) ? uploaded.etiquetas : (s.tags || []),
+                transcriptionVerified: Boolean(uploaded.transcripcion_verificada)
               };
             }
             return s;
@@ -407,7 +432,7 @@ export default function ProjectWorkspace({
             name: updatedName,
             sources: finalSources
           });
-          return;
+          return finalSources.find((source) => source.name === newSource.name || source.id === newSource.id);
         }
       } catch (err) {
         console.warn("[Workspace] Error subiendo fuente al backend:", err);
@@ -427,6 +452,7 @@ export default function ProjectWorkspace({
       name: updatedName,
       sources: finalizedSources
     });
+    return finalizedSources.find((source) => source.name === newSource.name || source.id === newSource.id);
   };
 
   const handleDeleteSource = async (sourceId) => {
@@ -537,7 +563,7 @@ export default function ProjectWorkspace({
       let aiResult = null;
       if (backendId) {
         try {
-          aiResult = await processWithAiApi(backendId, insumoBruto, '', providerToUse);
+          aiResult = await processWithAiApi(backendId, insumoBruto, '', providerToUse, null, 'requisitos');
         } catch (errAi) {
           console.error("[Workspace] Error en procesamiento con IA:", errAi.message);
           alert(`⚠️ ${errAi.message}`);
@@ -568,7 +594,8 @@ export default function ProjectWorkspace({
         }
       }
 
-      let { reqs, diags } = transformAiOutput(aiResult, updatedName, project.diagrams);
+      let { reqs } = transformAiOutput(aiResult, updatedName, project.diagrams);
+      let diags = {};
 
       if (!reqs?.functional?.length) {
         reqs = {
@@ -643,7 +670,7 @@ export default function ProjectWorkspace({
         };
       }
 
-      if (!diags?.useCase) {
+      if (aiResult?.objetivo !== "requisitos" && !diags?.useCase) {
         diags = {
           useCase: {
             id: "diag-uc",
@@ -713,17 +740,22 @@ export default function ProjectWorkspace({
           },
           navigationTree: {
             id: "diag-nav",
-            title: "Árbol de Navegación del Sistema (WBS)",
+            title: "Árbol de Navegación del Sistema",
             type: "navegacion",
             plantumlCode: generateDefaultPuml("navigationTree", updatedName),
             code: `graph TD
-    Inicio["Login / Autenticación"] --> Dashboard["Tablero Principal"]
-    Dashboard --> ModOperativo["Módulo de Operación"]
+    Inicio["Inicio de Sesión"] --> Recuperacion["Recuperación de Contraseña"]
+    Inicio --> Dashboard["Panel Principal"]
+    Dashboard --> ModPedidos["Módulo de Pedidos"]
+    ModPedidos --> ListadoPedidos["Listado de Pedidos"]
+    ModPedidos --> DetallePedido["Detalle de Pedido"]
     Dashboard --> ModDespacho["Módulo de Despacho"]
-    Dashboard --> ModCaja["Módulo de Liquidación"]
-    Dashboard --> ModReportes["Módulo de Auditoría"]
+    ModDespacho --> ListadoDespachos["Listado de Despachos"]
+    Dashboard --> Administracion["Administración"]
+    Administracion --> Usuarios["Gestión de Usuarios"]
+    Administracion --> Configuracion["Configuración del Sistema"]
 `,
-            description: "Estructura jerárquica de pantallas del sistema en WBS."
+            description: "Mapa jerárquico de pantallas y rutas de navegación del sistema."
           }
         };
       }
@@ -745,8 +777,12 @@ export default function ProjectWorkspace({
         sources: uniqueSources,
         isProcessed: true,
         currentPhase: 1, // Desbloquea la Fase 1
+        isAnalysisApproved: false,
+        isDiagramsApproved: false,
+        isMockupsApproved: false,
         requirements: reqs,
-        diagrams: diags
+        diagrams: {},
+        mockups: []
       });
     } catch (err) {
       console.error("[Workspace] Error procesando con IA:", err);
@@ -757,34 +793,144 @@ export default function ProjectWorkspace({
 
   const handleApproveAnalysis = async () => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
-    if (backendId) {
-      try {
-        await approvePhaseApi(backendId, "analisis");
-      } catch (e) {
-        console.warn("[Workspace] Error aprobando análisis en backend:", e);
-      }
+    if (!backendId) {
+      alert("No se encontró el proyecto persistido. Guarda o reprocesa las fuentes antes de aprobar los requisitos.");
+      return { success: false, error: "Proyecto no persistido" };
     }
-    onUpdateProject({
-      ...project,
-      isAnalysisApproved: true,
-      currentPhase: 2 // Avanza a Fase 2 (Diagramas)
-    });
+    setIsGeneratingDiagrams(true);
+    let approvalCompleted = Boolean(project.isAnalysisApproved);
+    try {
+      const latestRequirements = [
+        ...(project.requirements?.functional || []).map((requirement, index) => ({
+          ...requirement,
+          tipo: 'RF',
+          identificador: requirement.identificador || requirement.id || `RF-${String(index + 1).padStart(2, '0')}`
+        })),
+        ...(project.requirements?.nonFunctional || []).map((requirement, index) => ({
+          ...requirement,
+          tipo: 'RNF',
+          identificador: requirement.identificador || requirement.id || `RNF-${String(index + 1).padStart(2, '0')}`
+        }))
+      ];
+      const syncResult = await syncProjectRequirementsApi(backendId, latestRequirements);
+      if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de generar los diagramas.");
+      await approvePhaseApi(backendId, "analisis");
+      approvalCompleted = true;
+      const aiResult = await processWithAiApi(backendId, '', '', selectedAiProvider || 'auto', null, 'diagramas');
+      const { diags } = transformAiOutput(aiResult, project.name, {});
+      if (!diags?.useCase || !diags?.architecture || !diags?.classDiagram || !diags?.navigationTree) {
+        throw new Error("La generación no devolvió todos los diagramas requeridos.");
+      }
+      onUpdateProject({
+        ...project,
+        isAnalysisApproved: true,
+        currentPhase: 2,
+        diagrams: diags
+      });
+      return { success: true };
+    } catch (e) {
+      console.warn("[Workspace] Error generando diagramas después de aprobar requisitos:", e);
+      onUpdateProject({ ...project, isAnalysisApproved: approvalCompleted, currentPhase: 1, diagrams: {} });
+      alert(`${approvalCompleted ? "Los requisitos fueron aprobados, pero no se pudieron generar los diagramas." : "No se pudieron aprobar los requisitos."} Puedes reintentar desde esta pantalla.\n\n${e.message}`);
+      return { success: false, error: e.message };
+    } finally {
+      setIsGeneratingDiagrams(false);
+    }
   };
 
   const handleApproveDiagrams = async () => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
     if (backendId) {
       try {
-        await approvePhaseApi(backendId, "diseno");
+        await approvePhaseApi(backendId, "diagramas");
       } catch (e) {
         console.warn("[Workspace] Error aprobando diseño en backend:", e);
+        return { success: false, error: e.message };
+      }
+    }
+    setIsSourcesCollapsed(true);
+    onUpdateProject({
+      ...project,
+      isDiagramsApproved: true,
+      currentPhase: 2
+    });
+    return { success: true };
+  };
+
+  const handleUpdateSource = async (sourceId, changes) => {
+    const source = (project.sources || []).find((item) => item.id === sourceId);
+    if (!source) throw new Error("No se encontró la fuente que deseas actualizar.");
+    const backendSourceId = source.backendId || source.id;
+    if (!backendSourceId || backendSourceId.startsWith("src-")) {
+      throw new Error("Espera a que la fuente termine de cargarse antes de guardar sus detalles.");
+    }
+
+    const payload = {
+      categoria: changes.category,
+      tipo_contenido: changes.contentType,
+      descripcion: changes.description,
+      autor_origen: changes.authorOrigin,
+      fecha_documento: changes.documentDate,
+      etiquetas: changes.tags,
+      texto_transcrito: changes.contentSnippet,
+      transcripcion_verificada: changes.transcriptionVerified,
+      metadatos_generados_ia: changes.aiMetadata
+    };
+    const saved = await updateFuenteApi(backendSourceId, payload);
+    const updatedSources = (project.sources || []).map((item) => item.id === sourceId ? {
+      ...item,
+      category: saved.categoria,
+      contentType: saved.tipo_contenido,
+      description: saved.descripcion,
+      authorOrigin: saved.autor_origen,
+      documentDate: saved.fecha_documento,
+      tags: saved.etiquetas || [],
+      contentSnippet: saved.texto_transcrito || "",
+      transcriptionVerified: Boolean(saved.transcripcion_verificada),
+      aiMetadata: Boolean(saved.metadatos_generados_ia)
+    } : item);
+    onUpdateProject({ ...project, sources: updatedSources });
+    return updatedSources.find((item) => item.id === sourceId);
+  };
+
+  const handleSuggestSourceMetadata = async (sourceId) => {
+    const source = (project.sources || []).find((item) => item.id === sourceId);
+    const backendSourceId = source?.backendId || source?.id;
+    if (!backendSourceId || backendSourceId.startsWith("src-")) {
+      throw new Error("Espera a que la fuente termine de cargarse para usar el rellenado con IA.");
+    }
+    const suggestion = await suggestFuenteMetadataApi(backendSourceId, selectedAiProvider);
+    return {
+      category: suggestion.categoria,
+      contentType: suggestion.tipo_contenido,
+      description: suggestion.descripcion,
+      authorOrigin: suggestion.autor_origen,
+      documentDate: suggestion.fecha_documento,
+      tags: suggestion.etiquetas || [],
+      aiMetadata: Boolean(suggestion.generado_por_ia)
+    };
+  };
+
+  const handleApproveMockups = async () => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!project.mockups?.length) {
+      return { success: false, error: "Genera al menos un mockup antes de aprobar esta fase." };
+    }
+    if (backendId) {
+      try {
+        await approvePhaseApi(backendId, "mockups");
+      } catch (e) {
+        console.warn("[Workspace] Error aprobando mockups en backend:", e);
+        return { success: false, error: e.message };
       }
     }
     onUpdateProject({
       ...project,
       isDiagramsApproved: true,
-      currentPhase: 3 // Avanza a Fase 3 (Documento)
+      isMockupsApproved: true,
+      currentPhase: 3
     });
+    return { success: true };
   };
 
   const handleApplyAiCorrection = async (phase, promptText, diagKey) => {
@@ -844,7 +990,8 @@ export default function ProjectWorkspace({
 
     if (backendId) {
       try {
-        const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional);
+        const objetivo = phase === "diagrams" ? "diagramas" : "requisitos";
+        const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo);
         if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
           const { reqs, diags } = transformAiOutput(aiResult, project.name, project.diagrams);
 
@@ -861,7 +1008,13 @@ export default function ProjectWorkspace({
               functional: reqs?.functional || project.requirements?.functional || [],
               nonFunctional: cleanedRNF
             },
-            diagrams: diags || project.diagrams
+            diagrams: phase === "diagrams" ? (diags || project.diagrams) : {},
+            ...(phase === "diagrams" ? {} : {
+              isAnalysisApproved: false,
+              isDiagramsApproved: false,
+              isMockupsApproved: false,
+              mockups: []
+            })
           });
           return { success: true };
         } else {
@@ -933,12 +1086,16 @@ export default function ProjectWorkspace({
       <SourcesPanel
         sources={project.sources || []}
         onAddSource={handleAddSource}
+        onUpdateSource={handleUpdateSource}
+        onSuggestSourceMetadata={handleSuggestSourceMetadata}
         onDeleteSource={handleDeleteSource}
         onProcess={(prov) => handleProcess(prov)}
         selectedProvider={selectedAiProvider}
         onSelectProvider={setSelectedAiProvider}
         availableProviders={availableProviders}
-        isProcessing={isProcessing}
+        collapsed={isSourcesCollapsed}
+        onToggleCollapsed={() => setIsSourcesCollapsed(value => !value)}
+        isProcessing={isProcessing || isGeneratingDiagrams}
         isProcessed={project.isProcessed}
         projectName={project.name}
         onUpdateProjectName={handleUpdateProjectName}
@@ -953,19 +1110,23 @@ export default function ProjectWorkspace({
 
       {/* SECCIÓN DERECHA: Contenido Organizado con Máximo Espacio de Visualización */}
       <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0">
-        {isProcessing ? (
+        {isProcessing || isGeneratingDiagrams ? (
           /* Efecto Gemini en procesamiento */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
             <div className="w-full flex flex-col items-center space-y-4">
               <div className="w-48 h-48 rounded-full gemini-aura-glow absolute -z-10 pointer-events-none"></div>
               <h3 className="text-base font-semibold gemini-gradient-text tracking-normal">
-                {project.isProcessed ? "Reprocesando insumos y actualizando especificación..." : "Generando especificación y modelado..."}
+                {isGeneratingDiagrams
+                  ? "Requisitos aprobados. Generando diagramas..."
+                  : project.isProcessed ? "Reprocesando insumos y actualizando requisitos..." : "Generando especificación de requisitos..."}
               </h3>
               <div className="w-56 h-1.5 rounded-full gemini-wave-bar shadow-xs"></div>
               <p className="text-xs text-slate-400 font-normal">
-                {project.isProcessed
-                  ? "Analizando nuevos insumos y actualizando requerimientos y modelado con IA"
-                  : "Extrayendo requerimientos del sistema y modelando diagramas"}
+                {isGeneratingDiagrams
+                  ? "Construyendo casos de uso, arquitectura, clases y árbol de navegación desde los requisitos definitivos"
+                  : project.isProcessed
+                    ? "Analizando nuevos insumos y actualizando únicamente los requisitos"
+                    : "Extrayendo y estructurando los requisitos del sistema para su revisión"}
               </p>
 
               <div className="w-full max-w-sm mt-4 space-y-2.5">
@@ -1038,8 +1199,13 @@ export default function ProjectWorkspace({
                 });
               }
             }}
-            onApprovePhase={handleApproveDiagrams}
-            onBackToAnalysis={() => onUpdateProject({ ...project, currentPhase: 1 })}
+            onApproveDiagrams={handleApproveDiagrams}
+            onApproveMockups={handleApproveMockups}
+            isDiagramsApproved={Boolean(project.isDiagramsApproved)}
+            onBackToAnalysis={() => {
+              setIsSourcesCollapsed(false);
+              onUpdateProject({ ...project, currentPhase: 1 });
+            }}
             onApplyAiCorrection={(prompt, diagKey) => handleApplyAiCorrection("diagrams", prompt, diagKey)}
             projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}
             requirements={project.requirements}

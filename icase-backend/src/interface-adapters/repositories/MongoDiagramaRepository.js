@@ -12,6 +12,8 @@ class MongoDiagramaRepository extends IDiagramaRepository {
       codigo_plantuml: diag.codigo_plantuml || diag.codigo_puml || '',
       aprobado: diag.aprobado,
       trazabilidad_rnf: diag.trazabilidad_rnf,
+      requisitos_relacionados: diag.requisitos_relacionados || [],
+      versiones_origen: diag.versiones_origen || {},
       descripcion_jerarquica: diag.descripcion_jerarquica || []
     });
     const guardado = await nuevo.save();
@@ -28,6 +30,8 @@ class MongoDiagramaRepository extends IDiagramaRepository {
       codigo_plantuml: diag.codigo_plantuml || diag.codigo_puml || '',
       aprobado: diag.aprobado,
       trazabilidad_rnf: diag.trazabilidad_rnf,
+      requisitos_relacionados: diag.requisitos_relacionados || [],
+      versiones_origen: diag.versiones_origen || {},
       descripcion_jerarquica: diag.descripcion_jerarquica || []
     }));
     const guardados = await DiagramaModel.insertMany(docs);

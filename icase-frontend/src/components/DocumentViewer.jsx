@@ -29,7 +29,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
     : [
         `Realizar el análisis formal de requisitos funcionales y no funcionales cuantificables para ${project.name || "el sistema"}.`,
         `Diseñar los casos de uso fundamentales y el modelo de clases de dominio con tipado estricto.`,
-        `Modelar la arquitectura de software de alta disponibilidad con tolerancia a fallos y el árbol jerárquico de navegación.`
+        `Modelar la arquitectura de software de alta disponibilidad con tolerancia a fallos y el mapa de pantallas y rutas de navegación.`
       ];
 
   const resumenTexto = project.resumenEjecutivo || project.resumen_ejecutivo || project.description ||
@@ -409,7 +409,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               8.3 Árbol de Navegación
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
-              {project.diagrams?.navigationTree?.description || "Organiza la navegación jerárquica de la solución estructurada en fases de operación y módulos de control."}
+              {project.diagrams?.navigationTree?.description || "Mapa de pantallas y rutas de navegación de la solución, desde el portal de acceso y el panel principal hasta las vistas de cada módulo."}
             </p>
             <StaticDiagram
               code={project.diagrams?.navigationTree?.code}

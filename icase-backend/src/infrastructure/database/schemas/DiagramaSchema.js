@@ -1,4 +1,15 @@
 const mongoose = require('mongoose');
+const {
+  DIAGRAM_TYPE_VALUES,
+  LEGACY_DIAGRAM_TYPES
+} = require('../../../core/constants/DiagramTypes');
+
+const AUXILIARY_DIAGRAM_TYPES = ['er', 'secuencia', 'actividad'];
+const ACCEPTED_DIAGRAM_TYPES = [
+  ...DIAGRAM_TYPE_VALUES,
+  ...Object.keys(LEGACY_DIAGRAM_TYPES),
+  ...AUXILIARY_DIAGRAM_TYPES
+];
 
 const DiagramaSchema = new mongoose.Schema({
   proyecto_id: {
@@ -9,7 +20,7 @@ const DiagramaSchema = new mongoose.Schema({
   },
   tipo: {
     type: String,
-    enum: ['casos_de_uso', 'clases', 'er', 'arquitectura', 'arbol_navegacion', 'secuencia', 'actividad'],
+    enum: ACCEPTED_DIAGRAM_TYPES,
     required: true
   },
   titulo: {
@@ -38,6 +49,15 @@ const DiagramaSchema = new mongoose.Schema({
   trazabilidad_rnf: {
     type: [String],
     default: []
+  },
+  requisitos_relacionados: {
+    type: [String],
+    default: []
+  },
+  versiones_origen: {
+    type: Map,
+    of: Number,
+    default: {}
   },
   descripcion_jerarquica: {
     type: [String],

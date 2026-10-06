@@ -1,6 +1,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const AiModelConfig = require('./AiModelConfig');
 
 class MockupIaService {
   constructor() {
@@ -9,6 +10,15 @@ class MockupIaService {
     this.groqApiKey = process.env.GROQ_API_KEY || '';
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
     this.promptsDir = path.join(__dirname, '../prompts');
+    this.providerOrder = AiModelConfig.mockups.providerOrder();
+    this.models = {
+      gemini: AiModelConfig.mockups.gemini(),
+      groq: AiModelConfig.mockups.groq(),
+      openrouter: AiModelConfig.mockups.openrouter()
+    };
+    this.circuitos = new Map();
+    this.failureThreshold = Number(process.env.MOCKUP_CIRCUIT_FAILURES || 2);
+    this.cooldownMs = Number(process.env.MOCKUP_CIRCUIT_COOLDOWN_MS || 300000);
   }
 
   leerPrompt(archivo) {
@@ -21,31 +31,27 @@ class MockupIaService {
   }
 
   async generarMockups({ contextoProyecto, pantallas = [], insumoAdicional = '' }) {
-    const promptBase = this.leerPrompt('disenador_mockups.md');
+    const promptBase = this.leerPrompt(process.env.MOCKUP_PROMPT_FILE || 'disenador_mockups_compacto.md');
     const promptCompleto = this._construirPromptCompleto(promptBase, contextoProyecto, pantallas, insumoAdicional);
 
     let resultado = null;
     let proveedorUsado = null;
     const advertencias = [];
 
-    resultado = await this._intentarGemini(promptCompleto);
-    if (resultado) {
-      proveedorUsado = 'gemini';
-    } else {
-      advertencias.push('Gemini no devolvió respuesta válida, probando Groq...');
-      resultado = await this._intentarGroq(promptCompleto);
-      if (resultado) {
-        proveedorUsado = 'groq';
-      } else {
-        advertencias.push('Groq no devolvió respuesta válida, probando OpenRouter (modelo gratuito)...');
-        resultado = await this._intentarOpenRouter(promptCompleto);
-        if (resultado) {
-          proveedorUsado = 'openrouter';
-        } else {
-          advertencias.push('Todos los proveedores fallaron. Devolviendo array vacío.');
-        }
+    const tokensEstimados = this._estimarTokens(promptCompleto);
+    advertencias.push(`Prompt estimado: ${tokensEstimados} tokens de entrada`);
+
+    for (const proveedor of this._ordenProveedores()) {
+      const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados);
+      advertencias.push(...intento.advertencias);
+      if (intento.texto) {
+        resultado = intento.texto;
+        proveedorUsado = `${proveedor}:${intento.modelo}`;
+        break;
       }
     }
+
+    if (!resultado) advertencias.push('Todos los proveedores configurados fallaron o estaban temporalmente bloqueados.');
 
     const mockupsParseados = this._parsearTolerante(resultado);
     const mockupsValidos = mockupsParseados.filter(m => this._mockupValido(m));
@@ -55,19 +61,167 @@ class MockupIaService {
     }
 
     return {
-      mockups: mockupsValidos.slice(0, 6),
+      mockups: mockupsValidos,
       proveedorUsado,
       advertencias
     };
   }
 
+  async sugerirPaleta({ nombreProyecto, descripcion = '' }) {
+    const prompt = `Actúa como diseñador UI. Sugiere una paleta accesible y profesional para el sistema "${nombreProyecto}" (${String(descripcion).slice(0, 500)}). Responde SOLO JSON estricto con esta forma: {"nombre":"...","colores":{"primario":"#RRGGBB","primario_oscuro":"#RRGGBB","secundario":"#RRGGBB","fondo":"#RRGGBB","superficie":"#RRGGBB","texto":"#RRGGBB","exito":"#RRGGBB","alerta":"#RRGGBB","error":"#RRGGBB"}}. Asegura contraste WCAG AA entre texto/fondo y texto/superficie.`;
+    const tokens = this._estimarTokens(prompt);
+    for (const proveedor of this._ordenProveedores()) {
+      const intento = await this._intentarProveedor(proveedor, prompt, tokens);
+      if (!intento.texto) continue;
+      try {
+        const limpio = intento.texto.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const parsed = JSON.parse(limpio.slice(limpio.indexOf('{'), limpio.lastIndexOf('}') + 1));
+        const colores = parsed?.colores || {};
+        const claves = ['primario', 'primario_oscuro', 'secundario', 'fondo', 'superficie', 'texto', 'exito', 'alerta', 'error'];
+        if (claves.every(k => /^#[0-9a-f]{6}$/i.test(colores[k] || ''))) {
+          return { nombre: parsed.nombre || 'Sugerencia IA', origen: 'ia', version: 1, colores };
+        }
+      } catch (error) {
+        console.warn('[MockupIaService] Paleta IA inválida:', error.message);
+      }
+    }
+    throw new Error('Ningún proveedor pudo sugerir una paleta válida en este momento.');
+  }
+
+  _ordenProveedores() {
+    if (!this.provider || this.provider === 'auto') return this.providerOrder;
+    return [this.provider, ...this.providerOrder.filter(p => p !== this.provider)];
+  }
+
+  _estimarTokens(texto) {
+    return Math.ceil(String(texto || '').length / 4);
+  }
+
+  _circuitoDisponible(clave) {
+    const estado = this.circuitos.get(clave);
+    if (!estado) return true;
+    if (estado.permanente) return false;
+    if (estado.abiertoHasta > Date.now()) return false;
+    if (estado.abiertoHasta) this.circuitos.delete(clave);
+    return true;
+  }
+
+  _registrarFallo(clave, clasificacion) {
+    const previo = this.circuitos.get(clave) || { fallos: 0 };
+    const permanente = ['modelo_no_disponible', 'autenticacion'].includes(clasificacion.tipo);
+    const fallos = previo.fallos + 1;
+    const debeAbrir = permanente || clasificacion.tipo === 'cuota' || fallos >= this.failureThreshold;
+    this.circuitos.set(clave, {
+      fallos,
+      permanente,
+      abiertoHasta: debeAbrir
+        ? Date.now() + (clasificacion.reintentarEnMs || this.cooldownMs)
+        : 0
+    });
+  }
+
+  _clasificarError(error) {
+    const status = error.response?.status;
+    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    if (status === 401 || status === 403) return { tipo: 'autenticacion', reintentable: false };
+    if (status === 404 || /no longer available|does not exist|not found|unavailable for free/.test(mensaje)) {
+      return { tipo: 'modelo_no_disponible', reintentable: false };
+    }
+    if (status === 429 || /quota|rate limit|high demand|resource exhausted/.test(mensaje)) {
+      const minutos = mensaje.match(/retry in (\d+)m/);
+      return { tipo: 'cuota', reintentable: true, reintentarEnMs: minutos ? Number(minutos[1]) * 60000 : this.cooldownMs };
+    }
+    if (/request too large|context|tokens per minute|tpm/.test(mensaje)) {
+      return { tipo: 'limite_contexto', reintentable: false };
+    }
+    return { tipo: 'transitorio', reintentable: true };
+  }
+
+  async _intentarProveedor(proveedor, prompt, tokensEstimados) {
+    const advertencias = [];
+    const modelos = this.models[proveedor] || [];
+    if (modelos.length === 0) return { texto: null, modelo: null, advertencias: [`${proveedor}: sin modelos configurados`] };
+    const tieneCredencial = proveedor === 'gemini'
+      ? Boolean(this.geminiApiKey)
+      : proveedor === 'groq'
+        ? Boolean(this.groqApiKey)
+        : Boolean(this.openrouterApiKey);
+    if (!tieneCredencial) {
+      return { texto: null, modelo: null, advertencias: [`${proveedor}: proveedor omitido porque no tiene credencial configurada`] };
+    }
+
+    if (proveedor === 'groq') {
+      const presupuesto = Number(process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000);
+      if (tokensEstimados > presupuesto) {
+        return { texto: null, modelo: null, advertencias: [`Groq omitido: entrada estimada ${tokensEstimados} > presupuesto ${presupuesto}`] };
+      }
+    }
+
+    for (const modelo of modelos) {
+      const clave = `${proveedor}:${modelo}`;
+      if (!this._circuitoDisponible(clave)) {
+        advertencias.push(`${clave} omitido por circuit breaker`);
+        continue;
+      }
+      try {
+        console.log(`[MockupIaService] Generando con ${clave} (~${tokensEstimados} tokens de entrada)...`);
+        const texto = await this._solicitar(proveedor, modelo, prompt);
+        if (texto) {
+          this.circuitos.delete(clave);
+          return { texto, modelo, advertencias };
+        }
+      } catch (error) {
+        const clasificacion = this._clasificarError(error);
+        this._registrarFallo(clave, clasificacion);
+        const mensaje = error.response?.data?.error?.message || error.message;
+        console.warn(`[MockupIaService] ${clave} falló (${clasificacion.tipo}):`, mensaje);
+        advertencias.push(`${clave}: ${clasificacion.tipo}`);
+        if (clasificacion.tipo === 'autenticacion') break;
+      }
+    }
+    return { texto: null, modelo: null, advertencias };
+  }
+
+  async _solicitar(proveedor, modelo, prompt) {
+    if (proveedor === 'gemini') {
+      if (!this.geminiApiKey) throw Object.assign(new Error('GEMINI_API_KEY no configurada'), { response: { status: 401 } });
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${this.geminiApiKey}`;
+      const res = await axios.post(url, {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 12000, responseMimeType: 'application/json' }
+      }, { timeout: 90000 });
+      return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    }
+
+    const apiKey = proveedor === 'groq' ? this.groqApiKey : this.openrouterApiKey;
+    if (!apiKey) throw Object.assign(new Error(`${proveedor.toUpperCase()} API key no configurada`), { response: { status: 401 } });
+    const url = proveedor === 'groq'
+      ? 'https://api.groq.com/openai/v1/chat/completions'
+      : 'https://openrouter.ai/api/v1/chat/completions';
+    const maxTokens = proveedor === 'groq'
+      ? Number(process.env.GROQ_MOCKUP_MAX_OUTPUT_TOKENS || 4800)
+      : Number(process.env.OPENROUTER_MOCKUP_MAX_OUTPUT_TOKENS || 8000);
+    const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+    if (proveedor === 'openrouter') Object.assign(headers, { 'HTTP-Referer': 'https://icase.app', 'X-Title': 'I-CASE Mockups' });
+    const res = await axios.post(url, {
+      model: modelo,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+      temperature: 0.3
+    }, { headers, timeout: 90000 });
+    return res.data?.choices?.[0]?.message?.content || null;
+  }
+
   _construirPromptCompleto(promptBase, contextoProyecto, pantallas, insumoAdicional) {
     let prompt = promptBase;
 
-    prompt = prompt.replace('{{CONTEXTO_PROYECTO}}', contextoProyecto || 'Sin contexto previo.');
+    prompt = prompt.split('{{CONTEXTO_PROYECTO}}').join(contextoProyecto || 'Sin contexto previo.');
 
     if (pantallas.length > 0) {
       prompt += `\n\nPANTALLAS SOLICITADAS EXPLÍCITAMENTE (genera SOLO estas, en este orden):\n${pantallas.map(p => `- ${p}`).join('\n')}`;
+    } else {
+      prompt += `\n\nSIN PANTALLAS SOLICITADAS: sigue el listado "PANTALLAS A DISEÑAR" derivado del Árbol de Navegación, respetando su orden. No substitutes ese listado por los Requerimientos Funcionales.`;
     }
 
     if (insumoAdicional) {
@@ -77,127 +231,6 @@ class MockupIaService {
     prompt += '\n\nRECUERDA: Devuelve SOLO el JSON estricto con la clave "mockups". Sin texto extra, sin markdown, sin explicaciones.';
 
     return prompt;
-  }
-
-  async _intentarGemini(prompt) {
-    if (!this.geminiApiKey) {
-      console.warn('[MockupIaService] GEMINI_API_KEY no configurada');
-      return null;
-    }
-
-    const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
-
-    for (const modelName of modelos) {
-      try {
-        console.log(`[MockupIaService] Generando mockups con Google Gemini (${modelName})...`);
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.geminiApiKey}`;
-
-        const res = await axios.post(
-          url,
-          {
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.35,
-              maxOutputTokens: 32768,
-              responseMimeType: 'application/json'
-            }
-          },
-          { timeout: 90000 }
-        );
-
-        const rawText = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawText) {
-          console.log(`[MockupIaService] Generación exitosa con Google Gemini (${modelName})`);
-          return rawText;
-        }
-      } catch (err) {
-        console.warn(`[MockupIaService] Gemini (${modelName}) falló:`, err.response?.data?.error?.message || err.message);
-      }
-    }
-    return null;
-  }
-
-  async _intentarGroq(prompt) {
-    if (!this.groqApiKey) {
-      console.warn('[MockupIaService] GROQ_API_KEY no configurada');
-      return null;
-    }
-
-    const modelosGroq = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b'];
-    for (const model of modelosGroq) {
-      try {
-        console.log(`[MockupIaService] Generando mockups con Groq (${model})...`);
-        const url = 'https://api.groq.com/openai/v1/chat/completions';
-
-        const res = await axios.post(
-          url,
-          {
-            model: model,
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: 16000,
-            response_format: { type: 'json_object' },
-            temperature: 0.35
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${this.groqApiKey}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 90000
-          }
-        );
-
-        const content = res.data?.choices?.[0]?.message?.content;
-        if (content) {
-          console.log(`[MockupIaService] Generación exitosa con Groq (${model})`);
-          return content;
-        }
-      } catch (err) {
-        console.warn(`[MockupIaService] Groq (${model}) falló:`, err.response?.data?.error?.message || err.message);
-      }
-    }
-    return null;
-  }
-
-  async _intentarOpenRouter(prompt) {
-    if (!this.openrouterApiKey) {
-      console.warn('[MockupIaService] OPENROUTER_API_KEY no configurada');
-      return null;
-    }
-
-    try {
-      console.log('[MockupIaService] Generando mockups con OpenRouter (qwen/qwen3.8-27b:free)...');
-      const url = 'https://openrouter.ai/api/v1/chat/completions';
-
-      const res = await axios.post(
-        url,
-        {
-          model: 'qwen/qwen3.8-27b:free',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 16000,
-          response_format: { type: 'json_object' },
-          temperature: 0.35
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.openrouterApiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://icase.app',
-            'X-Title': 'I-CASE Mockups'
-          },
-          timeout: 90000
-        }
-      );
-
-      const content = res.data?.choices?.[0]?.message?.content;
-      if (content) {
-        console.log('[MockupIaService] Generación exitosa con OpenRouter');
-        return content;
-      }
-    } catch (err) {
-      console.warn('[MockupIaService] OpenRouter falló:', err.response?.data?.error?.message || err.message);
-    }
-    return null;
   }
 
   _parsearTolerante(rawText) {

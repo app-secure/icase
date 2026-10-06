@@ -1,15 +1,18 @@
-import React, { useEffect, useState } from "react";
-import { ZoomIn, ZoomOut, RotateCcw, Copy, Check, Download, AlertCircle, RefreshCw, Maximize2, X, MoveHorizontal } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { ZoomIn, ZoomOut, RotateCcw, AlertCircle, RefreshCw, Maximize2, X, MoveHorizontal } from "lucide-react";
 import { getPlantUMLSvgUrl } from "../utils/plantumlEncoder";
 
 export default function PlantUMLViewer({ code, title }) {
+  const isNavigationTree = /^\s*@startwbs\b/i.test(code || "");
   const [svgUrl, setSvgUrl] = useState("");
   const [svgContent, setSvgContent] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [renderError, setRenderError] = useState(null);
-  const [copied, setCopied] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [diagramSize, setDiagramSize] = useState(null);
+  const canvasRef = useRef(null);
+  const autoFittedRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -24,6 +27,9 @@ export default function PlantUMLViewer({ code, title }) {
 
       setSvgUrl("");
       setSvgContent("");
+      setDiagramSize(null);
+      setZoom(1);
+      autoFittedRef.current = false;
       setIsLoading(true);
       setRenderError(null);
 
@@ -43,7 +49,9 @@ export default function PlantUMLViewer({ code, title }) {
                   setSvgContent("");
                 }
               } else {
-                if (isMounted) setSvgContent(text);
+                if (isMounted) {
+                  setSvgContent(text);
+                }
               }
             }
           }
@@ -79,24 +87,80 @@ export default function PlantUMLViewer({ code, title }) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isFullscreen]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleDownload = () => {
-    if (!svgUrl) return;
-    const link = document.createElement("a");
-    link.href = svgUrl;
-    link.download = `${title?.toLowerCase().replace(/\s+/g, "_") || "diagrama"}.svg`;
-    link.target = "_blank";
-    link.click();
-  };
-
   const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.15, 2.5));
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.15, 0.5));
   const handleResetZoom = () => setZoom(1);
+
+  const renderDiagram = (fullscreen = false) => {
+    if (!svgContent && !svgUrl) return null;
+
+    // Los diagramas UML convencionales conservan el renderizado SVG inline
+    // que ya funcionaba correctamente. El tratamiento especial se limita al WBS.
+    if (!isNavigationTree) {
+      return (
+        <div
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: "top left",
+            transition: "transform 0.15s ease-out"
+          }}
+          className="min-w-fit inline-block m-auto"
+        >
+          {svgContent ? (
+            <div
+              className={`[&_svg]:max-w-none [&_svg]:h-auto inline-block align-top ${fullscreen ? "bg-white p-4 rounded-xl shadow-xs border border-slate-200" : "drop-shadow-xs"}`}
+              dangerouslySetInnerHTML={{ __html: svgContent }}
+            />
+          ) : (
+            <img
+              src={svgUrl}
+              alt={title}
+              className={`max-w-none h-auto inline-block align-top ${fullscreen ? "bg-white p-4 rounded-xl shadow-xs border border-slate-200" : "drop-shadow-xs"}`}
+            />
+          )}
+        </div>
+      );
+    }
+
+    const scaledSize = diagramSize
+      ? { width: diagramSize.width * zoom, height: diagramSize.height * zoom }
+      : null;
+
+    return (
+      <div
+        className="relative shrink-0 mx-auto"
+        style={scaledSize ? scaledSize : undefined}
+      >
+        <div
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: "top left",
+            transition: "transform 0.15s ease-out",
+            position: scaledSize ? "absolute" : "relative",
+            top: 0,
+            left: 0
+          }}
+          className="inline-block"
+        >
+          <img
+            src={svgUrl}
+            alt={title}
+            onLoad={(event) => {
+              const naturalWidth = event.currentTarget.naturalWidth;
+              const naturalHeight = event.currentTarget.naturalHeight;
+              setDiagramSize({ width: naturalWidth, height: naturalHeight });
+              if (!fullscreen && !autoFittedRef.current && canvasRef.current && naturalWidth > 0) {
+                const availableWidth = Math.max(canvasRef.current.clientWidth - 32, 320);
+                setZoom(Math.max(0.5, Math.min(1, availableWidth / naturalWidth)));
+                autoFittedRef.current = true;
+              }
+            }}
+            className={`max-w-none h-auto inline-block align-top ${fullscreen ? "bg-white p-4 rounded-xl shadow-xs border border-slate-200" : "drop-shadow-xs"}`}
+          />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -148,7 +212,10 @@ export default function PlantUMLViewer({ code, title }) {
         </div>
 
         {/* Contenedor scrolleable horizontalmente y verticalmente sin cortes ni restricciones */}
-        <div className="relative flex-1 w-full overflow-x-auto overflow-y-auto max-h-[680px] p-4 bg-slate-50/60 custom-scrollbar flex items-start justify-center">
+        <div
+          ref={isNavigationTree ? canvasRef : null}
+          className={`relative flex-1 w-full overflow-auto max-h-[680px] p-4 bg-slate-50/60 custom-scrollbar ${isNavigationTree ? "" : "flex items-start justify-center"}`}
+        >
           {isLoading ? (
             <div className="flex flex-col items-center gap-3 text-slate-500 text-xs py-20 m-auto">
               <RefreshCw size={24} className="animate-spin text-blue-600" />
@@ -162,35 +229,8 @@ export default function PlantUMLViewer({ code, title }) {
                 <pre className="text-xs whitespace-pre-wrap">{renderError}</pre>
               </div>
             </div>
-          ) : svgContent ? (
-            <div
-              style={{
-                transform: `scale(${zoom})`,
-                transformOrigin: "top left",
-                transition: "transform 0.15s ease-out"
-              }}
-              className="min-w-fit inline-block m-auto"
-            >
-              <div
-                className="[&_svg]:max-w-none [&_svg]:h-auto inline-block align-top drop-shadow-xs"
-                dangerouslySetInnerHTML={{ __html: svgContent }}
-              />
-            </div>
-          ) : svgUrl ? (
-            <div
-              style={{
-                transform: `scale(${zoom})`,
-                transformOrigin: "top left",
-                transition: "transform 0.15s ease-out"
-              }}
-              className="min-w-fit inline-block m-auto"
-            >
-              <img
-                src={svgUrl}
-                alt={title}
-                className="max-w-none h-auto inline-block align-top drop-shadow-xs"
-              />
-            </div>
+          ) : svgContent || svgUrl ? (
+            renderDiagram()
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 text-slate-400 py-20 m-auto">
               <span className="text-sm font-medium text-slate-500">No hay diagrama disponible</span>
@@ -254,28 +294,8 @@ export default function PlantUMLViewer({ code, title }) {
             </div>
 
             {/* Canvas de Pantalla Completa con Scroll Libre */}
-            <div className="flex-1 overflow-auto p-6 bg-slate-50 flex items-start justify-center custom-scrollbar">
-              <div
-                style={{
-                  transform: `scale(${zoom})`,
-                  transformOrigin: "top left",
-                  transition: "transform 0.15s ease-out"
-                }}
-                className="min-w-fit inline-block m-auto"
-              >
-                {svgContent ? (
-                  <div
-                    className="[&_svg]:max-w-none [&_svg]:h-auto inline-block align-top bg-white p-4 rounded-xl shadow-xs border border-slate-200"
-                    dangerouslySetInnerHTML={{ __html: svgContent }}
-                  />
-                ) : svgUrl ? (
-                  <img
-                    src={svgUrl}
-                    alt={title}
-                    className="max-w-none h-auto inline-block align-top bg-white p-4 rounded-xl shadow-xs border border-slate-200"
-                  />
-                ) : null}
-              </div>
+            <div className={`flex-1 overflow-auto p-6 bg-slate-50 custom-scrollbar ${isNavigationTree ? "" : "flex items-start justify-center"}`}>
+              {renderDiagram(true)}
             </div>
           </div>
         </div>

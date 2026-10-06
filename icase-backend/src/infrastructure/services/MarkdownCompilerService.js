@@ -173,7 +173,7 @@ class MarkdownCompilerService {
     }
 
     // 8.2 Árbol de Navegación
-    md += `### 8.2 Árbol de Arquitectura de Navegación (WBS)\n\n`;
+    md += `### 8.2 Árbol de Navegación (Pantallas y Rutas)\n\n`;
     const navCode = diagramas.find((d) => d.tipo === 'arbol_navegacion')?.codigo_plantuml || diseno?.arbol_navegacion?.codigo_plantuml || diagramas.find((d) => d.tipo === 'arbol_navegacion')?.codigo_mermaid;
     if (navCode) {
       md += `\`\`\`plantuml\n${navCode}\n\`\`\`\n\n`;

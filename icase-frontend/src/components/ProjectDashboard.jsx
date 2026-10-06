@@ -1,20 +1,14 @@
  import React, { useState, useRef, useEffect } from "react";
 import {
   Plus,
-  FileText,
-  FileAudio,
-  FileCode,
   CheckCircle2,
   Trash2,
-  Clock,
-  FolderOpen,
   Search,
   ChevronDown,
   LayoutGrid,
   Menu,
   Check,
-  MoreVertical,
-  BookOpen
+  MoreVertical
 } from "lucide-react";
 
 export default function ProjectDashboard({
@@ -150,28 +144,12 @@ export default function ProjectDashboard({
     return result;
   }, [projects, searchQuery, sortBy]);
 
-  const getSourceIcon = (type) => {
-    switch (type) {
-      case "audio":
-        return <FileAudio size={13} className="text-amber-600 shrink-0" />;
-      case "pdf":
-        return <FileText size={13} className="text-red-500 shrink-0" />;
-      case "txt":
-      default:
-        return <FileCode size={13} className="text-[#6D8196] shrink-0" />;
-    }
-  };
-
   return (
-    <div className="flex-1 overflow-y-auto bg-gradient-to-br from-white via-[#FCF7FA] to-[#FDF2F8] p-6 md:p-10 select-text font-inter relative min-h-screen">
-      {/* Atmósfera elegante con tonos rosa y violeta del logo Orbix */}
-      <div className="absolute top-0 right-0 w-[550px] h-[450px] bg-gradient-to-b from-pink-200/25 via-purple-100/20 to-transparent rounded-full blur-3xl pointer-events-none -z-0" />
-      <div className="absolute top-48 left-0 w-[450px] h-[350px] bg-gradient-to-tr from-rose-100/30 via-violet-100/20 to-transparent rounded-full blur-3xl pointer-events-none -z-0" />
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#f43f5e06_1px,transparent_1px),linear-gradient(to_bottom,#7c3aed06_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none -z-0" />
+    <div className="flex-1 overflow-y-auto bg-[#FAF9FC] p-6 md:p-10 select-text font-inter relative min-h-screen">
 
       <div className="max-w-6xl mx-auto relative z-10">
         {/* Encabezado del Tablero con Filtros NotebookLM estilo Google */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-pink-100/80">
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[#E7E3EE]">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight font-inter">
               Mis Proyectos
@@ -225,7 +203,7 @@ export default function ProjectDashboard({
                 onClick={() => handleSetViewMode("grid")}
                 className={`px-3 py-1.5 rounded-l-full text-xs flex items-center gap-1.5 transition-all cursor-pointer font-inter ${
                   viewMode === "grid"
-                    ? "bg-[#e8f0fe] text-[#0b57d0] font-bold shadow-2xs"
+                    ? "bg-[#F2EDFF] text-[#6D28D9] font-bold shadow-2xs"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-normal"
                 }`}
                 title="Vista de cuadrícula"
@@ -242,7 +220,7 @@ export default function ProjectDashboard({
                 onClick={() => handleSetViewMode("table")}
                 className={`px-3 py-1.5 rounded-r-full text-xs flex items-center gap-1.5 transition-all cursor-pointer font-inter ${
                   viewMode === "table"
-                    ? "bg-[#e8f0fe] text-[#0b57d0] font-bold shadow-2xs"
+                    ? "bg-[#F2EDFF] text-[#6D28D9] font-bold shadow-2xs"
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-normal"
                 }`}
                 title="Vista de lista / tabla"
@@ -273,7 +251,7 @@ export default function ProjectDashboard({
                     }}
                     className={`w-full text-left px-3.5 py-2 text-xs md:text-sm transition-colors cursor-pointer flex items-center justify-between font-inter ${
                       sortBy === "recent"
-                        ? "text-slate-900 font-bold border-2 border-[#1a73e8] rounded-lg mx-1 w-[calc(100%-8px)] bg-blue-50/30"
+                        ? "text-slate-900 font-bold border-2 border-[#7C3AED] rounded-lg mx-1 w-[calc(100%-8px)] bg-[#F2EDFF]"
                         : "text-slate-700 hover:bg-slate-50 font-normal"
                     }`}
                   >
@@ -288,7 +266,7 @@ export default function ProjectDashboard({
                     }}
                     className={`w-full text-left px-3.5 py-2 text-xs md:text-sm transition-colors cursor-pointer flex items-center justify-between mt-1 font-inter ${
                       sortBy === "title"
-                        ? "text-slate-900 font-bold border-2 border-[#1a73e8] rounded-lg mx-1 w-[calc(100%-8px)] bg-blue-50/30"
+                        ? "text-slate-900 font-bold border-2 border-[#7C3AED] rounded-lg mx-1 w-[calc(100%-8px)] bg-[#F2EDFF]"
                         : "text-slate-700 hover:bg-slate-50 font-normal"
                     }`}
                   >
@@ -323,9 +301,9 @@ export default function ProjectDashboard({
             <button
               type="button"
               onClick={handleQuickCreate}
-              className="h-60 rounded-2xl border-2 border-dashed border-pink-200 hover:border-[#7C3AED] bg-white/80 hover:bg-white p-5 flex flex-col items-center justify-center text-center transition-all cursor-pointer group shadow-2xs hover:shadow-md font-inter backdrop-blur-xs"
+              className="h-60 rounded-2xl border-2 border-dashed border-[#D8D1E3] hover:border-[#7C3AED] bg-white hover:bg-[#FCFBFE] p-5 flex flex-col items-center justify-center text-center transition-all cursor-pointer group shadow-2xs hover:shadow-md font-inter"
             >
-              <div className="w-12 h-12 rounded-full bg-pink-50 group-hover:bg-[#7C3AED]/10 flex items-center justify-center text-[#7C3AED] transition-colors mb-3">
+              <div className="w-12 h-12 rounded-full bg-[#F2EDFF] group-hover:bg-[#E9DDFE] flex items-center justify-center text-[#7C3AED] transition-colors mb-3">
                 <Plus size={24} />
               </div>
               <span className="text-base font-bold text-slate-900 group-hover:text-[#7C3AED] transition-colors font-inter">
@@ -345,12 +323,12 @@ export default function ProjectDashboard({
               <div
                 key={proj.id}
                 onClick={() => onSelectProject(proj.id)}
-                className="h-60 bg-white/90 border border-pink-100 hover:border-[#7C3AED]/50 rounded-2xl p-5 flex flex-col justify-between transition-all cursor-pointer shadow-2xs hover:shadow-md group relative font-inter backdrop-blur-xs"
+                className="h-60 bg-white border border-[#E7E3EE] hover:border-[#A78BFA] rounded-2xl p-5 flex flex-col justify-between transition-all cursor-pointer shadow-2xs hover:shadow-md group relative font-inter"
               >
                 <div className="flex-1 flex items-center">
                   {/* Badge Aprobado en esquina superior izquierda */}
                   {proj.isAnalysisApproved && (
-                    <span className="absolute top-3.5 left-4 flex items-center gap-1 text-xs text-emerald-600 font-bold font-inter z-10">
+                    <span className="absolute top-3.5 left-4 flex items-center gap-1 text-xs text-[#4D7C0F] font-bold font-inter z-10">
                       <CheckCircle2 size={13} /> Aprobado
                     </span>
                   )}
@@ -388,9 +366,9 @@ export default function ProjectDashboard({
           </div>
         ) : (
           /* 2. VISTA TABLA (NotebookLM Table Style) */
-          <div className="bg-white/95 backdrop-blur-xs rounded-2xl border border-pink-100/90 shadow-2xs font-inter relative min-h-[140px]">
+          <div className="bg-white rounded-2xl border border-[#E7E3EE] shadow-2xs font-inter relative min-h-[140px]">
             {/* Cabecera de la tabla */}
-            <div className="grid grid-cols-12 px-6 py-3.5 border-b border-slate-200/80 text-xs md:text-sm font-bold text-slate-700 bg-pink-50/40 rounded-t-2xl font-inter">
+            <div className="grid grid-cols-12 px-6 py-3.5 border-b border-[#E7E3EE] text-xs md:text-sm font-bold text-slate-700 bg-[#F8F7FB] rounded-t-2xl font-inter">
               <div className="col-span-6 md:col-span-5 font-bold">Título</div>
               <div className="col-span-3 md:col-span-2 text-left font-bold">Fuentes</div>
               <div className="col-span-3 md:col-span-3 text-left font-bold">Creado</div>
@@ -408,7 +386,7 @@ export default function ProjectDashboard({
                 <div
                   key={proj.id}
                   onClick={() => onSelectProject(proj.id)}
-                  className={`grid grid-cols-12 px-6 py-4 border-b border-slate-100/90 last:border-b-0 hover:bg-pink-50/20 transition-colors cursor-pointer items-center text-xs md:text-sm text-slate-700 group relative font-inter ${
+                  className={`grid grid-cols-12 px-6 py-4 border-b border-slate-100/90 last:border-b-0 hover:bg-[#FAF9FC] transition-colors cursor-pointer items-center text-xs md:text-sm text-slate-700 group relative font-inter ${
                     isLast ? "rounded-b-2xl" : ""
                   }`}
                 >
@@ -462,7 +440,7 @@ export default function ProjectDashboard({
                             setActiveMenuProjectId(null);
                             onSelectProject(proj.id);
                           }}
-                          className="w-full text-left px-4 py-2 text-xs md:text-sm font-normal text-slate-700 hover:bg-pink-50/50 hover:text-[#7C3AED] cursor-pointer transition-colors"
+                          className="w-full text-left px-4 py-2 text-xs md:text-sm font-normal text-slate-700 hover:bg-[#F2EDFF] hover:text-[#7C3AED] cursor-pointer transition-colors"
                         >
                           Abrir
                         </button>

@@ -40,6 +40,12 @@ function buildFuenteRoutes(fuenteController) {
   router.get('/proyectos/:proyectoId/fuentes', (req, res) =>
     fuenteController.listar(req, res)
   );
+  router.patch('/fuentes/:id', (req, res) =>
+    fuenteController.actualizar(req, res)
+  );
+  router.post('/fuentes/:id/sugerir-metadatos', (req, res) =>
+    fuenteController.sugerirMetadatos(req, res)
+  );
   router.delete('/fuentes/:id', (req, res) =>
     fuenteController.eliminar(req, res)
   );

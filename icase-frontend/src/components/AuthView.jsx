@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Eye, EyeOff, Lock, Mail, User, Phone, Check, AlertCircle, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, User, Phone, AlertCircle, ArrowRight } from "lucide-react";
 import RbixLogo from "./RbixLogo";
 import { loginApi, registroApi, setAuthToken, setStoredUser } from "../services/api";
 

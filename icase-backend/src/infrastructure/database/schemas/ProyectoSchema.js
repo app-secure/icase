@@ -47,7 +47,17 @@ const ProyectoSchema = new mongoose.Schema({
   },
   estado_fase: {
     type: String,
-    enum: ['insumos_pendientes', 'analisis_pendiente', 'analisis_aprobado', 'diseno_pendiente', 'diseno_aprobado', 'finalizado'],
+    enum: [
+      'insumos_pendientes',
+      'analisis_pendiente',
+      'analisis_aprobado',
+      'diseno_pendiente',
+      'diagramas_aprobados',
+      'mockups_pendientes',
+      'mockups_aprobados',
+      'diseno_aprobado',
+      'finalizado'
+    ],
     default: 'insumos_pendientes'
   }
 }, {

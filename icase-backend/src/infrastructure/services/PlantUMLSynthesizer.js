@@ -6,7 +6,7 @@ class PlantUMLSynthesizer {
       { tipo: 'casos_de_uso', titulo: 'Diagrama de Casos de Uso (IEEE 830)' },
       { tipo: 'arquitectura', titulo: 'Diagrama de Arquitectura Técnica Integral (C4 Container)' },
       { tipo: 'clases', titulo: 'Diagrama de Clases del Dominio' },
-      { tipo: 'arbol_navegacion', titulo: 'Árbol de Navegación del Sistema (WBS)' }
+      { tipo: 'arbol_navegacion', titulo: 'Árbol de Navegación del Sistema' }
     ];
 
     return tiposRequeridos.map(cfg => {
@@ -15,7 +15,7 @@ class PlantUMLSynthesizer {
       const esValido = code && code.length > 20 && code.includes('@start');
 
       const fallbackMensaje = cfg.tipo === 'arbol_navegacion'
-        ? '@startwbs\n* No hay diagrama disponible\n@endwbs'
+        ? '@startwbs\n* Sistema\n** Portal de Acceso\n*** Inicio de Sesión\n** Panel Principal\n*** No hay diagrama de navegación disponible\n@endwbs'
         : '@startuml\nrectangle "No hay diagrama disponible"\n@enduml';
 
       return {

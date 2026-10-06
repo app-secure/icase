@@ -2,13 +2,15 @@ class Diagrama {
   constructor({
     id,
     proyecto_id,
-    tipo, // casos_de_uso, arquitectura, clases, er, arbol_navegacion, secuencia, actividad
+    tipo, // Usar los valores oficiales definidos en core/constants/DiagramTypes.
     titulo,
     descripcion = '',
     codigo_mermaid = '',
     codigo_plantuml = '',
     aprobado = false,
     trazabilidad_rnf = [],
+    requisitos_relacionados = [],
+    versiones_origen = {},
     descripcion_jerarquica = [],
     createdAt,
     updatedAt
@@ -22,6 +24,12 @@ class Diagrama {
     this.codigo_plantuml = codigo_plantuml;
     this.aprobado = aprobado;
     this.trazabilidad_rnf = Array.isArray(trazabilidad_rnf) ? trazabilidad_rnf : [trazabilidad_rnf].filter(Boolean);
+    this.requisitos_relacionados = Array.isArray(requisitos_relacionados)
+      ? requisitos_relacionados
+      : [requisitos_relacionados].filter(Boolean);
+    this.versiones_origen = versiones_origen && typeof versiones_origen === 'object'
+      ? versiones_origen
+      : {};
     this.descripcion_jerarquica = Array.isArray(descripcion_jerarquica) ? descripcion_jerarquica : (descripcion_jerarquica ? [descripcion_jerarquica] : []);
     this.createdAt = createdAt || new Date();
     this.updatedAt = updatedAt || new Date();

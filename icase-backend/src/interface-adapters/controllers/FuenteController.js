@@ -3,10 +3,56 @@ const fs = require('fs');
 const mongoose = require('mongoose');
 
 class FuenteController {
-  constructor({ fuenteRepository, proyectoRepository, fileIngestionService }) {
+  constructor({ fuenteRepository, proyectoRepository, fileIngestionService, modelosIaService }) {
     this.fuenteRepo = fuenteRepository;
     this.proyectoRepo = proyectoRepository;
     this.ingestionService = fileIngestionService;
+    this.modelosIaService = modelosIaService;
+  }
+
+  _categoriaDeArchivo({ tipo, nombreArchivo = '', mimetype = '' }) {
+    const ext = path.extname(nombreArchivo).toLowerCase();
+    if (tipo === 'audio') return ['.mp4', '.webm'].includes(ext) || mimetype.startsWith('video/') ? 'videos' : 'audios';
+    if (tipo === 'pdf' || ['.doc', '.docx', '.odt', '.rtf'].includes(ext)) return 'documentos';
+    if (tipo === 'texto' || ['.txt', '.md', '.csv', '.json'].includes(ext)) return 'textos';
+    return 'otros';
+  }
+
+  _tipoContenidoSugerido(fuente) {
+    const muestra = `${fuente.nombre_archivo || ''} ${fuente.texto_transcrito || ''}`.toLowerCase();
+    if (/entrevista|pregunta|respuesta|hablante|speaker/.test(muestra)) return 'Entrevista';
+    if (/reuni[oó]n|acta|minuta|acuerdos|asistentes/.test(muestra)) return 'Notas de reunión';
+    if (/requisito|especificaci[oó]n|debe|shall/.test(muestra)) return 'Especificación de requisitos';
+    if (fuente.tipo === 'audio') return 'Grabación de audio';
+    if (fuente.tipo === 'pdf') return 'Documento de referencia';
+    return 'Texto de referencia';
+  }
+
+  _normalizarEtiquetas(value) {
+    const items = Array.isArray(value) ? value : String(value || '').split(',');
+    return [...new Set(items.map((item) => String(item).trim()).filter(Boolean))].slice(0, 12);
+  }
+
+  _contextoFuente(fuente) {
+    const etiquetas = this._normalizarEtiquetas(fuente.etiquetas);
+    const metadatos = [
+      `Archivo: ${fuente.nombre_archivo}`,
+      `Categoría: ${fuente.categoria || this._categoriaDeArchivo({ tipo: fuente.tipo, nombreArchivo: fuente.nombre_archivo })}`,
+      `Tipo de contenido: ${fuente.tipo_contenido || 'Sin especificar'}`,
+      fuente.descripcion ? `Descripción aportada por el usuario: ${fuente.descripcion}` : '',
+      fuente.autor_origen ? `Autor u origen: ${fuente.autor_origen}` : '',
+      fuente.fecha_documento ? `Fecha del contenido: ${fuente.fecha_documento}` : '',
+      etiquetas.length ? `Etiquetas: ${etiquetas.join(', ')}` : '',
+      fuente.tipo === 'audio' ? `Transcripción revisada por el usuario: ${fuente.transcripcion_verificada ? 'sí' : 'no'}` : ''
+    ].filter(Boolean).join('\n');
+    return `[Fuente enriquecida]\n${metadatos}\n\n[Contenido extraído]\n${fuente.texto_transcrito || ''}`;
+  }
+
+  async _recalcularInsumoProyecto(proyectoId) {
+    if (!proyectoId) return;
+    const fuentes = await this.fuenteRepo.listarPorProyecto(proyectoId);
+    const insumoTotal = fuentes.map((fuente) => this._contextoFuente(fuente)).join('\n\n---\n\n');
+    await this.proyectoRepo.actualizar(proyectoId, { insumo_bruto: insumoTotal });
   }
 
   async subirYTranscribir(req, res) {
@@ -43,6 +89,7 @@ class FuenteController {
       } else if (isPdf) {
         tipo = 'pdf';
       }
+      const categoria = this._categoriaDeArchivo({ tipo, nombreArchivo, mimetype: mime });
 
       // Procesar e ingerir texto (transcripción para audios o extracción para PDFs)
       const textoExtraido = await this.ingestionService.procesarArchivo(file, tipo);
@@ -60,6 +107,7 @@ class FuenteController {
           tamanio: (file.size / 1024).toFixed(1) + ' KB',
           ruta_archivo: file.path,
           texto_transcrito: textoExtraido,
+          categoria,
           estado: 'transcrito'
         });
 
@@ -79,17 +127,14 @@ class FuenteController {
           tamanio: (file.size / 1024).toFixed(1) + ' KB',
           ruta_archivo: file.path,
           texto_transcrito: textoExtraido,
+          categoria,
+          tipo_contenido: this._tipoContenidoSugerido({ tipo, nombre_archivo: nombreArchivo, texto_transcrito: textoExtraido }),
           estado: 'transcrito'
         });
       }
 
       // Actualizar el insumo bruto del proyecto concatenando las fuentes únicas
-      const fuentesActualizadas = await this.fuenteRepo.listarPorProyecto(proyectoId);
-      const insumoTotal = fuentesActualizadas.map((f) => `[Fuente: ${f.nombre_archivo} (${f.tipo})]\n${f.texto_transcrito}`).join('\n\n');
-
-      await this.proyectoRepo.actualizar(proyectoId, {
-        insumo_bruto: insumoTotal
-      });
+      await this._recalcularInsumoProyecto(proyectoId);
 
       return res.status(200).json(fuente);
     } catch (err) {
@@ -104,6 +149,78 @@ class FuenteController {
       const fuentes = await this.fuenteRepo.listarPorProyecto(proyectoId);
       return res.json(fuentes);
     } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  async actualizar(req, res) {
+    try {
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ error: 'Identificador de fuente inválido' });
+      const existente = await this.fuenteRepo.obtenerPorId(id);
+      if (!existente) return res.status(404).json({ error: 'Fuente no encontrada' });
+
+      const permitidos = ['categoria', 'tipo_contenido', 'descripcion', 'autor_origen', 'fecha_documento', 'texto_transcrito', 'transcripcion_verificada'];
+      const cambios = {};
+      for (const campo of permitidos) {
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, campo)) cambios[campo] = req.body[campo];
+      }
+      if (cambios.categoria && !['textos', 'documentos', 'audios', 'videos', 'otros'].includes(cambios.categoria)) {
+        return res.status(400).json({ error: 'Categoría de fuente inválida' });
+      }
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, 'etiquetas')) cambios.etiquetas = this._normalizarEtiquetas(req.body.etiquetas);
+      if (Object.prototype.hasOwnProperty.call(cambios, 'transcripcion_verificada')) cambios.transcripcion_verificada = Boolean(cambios.transcripcion_verificada);
+      cambios.metadatos_generados_ia = Boolean(req.body?.metadatos_generados_ia);
+
+      const actualizada = await this.fuenteRepo.actualizar(id, cambios);
+      await this._recalcularInsumoProyecto(existente.proyecto_id);
+      return res.json(actualizada);
+    } catch (err) {
+      console.error('[FuenteController] Error actualizando fuente:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  async sugerirMetadatos(req, res) {
+    try {
+      const { id } = req.params;
+      const fuente = mongoose.Types.ObjectId.isValid(id) ? await this.fuenteRepo.obtenerPorId(id) : null;
+      if (!fuente) return res.status(404).json({ error: 'Fuente no encontrada' });
+
+      const fallback = {
+        categoria: fuente.categoria || this._categoriaDeArchivo({ tipo: fuente.tipo, nombreArchivo: fuente.nombre_archivo }),
+        tipo_contenido: fuente.tipo_contenido || this._tipoContenidoSugerido(fuente),
+        descripcion: fuente.descripcion || `Fuente ${fuente.nombre_archivo} utilizada como contexto para el levantamiento y validación de requisitos.`,
+        autor_origen: fuente.autor_origen || '',
+        fecha_documento: fuente.fecha_documento || '',
+        etiquetas: fuente.etiquetas?.length ? fuente.etiquetas : []
+      };
+
+      if (!this.modelosIaService) return res.json({ ...fallback, generado_por_ia: false });
+      const contenido = String(fuente.texto_transcrito || '').slice(0, 12000);
+      const prompt = `Analiza esta fuente de un proyecto de software y devuelve EXCLUSIVAMENTE JSON válido con estas claves: categoria (una de textos, documentos, audios, videos, otros), tipo_contenido (ej. Entrevista, Acta de reunión, Especificación), descripcion (máximo 450 caracteres, concreta y útil para otra IA), autor_origen (vacío si se desconoce), fecha_documento (vacío si se desconoce), etiquetas (arreglo de 3 a 8 términos). No inventes autor ni fecha.\n\nArchivo: ${fuente.nombre_archivo}\nFormato: ${fuente.tipo}\nContenido:\n${contenido}`;
+
+      let sugerencia = null;
+      const proveedorSolicitado = String(req.body?.provider || '').toLowerCase();
+      const orden = proveedorSolicitado && proveedorSolicitado !== 'auto'
+        ? [proveedorSolicitado]
+        : this.modelosIaService.providerOrder;
+      for (const proveedor of orden) {
+        sugerencia = await this.modelosIaService._ejecutarProveedor(proveedor, prompt, null);
+        if (sugerencia) break;
+      }
+      const resultado = sugerencia && typeof sugerencia === 'object' ? sugerencia : fallback;
+      return res.json({
+        categoria: ['textos', 'documentos', 'audios', 'videos', 'otros'].includes(resultado.categoria) ? resultado.categoria : fallback.categoria,
+        tipo_contenido: String(resultado.tipo_contenido || fallback.tipo_contenido).slice(0, 100),
+        descripcion: String(resultado.descripcion || fallback.descripcion).slice(0, 1200),
+        autor_origen: String(resultado.autor_origen || '').slice(0, 160),
+        fecha_documento: String(resultado.fecha_documento || '').slice(0, 40),
+        etiquetas: this._normalizarEtiquetas(resultado.etiquetas || fallback.etiquetas),
+        generado_por_ia: Boolean(sugerencia)
+      });
+    } catch (err) {
+      console.error('[FuenteController] Error sugiriendo metadatos:', err);
       return res.status(500).json({ error: err.message });
     }
   }
@@ -171,14 +288,8 @@ class FuenteController {
       // 3. Recalcular y limpiar insumo_bruto del proyecto para que no queden datos sucios
       const pId = fuente.proyecto_id || proyectoId;
       if (pId) {
-        const fuentesRestantes = await this.fuenteRepo.listarPorProyecto(pId);
-        const insumoLimpio = fuentesRestantes
-          .map((f) => `[Fuente: ${f.nombre_archivo} (${f.tipo})]\n${f.texto_transcrito}`)
-          .join('\n\n');
-        await this.proyectoRepo.actualizar(pId, {
-          insumo_bruto: insumoLimpio
-        });
-        console.log(`[FuenteController] Insumo bruto del proyecto ${pId} recalculado (${fuentesRestantes.length} fuentes restantes)`);
+        await this._recalcularInsumoProyecto(pId);
+        console.log(`[FuenteController] Insumo bruto del proyecto ${pId} recalculado tras eliminar una fuente`);
       }
 
       return res.json({ success: true, eliminado: true, id: fuenteIdEliminar });
