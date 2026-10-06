@@ -40,6 +40,15 @@ class MongoDisenoRepository {
     await diseno.save();
     return diseno.toJSON();
   }
+
+  async invalidarDerivados(proyectoId) {
+    await DisenoModel.findOneAndUpdate(
+      { proyecto_id: proyectoId },
+      { $set: { mockups: [], manifiesto_navegacion: [], aprobado: false } },
+      { new: true }
+    );
+    return true;
+  }
 }
 
 module.exports = MongoDisenoRepository;

@@ -2,6 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
+const AiModelConfig = require('./AiModelConfig');
 
 class ModelosIaService {
   constructor() {
@@ -11,6 +12,15 @@ class ModelosIaService {
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
     this.provider = (process.env.AI_PROVIDER || 'groq').toLowerCase();
     this.promptsDir = path.join(__dirname, '../prompts');
+    this.models = {
+      gemini: AiModelConfig.analysis.gemini(),
+      groq: AiModelConfig.analysis.groq(),
+      openrouter: AiModelConfig.analysis.openrouter()
+    };
+    this.providerOrder = AiModelConfig.analysis.providerOrder();
+    this.modelosDeshabilitados = new Set();
+    this.circuitos = new Map();
+    this.circuitCooldownMs = Number(process.env.AI_CIRCUIT_COOLDOWN_MS || 300000);
   }
 
   leerPrompt(archivo) {
@@ -22,7 +32,7 @@ class ModelosIaService {
     }
   }
 
-  construirPrompt({ insumo, contextoActualTexto, insumoAdicional }) {
+  construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo = 'completo' }) {
     const plantilla = this.leerPrompt('plantilla_orquestador.md');
 
     const directivas = [
@@ -33,12 +43,18 @@ class ModelosIaService {
 
     const estructuraSalida = this.leerPrompt('estructura_salida.md');
 
+    const directivaFase = objetivo === 'requisitos'
+      ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nGenera y devuelve únicamente el análisis y los requerimientos RF/RNF. El arreglo "diagramas" DEBE ser []. No diseñes, sintetices ni anticipes diagramas todavía.`
+      : objetivo === 'diagramas'
+        ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos requerimientos incluidos en el contexto ya fueron revisados y aprobados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera los cuatro diagramas obligatorios (casos_de_uso, arquitectura, clases y arbol_navegacion) trazados estrictamente desde esos requerimientos aprobados.`
+        : '';
+
     return plantilla
       .replace('{{DIRECTIVAS_AGENTES}}', directivas)
       .replace('{{ESTRUCTURA_SALIDA}}', estructuraSalida)
       .replace('{{INSUMO_PROYECTO}}', insumo || 'No se proporcionó insumo bruto.')
       .replace('{{CONTEXTO_PROYECTO}}', contextoActualTexto || 'Sin requerimientos previos.')
-      .replace('{{INSTRUCCIONES_USUARIO}}', insumoAdicional ? insumoAdicional : 'Sin correcciones adicionales.');
+      .replace('{{INSTRUCCIONES_USUARIO}}', insumoAdicional ? insumoAdicional : 'Sin correcciones adicionales.') + directivaFase;
   }
 
   async verificarSaldoDeepSeek() {
@@ -128,20 +144,29 @@ class ModelosIaService {
     const reqsActuales = payload.contexto_proyecto?.requerimientos_actuales || [];
     const requestedProvider = (payload.provider || payload.modelo || payload.proveedor || this.provider).toLowerCase();
     const specificModel = payload.specificModel || payload.modelName || null;
+    const objetivo = ['requisitos', 'diagramas'].includes(payload.objetivo) ? payload.objetivo : 'completo';
 
     let contextoActualTexto = '';
     if (reqsActuales.length > 0) {
-      contextoActualTexto = `REQUERIMIENTOS PREVIOS EN EL SISTEMA:\n` +
-        reqsActuales.map(r => `- [${r.identificador}] (${r.tipo}) ${r.nombre}: ${r.descripcion}`).join('\n');
+      contextoActualTexto = `REQUERIMIENTOS PREVIOS EN EL SISTEMA (fuente obligatoria para la trazabilidad):\n` +
+        reqsActuales.map(r => {
+          const actores = Array.isArray(r.actores) ? r.actores.join(', ') : (r.actores || 'Sin actores definidos');
+          return [
+            `- [${r.identificador}] (${r.tipo}) ${r.nombre}`,
+            `  Declaración: ${r.descripcion || 'Sin descripción'}`,
+            `  Actores: ${actores}`,
+            `  Prioridad: ${r.prioridad || 'Media'}`,
+            `  Precondición: ${r.precondiciones || r.precondicion || 'No especificada'}`,
+            `  Poscondición: ${r.poscondiciones || r.poscondicion || 'No especificada'}`
+          ].join('\n');
+        }).join('\n');
     }
 
     console.log(`[ModelosIaService] Procesando ${insumo.length} caracteres de insumo (Proveedor solicitado: ${requestedProvider})...`);
 
-    const promptCompleto = this.construirPrompt({ insumo, contextoActualTexto, insumoAdicional });
+    const promptCompleto = this.construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo });
 
     let respuestaData = null;
-    const esPromptMasivo = promptCompleto.length > 22000;
-
     if (requestedProvider === 'groq') {
       respuestaData = await this.generarConGroq(promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider === 'gemini') {
@@ -157,18 +182,12 @@ class ModelosIaService {
     } else if (requestedProvider === 'openrouter') {
       respuestaData = await this.generarConOpenRouter(promptCompleto, specificModel, { allowFallback: false });
     } else {
-      // Modo 'auto' (Enrutamiento Inteligente con Fallback Automático)
-      if (esPromptMasivo && this.geminiApiKey) {
-        console.log(`[ModelosIaService] Insumo extenso detectado (${promptCompleto.length} caracteres). Enrutando prioritariamente a Gemini...`);
-        respuestaData = await this.generarConGemini(promptCompleto, specificModel, { allowFallback: true });
-        if (!respuestaData && this.groqApiKey) respuestaData = await this.generarConGroq(promptCompleto, null, { allowFallback: true });
-        if (!respuestaData && this.openrouterApiKey) respuestaData = await this.generarConOpenRouter(promptCompleto, null, { allowFallback: true });
-        if (!respuestaData && this.deepseekApiKey) respuestaData = await this.generarConDeepSeek(promptCompleto, null, { allowFallback: true });
-      } else {
-        if (this.groqApiKey) respuestaData = await this.generarConGroq(promptCompleto, specificModel, { allowFallback: true });
-        if (!respuestaData && this.geminiApiKey) respuestaData = await this.generarConGemini(promptCompleto, specificModel, { allowFallback: true });
-        if (!respuestaData && this.deepseekApiKey) respuestaData = await this.generarConDeepSeek(promptCompleto, specificModel, { allowFallback: true });
-        if (!respuestaData && this.openrouterApiKey) respuestaData = await this.generarConOpenRouter(promptCompleto, specificModel, { allowFallback: true });
+      const orden = promptCompleto.length > 22000
+        ? ['gemini', ...this.providerOrder.filter(p => p !== 'gemini')]
+        : this.providerOrder;
+      for (const proveedor of orden) {
+        respuestaData = await this._ejecutarProveedor(proveedor, promptCompleto, specificModel);
+        if (respuestaData) break;
       }
     }
 
@@ -180,7 +199,16 @@ class ModelosIaService {
       };
     }
 
-    return this.normalizarResultado(respuestaData);
+    return this.normalizarResultado(respuestaData, objetivo);
+  }
+
+  async _ejecutarProveedor(proveedor, prompt, specificModel) {
+    if (proveedor === 'gemini') return this.generarConGemini(prompt, specificModel, { allowFallback: true });
+    if (proveedor === 'groq') return this.generarConGroq(prompt, specificModel, { allowFallback: true });
+    if (proveedor === 'deepseek') return this.generarConDeepSeek(prompt, specificModel, { allowFallback: true });
+    if (proveedor === 'openrouter') return this.generarConOpenRouter(prompt, specificModel, { allowFallback: true });
+    console.warn(`[ModelosIaService] Proveedor desconocido omitido: ${proveedor}`);
+    return null;
   }
 
   async generarConGroq(prompt, specificModel = null, options = { allowFallback: true }) {
@@ -188,22 +216,22 @@ class ModelosIaService {
       if (!options.allowFallback) {
         throw new Error('GROQ_API_KEY no está configurada en el servidor backend.');
       }
-      if (this.geminiApiKey) return this.generarConGemini(prompt);
-      if (this.openrouterApiKey) return this.generarConOpenRouter(prompt);
       return null;
     }
 
-    const modelosGroq = specificModel
-      ? [specificModel, 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'openai/gpt-oss-120b']
-      : ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'openai/gpt-oss-120b'];
+    const modelosGroq = AiModelConfig.modelosConPreferencia(specificModel, this.models.groq);
 
-    let promptAjustado = prompt;
-    if (prompt.length > 24000) {
-      console.log(`[ModelosIaService] Recortando insumo masivo (${prompt.length} chars) para compatibilidad con límites TPM de Groq...`);
-      promptAjustado = prompt.slice(0, 14000) + '\n\n...[TEXTO INTERMEDIO CONDENSADO POR VOLUMEN]...\n\n' + prompt.slice(-8000);
+    const tokensEntrada = Math.ceil(prompt.length / 4);
+    const presupuestoEntrada = Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000);
+    if (tokensEntrada > presupuestoEntrada) {
+      const mensaje = `Prompt estimado en ${tokensEntrada} tokens; supera el presupuesto Groq de ${presupuestoEntrada}.`;
+      if (!options.allowFallback) throw new Error(mensaje);
+      console.warn(`[ModelosIaService] ${mensaje} Proveedor omitido.`);
+      return null;
     }
 
     for (const modelName of modelosGroq) {
+      if (!this._modeloDisponible(`groq:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con Groq Cloud (${modelName})...`);
         const res = await axios.post(
@@ -217,11 +245,11 @@ class ModelosIaService {
               },
               {
                 role: 'user',
-                content: promptAjustado
+                content: prompt
               }
             ],
             temperature: 0.2,
-            max_tokens: 8000,
+            max_tokens: Number(process.env.GROQ_ANALYSIS_MAX_OUTPUT_TOKENS || 4800),
             response_format: { type: 'json_object' }
           },
           {
@@ -241,6 +269,7 @@ class ModelosIaService {
       } catch (err) {
         const errorMsg = err.response?.data?.error?.message || err.message;
         console.warn(`[ModelosIaService] Groq Cloud (${modelName}) falló:`, errorMsg);
+        this._registrarErrorModelo(`groq:${modelName}`, err);
         if (!options.allowFallback && modelName === modelosGroq[modelosGroq.length - 1]) {
           throw new Error(`El proveedor Groq Cloud no pudo completar la solicitud: ${errorMsg}`);
         }
@@ -251,16 +280,6 @@ class ModelosIaService {
       throw new Error('El proveedor Groq Cloud no devolvió una respuesta válida.');
     }
 
-    if (this.geminiApiKey) {
-      console.log('[ModelosIaService] Groq no devolvió respuesta. Reenrutando a Gemini...');
-      return this.generarConGemini(prompt);
-    }
-
-    if (this.openrouterApiKey) {
-      console.log('[ModelosIaService] Groq no devolvió respuesta. Reenrutando a OpenRouter...');
-      return this.generarConOpenRouter(prompt);
-    }
-
     return null;
   }
 
@@ -269,17 +288,15 @@ class ModelosIaService {
       if (!options.allowFallback) {
         throw new Error('GEMINI_API_KEY no está configurada en el servidor backend.');
       }
-      if (this.groqApiKey) return this.generarConGroq(prompt);
-      if (this.openrouterApiKey) return this.generarConOpenRouter(prompt);
       return null;
     }
 
-    const modelos = specificModel
-      ? [specificModel, 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest']
-      : ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
+    const modelos = AiModelConfig.modelosConPreferencia(specificModel, this.models.gemini);
 
     for (const modelName of modelos) {
-      for (let intento = 1; intento <= 2; intento++) {
+      if (!this._modeloDisponible(`gemini:${modelName}`)) continue;
+      const maxIntentos = Number(process.env.AI_TRANSIENT_RETRIES || 1);
+      for (let intento = 1; intento <= maxIntentos; intento++) {
         try {
           console.log(`[ModelosIaService] Procesando con Google Gemini (${modelName}) [Intento ${intento}]...`);
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.geminiApiKey}`;
@@ -305,10 +322,13 @@ class ModelosIaService {
         } catch (err) {
           const msg = err.response?.data?.error?.message || err.message;
           console.warn(`[ModelosIaService] Gemini (${modelName}) intento ${intento} falló:`, msg);
+          if (this._registrarErrorModelo(`gemini:${modelName}`, err) === 'modelo_no_disponible') {
+            break;
+          }
 
-          if (intento === 1 && /demand|high demand|429|503|timeout/i.test(msg)) {
+          if (intento < maxIntentos && /demand|high demand|429|503|timeout/i.test(msg)) {
             await new Promise(r => setTimeout(r, 1200));
-          } else if (intento === 1 && /quota|exceeded|not found|no longer available/i.test(msg)) {
+          } else if (/quota|exceeded|not found|no longer available/i.test(msg)) {
             break;
           }
         }
@@ -319,23 +339,12 @@ class ModelosIaService {
       throw new Error('El proveedor Google Gemini no pudo completar la solicitud debido a límites de demanda o cuota.');
     }
 
-    if (this.groqApiKey) {
-      console.log('[ModelosIaService] Gemini no disponible. Reenrutando a Groq Cloud...');
-      const resGroq = await this.generarConGroq(prompt);
-      if (resGroq) return resGroq;
-    }
-
-    if (this.openrouterApiKey) {
-      console.log('[ModelosIaService] Reenrutando transparentemente vía OpenRouter API...');
-      const resOR = await this.generarConOpenRouter(prompt);
-      if (resOR) return resOR;
-    }
-
     return null;
   }
 
   async generarConDeepSeek(prompt, specificModel = null, options = { allowFallback: true }) {
     const modelName = specificModel || process.env.DEEPSEEK_MODEL || 'deepseek-chat';
+    if (!this._modeloDisponible(`deepseek:${modelName}`)) return null;
 
     if (this.deepseekApiKey) {
       try {
@@ -371,6 +380,7 @@ class ModelosIaService {
       } catch (err) {
         const errorMsg = err.response?.data?.error?.message || err.message;
         console.warn(`[ModelosIaService] DeepSeek API directa (${modelName}) falló:`, errorMsg);
+        this._registrarErrorModelo(`deepseek:${modelName}`, err);
         
         if (!options.allowFallback) {
           if (/Insufficient Balance|402|balance|quota/i.test(errorMsg)) {
@@ -381,24 +391,6 @@ class ModelosIaService {
       }
     } else if (!options.allowFallback) {
       throw new Error('DEEPSEEK_API_KEY no está configurada en el servidor backend.');
-    }
-
-    if (this.groqApiKey) {
-      console.log('[ModelosIaService] Reenrutando solicitud a Groq Cloud (respuesta ultra-rápida)...');
-      const resGroq = await this.generarConGroq(prompt);
-      if (resGroq) return resGroq;
-    }
-
-    if (this.geminiApiKey) {
-      console.log('[ModelosIaService] Reenrutando solicitud a Google Gemini...');
-      const resGemini = await this.generarConGemini(prompt);
-      if (resGemini) return resGemini;
-    }
-
-    if (this.openrouterApiKey) {
-      console.log('[ModelosIaService] Reenrutando solicitud vía OpenRouter API...');
-      const resOpenRouter = await this.generarConOpenRouter(prompt, 'openrouter/free');
-      if (resOpenRouter) return resOpenRouter;
     }
 
     return null;
@@ -412,11 +404,10 @@ class ModelosIaService {
       return null;
     }
 
-    const modelosOpenRouter = specificModel
-      ? [specificModel, 'openrouter/free', 'openrouter/auto']
-      : ['openrouter/free', 'openrouter/auto'];
+    const modelosOpenRouter = AiModelConfig.modelosConPreferencia(specificModel, this.models.openrouter);
 
     for (const modelName of modelosOpenRouter) {
+      if (!this._modeloDisponible(`openrouter:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con OpenRouter Cloud (${modelName})...`);
         const res = await axios.post(
@@ -453,6 +444,7 @@ class ModelosIaService {
       } catch (err) {
         const errorMsg = err.response?.data?.error?.message || err.message;
         console.warn(`[ModelosIaService] OpenRouter (${modelName}) falló:`, errorMsg);
+        this._registrarErrorModelo(`openrouter:${modelName}`, err);
         if (!options.allowFallback && modelName === modelosOpenRouter[modelosOpenRouter.length - 1]) {
           throw new Error(`El proveedor OpenRouter no pudo completar la solicitud: ${errorMsg}`);
         }
@@ -463,6 +455,41 @@ class ModelosIaService {
       throw new Error('El proveedor OpenRouter no devolvió una respuesta válida.');
     }
     return null;
+  }
+
+  _esModeloNoDisponible(error) {
+    const status = error.response?.status;
+    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    return status === 404 || /no longer available|does not exist|not found|unavailable for free/.test(mensaje);
+  }
+
+  _clasificarError(error) {
+    if (this._esModeloNoDisponible(error)) return 'modelo_no_disponible';
+    const status = error.response?.status;
+    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    if (status === 401 || status === 403) return 'autenticacion';
+    if (status === 429 || /quota|rate limit|high demand|resource exhausted|insufficient balance/.test(mensaje)) return 'cuota';
+    if (/request too large|context|tokens per minute|tpm/.test(mensaje)) return 'limite_contexto';
+    return 'transitorio';
+  }
+
+  _registrarErrorModelo(clave, error) {
+    const tipo = this._clasificarError(error);
+    if (tipo === 'modelo_no_disponible' || tipo === 'autenticacion') {
+      this.modelosDeshabilitados.add(clave);
+    } else if (tipo === 'cuota') {
+      this.circuitos.set(clave, Date.now() + this.circuitCooldownMs);
+    }
+    return tipo;
+  }
+
+  _modeloDisponible(clave) {
+    if (this.modelosDeshabilitados.has(clave)) return false;
+    const hasta = this.circuitos.get(clave);
+    if (!hasta) return true;
+    if (hasta > Date.now()) return false;
+    this.circuitos.delete(clave);
+    return true;
   }
 
   limpiarYParsearJson(str) {
@@ -486,10 +513,10 @@ class ModelosIaService {
     return cleaned;
   }
 
-  normalizarResultado(data) {
+  normalizarResultado(data, objetivo = 'completo') {
     const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
     const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
-    const requerimientos = Array.isArray(data?.requerimientos) ? data.requerimientos : [];
+    const requerimientos = objetivo === 'diagramas' ? [] : (Array.isArray(data?.requerimientos) ? data.requerimientos : []);
 
     let palabrasClave = Array.isArray(data?.palabras_clave)
       ? data.palabras_clave.filter(k => typeof k === 'string' && k.trim())
@@ -504,7 +531,7 @@ class ModelosIaService {
 
     palabrasClave = palabrasClave.filter(k => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
 
-    const diagramas = PlantUMLSynthesizer.normalizar(data?.diagramas);
+    const diagramas = objetivo === 'requisitos' ? [] : PlantUMLSynthesizer.normalizar(data?.diagramas);
 
     return {
       nombre_proyecto: safeProjectName,

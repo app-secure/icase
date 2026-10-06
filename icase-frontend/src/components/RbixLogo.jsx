@@ -44,7 +44,7 @@ export default function RbixLogo({ size = "md", showText = true, isDark = false,
           y1="42"
           x2="62"
           y2="66"
-          stroke="#2E5A1C"
+          stroke={isDark ? "#A3FF12" : "#4D7C0F"}
           strokeWidth="7.5"
           strokeLinecap="round"
         />
@@ -53,7 +53,7 @@ export default function RbixLogo({ size = "md", showText = true, isDark = false,
           y1="42"
           x2="38"
           y2="66"
-          stroke="#2E5A1C"
+          stroke={isDark ? "#A3FF12" : "#4D7C0F"}
           strokeWidth="7.5"
           strokeLinecap="round"
         />

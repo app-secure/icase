@@ -58,7 +58,7 @@ export default function MermaidViewer({ code, title }) {
         if (isMounted) {
           setSvgContent(svg);
         }
-      } catch (err) {
+      } catch {
         document.querySelectorAll('.error-icon, [id^="dmermaid"]').forEach((el) => el.remove());
         if (isMounted) {
           setRenderError("Sintaxis Mermaid en ajuste. Puedes revisar el diagrama en PlantUML / C4 o editar el código fuente.");

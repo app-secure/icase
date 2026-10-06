@@ -1,441 +1,267 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Download,
-  Copy,
-  RotateCcw,
-  Plus,
-  Layout,
-  Loader2,
-  AlertCircle,
-  Check
+  AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Download,
+  Info as InfoIcon, Layout, ListTree, Loader2, Monitor, Palette,
+  RotateCcw, Smartphone, Tablet, WandSparkles
 } from "lucide-react";
-import { generateMockupsApi } from "../services/api";
+import {
+  fetchLatestMockupJobApi, fetchMockupJobApi, fetchMockupsApi,
+  startMockupJobApi, suggestMockupDesignSystemApi, updateMockupDesignSystemApi
+} from "../services/api";
 
-const prepareMockupHtml = (rawHtml) => {
+const DEFAULT_DESIGN_SYSTEM = {
+  nombre: "Predeterminado I-CASE",
+  origen: "predeterminado",
+  version: 1,
+  colores: {
+    primario: "#0b57d0", primario_oscuro: "#073d8c", secundario: "#64748b",
+    fondo: "#f8fafc", superficie: "#ffffff", texto: "#0f172a",
+    exito: "#059669", alerta: "#d97706", error: "#dc2626"
+  }
+};
+
+const formatName = (value = "") => value.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+const quality = (mockup) => mockup?.estado_calidad || (mockup?.advertencias_validacion?.length ? "advertencia" : "valido");
+
+const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM) => {
   if (!rawHtml) return "";
-  let html = rawHtml;
+  let html = rawHtml
+    .replace(/<base\b[^>]*>/gi, "")
+    .replace(/<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, "")
+    .replace(/\s(href|action)\s*=\s*(["'])(.*?)\2/gi, (_m, attr, quote, value) => {
+      if (attr.toLowerCase() === "href" && /^https:\/\/fonts\.(googleapis|gstatic)\.com/i.test(value)) return ` ${attr}=${quote}${value}${quote}`;
+      return ` data-icase-${attr}=${quote}${value}${quote} ${attr}=${quote}#${quote}`;
+    });
 
-  // Asegurar Tailwind CDN
   if (!html.includes("cdn.tailwindcss.com")) {
-    if (html.includes("<head>")) {
-      html = html.replace(/<head>/i, '<head>\n  <script src="https://cdn.tailwindcss.com"></script>');
-    } else {
-      html = `<script src="https://cdn.tailwindcss.com"></script>\n` + html;
-    }
+    html = html.replace(/<head>/i, '<head><script src="https://cdn.tailwindcss.com"></script>');
   }
-
-  // Asegurar Google Fonts Inter
-  if (!html.includes("fonts.googleapis.com")) {
-    const fontsLink = `  <link rel="preconnect" href="https://fonts.googleapis.com">\n  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">\n`;
-    if (html.includes("<head>")) {
-      html = html.replace(/<head>/i, `<head>\n${fontsLink}`);
-    }
-  }
-
-  // Estilos modernos de respaldo y elevación estética
-  const modernStyles = `
-  <style id="icase-modern-styles">
-    *, *::before, *::after { box-sizing: border-box; }
-    html, body {
-      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-      margin: 0;
-      padding: 0;
-      background-color: #f8fafc;
-      color: #0f172a;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-    input, select, textarea, button {
-      font-family: inherit;
-    }
-    input[type="text"], input[type="email"], input[type="password"], select, textarea {
-      outline: none;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
-      border-color: #0b57d0 !important;
-      box-shadow: 0 0 0 3px rgba(11, 87, 208, 0.15) !important;
-    }
-    button {
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    button:hover {
-      filter: brightness(1.03);
-    }
-    button:active {
-      transform: scale(0.99);
-    }
-  </style>
-  `;
-
-  if (!html.includes("icase-modern-styles")) {
-    if (html.includes("</head>")) {
-      html = html.replace(/<\/head>/i, `${modernStyles}\n</head>`);
-    } else {
-      html = modernStyles + html;
-    }
-  }
-
-  // Configuración de colores primarios y tipografía en Tailwind
-  if (!html.includes("tailwind.config")) {
-    const tailwindConfig = `
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-          },
-          colors: {
-            primary: {
-              50: '#eff6ff',
-              100: '#dbeafe',
-              500: '#0b57d0',
-              600: '#0947a8',
-              700: '#073d8c',
-            },
-            secondary: {
-              500: '#64748b',
-              600: '#475569',
-            }
-          }
-        }
-      }
-    }
-  </script>
-    `;
-    if (html.includes("</head>")) {
-      html = html.replace(/<\/head>/i, `${tailwindConfig}\n</head>`);
-    }
-  }
-
-  return html;
+  const colors = designSystem?.colores || DEFAULT_DESIGN_SYSTEM.colores;
+  html = html
+    .replace(/#0b57d0/gi, colors.primario)
+    .replace(/#0947a8/gi, colors.primario_oscuro)
+    .replace(/#073d8c/gi, colors.primario_oscuro)
+    .replace(/#64748b/gi, colors.secundario);
+  const paletteStyles = `<style id="icase-preview-palette">
+    :root{--icase-primary:${colors.primario};--icase-primary-dark:${colors.primario_oscuro};--icase-secondary:${colors.secundario};--icase-bg:${colors.fondo};--icase-surface:${colors.superficie};--icase-text:${colors.texto};--icase-success:${colors.exito};--icase-warning:${colors.alerta};--icase-error:${colors.error}}
+    html,body{background-color:var(--icase-bg)!important;color:var(--icase-text)!important}
+    .bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-primary-500,.bg-primary-600,.bg-primary-700{background-color:var(--icase-primary)!important}
+    .hover\\:bg-blue-700:hover,.hover\\:bg-primary-700:hover{background-color:var(--icase-primary-dark)!important}
+    .text-blue-500,.text-blue-600,.text-blue-700,.text-primary-500,.text-primary-600,.text-primary-700{color:var(--icase-primary)!important}
+    .border-blue-500,.border-blue-600,.border-primary-500,.border-primary-600{border-color:var(--icase-primary)!important}
+    .bg-emerald-500,.bg-green-500,.bg-green-600{background-color:var(--icase-success)!important}
+    .text-emerald-600,.text-green-600,.text-green-700{color:var(--icase-success)!important}
+    .text-amber-600,.text-yellow-600{color:var(--icase-warning)!important}
+    .text-red-600,.text-red-700{color:var(--icase-error)!important}
+  </style>`;
+  html = html.includes("</head>") ? html.replace(/<\/head>/i, `${paletteStyles}</head>`) : `${paletteStyles}${html}`;
+  const guard = `<script id="icase-preview-guard">document.addEventListener('click',function(e){var t=e.target.closest('a,button');if(t){e.preventDefault();}} ,true);document.addEventListener('submit',function(e){e.preventDefault();},true);</script>`;
+  return html.includes("</body>") ? html.replace(/<\/body>/i, `${guard}</body>`) : `${html}${guard}`;
 };
 
-// Formatear y capitalizar nombres de pantalla (ej: reserva-mesas-sillas -> Reserva-Mesas-Sillas)
-const formatScreenName = (str) => {
-  if (!str) return "";
-  return str
-    .replace(/[-_]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
-};
-
-const capitalizeFirst = (text) => {
-  if (!text) return "";
-  return text.charAt(0).toUpperCase() + text.slice(1);
-};
+const platformIcon = (platform, size = 13) => platform === "mobile"
+  ? <Smartphone size={size} />
+  : platform === "tablet" ? <Tablet size={size} /> : <Monitor size={size} />;
 
 export default function MockupsView({
-  mockups = [],
-  onUpdateMockup,
-  projectId,
-  selectedScreen = 0,
-  onSelectScreen,
-  requirements = null
+  mockups = [], onUpdateMockup, projectId, selectedScreen = 0, onSelectScreen, requirements = null
 }) {
-  const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
-  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
-  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [viewMode, setViewMode] = useState("visual");
+  const [activeId, setActiveId] = useState(mockups[selectedScreen]?.nombre_pantalla || "");
+  const [manifest, setManifest] = useState([]);
+  const [designSystem, setDesignSystem] = useState(DEFAULT_DESIGN_SYSTEM);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [filter, setFilter] = useState("all");
+  const [showPalette, setShowPalette] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(true);
+  const [showDetails, setShowDetails] = useState(false);
+  const [activeJob, setActiveJob] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [savingPalette, setSavingPalette] = useState(false);
+  const [suggestingPalette, setSuggestingPalette] = useState(false);
+  const handledJobRef = useRef(null);
+  const initializedSelection = useRef(false);
 
-  const currentMockup = mockups[selectedScreen] || mockups[0] || null;
-
-  const handleGenerateAll = async () => {
-    if (isGeneratingAll) return;
-    if (!projectId) {
-      setFeedback({
-        type: "error",
-        message: "No se encontró el ID del proyecto. Por favor procesa tus fuentes primero en la Fase 1."
-      });
-      return;
+  const loadCatalog = async () => {
+    if (!projectId) return;
+    const data = await fetchMockupsApi(projectId);
+    const catalog = data.manifiesto?.length ? data.manifiesto : (data.mockups || []).map((m, index) => ({
+      pantalla_id: m.pantalla_id || m.nombre_pantalla, slug: m.nombre_pantalla,
+      nombre: m.nombre_visible || formatName(m.nombre_pantalla), flujo: m.flujo || "General",
+      modulo: m.modulo || "General", ruta: m.ruta || "", tipo: m.tipo || "otro",
+      plataforma: m.plataforma || "web", roles: m.roles || ["Usuario"], shell: m.shell || "web-general", orden: index + 1
+    }));
+    setManifest(catalog);
+    setDesignSystem(data.sistemaDiseno || DEFAULT_DESIGN_SYSTEM);
+    if (!initializedSelection.current) {
+      setSelectedIds(new Set(catalog.map(p => p.slug)));
+      initializedSelection.current = true;
     }
-    setIsGeneratingAll(true);
-    setFeedback(null);
+    if (data.mockups?.length && onUpdateMockup) onUpdateMockup(data.mockups);
+    if (!activeId && catalog[0]) setActiveId(catalog[0].slug);
+  };
 
+  const applyJobResponse = (response) => {
+    const job = response?.trabajo;
+    if (!job) return;
+    setActiveJob(job);
+    if (job.estado === "completado" && handledJobRef.current !== job.id) {
+      handledJobRef.current = job.id;
+      if (response.mockups?.length && onUpdateMockup) onUpdateMockup(response.mockups);
+      setFeedback({ type: "success", message: `Generación completada: ${job.total_generados || 0} mockups disponibles.` });
+      loadCatalog().catch(() => {});
+    } else if (job.estado === "fallido") {
+      setFeedback({ type: "error", message: job.error || "La generación falló." });
+    }
+  };
+
+  // La carga remota inicializa catálogo, selección y sistema visual como una sola transacción de UI.
+  // oxlint-disable-next-line react/set-state-in-effect
+  useEffect(() => { loadCatalog().catch(() => {}); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!projectId) return undefined;
+    let cancelled = false;
+    fetchLatestMockupJobApi(projectId).then(r => { if (!cancelled) applyJobResponse(r); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!activeJob || !["encolado", "procesando"].includes(activeJob.estado)) return undefined;
+    const timer = window.setInterval(() => fetchMockupJobApi(activeJob.id).then(applyJobResponse).catch(e => setFeedback({ type: "error", message: e.message })), 2000);
+    return () => window.clearInterval(timer);
+  }, [activeJob?.id, activeJob?.estado]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mockupMap = useMemo(() => new Map(mockups.map((m, i) => [m.nombre_pantalla, { ...m, index: i }])), [mockups]);
+  const screens = manifest.length ? manifest : [...mockupMap.values()].map((m, i) => ({
+    pantalla_id: m.nombre_pantalla, slug: m.nombre_pantalla, nombre: formatName(m.nombre_pantalla),
+    flujo: m.flujo || "General", modulo: m.modulo || "General", plataforma: m.plataforma || "web", orden: i + 1
+  }));
+  const visibleScreens = screens.filter(p => filter === "all" || p.plataforma === filter);
+  const groups = useMemo(() => {
+    const result = new Map();
+    visibleScreens.forEach(screen => {
+      const flow = screen.flujo || "General";
+      const module = screen.modulo || "General";
+      if (!result.has(flow)) result.set(flow, new Map());
+      if (!result.get(flow).has(module)) result.get(flow).set(module, []);
+      result.get(flow).get(module).push(screen);
+    });
+    return result;
+  }, [visibleScreens]);
+  const currentEntry = screens.find(p => p.slug === activeId) || screens[0];
+  const currentMockup = currentEntry ? mockupMap.get(currentEntry.slug) : null;
+  const currentPosition = currentEntry ? screens.findIndex(p => p.slug === currentEntry.slug) : -1;
+  const busy = ["encolado", "procesando"].includes(activeJob?.estado);
+
+  const selectScreen = (entry) => {
+    setActiveId(entry.slug);
+    const generated = mockupMap.get(entry.slug);
+    if (generated && onSelectScreen) onSelectScreen(generated.index);
+  };
+  const toggleScreen = (slug) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(slug)) next.delete(slug); else next.add(slug);
+    return next;
+  });
+  const startGeneration = async (ids, label) => {
+    if (!projectId || busy || !ids.length) return;
     try {
-      const result = await generateMockupsApi(projectId, [], "", requirements);
-      if (result && result.mockups && result.mockups.length > 0) {
-        setFeedback({ type: "success", message: `Generados ${result.mockups.length} mockups exitosamente con IA.` });
-        if (onUpdateMockup) {
-          onUpdateMockup(result.mockups);
-        }
-        if (onSelectScreen) {
-          onSelectScreen(0);
-        }
-      } else {
-        const errorMsg = result?.advertencias?.length
-          ? result.advertencias.join(", ")
-          : (result?.error || "No se generaron mockups. Intenta de nuevo.");
-        setFeedback({ type: "error", message: errorMsg });
-      }
-    } catch (err) {
-      setFeedback({ type: "error", message: err.message || "Error al generar mockups con IA." });
-    } finally {
-      setIsGeneratingAll(false);
+      setFeedback(null);
+      const response = await startMockupJobApi(projectId, ids, "", requirements);
+      applyJobResponse(response);
+      setFeedback({ type: "success", message: response.reutilizado ? "Se recuperó el trabajo activo." : `${label} iniciada. Puedes cambiar de pestaña.` });
+    } catch (error) {
+      setFeedback({ type: "error", message: error.message });
     }
   };
-
-  const handleRegenerateScreen = async () => {
-    if (!currentMockup || isRegenerating) return;
-    if (!projectId) {
-      setFeedback({
-        type: "error",
-        message: "No se encontró el ID del proyecto en el servidor."
-      });
-      return;
-    }
-    setIsRegenerating(true);
-    setFeedback(null);
-
+  const savePalette = async () => {
     try {
-      const result = await generateMockupsApi(projectId, [currentMockup.nombre_pantalla], "", requirements);
-      if (result && result.mockups && result.mockups.length > 0) {
-        setFeedback({ type: "success", message: `Mockup "${currentMockup.nombre_pantalla}" regenerado con éxito.` });
-        if (onUpdateMockup) {
-          onUpdateMockup(result.mockups);
-        }
-      } else {
-        setFeedback({ type: "error", message: result?.error || "No se pudo regenerar esta pantalla." });
-      }
-    } catch (err) {
-      setFeedback({ type: "error", message: err.message || "Error al regenerar pantalla." });
-    } finally {
-      setIsRegenerating(false);
-    }
+      setSavingPalette(true);
+      const response = await updateMockupDesignSystemApi(projectId, designSystem);
+      setDesignSystem(response.sistemaDiseno);
+      setFeedback({ type: "success", message: "Paleta guardada. Regenera solo las pantallas que quieras actualizar." });
+    } catch (error) { setFeedback({ type: "error", message: error.message }); }
+    finally { setSavingPalette(false); }
   };
-
-  const handleDownloadHtml = () => {
-    if (!currentMockup) return;
-    const blob = new Blob([currentMockup.preview_code], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${currentMockup.nombre_pantalla}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const applyPalette = async () => {
+    if (!selectedIds.size || busy) return;
+    try {
+      setSavingPalette(true);
+      const response = await updateMockupDesignSystemApi(projectId, designSystem);
+      setDesignSystem(response.sistemaDiseno);
+      setShowPalette(false);
+      await startGeneration([...selectedIds], "Aplicación de paleta");
+    } catch (error) { setFeedback({ type: "error", message: error.message }); }
+    finally { setSavingPalette(false); }
   };
-
-  const handleCopyHtml = () => {
-    if (!currentMockup) return;
-    navigator.clipboard.writeText(currentMockup.preview_code);
-    setFeedback({ type: "success", message: "Código HTML copiado al portapapeles." });
+  const suggestPalette = async () => {
+    try {
+      setSuggestingPalette(true);
+      const response = await suggestMockupDesignSystemApi(projectId);
+      setDesignSystem(response.sistemaDiseno);
+      setFeedback({ type: "success", message: "La IA propuso una paleta. Revísala y guárdala si deseas aplicarla." });
+    } catch (error) { setFeedback({ type: "error", message: error.message }); }
+    finally { setSuggestingPalette(false); }
   };
 
   return (
-    <div className="w-full flex-1 flex flex-col min-h-0">
-      {/* Feedback contextual temporal */}
-      {feedback && (
-        <div
-          className={`mb-3 text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 shrink-0 ${
-            feedback.type === "success"
-              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-              : "bg-red-50 text-red-700 border border-red-200"
-          }`}
-        >
-          <span>{feedback.message}</span>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="text-slate-400 hover:text-slate-600 font-bold ml-2 text-xs cursor-pointer"
-          >
-            ×
-          </button>
+    <div className="relative flex min-h-0 flex-1 flex-col gap-3">
+      {feedback && <div className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${feedback.type === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}><span>{feedback.message}</span><button onClick={() => setFeedback(null)}>×</button></div>}
+      {busy && <div className="rounded-xl border border-[#DDD2F5] bg-[#F2EDFF] px-3 py-2"><div className="mb-1.5 flex justify-between text-xs text-[#5B21B6]"><span className="flex items-center gap-2"><Loader2 size={13} className="animate-spin" />{activeJob.mensaje}</span><span>{activeJob.progreso || 0}%</span></div><div className="h-1.5 rounded bg-[#E4D8FA]"><div className="h-full rounded bg-[#7C3AED] transition-all" style={{ width: `${activeJob.progreso || 0}%` }} /></div></div>}
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+          {[['all', 'Todas'], ['web', 'Web'], ['tablet', 'Tablet'], ['mobile', 'Móvil']].map(([id, label]) => <button key={id} onClick={() => setFilter(id)} className={`rounded-md px-2.5 py-1 text-xs ${filter === id ? "bg-white font-semibold text-slate-900 shadow-sm" : "text-slate-500"}`}>{label}</button>)}
         </div>
-      )}
-
-      {/* Barra de Controles: Selector elegante en <select> + Acciones */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
-        <div className="flex items-center gap-2.5 flex-wrap flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Layout size={14} className="text-blue-600" />
-            <label className="text-xs font-semibold text-slate-700">Pantalla:</label>
-          </div>
-
-          {mockups.length > 0 ? (
-            <select
-              value={selectedScreen}
-              onChange={(e) => {
-                const idx = Number(e.target.value);
-                if (onSelectScreen) onSelectScreen(idx);
-              }}
-              className="bg-white border border-slate-300 hover:border-slate-400 text-slate-800 text-xs rounded-xl px-3 py-1.5 font-medium shadow-2xs focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer max-w-xs md:max-w-md truncate"
-            >
-              {mockups.map((m, idx) => (
-                <option key={m.nombre_pantalla || idx} value={idx}>
-                  {idx + 1}. {formatScreenName(m.nombre_pantalla)} ({capitalizeFirst(m.tipo || "interfaz")})
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="text-xs text-slate-400 italic">Sin mockups generados aún</span>
-          )}
-
-          <button
-            type="button"
-            onClick={handleGenerateAll}
-            disabled={isGeneratingAll}
-            className="px-3.5 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 cursor-pointer transition-colors shrink-0"
-          >
-            <Plus size={13} />
-            <span>{mockups.length > 0 ? "Regenerar todos" : "Generar mockups"}</span>
-            {isGeneratingAll && <Loader2 size={12} className="animate-spin" />}
-          </button>
-
-          {currentMockup && (
-            <button
-              type="button"
-              onClick={handleRegenerateScreen}
-              disabled={isRegenerating}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer transition-colors shrink-0"
-              title="Regenerar con IA solo esta pantalla"
-            >
-              <RotateCcw size={13} />
-              <span>Regenerar actual</span>
-              {isRegenerating && <Loader2 size={12} className="animate-spin" />}
-            </button>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setShowCatalog(value => !value)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${showCatalog ? 'border-[#CFC0F1] bg-[#F2EDFF] text-[#6D28D9]' : 'border-slate-200 text-slate-600'}`}><ListTree size={13} />Pantallas</button>
+          <button onClick={() => setShowDetails(value => !value)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${showDetails ? 'border-[#CFC0F1] bg-[#F2EDFF] text-[#6D28D9]' : 'border-slate-200 text-slate-600'}`}><InfoIcon size={13} />Detalles</button>
+          <button onClick={() => setSelectedIds(new Set(screens.filter(p => !mockupMap.has(p.slug) || quality(mockupMap.get(p.slug)) === 'invalido').map(p => p.slug)))} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600">Solo faltantes o inválidas</button>
+          <button onClick={() => setShowPalette(v => !v)} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700"><Palette size={13} />Paleta</button>
+          <button disabled={busy || selectedIds.size === 0} onClick={() => startGeneration([...selectedIds], "Generación seleccionada")} className="flex items-center gap-1.5 rounded-lg bg-[#7C3AED] px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-violet-900/10 hover:bg-[#6D28D9] disabled:opacity-40"><WandSparkles size={13} />Generar seleccionadas ({selectedIds.size})</button>
         </div>
-
-        {/* Controles de vista: Gráfico / Código y acciones */}
-        {currentMockup && (
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setViewMode("visual")}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "visual"
-                    ? "bg-white text-slate-900 shadow-2xs"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                Diseño
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("code")}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                  viewMode === "code"
-                    ? "bg-white text-slate-900 shadow-2xs"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                Código
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleDownloadHtml}
-              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              title="Descargar archivo HTML del mockup"
-            >
-              <Download size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={handleCopyHtml}
-              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              title="Copiar código HTML"
-            >
-              <Copy size={14} />
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Área del Mockup: 100% ajustada al ancho de la sección derecha sin contenedor limitante */}
-      <div className="w-full flex-1 flex flex-col min-h-[580px] relative mb-3">
-        {currentMockup ? (
-          viewMode === "visual" ? (
-            <div className="w-full flex-1 flex flex-col min-h-[580px] bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
-              <iframe
-                srcDoc={prepareMockupHtml(currentMockup.preview_code)}
-                sandbox="allow-scripts allow-same-origin"
-                className="w-full flex-1 min-h-[580px] border-0"
-                title={`Mockup: ${currentMockup.nombre_pantalla}`}
-              />
-            </div>
-          ) : (
-            <div className="w-full flex-1 flex flex-col min-h-[580px] bg-slate-50 border border-slate-200 rounded-2xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-mono text-slate-500">HTML & Tailwind Source</span>
-                <span className="text-[11px] text-slate-400">Edición directa</span>
-              </div>
-              <textarea
-                value={currentMockup.preview_code}
-                onChange={(e) => {
-                  const newCode = e.target.value;
-                  if (onUpdateMockup) {
-                    onUpdateMockup(currentMockup.nombre_pantalla, newCode);
-                  }
-                }}
-                rows={20}
-                className="flex-1 w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-600 resize-none leading-relaxed"
-                spellCheck="false"
-              />
-            </div>
-          )
-        ) : (
-          <div className="w-full flex-1 flex flex-col items-center justify-center text-center p-12 bg-slate-50 border border-slate-200 rounded-2xl min-h-[480px]">
-            <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 mb-4 shadow-xs">
-              <Layout size={28} />
-            </div>
-            <h3 className="text-base font-semibold text-slate-800 mb-1">
-              Wireframes y Mockups de Interfaz
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-              Genera una pantalla por cada nodo del Árbol de Navegación del sistema, respetando su ruta y módulo, y completando sus campos con los Requerimientos ISO/IEC/IEEE 29148:2018 y las Clases de Dominio.
-            </p>
+      {showPalette && <div className="absolute right-0 top-10 z-30 max-h-[75vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl" style={{ width: 'min(760px, calc(100vw - 2rem))' }}><div className="mb-3 flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Sistema visual · v{designSystem.version}</p><p className="text-[11px] text-slate-500">La previsualización refleja los colores al instante. “Aplicar” regenera únicamente las pantallas marcadas.</p></div><div className="flex items-center gap-2"><button disabled={suggestingPalette} onClick={suggestPalette} className="flex items-center gap-1 rounded-lg bg-violet-50 px-2.5 py-1.5 text-xs text-violet-700 disabled:opacity-50">{suggestingPalette ? <Loader2 size={12} className="animate-spin" /> : <WandSparkles size={12} />}{suggestingPalette ? 'Consultando…' : 'Sugerencia IA'}</button><button onClick={() => setShowPalette(false)} className="text-lg leading-none text-slate-400">×</button></div></div><div className="flex flex-wrap gap-3">{Object.entries(designSystem.colores || {}).map(([key, value]) => <label key={key} className="flex items-center gap-2 text-[11px] text-slate-600"><input type="color" value={value} onChange={e => setDesignSystem(prev => ({ ...prev, origen: 'manual', colores: { ...prev.colores, [key]: e.target.value } }))} className="h-7 w-8 rounded border-0" /><span>{formatName(key)}</span></label>)}</div><div className="mt-4 flex flex-wrap justify-end gap-2"><button disabled={savingPalette} onClick={savePalette} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Guardar sin regenerar</button><button disabled={savingPalette || busy || selectedIds.size === 0} onClick={applyPalette} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">{savingPalette ? <Loader2 size={12} className="animate-spin" /> : <Palette size={12} />}Aplicar a seleccionadas ({selectedIds.size})</button></div></div>}
+
+      <div className="flex min-h-[620px] flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        {showCatalog && <aside className="w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50/60 p-3">
+          <div className="mb-3 flex items-center justify-between"><span className="text-xs font-semibold text-slate-800">Flujos y pantallas</span><button onClick={() => setSelectedIds(selectedIds.size === screens.length ? new Set() : new Set(screens.map(p => p.slug)))} className="text-[11px] text-[#7C3AED]">{selectedIds.size === screens.length ? "Ninguna" : "Todas"}</button></div>
+          {[...groups.entries()].map(([flow, modules]) => <div key={flow} className="mb-4"><p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">{flow}</p>{[...modules.entries()].map(([module, items]) => <div key={module} className="mb-2"><p className="mb-1 pl-1 text-[11px] font-medium text-slate-600">{module}</p>{items.map(entry => { const generated = mockupMap.get(entry.slug); const state = generated ? quality(generated) : "faltante"; return <div key={entry.slug} className={`mb-1 flex items-start gap-2 rounded-lg border px-2 py-2 ${activeId === entry.slug ? "border-[#CFC0F1] bg-[#F2EDFF]" : "border-transparent hover:bg-white"}`}><input type="checkbox" checked={selectedIds.has(entry.slug)} onChange={() => toggleScreen(entry.slug)} className="mt-0.5 accent-[#7C3AED]" /><button onClick={() => selectScreen(entry)} className="min-w-0 flex-1 text-left"><span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-800">{platformIcon(entry.plataforma)}<span className="truncate">{entry.nombre || formatName(entry.slug)}</span></span><span className={`mt-1 flex items-center gap-1 text-[10px] ${state === 'invalido' ? 'text-red-600' : state === 'faltante' ? 'text-slate-400' : state === 'advertencia' ? 'text-amber-600' : 'text-[#4D7C0F]'}`}>{state === 'invalido' ? <AlertTriangle size={10} /> : state === 'valido' ? <Check size={10} /> : null}{state}</span></button></div>; })}</div>)}</div>)}
+          {!screens.length && <p className="text-xs text-slate-400">El árbol no contiene pantallas reconocibles.</p>}
+        </aside>}
+
+        <main className="flex min-w-0 flex-1 flex-col bg-slate-100/70">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-900">{currentEntry?.nombre || "Selecciona una pantalla"}</p><p className="truncate text-[10px] text-slate-500">{currentEntry?.ruta || `${currentEntry?.flujo || ''} / ${currentEntry?.modulo || ''}`}</p></div><div className="flex items-center gap-1"><button disabled={currentPosition <= 0} onClick={() => selectScreen(screens[currentPosition - 1])} className="rounded p-1.5 disabled:opacity-30"><ChevronLeft size={15} /></button><span className="text-[10px] text-slate-500">{currentPosition + 1}/{screens.length}</span><button disabled={currentPosition < 0 || currentPosition >= screens.length - 1} onClick={() => selectScreen(screens[currentPosition + 1])} className="rounded p-1.5 disabled:opacity-30"><ChevronRight size={15} /></button><div className="ml-2 flex rounded-lg bg-slate-100 p-0.5"><button onClick={() => setViewMode('visual')} className={`rounded-md px-2 py-1 text-[11px] ${viewMode === 'visual' ? 'bg-white shadow-sm' : ''}`}>Diseño</button><button onClick={() => setViewMode('code')} className={`rounded-md px-2 py-1 text-[11px] ${viewMode === 'code' ? 'bg-white shadow-sm' : ''}`}>Código</button></div></div></div>
+          <div className="flex min-w-0 flex-1 items-start justify-center overflow-auto p-3">
+            {currentMockup ? viewMode === "visual" ? <ScaledMockupPreview html={prepareMockupHtml(currentMockup.preview_code, designSystem)} platform={currentEntry?.plataforma} title={`Mockup ${currentMockup.nombre_pantalla}`} /> : <textarea value={currentMockup.preview_code} onChange={e => onUpdateMockup?.(currentMockup.nombre_pantalla, e.target.value)} className="h-full min-h-[540px] w-full resize-none rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs" spellCheck="false" /> : <div className="m-auto max-w-sm text-center"><Layout className="mx-auto mb-3 text-slate-300" size={36} /><p className="text-sm font-semibold text-slate-700">Mockup pendiente</p><p className="mt-1 text-xs text-slate-500">Marca esta pantalla y usa “Generar seleccionadas”.</p></div>}
           </div>
-        )}
+        </main>
+
+        {showDetails && <aside className="w-60 shrink-0 overflow-y-auto border-l border-slate-200 p-3"><div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-slate-800">Detalles de pantalla</p><button onClick={() => setShowDetails(false)} className="text-lg leading-none text-slate-400">×</button></div>{currentEntry && <div className="space-y-3 text-[11px]"><Info label="Plataforma" value={currentEntry.plataforma} icon={platformIcon(currentEntry.plataforma, 12)} /><Info label="Flujo" value={currentEntry.flujo} /><Info label="Módulo" value={currentEntry.modulo} /><Info label="Tipo" value={currentEntry.tipo} /><Info label="Roles" value={(currentEntry.roles || []).join(', ')} /><Info label="Shell compartido" value={currentEntry.shell} />{currentMockup && <><Info label="Estado" value={`${currentMockup.estado || 'generado'} · v${currentMockup.version || 1}`} /><div className={`rounded-lg border p-2 ${quality(currentMockup) === 'invalido' ? 'border-red-200 bg-red-50 text-red-700' : quality(currentMockup) === 'advertencia' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><p className="font-semibold">Calidad: {quality(currentMockup)}</p>{[...(currentMockup.errores_validacion || []), ...(currentMockup.advertencias_validacion || [])].map((warning, i) => <p key={i} className="mt-1">• {warning}</p>)}</div><div className="flex flex-wrap gap-1"><button disabled={busy} onClick={() => startGeneration([currentEntry.slug], 'Regeneración')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5"><RotateCcw size={11} />Regenerar</button><button onClick={() => navigator.clipboard.writeText(currentMockup.preview_code)} className="rounded-lg border border-slate-200 p-1.5" title="Copiar HTML"><Copy size={12} /></button><button onClick={() => { const url = URL.createObjectURL(new Blob([currentMockup.preview_code], { type: 'text/html' })); const a = document.createElement('a'); a.href = url; a.download = `${currentEntry.slug}.html`; a.click(); URL.revokeObjectURL(url); }} className="rounded-lg border border-slate-200 p-1.5" title="Descargar HTML"><Download size={12} /></button></div></>}</div>}</aside>}
       </div>
-
-      {/* DESCRIPCIÓN DEL MOCKUP: Con el mismo estilo limpio, numerado y tipográfico de los requerimientos */}
-      {currentMockup && (
-        <div className="pt-4 mt-2 border-t border-slate-200/80 space-y-2 text-slate-700 text-sm shrink-0">
-          <div className="flex items-start gap-3">
-            <span className="font-semibold text-slate-800 text-sm mt-0.5">
-              {(selectedScreen + 1)}.
-            </span>
-            <div className="flex-1 space-y-1.5">
-              <p className="leading-relaxed">
-                <strong className="text-slate-900 font-semibold">{formatScreenName(currentMockup.nombre_pantalla)}:</strong>{" "}
-                {capitalizeFirst(currentMockup.descripcion)}
-              </p>
-
-              <p className="text-xs text-slate-500">
-                <strong className="text-slate-700">Tipo:</strong> {capitalizeFirst(currentMockup.tipo || "interfaz")} •{" "}
-                <strong className="text-slate-700">RF Cubiertos:</strong> {currentMockup.rf_trazabilidad?.join(", ") || "N/A"} •{" "}
-                <strong className="text-slate-700">Estado:</strong> {capitalizeFirst(currentMockup.estado || "generado")} (v{currentMockup.version || 1})
-              </p>
-
-              {currentMockup.descripcion_jerarquica && currentMockup.descripcion_jerarquica.length > 0 && (
-                <div className="pt-1 space-y-1 text-xs text-slate-600">
-                  <p className="font-semibold text-slate-700">Estructura y Trazabilidad Operativa:</p>
-                  <ul className="list-disc pl-5 space-y-0.5">
-                    {currentMockup.descripcion_jerarquica.map((item, i) => {
-                      const cleanItem = String(item).replace(/^[•\-\*]\s*/, "");
-                      return <li key={i}>{cleanItem}</li>;
-                    })}
-                  </ul>
-                </div>
-              )}
-
-              {currentMockup.acciones_principales && currentMockup.acciones_principales.length > 0 && (
-                <p className="text-xs text-slate-500 pt-0.5">
-                  <strong className="text-slate-700">Acciones del usuario:</strong>{" "}
-                  {currentMockup.acciones_principales.join(", ")}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
+}
+
+function ScaledMockupPreview({ html, platform = "web", title }) {
+  const hostRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  const baseWidth = platform === "mobile" ? 390 : platform === "tablet" ? 820 : 1440;
+  const baseHeight = platform === "mobile" ? 844 : platform === "tablet" ? 900 : 820;
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+    const update = () => setScale(Math.min(1, Math.max(0.35, (host.clientWidth - 8) / baseWidth)));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [baseWidth]);
+
+  return <div ref={hostRef} className="min-h-[540px] w-full overflow-auto"><div className="mx-auto overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm" style={{ width: baseWidth * scale, height: baseHeight * scale }}><iframe srcDoc={html} sandbox="allow-scripts" title={title} style={{ width: baseWidth, height: baseHeight, transform: `scale(${scale})`, transformOrigin: 'top left', border: 0 }} /></div><p className="mt-2 text-center text-[10px] text-slate-400">Vista {platform} · ajustada al {Math.round(scale * 100)}%</p></div>;
+}
+
+function Info({ label, value, icon = null }) {
+  return <div><p className="mb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p><p className="flex items-center gap-1.5 break-words font-medium text-slate-700">{icon}{value || "No definido"}</p></div>;
 }

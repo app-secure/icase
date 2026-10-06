@@ -5,8 +5,14 @@
   --color-muted-gray: #CBCBCB;
   --color-warm-ivory: #FFFFE3;
   --color-slate-blue: #6D8196;
+  --color-rbix-ink: #171425;
   --color-rbix-purple: #7C3AED;
-  --color-rbix-green: #10B981;
+  --color-rbix-purple-dark: #6D28D9;
+  --color-rbix-purple-soft: #F2EDFF;
+  --color-rbix-green: #A3FF12;
+  --color-rbix-green-dark: #4D7C0F;
+  --color-rbix-surface: #FAF9FC;
+  --color-rbix-border: #E7E3EE;
 }
 
 .bg-slate-blue { background-color: #6D8196; }
@@ -29,7 +35,7 @@
   body {
     margin: 0;
     padding: 0;
-    background-color: #f8fafd;
+    background-color: #ffffff;
     color: #1f1f1f;
     font-family: "Roboto", "YouTube Sans", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -49,7 +55,7 @@
     padding: 0;
     border: none;
     text-align: left;
-    background-color: #f8fafd;
+    background-color: #ffffff;
   }
 }
 
@@ -117,7 +123,7 @@
 }
 
 .gemini-aura-glow {
-  background: radial-gradient(circle, rgba(66, 133, 244, 0.45) 0%, rgba(168, 85, 247, 0.35) 45%, rgba(236, 72, 153, 0.2) 70%, transparent 80%);
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.28) 0%, rgba(163, 255, 18, 0.12) 55%, transparent 80%);
   animation: geminiPulseAura 4s ease-in-out infinite;
 }
 
@@ -126,7 +132,7 @@
 }
 
 .gemini-gradient-text {
-  background: linear-gradient(135deg, #1a73e8 0%, #8ab4f8 25%, #c58af9 60%, #ea4335 100%);
+  background: linear-gradient(135deg, #171425 0%, #7C3AED 58%, #4D7C0F 100%);
   background-size: 250% 250%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -134,13 +140,13 @@
 }
 
 .gemini-wave-bar {
-  background: linear-gradient(90deg, #1a73e8, #8ab4f8, #c58af9, #f28b82, #1a73e8);
+  background: linear-gradient(90deg, #7C3AED, #A3FF12, #7C3AED);
   background-size: 300% 100%;
   animation: geminiWaveFlow 3s linear infinite;
 }
 
 .gemini-skeleton-loader {
-  background: linear-gradient(90deg, #f1f5f9 0%, #dbeafe 30%, #e9d5ff 50%, #f1f5f9 100%);
+  background: linear-gradient(90deg, #f8f7fb 0%, #eee8fb 45%, #f3f8e9 65%, #f8f7fb 100%);
   background-size: 200% 100%;
   animation: geminiSkeletonShimmer 2s infinite ease-in-out;
 }

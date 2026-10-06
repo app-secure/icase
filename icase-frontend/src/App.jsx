@@ -4,7 +4,7 @@ import ProjectDashboard from "./components/ProjectDashboard";
 import ProjectWorkspace from "./components/ProjectWorkspace";
 import AuthView from "./components/AuthView";
 import LoadingOverlay from "./components/LoadingOverlay";
-import { fetchProjects, fetchProjectById, createProjectApi, deleteProjectApi, getAuthToken, getStoredUser, clearAuth } from "./services/api";
+import { fetchProjects, fetchProjectById, deleteProjectApi, getAuthToken, getStoredUser, clearAuth } from "./services/api";
 import { sanitizePlantUML } from "./utils/plantumlEncoder";
 
 export default function App() {
@@ -134,9 +134,17 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         id: f.id || f._id,
         name: f.nombre_archivo || "Archivo de entrada",
         type: f.tipo || "txt",
+        category: f.categoria || (f.tipo === "audio" ? "audios" : f.tipo === "pdf" ? "documentos" : "textos"),
+        contentType: f.tipo_contenido || "",
+        description: f.descripcion || "",
+        authorOrigin: f.autor_origen || "",
+        documentDate: f.fecha_documento || "",
+        tags: Array.isArray(f.etiquetas) ? f.etiquetas : [],
+        transcriptionVerified: Boolean(f.transcripcion_verificada),
+        aiMetadata: Boolean(f.metadatos_generados_ia),
         size: f.tamanio || "10 KB",
         date: new Date(f.createdAt || Date.now()).toLocaleDateString("es-ES"),
-        contentSnippet: f.texto_transcrito?.slice(0, 160) || ""
+        contentSnippet: f.texto_transcrito || ""
       }));
 
     const hasRealRequirements = (reqs || []).length > 0;
@@ -168,14 +176,15 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
       updatedAt: new Date(p.updatedAt || Date.now()).toLocaleDateString("es-ES"),
       currentPhase: !isProcessed
         ? 0
-        : p.estado_fase === "finalizado" || p.estado_fase === "diseno_aprobado"
+        : ["finalizado", "diseno_aprobado", "mockups_aprobados"].includes(p.estado_fase)
         ? 3
-        : p.estado_fase === "analisis_aprobado" || p.estado_fase === "diseno_pendiente"
+        : ["analisis_aprobado", "diseno_pendiente", "diagramas_aprobados", "mockups_pendientes"].includes(p.estado_fase)
         ? 2
         : 1,
       isProcessed,
-      isAnalysisApproved: isProcessed && ["analisis_aprobado", "diseno_pendiente", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
-      isDiagramsApproved: isProcessed && ["diseno_aprobado", "finalizado"].includes(p.estado_fase),
+      isAnalysisApproved: isProcessed && ["analisis_aprobado", "diseno_pendiente", "diagramas_aprobados", "mockups_pendientes", "mockups_aprobados", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
+      isDiagramsApproved: isProcessed && ["diagramas_aprobados", "mockups_pendientes", "mockups_aprobados", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
+      isMockupsApproved: isProcessed && ["mockups_aprobados", "diseno_aprobado", "finalizado"].includes(p.estado_fase),
       sources: fuentesUnicas,
       requirements: {
         functional: reqs
@@ -245,7 +254,15 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         }
       },
       mockups: (p.diseno?.mockups || []).map(m => ({
+        pantalla_id: m.pantalla_id,
         nombre_pantalla: m.nombre_pantalla,
+        nombre_visible: m.nombre_visible,
+        flujo: m.flujo,
+        modulo: m.modulo,
+        ruta: m.ruta,
+        plataforma: m.plataforma,
+        roles: m.roles || [],
+        shell: m.shell,
         tipo: m.tipo,
         descripcion: m.descripcion,
         descripcion_jerarquica: m.descripcion_jerarquica || [],
@@ -256,7 +273,10 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         preview_code: m.preview_code,
         imagen_url: m.imagen_url,
         estado: m.estado,
-        version: m.version
+        version: m.version,
+        estado_calidad: m.estado_calidad,
+        errores_validacion: m.errores_validacion || [],
+        advertencias_validacion: m.advertencias_validacion || []
       }))
     };
   }, []);
@@ -327,6 +347,7 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
     isProcessed: false,
     isAnalysisApproved: false,
     isDiagramsApproved: false,
+    isMockupsApproved: false,
     sources: [],
     requirements: { functional: [], nonFunctional: [] },
     diagrams: {},

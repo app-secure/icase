@@ -656,14 +656,14 @@ export default function PdfPreviewModal({ project, onClose }) {
                 document.body.appendChild(iframe);
 
                 const timeout = setTimeout(() => {
-                  try { document.body.removeChild(iframe); } catch(_) {}
+                  try { document.body.removeChild(iframe); } catch {}
                   resolve(null);
                 }, 12000);
 
                 const tryCapture = (attempts) => {
                   if (attempts <= 0) {
                     clearTimeout(timeout);
-                    try { document.body.removeChild(iframe); } catch(_) {}
+                    try { document.body.removeChild(iframe); } catch {}
                     resolve(null);
                     return;
                   }
@@ -693,11 +693,11 @@ export default function PdfPreviewModal({ project, onClose }) {
                       allowTaint: false
                     }).then(canvas => {
                       clearTimeout(timeout);
-                      try { document.body.removeChild(iframe); } catch(_) {}
+                      try { document.body.removeChild(iframe); } catch {}
                       resolve(canvas.toDataURL("image/png", 0.92));
                     }).catch(() => {
                       clearTimeout(timeout);
-                      try { document.body.removeChild(iframe); } catch(_) {}
+                      try { document.body.removeChild(iframe); } catch {}
                       resolve(null);
                     });
                   } else {
@@ -841,7 +841,6 @@ sidebar, .sidebar { background: #1e293b; color: white; }
               const maxW = maxLineWidth;
               let w = size.width;
               let h = size.height;
-              const ratio = w / h;
               // Convertir px a mm (aprox 3.7795 px/mm a 96dpi)
               const pxToMm = (px) => px * 0.264583;
               let wMm = Math.min(pxToMm(w), maxW);

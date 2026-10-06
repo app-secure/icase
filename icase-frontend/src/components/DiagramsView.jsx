@@ -18,13 +18,15 @@ export default function DiagramsView({
   mockups = [],
   onUpdateMockups,
   onUpdateDiagramCode,
-  onApprovePhase,
+  onApproveDiagrams,
+  onApproveMockups,
+  isDiagramsApproved = false,
   onBackToAnalysis,
   onApplyAiCorrection,
   projectId,
   requirements = null
 }) {
-  const [selectedKey, setSelectedKey] = useState("useCase");
+  const [selectedKey, setSelectedKey] = useState(isDiagramsApproved ? "mockups" : "useCase");
   const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
   const [selectedScreen, setSelectedScreen] = useState(0);
   const [prompt, setPrompt] = useState("");
@@ -87,6 +89,22 @@ export default function DiagramsView({
   };
 
   const contextInfo = getContextInfo();
+
+  const handleApproveCurrentStage = async () => {
+    setCorrectionFeedback(null);
+    const result = selectedKey === "mockups"
+      ? await onApproveMockups?.()
+      : await onApproveDiagrams?.();
+
+    if (result?.success === false) {
+      setCorrectionFeedback({ type: "error", message: result.error });
+      return;
+    }
+    if (selectedKey !== "mockups") {
+      setSelectedKey("mockups");
+      setCorrectionFeedback({ type: "success", message: "Diagramas aprobados. Ya puedes generar los mockups." });
+    }
+  };
 
   // Envío inteligente: enruta la corrección según el artefacto activo
   const handleSendCorrection = async (e) => {
@@ -151,12 +169,12 @@ export default function DiagramsView({
   return (
     <div className="w-full h-full flex flex-col min-h-0 bg-white">
       {/* Contenedor scrolleable que abarca todo el ancho hasta el extremo derecho */}
-      <div className="w-full flex-1 overflow-y-auto min-h-0 px-6 md:px-12 pt-6 pb-4 flex flex-col">
-        <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col min-h-0">
+      <div className={`w-full flex-1 overflow-y-auto min-h-0 pt-6 pb-4 flex flex-col ${selectedKey === "mockups" ? "px-4" : "px-6 md:px-12"}`}>
+        <div className={`${selectedKey === "mockups" ? "max-w-none" : "max-w-6xl"} mx-auto w-full flex-1 flex flex-col min-h-0`}>
           {/* Cabecera superior unificada de Fase 2 */}
           <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
             <div>
-              <span className="text-[11px] font-semibold text-blue-600 uppercase tracking-wider block">
+              <span className="text-[11px] font-semibold text-[#7C3AED] uppercase tracking-wider block">
                 Fase 2: Modelado del Software & Wireframes
               </span>
               <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
@@ -183,14 +201,19 @@ export default function DiagramsView({
                 return (
                   <button
                     key={opt.key}
+                    disabled={opt.key === "mockups" && !isDiagramsApproved}
+                    title={opt.key === "mockups" && !isDiagramsApproved ? "Aprueba primero los cuatro diagramas" : undefined}
                     onClick={() => {
+                      if (opt.key === "mockups" && !isDiagramsApproved) return;
                       setSelectedKey(opt.key);
                       setCorrectionFeedback(null);
                     }}
                     className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
                       isSelected
                         ? "bg-slate-900 text-white shadow-xs"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        : opt.key === "mockups" && !isDiagramsApproved
+                          ? "bg-slate-50 text-slate-300 cursor-not-allowed"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
                     <Icon size={14} />
@@ -280,8 +303,8 @@ export default function DiagramsView({
       </div>
 
       {/* CHAT INTELIGENTE UNIFICADO: Detecta automáticamente el diagrama o mockup activo */}
-      <div className="w-full shrink-0 border-t border-slate-200 bg-white z-10 px-6 md:px-12 py-3.5">
-        <div className="max-w-6xl mx-auto w-full flex flex-col gap-2">
+      <div className={`w-full shrink-0 border-t border-slate-200 bg-white z-10 py-3.5 ${selectedKey === "mockups" ? "px-4" : "px-6 md:px-12"}`}>
+        <div className={`${selectedKey === "mockups" ? "max-w-none" : "max-w-6xl"} mx-auto w-full flex flex-col gap-2`}>
           {correctionFeedback && (
             <div
               className={`text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 ${
@@ -340,11 +363,11 @@ export default function DiagramsView({
             {/* Botón de Aprobación Escalonada: Modelado -> Mockups -> Documento */}
             <button
               type="button"
-              onClick={selectedKey !== "mockups" ? () => setSelectedKey("mockups") : onApprovePhase}
-              className="px-5 py-2.5 bg-[#0b57d0] hover:bg-[#0947a8] text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+              onClick={handleApproveCurrentStage}
+              className="px-5 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
             >
               <Check size={14} />
-              <span>{selectedKey !== "mockups" ? "Aprobar Modelado y Pasar a Mockups" : "Aprobar y Pasar a Documento"}</span>
+              <span>{selectedKey !== "mockups" ? "Aprobar Diagramas y Habilitar Mockups" : "Aprobar Mockups y Pasar a Documento"}</span>
             </button>
           </div>
         </div>

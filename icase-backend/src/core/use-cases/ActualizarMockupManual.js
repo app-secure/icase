@@ -8,8 +8,9 @@ class ActualizarMockupManual {
 
   async ejecutar({ proyectoId, nombrePantalla, previewCode }) {
     const validacion = this.validator.sanitizar(previewCode);
-    if (!this.validator.listo(validacion.html)) {
-      throw new Error('El código HTML no es un documento completo válido (falta <!DOCTYPE html> o </html>)');
+    const calidad = this.validator.validar(validacion.html);
+    if (!calidad.valido) {
+      throw new Error(`El código no cumple el contrato del mockup: ${calidad.errores.join('; ')}`);
     }
 
     if (validacion.advertencias.length > 0) {
@@ -34,7 +35,9 @@ class ActualizarMockupManual {
       preview_code: validacion.html,
       estado: 'editado',
       version: (mockupActual.version || 0) + 1,
-      advertencias_validacion: validacion.advertencias
+      advertencias_validacion: [...validacion.advertencias, ...calidad.advertencias],
+      errores_validacion: [],
+      estado_calidad: calidad.estado
     };
 
     mockups[index] = mockupActualizado;

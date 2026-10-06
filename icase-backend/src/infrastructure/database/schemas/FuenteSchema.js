@@ -29,6 +29,48 @@ const FuenteSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  categoria: {
+    type: String,
+    enum: ['textos', 'documentos', 'audios', 'videos', 'otros'],
+    default: 'otros',
+    index: true
+  },
+  tipo_contenido: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 100
+  },
+  descripcion: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 1200
+  },
+  autor_origen: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 160
+  },
+  fecha_documento: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 40
+  },
+  etiquetas: {
+    type: [String],
+    default: []
+  },
+  transcripcion_verificada: {
+    type: Boolean,
+    default: false
+  },
+  metadatos_generados_ia: {
+    type: Boolean,
+    default: false
+  },
   estado: {
     type: String,
     enum: ['cargado', 'transcrito', 'error'],

@@ -18,7 +18,7 @@ export default function Header({ onGoToProjects, activeView, projectName, isProc
   };
 
   return (
-    <header className="h-14 bg-[#1F1D30] border-b border-white/10 px-6 flex items-center justify-between shrink-0 z-10 shadow-xs select-none font-inter">
+    <header className="h-14 bg-[#171425] border-b border-white/10 px-6 flex items-center justify-between shrink-0 z-10 shadow-xs select-none font-inter">
       <div className="flex items-center gap-3">
         {activeView === "workspace" && (
           <button

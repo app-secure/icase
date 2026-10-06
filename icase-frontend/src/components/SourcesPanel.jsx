@@ -1,16 +1,18 @@
 import React, { useRef, useState } from "react";
 import {
   Upload,
-  Plus,
-  FileText,
-  FileAudio,
-  FileCode,
   Trash2,
-  ArrowRight,
   ArrowLeft,
-  Sparkles,
   Cpu,
-  ChevronDown
+  ChevronDown,
+  Files,
+  PanelLeftOpen,
+  PanelLeftClose,
+  Pencil,
+  Sparkles,
+  X,
+  Save,
+  CheckCircle2
 } from "lucide-react";
 import RbixLogo from "./RbixLogo";
 import BrainGearsIcon from "./BrainGearsIcon";
@@ -33,7 +35,7 @@ function NotebookDocIcon({ size = 22, className = "" }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={`shrink-0 ${className}`}>
       <path
         d="M6 3.5C4.9 3.5 4 4.4 4 5.5v13c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V9.5L14 3.5H6z"
-        fill="#1A73E8"
+        fill="#7C3AED"
       />
       <path d="M14 3.5V9h5.5L14 3.5z" fill="#90CAF9" />
       <path d="M8 12.5h8M8 15.5h5" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
@@ -45,9 +47,9 @@ function NotebookDocIcon({ size = 22, className = "" }) {
 function NotebookAudioIcon({ size = 22, className = "" }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={`shrink-0 ${className}`}>
-      <rect x="4.5" y="9.5" width="3" height="6" rx="1.5" fill="#1A73E8" />
-      <rect x="10.5" y="5" width="3" height="14" rx="1.5" fill="#1A73E8" />
-      <rect x="16.5" y="9.5" width="3" height="6" rx="1.5" fill="#1A73E8" />
+      <rect x="4.5" y="9.5" width="3" height="6" rx="1.5" fill="#7C3AED" />
+      <rect x="10.5" y="5" width="3" height="14" rx="1.5" fill="#7C3AED" />
+      <rect x="16.5" y="9.5" width="3" height="6" rx="1.5" fill="#7C3AED" />
     </svg>
   );
 }
@@ -55,6 +57,8 @@ function NotebookAudioIcon({ size = 22, className = "" }) {
 export default function SourcesPanel({
   sources,
   onAddSource,
+  onUpdateSource,
+  onSuggestSourceMetadata,
   onDeleteSource,
   onProcess,
   isProcessing,
@@ -64,12 +68,15 @@ export default function SourcesPanel({
   onBackToDashboard,
   selectedProvider,
   onSelectProvider,
-  availableProviders = []
+  availableProviders = [],
+  collapsed = false,
+  onToggleCollapsed
 }) {
   const [uploadingItem, setUploadingItem] = useState(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [localProvider, setLocalProvider] = useState("auto");
+  const [activeSourceId, setActiveSourceId] = useState(null);
   const fileInputRef = useRef(null);
 
   const currentProvider = selectedProvider !== undefined ? selectedProvider : localProvider;
@@ -121,6 +128,24 @@ export default function SourcesPanel({
 
   const totalSourcesCount = uniqueSources.length + (uploadingItem && !uniqueSources.some((s) => s.name === uploadingItem.name) ? 1 : 0);
   const isAnySourceLoading = Boolean(uploadingItem) || uniqueSources.some((s) => s.isUploading);
+  const activeSource = uniqueSources.find((source) => source.id === activeSourceId) || null;
+
+  const sourceGroups = React.useMemo(() => {
+    const labels = {
+      textos: "Textos",
+      documentos: "Documentos",
+      audios: "Audios",
+      videos: "Videos",
+      otros: "Otros"
+    };
+    const groups = {};
+    for (const source of displayedSources) {
+      const category = source.category || (source.type === "audio" ? "audios" : source.type === "pdf" ? "documentos" : "textos");
+      if (!groups[category]) groups[category] = { label: labels[category] || labels.otros, items: [] };
+      groups[category].items.push(source);
+    }
+    return Object.entries(groups);
+  }, [displayedSources]);
 
   const getFileIcon = (type) => {
     switch (type) {
@@ -140,7 +165,13 @@ export default function SourcesPanel({
 
     // Normalizar caracteres especiales UTF-8 del nombre del archivo (tildes, ñ, etc.)
     const rawName = file.name || "archivo";
-    const normalizedName = rawName.normalize("NFC").replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim();
+    const normalizedName = Array.from(rawName.normalize("NFC"))
+      .filter((character) => {
+        const code = character.charCodeAt(0);
+        return code > 31 && !(code >= 127 && code <= 159);
+      })
+      .join("")
+      .trim();
 
     const ext = normalizedName.split('.').pop().toLowerCase();
     const mime = (file.type || '').toLowerCase();
@@ -154,6 +185,7 @@ export default function SourcesPanel({
     } else if (isPdf) {
       type = "pdf";
     }
+    const category = isAudio ? (['mp4', 'webm'].includes(ext) || mime.startsWith('video/') ? "videos" : "audios") : isPdf ? "documentos" : "textos";
 
     const formattedSize = (file.size / 1024).toFixed(1) + " KB";
 
@@ -176,15 +208,23 @@ export default function SourcesPanel({
       id: "src-" + Date.now(),
       name: normalizedName,
       type,
+      category,
       size: formattedSize,
       date: new Date().toLocaleDateString("es-ES"),
       rawFile: file,
       contentSnippet: textContent,
+      contentType: "",
+      description: "",
+      authorOrigin: "",
+      documentDate: "",
+      tags: [],
+      transcriptionVerified: false,
       isUploading: true
     };
 
     try {
-      await onAddSource(newSource);
+      const savedSource = await onAddSource(newSource);
+      if (savedSource?.id && !savedSource.isUploading) setActiveSourceId(savedSource.id);
     } catch (err) {
       console.warn("Error cargando fuente:", err);
     } finally {
@@ -193,22 +233,23 @@ export default function SourcesPanel({
     }
   };
 
+  if (collapsed) {
+    return (
+      <aside className="w-14 bg-[#171425] border-r border-[#29243B] flex h-full shrink-0 flex-col items-center py-3 text-white shadow-sm">
+        <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".txt,.pdf,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.opus,.docx" className="hidden" />
+        <button type="button" onClick={onBackToDashboard} className="mb-3 rounded-lg p-2 text-slate-300 hover:bg-white/10 hover:text-white" title="Volver a proyectos"><ArrowLeft size={17} /></button>
+        <button type="button" onClick={onToggleCollapsed} className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20" title="Mostrar fuentes"><PanelLeftOpen size={18} /></button>
+        <div className="my-3 h-px w-7 bg-white/15" />
+        <button type="button" disabled={isAnySourceLoading} onClick={() => fileInputRef.current?.click()} className="relative rounded-lg p-2 text-slate-200 hover:bg-white/10 disabled:opacity-40" title={`Fuentes (${totalSourcesCount})`}><Files size={18} />{totalSourcesCount > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[#A3FF12] px-1 text-[9px] font-bold leading-4 text-[#171425]">{totalSourcesCount}</span>}</button>
+        <div className="mt-auto flex w-full items-center justify-center">
+          <RbixLogo size="sm" showText={false} isDark={true} />
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="w-64 md:w-72 bg-[#F8FAFD] border-r border-slate-200/90 flex flex-col h-full shrink-0 select-none overflow-hidden font-inter relative shadow-xs">
-      {/* Fondo técnico elegante y luminoso con cuadrícula fina y sutil resplandor ambiental */}
-      <div
-        className="absolute inset-0 pointer-events-none -z-0"
-        style={{
-          backgroundColor: "#F8FAFD",
-          backgroundImage: `
-            radial-gradient(circle at 85% 15%, rgba(244, 114, 182, 0.08) 0%, transparent 55%),
-            radial-gradient(circle at 15% 85%, rgba(14, 165, 233, 0.06) 0%, transparent 55%),
-            linear-gradient(to right, rgba(15, 23, 42, 0.045) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(15, 23, 42, 0.045) 1px, transparent 1px)
-          `,
-          backgroundSize: "100% 100%, 100% 100%, 28px 28px, 28px 28px"
-        }}
-      />
+    <aside className="w-64 md:w-72 bg-white border-r border-[#E7E3EE] flex flex-col h-full shrink-0 select-none overflow-hidden font-inter relative shadow-xs">
 
       {/* Hidden File Input */}
       <input
@@ -220,7 +261,7 @@ export default function SourcesPanel({
       />
 
       {/* 1. PROJECT TITLE HEADER: Título blanco grande con fondo #1F1D30 */}
-      <div className="p-4 border-b border-slate-700/60 bg-[#1F1D30] text-white shrink-0 z-10 relative shadow-sm">
+      <div className="p-4 border-b border-[#29243B] bg-[#171425] text-white shrink-0 z-10 relative shadow-sm">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -255,11 +296,12 @@ export default function SourcesPanel({
               </span>
             )}
           </div>
+          <button type="button" onClick={onToggleCollapsed} className="rounded-lg p-1.5 text-slate-300 hover:bg-white/10 hover:text-white" title="Ocultar fuentes"><PanelLeftClose size={17} /></button>
         </div>
       </div>
 
       {/* 2. SOURCES HEADER */}
-      <div className="p-4 border-b border-slate-200/80 bg-white/40 backdrop-blur-xs z-10 relative">
+      <div className="p-4 border-b border-[#E7E3EE] bg-white z-10 relative">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold text-slate-800 font-inter">Fuentes</h3>
           {/* Texto neutral sin pintar como solicitó el usuario */}
@@ -273,18 +315,18 @@ export default function SourcesPanel({
           type="button"
           disabled={isAnySourceLoading}
           onClick={() => fileInputRef.current?.click()}
-          className="w-full py-2 px-4 bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 rounded-xl text-[15px] font-bold text-slate-800 hover:text-slate-950 flex items-center justify-center gap-2.5 transition-all shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-inter group"
+          className="w-full py-2 px-4 bg-white hover:bg-[#FAF9FC] border border-[#D8D1E3] hover:border-[#7C3AED] rounded-xl text-[15px] font-bold text-slate-800 hover:text-[#5B21B6] flex items-center justify-center gap-2.5 transition-all shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-inter group"
         >
-          <Upload size={17} className="text-blue-600 group-hover:-translate-y-0.5 transition-transform duration-200 shrink-0" />
+          <Upload size={17} className="text-[#7C3AED] group-hover:-translate-y-0.5 transition-transform duration-200 shrink-0" />
           <span className="text-[15px] font-bold tracking-tight">Subir Insumos</span>
         </button>
       </div>
 
       {/* 3. UPLOADED DOCUMENTS LIST: Diseño limpio y sin bordes estilo NotebookLM */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-1 z-10 relative">
+      <div className="flex-1 overflow-y-auto p-3 space-y-1 z-10 relative bg-white">
         {/* Efecto de Carga del Archivo en Proceso idéntico a NotebookLM */}
         {uploadingItem && (
-          <div className="px-3 py-2.5 rounded-xl bg-[#E8F0FE]/90 border border-blue-100/60 flex items-center justify-between gap-3 font-inter transition-all">
+          <div className="px-3 py-2.5 rounded-xl bg-[#F2EDFF] border border-[#DDD2F5] flex items-center justify-between gap-3 font-inter transition-all">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {getFileIcon(uploadingItem.type)}
               <span className="text-[13.5px] font-medium text-slate-700 truncate font-inter tracking-tight">
@@ -293,7 +335,7 @@ export default function SourcesPanel({
             </div>
             {/* Spinner circular azul estilo Google idéntico a la imagen adjunta */}
             <svg
-              className="w-[22px] h-[22px] animate-spin text-[#1A73E8] shrink-0"
+              className="w-[22px] h-[22px] animate-spin text-[#7C3AED] shrink-0"
               viewBox="0 0 24 24"
               fill="none"
             >
@@ -318,54 +360,43 @@ export default function SourcesPanel({
             </p>
           </div>
         ) : (
-          <div className="space-y-1">
-            {displayedSources.map((src) => (
-              <div
-                key={src.id}
-                className="px-3 py-2.5 rounded-xl hover:bg-slate-200/50 transition-colors flex items-center justify-between gap-3 group cursor-pointer"
-                title={`${src.name} (${src.size})`}
-              >
-                {/* Icono fiel al tipo y nombre con tipografía nítida y sombreado suave de NotebookLM */}
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  {getFileIcon(src.type)}
-                  <span
-                    className="text-[13.5px] font-medium text-[#202124] truncate font-inter tracking-tight"
-                    style={{ textShadow: "0 0.5px 1px rgba(0, 0, 0, 0.12)" }}
-                  >
-                    {src.name}
-                  </span>
+          <div className="space-y-4">
+            {sourceGroups.map(([category, group]) => (
+              <section key={category}>
+                <div className="mb-1.5 flex items-center justify-between px-2">
+                  <h4 className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{group.label}</h4>
+                  <span className="text-[10px] text-slate-400">{group.items.length}</span>
                 </div>
-
-                {src.isUploading ? (
-                  <svg
-                    className="w-[20px] h-[20px] animate-spin text-[#1A73E8] shrink-0"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="9.5"
-                      stroke="currentColor"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                      strokeDasharray="44 20"
-                    />
-                  </svg>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteSource(src.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 rounded-md hover:bg-slate-200/80 transition-all cursor-pointer shrink-0"
-                    title="Quitar fuente"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
+                <div className="space-y-1">
+                  {group.items.map((src) => (
+                    <div
+                      key={src.id}
+                      onClick={() => !src.isUploading && setActiveSourceId(src.id)}
+                      className="group cursor-pointer rounded-xl border border-transparent px-2.5 py-2.5 transition-colors hover:border-[#E7E3EE] hover:bg-[#FAF9FC]"
+                      title={`${src.name} (${src.size})`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                          {getFileIcon(src.type)}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[13px] font-medium tracking-tight text-[#202124]">{src.name}</p>
+                            <p className="truncate text-[10px] text-slate-500">{src.contentType || "Añadir contexto"}</p>
+                          </div>
+                        </div>
+                        {src.isUploading ? (
+                          <svg className="h-5 w-5 shrink-0 animate-spin text-[#7C3AED]" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="44 20" /></svg>
+                        ) : (
+                          <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
+                            <button type="button" onClick={(event) => { event.stopPropagation(); setActiveSourceId(src.id); }} className="rounded-md p-1 text-slate-400 hover:bg-[#F2EDFF] hover:text-[#7C3AED]" title="Editar detalles"><Pencil size={13} /></button>
+                            <button type="button" onClick={(event) => { event.stopPropagation(); onDeleteSource(src.id); }} className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Quitar fuente"><Trash2 size={13} /></button>
+                          </div>
+                        )}
+                      </div>
+                      {src.transcriptionVerified && (src.type === "audio" || src.category === "videos") && <div className="mt-1.5 flex items-center gap-1 pl-8 text-[10px] font-medium text-emerald-700"><CheckCircle2 size={11} />Transcripción revisada</div>}
+                    </div>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}
@@ -377,11 +408,11 @@ export default function SourcesPanel({
         <div>
           <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-inter flex items-center justify-between">
             <span className="flex items-center gap-1.5">
-              <Cpu size={13} className="text-blue-600" />
+              <Cpu size={13} className="text-[#7C3AED]" />
               Proveedor
             </span>
             {currentProvider !== 'auto' && (
-              <span className="text-[10px] text-blue-700 font-semibold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+              <span className="text-[10px] text-[#5B21B6] font-semibold bg-[#F2EDFF] px-1.5 py-0.2 rounded border border-[#DDD2F5]">
                 Seleccionado
               </span>
             )}
@@ -390,7 +421,7 @@ export default function SourcesPanel({
             <select
               value={currentProvider}
               onChange={(e) => handleProviderChange(e.target.value)}
-              className="w-full text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:border-slate-400 rounded-xl px-3 py-2 pr-8 outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer shadow-2xs font-inter appearance-none"
+              className="w-full text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:border-[#7C3AED] rounded-xl px-3 py-2 pr-8 outline-hidden focus:ring-2 focus:ring-[#7C3AED]/15 focus:border-[#7C3AED] transition-all cursor-pointer shadow-2xs font-inter appearance-none"
             >
               {Array.isArray(availableProviders) && availableProviders.length > 0 ? (
                 availableProviders.map((p) => {
@@ -421,7 +452,7 @@ export default function SourcesPanel({
           type="button"
           onClick={() => onProcess(currentProvider)}
           disabled={sources.length === 0 || isProcessing || isAnySourceLoading}
-          className="w-full py-3 px-6 bg-[#0b57d0] hover:bg-[#0947a8] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-md hover:shadow-lg cursor-pointer disabled:cursor-not-allowed font-inter hover:scale-[1.01] active:scale-[0.99]"
+          className="w-full py-3 px-6 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-md shadow-violet-900/10 hover:shadow-lg cursor-pointer disabled:cursor-not-allowed font-inter hover:scale-[1.01] active:scale-[0.99]"
         >
           {isProcessing ? (
             <>
@@ -444,12 +475,140 @@ export default function SourcesPanel({
 
       {/* 5. BRAND FOOTER DOCK: Solo en la parte inferior donde está el logo */}
       <div
-        className="py-2 px-4 bg-[#181724] border-t border-slate-700/80 flex items-center justify-center cursor-pointer hover:bg-[#201E30] transition-colors shrink-0 z-10 relative shadow-inner"
+        className="py-2 px-4 bg-[#171425] border-t border-[#29243B] flex items-center justify-center cursor-pointer hover:bg-[#211C34] transition-colors shrink-0 z-10 relative shadow-inner"
         onClick={onBackToDashboard}
         title="RBIX - Volver a Proyectos"
       >
         <RbixLogo size="sm" isDark={true} />
       </div>
+      {activeSource && (
+        <SourceDetailsModal
+          source={activeSource}
+          onClose={() => setActiveSourceId(null)}
+          onSave={onUpdateSource}
+          onSuggest={onSuggestSourceMetadata}
+        />
+      )}
     </aside>
+  );
+}
+
+function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
+  const toDraft = React.useCallback((item) => ({
+    category: item.category || (item.type === "audio" ? "audios" : item.type === "pdf" ? "documentos" : "textos"),
+    contentType: item.contentType || "",
+    description: item.description || "",
+    authorOrigin: item.authorOrigin || "",
+    documentDate: item.documentDate || "",
+    tagsText: Array.isArray(item.tags) ? item.tags.join(", ") : "",
+    contentSnippet: item.contentSnippet || "",
+    transcriptionVerified: Boolean(item.transcriptionVerified),
+    aiMetadata: Boolean(item.aiMetadata)
+  }), []);
+  const [draft, setDraft] = useState(() => toDraft(source));
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const hasTranscription = source.type === "audio" || draft.category === "audios" || draft.category === "videos";
+
+  React.useEffect(() => {
+    const handleKey = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+
+  const handleSuggest = async () => {
+    setIsSuggesting(true);
+    setFeedback(null);
+    try {
+      const suggestion = await onSuggest(source.id);
+      setDraft((current) => ({
+        ...current,
+        ...suggestion,
+        tagsText: (suggestion.tags || []).join(", "),
+        aiMetadata: true
+      }));
+      setFeedback({ type: "success", message: "Sugerencias aplicadas al formulario. Revísalas antes de guardar." });
+    } catch (error) {
+      setFeedback({ type: "error", message: error.message || "No fue posible generar sugerencias." });
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+    setIsSaving(true);
+    setFeedback(null);
+    try {
+      await onSave(source.id, {
+        ...draft,
+        tags: draft.tagsText.split(",").map((tag) => tag.trim()).filter(Boolean)
+      });
+      onClose();
+    } catch (error) {
+      setFeedback({ type: "error", message: error.message || "No fue posible guardar los detalles." });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-[#7C3AED] focus:ring-2 focus:ring-violet-100";
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#171425]/45 p-4 backdrop-blur-[2px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <form onSubmit={handleSave} className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#E7E3EE] bg-white shadow-2xl">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7C3AED]">Contexto de la fuente</p>
+            <h3 className="truncate text-lg font-semibold text-slate-900">{source.name}</h3>
+            <p className="mt-0.5 text-xs text-slate-500">Estos datos acompañarán el contenido cuando la IA analice el proyecto.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={18} /></button>
+        </header>
+
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          <div className="flex justify-end">
+            <button type="button" onClick={handleSuggest} disabled={isSuggesting || isSaving} className="flex items-center gap-2 rounded-full border border-[#CFC0F1] bg-[#F2EDFF] px-3.5 py-2 text-xs font-semibold text-[#6D28D9] hover:bg-[#E9DDFE] disabled:opacity-50">
+              {isSuggesting ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-[#7C3AED]" /> : <Sparkles size={14} />}
+              {isSuggesting ? "Analizando fuente..." : "Rellenar campos con IA"}
+            </button>
+          </div>
+
+          {feedback && <div className={`rounded-xl border px-3 py-2 text-xs ${feedback.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{feedback.message}</div>}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Categoría</span><select value={draft.category} onChange={(event) => update("category", event.target.value)} className={inputClass}><option value="textos">Textos</option><option value="documentos">Documentos</option><option value="audios">Audios</option><option value="videos">Videos</option><option value="otros">Otros</option></select></label>
+            <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Tipo de contenido</span><input value={draft.contentType} onChange={(event) => update("contentType", event.target.value)} placeholder="Ej. Entrevista, acta, especificación" maxLength={100} className={inputClass} /></label>
+            <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Autor u origen</span><input value={draft.authorOrigin} onChange={(event) => update("authorOrigin", event.target.value)} placeholder="Persona, equipo o institución" maxLength={160} className={inputClass} /></label>
+            <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Fecha del contenido</span><input value={draft.documentDate} onChange={(event) => update("documentDate", event.target.value)} placeholder="Ej. 05/10/2026 o Sprint 3" maxLength={40} className={inputClass} /></label>
+            <label className="space-y-1.5 sm:col-span-2"><span className="text-xs font-semibold text-slate-700">Descripción para la IA</span><textarea value={draft.description} onChange={(event) => update("description", event.target.value)} placeholder="Explica qué contiene, quién lo produjo y por qué es relevante para el sistema." rows={3} maxLength={1200} className={`${inputClass} resize-y`} /><span className="block text-right text-[10px] text-slate-400">{draft.description.length}/1200</span></label>
+            <label className="space-y-1.5 sm:col-span-2"><span className="text-xs font-semibold text-slate-700">Etiquetas</span><input value={draft.tagsText} onChange={(event) => update("tagsText", event.target.value)} placeholder="reservas, clientes, pagos, reglas de negocio" className={inputClass} /><span className="text-[10px] text-slate-400">Sepáralas con comas.</span></label>
+          </div>
+
+          {hasTranscription && (
+            <section className="rounded-2xl border border-[#DDD2F5] bg-[#FCFBFE] p-4">
+              <div className="mb-3">
+                <h4 className="text-sm font-semibold text-slate-900">Revisión de transcripción</h4>
+                <p className="text-xs text-slate-500">Corrige nombres, cifras o reglas mal interpretadas antes de procesar el proyecto.</p>
+              </div>
+              <textarea value={draft.contentSnippet} onChange={(event) => { update("contentSnippet", event.target.value); update("transcriptionVerified", false); }} rows={10} className={`${inputClass} resize-y font-mono text-xs leading-relaxed`} />
+              <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                <input type="checkbox" checked={draft.transcriptionVerified} onChange={(event) => update("transcriptionVerified", event.target.checked)} className="mt-0.5 accent-emerald-600" />
+                <span><strong className="block text-xs text-emerald-800">He revisado esta transcripción</strong><span className="text-[11px] text-emerald-700">La IA utilizará este texto como versión validada por el usuario.</span></span>
+              </label>
+            </section>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+          <button type="button" onClick={onClose} disabled={isSaving} className="rounded-full px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button>
+          <button type="submit" disabled={isSaving || isSuggesting} className="flex items-center gap-2 rounded-full bg-[#7C3AED] px-5 py-2 text-xs font-semibold text-white hover:bg-[#6D28D9] disabled:opacity-50">{isSaving ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Save size={14} />}Guardar contexto</button>
+        </footer>
+      </form>
+    </div>
   );
 }
