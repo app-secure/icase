@@ -1,11 +1,13 @@
 const CrearProyecto = require('../src/core/use-cases/CrearProyecto');
 const ActualizarRequerimientoManual = require('../src/core/use-cases/ActualizarRequerimientoManual');
 const ActualizarDiagramaManual = require('../src/core/use-cases/ActualizarDiagramaManual');
+const RestaurarVersionDiagrama = require('../src/core/use-cases/RestaurarVersionDiagrama');
 const AprobarFase = require('../src/core/use-cases/AprobarFase');
 const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
 const ProcesarConIA = require('../src/core/use-cases/ProcesarConIA');
 const PlantUMLValidatorService = require('../src/infrastructure/services/PlantUMLValidatorService');
 const PlantUMLSynthesizer = require('../src/infrastructure/services/PlantUMLSynthesizer');
+const RequirementChangeService = require('../src/core/services/RequirementChangeService');
 
 describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
   test('ModelosIaService debe usar catálogos configurables sin fallbacks obsoletos', async () => {
@@ -74,6 +76,39 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(actualizado.nombre).toBe('Nombre editado manualmente');
   });
 
+  test('RequirementChangeService invalida diagramas y devuelve el proyecto a análisis', async () => {
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockResolvedValue([
+        { id: 'd1', tipo: 'casos_de_uso', aprobado: true, estado: 'aprobado' },
+        { id: 'aux', tipo: 'secuencia', aprobado: true, estado: 'aprobado' }
+      ]),
+      actualizar: jest.fn().mockResolvedValue(true)
+    };
+    const proyectoRepository = { actualizarEstadoFase: jest.fn().mockResolvedValue(true) };
+    const disenoRepository = { invalidarDerivados: jest.fn().mockResolvedValue(true) };
+    const service = new RequirementChangeService({ proyectoRepository, diagramaRepository, disenoRepository });
+
+    expect(service.changed(
+      [{ identificador: 'RF-01', tipo: 'RF', nombre: 'Consultar', actores: ['Cliente'] }],
+      [{ tipo: 'RF', actores: ['Cliente'], nombre: 'Consultar', identificador: 'RF-01' }]
+    )).toBe(false);
+    expect(service.changed(
+      [{ identificador: 'RF-01', tipo: 'RF', nombre: 'Consultar' }],
+      [{ identificador: 'RF-01', tipo: 'RF', nombre: 'Reservar' }]
+    )).toBe(true);
+
+    await service.invalidate('p1');
+
+    expect(diagramaRepository.actualizar).toHaveBeenCalledTimes(1);
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
+      aprobado: false,
+      estado: 'desactualizado',
+      huella_entrada: null
+    }));
+    expect(disenoRepository.invalidarDerivados).toHaveBeenCalledWith('p1');
+    expect(proyectoRepository.actualizarEstadoFase).toHaveBeenCalledWith('p1', 'analisis_pendiente');
+  });
+
   test('ActualizarDiagramaManual debe validar sintaxis PlantUML antes de persistir', async () => {
     const mockRepo = {
       obtenerPorId: jest.fn().mockResolvedValue({ id: 'diag-1', codigo_plantuml: '@startuml\nactor Admin\n@enduml' }),
@@ -98,6 +133,65 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     });
 
     expect(res.codigo_plantuml).toBe('@startuml\nrectangle "Test"\n@enduml');
+  });
+
+  test('ActualizarDiagramaManual invalida los diagramas dependientes', async () => {
+    const existente = {
+      id: 'd1', proyecto_id: 'p1', tipo: 'casos_de_uso', version: 1,
+      codigo_plantuml: '@startuml\nactor Usuario\n@enduml'
+    };
+    const dependiente = { id: 'd2', proyecto_id: 'p1', tipo: 'clases_dominio', aprobado: true, estado: 'aprobado' };
+    const diagramaRepository = {
+      obtenerPorId: jest.fn().mockResolvedValue(existente),
+      listarPorProyecto: jest.fn().mockResolvedValue([existente, dependiente]),
+      actualizar: jest.fn().mockImplementation((id, changes) => Promise.resolve({ ...(id === 'd1' ? existente : dependiente), ...changes, id }))
+    };
+    const proyectoRepository = { actualizarEstadoFase: jest.fn().mockResolvedValue(true) };
+    const useCase = new ActualizarDiagramaManual({ diagramaRepository, proyectoRepository });
+
+    await useCase.ejecutar({ id: 'd1', datos: { descripcion: 'Nueva descripción' } });
+
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({ aprobado: false, version: 2 }));
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
+      historial_versiones: [expect.objectContaining({ version: 1 })]
+    }));
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d2', expect.objectContaining({ estado: 'desactualizado', desactualizado: true }));
+    expect(proyectoRepository.actualizarEstadoFase).toHaveBeenCalledWith('p1', 'diseno_pendiente');
+  });
+
+  test('RestaurarVersionDiagrama recupera una versión anterior como una nueva versión', async () => {
+    const actual = {
+      id: 'd2', proyecto_id: 'p1', tipo: 'casos_de_uso', version: 2,
+      titulo: 'Actual', descripcion: 'Versión actual', codigo_mermaid: 'actual',
+      codigo_plantuml: '@startuml\nactor Actual\n@enduml', historial_versiones: []
+    };
+    const anterior = {
+      id: 'd1', proyecto_id: 'p1', tipo: 'casos_de_uso', version: 1,
+      titulo: 'Anterior', descripcion: 'Versión anterior', codigo_mermaid: 'anterior',
+      codigo_plantuml: '@startuml\nactor Anterior\n@enduml'
+    };
+    const actualizarDiagramaManualUseCase = {
+      ejecutar: jest.fn().mockImplementation(({ id, datos }) => Promise.resolve({ id, ...datos, version: 3 }))
+    };
+    const useCase = new RestaurarVersionDiagrama({
+      diagramaRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue(actual),
+        listarPorProyecto: jest.fn().mockResolvedValue([anterior, actual])
+      },
+      actualizarDiagramaManualUseCase
+    });
+
+    const result = await useCase.ejecutar({ id: 'd2', version: 1 });
+
+    expect(actualizarDiagramaManualUseCase.ejecutar).toHaveBeenCalledWith({
+      id: 'd2',
+      datos: expect.objectContaining({
+        titulo: 'Anterior',
+        codigo_plantuml: anterior.codigo_plantuml,
+        restaurada_desde_version: 1
+      })
+    });
+    expect(result.version).toBe(3);
   });
 
   test('AprobarFase debe cambiar estado y opcionalmente aprobar todos los requerimientos', async () => {
@@ -149,7 +243,43 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(validator.validar(invalidClasses, 'clases').valido).toBe(false);
   });
 
-  test('AprobarFase debe exigir los cuatro diagramas antes de habilitar mockups', async () => {
+  test('PlantUMLValidatorService diferencia arquitectura de software, sistema y navegación', () => {
+    const validator = new PlantUMLValidatorService();
+    const systemArchitecture = '@startuml\nnode "Balanceador" as lb\nnode "Servidor API" as api\ndatabase "PostgreSQL" as db\nlb --> api\napi --> db\n@enduml';
+    const navigation = '@startmindmap\n* Sistema\n** Ventas\n*** Listado\n*** Detalle\n@endmindmap';
+
+    expect(validator.validar(systemArchitecture, 'arquitectura_sistema').valido).toBe(true);
+    expect(validator.validar(systemArchitecture, 'arquitectura_software').valido).toBe(false);
+    expect(validator.validar(navigation, 'arbol_navegacion').valido).toBe(true);
+  });
+
+  test('AprobarFase bloquea un diagrama que no supera el control de calidad', async () => {
+    const invalido = {
+      id: 'd1', tipo: 'casos_de_uso', aprobado: false, estado: 'pendiente_revision', version: 1,
+      codigo_plantuml: '@startuml\nactor Usuario\nrectangle Sistema {\nusecase "Único" as UC1\n}\nUsuario --> UC1\n@enduml'
+    };
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockResolvedValue([invalido]),
+      actualizar: jest.fn().mockImplementation((id, changes) => Promise.resolve({ ...invalido, ...changes, id }))
+    };
+    const useCase = new AprobarFase({
+      proyectoRepository: { obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', estado_fase: 'diseno_pendiente' }) },
+      requerimientoRepository: {},
+      diagramaRepository,
+      disenoRepository: {},
+      plantumlValidatorService: new PlantUMLValidatorService()
+    });
+
+    await expect(useCase.ejecutar({ proyectoId: 'p1', fase: 'diagrama', tipoDiagrama: 'casos_de_uso' }))
+      .rejects.toThrow('no supera el control de calidad');
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
+      estado_calidad: 'invalido',
+      errores_validacion: expect.any(Array)
+    }));
+    expect(diagramaRepository.actualizar).not.toHaveBeenCalledWith('d1', expect.objectContaining({ aprobado: true }));
+  });
+
+  test('AprobarFase impide omitir la revisión individual de diagramas', async () => {
     const proyectoRepository = {
       obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', estado_fase: 'diseno_pendiente' }),
       actualizarEstadoFase: jest.fn()
@@ -169,7 +299,7 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     });
 
     await expect(useCase.ejecutar({ proyectoId: 'p1', fase: 'diagramas' }))
-      .rejects.toThrow('Faltan: clases, arbol_navegacion');
+      .rejects.toThrow('La aprobación masiva ya no está disponible');
     expect(proyectoRepository.actualizarEstadoFase).not.toHaveBeenCalled();
   });
 
@@ -182,8 +312,8 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
         return Promise.resolve({ id, estado_fase: estado });
       })
     };
-    const diagramas = ['casos_de_uso', 'arquitectura', 'clases', 'arbol_navegacion']
-      .map((tipo, index) => ({ id: `d${index + 1}`, tipo }));
+    const diagramas = ['casos_de_uso', 'clases_dominio', 'arquitectura_software', 'arquitectura_sistema', 'clases_diseno', 'arbol_navegacion']
+      .map((tipo, index) => ({ id: `d${index + 1}`, tipo, aprobado: true, estado: 'aprobado' }));
     const diagramaRepository = {
       listarPorProyecto: jest.fn().mockResolvedValue(diagramas),
       actualizar: jest.fn().mockResolvedValue(true)
@@ -204,8 +334,81 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     const mockupResult = await useCase.ejecutar({ proyectoId: 'p1', fase: 'mockups' });
 
     expect(diagramResult.nuevoEstado).toBe('mockups_pendientes');
-    expect(diagramaRepository.actualizar).toHaveBeenCalledTimes(4);
+    expect(diagramaRepository.actualizar).not.toHaveBeenCalled();
     expect(mockupResult.nuevoEstado).toBe('mockups_aprobados');
+  });
+
+  test('AprobarFase aprueba un diagrama y habilita solamente su dependiente inmediato', async () => {
+    const proyectoRepository = {
+      obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', estado_fase: 'diseno_pendiente' }),
+      actualizarEstadoFase: jest.fn().mockImplementation((id, estado) => Promise.resolve({ id, estado_fase: estado }))
+    };
+    const casosUso = { id: 'd1', tipo: 'casos_de_uso', aprobado: false, estado: 'pendiente_revision', version: 1 };
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockResolvedValue([casosUso]),
+      actualizar: jest.fn().mockImplementation((id, changes) => Promise.resolve({ ...casosUso, ...changes, id }))
+    };
+    const useCase = new AprobarFase({ proyectoRepository, requerimientoRepository: {}, diagramaRepository, disenoRepository: {} });
+
+    const result = await useCase.ejecutar({
+      proyectoId: 'p1', fase: 'diagrama', tipoDiagrama: 'casos_de_uso', aprobadoPor: 'user-1'
+    });
+
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
+      aprobado: true,
+      estado: 'aprobado',
+      aprobado_en: expect.any(Date),
+      aprobado_por: 'user-1'
+    }));
+    expect(result.nuevoEstado).toBe('diseno_pendiente');
+    expect(result.flujoDiagramas.siguiente).toBe('clases_dominio');
+  });
+
+  test('AprobarFase registra un rechazo con observaciones sin habilitar dependientes', async () => {
+    const pendiente = {
+      id: 'd1', tipo: 'casos_de_uso', aprobado: false, estado: 'pendiente_revision', version: 1,
+      codigo_plantuml: '@startuml\nactor Usuario\nrectangle Sistema {\nusecase "Crear" as UC1\nusecase "Consultar" as UC2\n}\nUsuario --> UC1\nUsuario --> UC2\n@enduml'
+    };
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockResolvedValue([pendiente]),
+      actualizar: jest.fn().mockImplementation((id, changes) => Promise.resolve({ ...pendiente, ...changes, id }))
+    };
+    const useCase = new AprobarFase({
+      proyectoRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', estado_fase: 'diseno_pendiente' }),
+        actualizarEstadoFase: jest.fn().mockResolvedValue({ id: 'p1', estado_fase: 'diseno_pendiente' })
+      },
+      requerimientoRepository: {}, diagramaRepository, disenoRepository: {}
+    });
+
+    await expect(useCase.ejecutar({
+      proyectoId: 'p1', fase: 'diagrama', tipoDiagrama: 'casos_de_uso', decision: 'rechazar', observaciones: 'no'
+    })).rejects.toThrow('al menos 5 caracteres');
+
+    const result = await useCase.ejecutar({
+      proyectoId: 'p1', fase: 'diagrama', tipoDiagrama: 'casos_de_uso', decision: 'rechazar',
+      observaciones: 'Falta representar el flujo alternativo.'
+    });
+    expect(result.decision).toBe('rechazado');
+    expect(result.flujoDiagramas.siguiente).toBe('casos_de_uso');
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
+      estado: 'rechazado',
+      revisiones: [expect.objectContaining({ decision: 'rechazado', version: 1 })]
+    }));
+  });
+
+  test('AprobarFase impide aprobar un diagrama sin sus dependencias', async () => {
+    const useCase = new AprobarFase({
+      proyectoRepository: { obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', estado_fase: 'diseno_pendiente' }) },
+      requerimientoRepository: {},
+      diagramaRepository: {
+        listarPorProyecto: jest.fn().mockResolvedValue([{ id: 'd2', tipo: 'clases_dominio', aprobado: false, estado: 'pendiente_revision' }])
+      },
+      disenoRepository: {}
+    });
+
+    await expect(useCase.ejecutar({ proyectoId: 'p1', fase: 'diagrama', tipoDiagrama: 'clases_dominio' }))
+      .rejects.toThrow('Primero aprueba: casos_de_uso');
   });
 
   test('ProcesarConIA debe enviar los 3 bloques mandatorios en el payload', async () => {
@@ -334,6 +537,67 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(proyectoRepository.actualizar).toHaveBeenCalledWith('p1', expect.objectContaining({ estado_fase: 'diseno_pendiente' }));
   });
 
+  test('ProcesarConIA genera un solo diagrama sin eliminar los artefactos existentes', async () => {
+    const requerimientos = [{
+      tipo: 'RF', identificador: 'RF-01', nombre: 'Consultar', descripcion: 'Consultar información',
+      actores: ['Cliente'], aprobado: true
+    }];
+    const creados = [];
+    let diagramasPersistidos = [{
+      id: 'previous', tipo: 'casos_de_uso', version: 1, estado: 'rechazado', aprobado: false,
+      revisiones: [{
+        decision: 'rechazado', version: 1,
+        observaciones: 'Incluye el flujo alternativo de consulta.'
+      }]
+    }];
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockImplementation(() => Promise.resolve(diagramasPersistidos)),
+      eliminarPorProyecto: jest.fn(),
+      actualizar: jest.fn(),
+      crearMuchos: jest.fn().mockImplementation((items) => {
+        creados.push(...items);
+        diagramasPersistidos = items.map((item, index) => ({ ...item, id: `d${index + 1}` }));
+        return Promise.resolve(diagramasPersistidos);
+      })
+    };
+    const aiOrchestratorService = {
+      procesar: jest.fn().mockResolvedValue({
+        nombre_proyecto: 'Demo',
+        diagramas: [{
+          tipo: 'casos_de_uso',
+          titulo: 'Casos de Uso',
+          codigo_plantuml: '@startuml\nactor "Cliente" as Cliente\nrectangle "Sistema" {\nusecase "Consultar" as UC1\nusecase "Ver detalle" as UC2\n}\nCliente --> UC1\nCliente --> UC2\n@enduml'
+        }]
+      })
+    };
+    const useCase = new ProcesarConIA({
+      proyectoRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Acta', estado_fase: 'analisis_aprobado' }),
+        actualizar: jest.fn().mockResolvedValue(true)
+      },
+      requerimientoRepository: { listarPorProyecto: jest.fn().mockResolvedValue(requerimientos) },
+      diagramaRepository,
+      estandarRepository: { obtenerEstandares: jest.fn().mockResolvedValue([]) },
+      aiOrchestratorService
+    });
+
+    const result = await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas', tipoDiagrama: 'casos_de_uso' });
+    const cachedResult = await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas', tipoDiagrama: 'casos_de_uso' });
+
+    expect(aiOrchestratorService.procesar).toHaveBeenCalledWith(expect.objectContaining({
+      tipo_diagrama: 'casos_de_uso',
+      contexto_proyecto: expect.objectContaining({
+        retroalimentacion_diagrama: 'Incluye el flujo alternativo de consulta.'
+      })
+    }));
+    expect(diagramaRepository.eliminarPorProyecto).not.toHaveBeenCalled();
+    expect(creados).toHaveLength(1);
+    expect(creados[0]).toEqual(expect.objectContaining({ tipo: 'casos_de_uso', version: 2, estado: 'pendiente_revision' }));
+    expect(result.flujoDiagramas.siguiente).toBe('casos_de_uso');
+    expect(cachedResult.cache_hit).toBe(true);
+    expect(aiOrchestratorService.procesar).toHaveBeenCalledTimes(1);
+  });
+
   test('ProcesarConIA rechaza diagramas antes de aprobar los requisitos', async () => {
     const useCase = new ProcesarConIA({
       proyectoRepository: { obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', estado_fase: 'analisis_pendiente' }) }
@@ -392,7 +656,7 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
         tipo: 'clases',
         codigo_plantuml: '@startuml\nclass Usuario\nclass Pedido\nclass Pago\nUsuario "1" -- "0..*" Pedido\nPedido "1" -- "1" Pago\n@enduml'
       },
-      { tipo: 'arbol_navegacion', codigo_plantuml: '@startwbs\n* Sistema\n** Inicio\n@endwbs' }
+      { tipo: 'arbol_navegacion', codigo_plantuml: '@startwbs\n* Sistema\n** Portal\n*** Inicio\n*** Recuperar acceso\n@endwbs' }
     ];
     const useCase = new ProcesarConIA({
       proyectoRepository: { obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Acta', estado_fase: 'analisis_aprobado' }) },

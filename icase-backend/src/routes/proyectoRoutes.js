@@ -9,11 +9,15 @@ function buildProyectoRoutes(proyectoController) {
   router.post('/', (req, res) => proyectoController.crear(req, res));
   router.get('/', (req, res) => proyectoController.listar(req, res));
   router.get('/modelos-ia', (req, res) => proyectoController.obtenerModelosIA(req, res));
+  router.get('/trabajos-diagramas/:trabajoId', (req, res) => proyectoController.obtenerTrabajoDiagrama(req, res));
   router.get('/:id', (req, res) => proyectoController.obtenerPorId(req, res));
   router.put('/:id', (req, res) => proyectoController.actualizar(req, res));
   router.delete('/:id', (req, res) => proyectoController.eliminar(req, res));
   router.post('/:id/procesar-ia', (req, res) => proyectoController.procesarConIA(req, res));
+  router.post('/:id/trabajos-diagramas', (req, res) => proyectoController.iniciarTrabajoDiagrama(req, res));
+  router.get('/:id/trabajos-diagramas/ultimo', (req, res) => proyectoController.obtenerUltimoTrabajoDiagrama(req, res));
   router.post('/:id/aprobar-fase', (req, res) => proyectoController.aprobarFase(req, res));
+  router.get('/:id/flujo-diagramas', (req, res) => proyectoController.obtenerFlujoDiagramas(req, res));
   router.get('/:id/exportar-markdown', (req, res) => proyectoController.exportarMarkdown(req, res));
   router.get('/:id/documento-consolidado', (req, res) => proyectoController.documentoConsolidado(req, res));
 

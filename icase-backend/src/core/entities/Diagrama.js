@@ -10,6 +10,22 @@ class Diagrama {
     codigo_mermaid = '',
     codigo_plantuml = '',
     aprobado = false,
+    estado = 'pendiente_revision',
+    version = 1,
+    desactualizado = false,
+    motivos_desactualizacion = [],
+    aprobado_en = null,
+    aprobado_por = null,
+    estado_calidad = 'advertencia',
+    errores_validacion = [],
+    advertencias_validacion = [],
+    metricas_validacion = {},
+    validado_en = null,
+    revisiones = [],
+    historial_versiones = [],
+    restaurada_desde_version = null,
+    huella_entrada = null,
+    retroalimentacion_aplicada = '',
     trazabilidad_rnf = [],
     requisitos_relacionados = [],
     versiones_origen = {},
@@ -25,6 +41,24 @@ class Diagrama {
     this.codigo_mermaid = codigo_mermaid;
     this.codigo_plantuml = codigo_plantuml;
     this.aprobado = aprobado;
+    this.estado = estado;
+    this.version = Math.max(1, Number(version) || 1);
+    this.desactualizado = Boolean(desactualizado);
+    this.motivos_desactualizacion = Array.isArray(motivos_desactualizacion)
+      ? motivos_desactualizacion
+      : [motivos_desactualizacion].filter(Boolean);
+    this.aprobado_en = aprobado_en;
+    this.aprobado_por = aprobado_por;
+    this.estado_calidad = estado_calidad;
+    this.errores_validacion = Array.isArray(errores_validacion) ? errores_validacion : [];
+    this.advertencias_validacion = Array.isArray(advertencias_validacion) ? advertencias_validacion : [];
+    this.metricas_validacion = metricas_validacion && typeof metricas_validacion === 'object' ? metricas_validacion : {};
+    this.validado_en = validado_en;
+    this.revisiones = Array.isArray(revisiones) ? revisiones : [];
+    this.historial_versiones = Array.isArray(historial_versiones) ? historial_versiones : [];
+    this.restaurada_desde_version = restaurada_desde_version;
+    this.huella_entrada = huella_entrada;
+    this.retroalimentacion_aplicada = retroalimentacion_aplicada;
     this.trazabilidad_rnf = Array.isArray(trazabilidad_rnf) ? trazabilidad_rnf : [trazabilidad_rnf].filter(Boolean);
     this.requisitos_relacionados = Array.isArray(requisitos_relacionados)
       ? requisitos_relacionados

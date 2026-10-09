@@ -33,7 +33,58 @@ casos_de_uso
         └── arbol_navegacion
 ```
 
-Una dependencia indica que el artefacto anterior debe estar aprobado antes de generar el siguiente. La rama de flujo secuencial será responsable de hacer cumplir esta regla; este contrato no cambia todavía el flujo actual.
+Una dependencia indica que el artefacto anterior debe estar aprobado antes de generar el siguiente. El backend y la interfaz hacen cumplir esta regla tanto al generar como al aprobar cada artefacto.
+
+## Estados y versiones
+
+Cada diagrama obligatorio utiliza uno de estos estados:
+
+- `bloqueado`: faltan requisitos o diagramas previos aprobados.
+- `disponible`: puede generarse.
+- `pendiente_revision`: existe una versión que requiere revisión manual.
+- `aprobado`: la versión vigente fue aprobada manualmente.
+- `rechazado`: el usuario solicitó cambios y dejó observaciones para la siguiente versión.
+- `desactualizado`: cambió alguna dependencia y debe regenerarse.
+- `generando` y `error`: estados operativos de una ejecución.
+
+`versiones_origen` registra la versión exacta de cada dependencia utilizada para generar el diagrama. El flujo compara esas versiones con las vigentes y marca automáticamente el artefacto como `desactualizado` cuando existe una diferencia, incluso si el registro no fue invalidado explícitamente.
+
+La aprobación registra `aprobado_en` y `aprobado_por`. Editar o regenerar un diagrama elimina su aprobación e invalida transitivamente los artefactos dependientes.
+
+## Control de calidad previo a aprobación
+
+Cada tipo se valida con reglas propias antes de persistir una generación y nuevamente antes de aprobarla:
+
+- Casos de uso: actores, límite del sistema, casos y relaciones legibles.
+- Clases de dominio: entidades y relaciones del modelo de negocio.
+- Arquitectura de software: vista C4 de contenedores, límites y comunicaciones.
+- Arquitectura del sistema: nodos de infraestructura, despliegue y conexiones; no se obliga a usar C4.
+- Clases de diseño: clases e interfaces técnicas, relaciones y recomendación de paquetes o capas.
+- Árbol de navegación: sintaxis WBS o mindmap, módulos, pantallas y profundidad jerárquica.
+
+El resultado queda persistido en `estado_calidad`, `errores_validacion`, `advertencias_validacion`, `metricas_validacion` y `validado_en`. Un error bloquea la aprobación; una advertencia permite aprobar después de la revisión manual.
+
+## Decisiones de revisión
+
+Una versión pendiente puede aprobarse o rechazarse. Rechazar exige una observación concreta y no habilita los artefactos dependientes. Cada decisión se agrega a `revisiones` con usuario, fecha, versión y comentario. Al regenerar un diagrama rechazado, la última observación se incorpora automáticamente al contexto de la IA para corregirla sin reenviar todos los artefactos ni repetir instrucciones manualmente.
+
+## Historial y restauración
+
+Las versiones generadas por IA y las ediciones manuales forman un único historial lógico. Antes de guardar una edición se conserva una instantánea de título, descripción, código y calidad; se retienen las últimas 20 instantáneas manuales por documento. Restaurar nunca sobrescribe silenciosamente la versión vigente: crea una versión nueva pendiente de revisión, registra `restaurada_desde_version`, retira la aprobación e invalida los diagramas dependientes.
+
+El editor de código utiliza guardado explícito mediante **Guardar versión**. Los cambios locales no crean versiones ni ejecutan solicitudes por cada pulsación de teclado.
+
+## Reutilización y ahorro de llamadas de IA
+
+Cada generación individual calcula `huella_entrada` mediante SHA-256 sobre el tipo, los insumos, requisitos aprobados, versiones de dependencias, proveedor/modelo y retroalimentación aplicable. Si existe una versión válida pendiente o aprobada con la misma huella, el backend la devuelve con `cache_hit: true` sin invocar al proveedor de IA.
+
+Las ediciones manuales y restauraciones eliminan la huella para impedir reutilizaciones incorrectas. Una versión generada después de un rechazo conserva `retroalimentacion_aplicada`, de modo que solicitudes idénticas posteriores reconozcan que esas observaciones ya fueron incorporadas. También se bloquean solicitudes simultáneas para el mismo proyecto y tipo mientras la llamada al proveedor está en curso.
+
+## Cambios posteriores en requisitos
+
+Agregar, editar o eliminar un requisito después de aprobar el análisis retira esa aprobación y devuelve el proyecto a `analisis_pendiente`. Todos los diagramas obligatorios se marcan `desactualizado`, se limpian sus aprobaciones y huellas de entrada, y los mockups derivados se invalidan. El usuario debe revisar y aprobar nuevamente los requisitos antes de regenerar el modelado.
+
+La sincronización compara únicamente campos funcionales normalizados. Enviar una lista semánticamente idéntica no recrea documentos, no cambia sus identificadores y no invalida el trabajo aprobado.
 
 ## Formato de intercambio
 

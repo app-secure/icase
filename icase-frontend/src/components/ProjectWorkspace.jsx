@@ -12,14 +12,32 @@ import {
   deleteFuenteApi,
   fetchFuentesApi,
   processWithAiApi,
+  startDiagramJobApi,
+  fetchDiagramJobApi,
+  fetchLatestDiagramJobApi,
   approvePhaseApi,
+  approveDiagramApi,
+  rejectDiagramApi,
   updateDiagramApi,
+  fetchDiagramVersionsApi,
+  restoreDiagramVersionApi,
+  fetchDiagramWorkflowApi,
   fetchAiModelsApi,
   fetchMockupsApi,
   updateMockupApi,
   syncProjectRequirementsApi
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
+import { DIAGRAM_TYPES } from "../constants/diagramTypes";
+
+const DIAGRAM_KEY_BY_TYPE = Object.freeze({
+  [DIAGRAM_TYPES.USE_CASES]: "useCase",
+  [DIAGRAM_TYPES.DOMAIN_CLASSES]: "classDiagram",
+  [DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE]: "architecture",
+  [DIAGRAM_TYPES.SYSTEM_ARCHITECTURE]: "systemArchitecture",
+  [DIAGRAM_TYPES.DESIGN_CLASSES]: "designClassDiagram",
+  [DIAGRAM_TYPES.NAVIGATION_TREE]: "navigationTree"
+});
 
 const extractInsumoBruto = async (sources) => {
   let insumoBruto = "";
@@ -79,11 +97,10 @@ UC1 .> UC2 : <<include>>
 UC3 .> UC1 : <<include>>
 @enduml`;
 
-    case "softwareArchitecture":
     case "architecture":
       return `@startuml
 !include <C4/C4_Container>
-title Arquitectura de Software - ${safeName}
+title Arquitectura Técnica Integral - ${safeName}
 
 Person(operador, "Operador Principal", "Personal autorizado del sistema")
 Person(supervisor, "Supervisor / Administrador", "Gestión y auditoría")
@@ -103,6 +120,7 @@ System_Boundary(sys, "${safeName}") {
   ContainerDb(dbRelacional, "Base de Datos del Sistema", "PostgreSQL", "Persistencia transaccional ACID")
   ContainerDb(cacheMem, "Memoria Caché", "Redis", "Caché de latencia < 0.8s")
   Container(auditStorage, "Almacén de Auditoría", "Elasticsearch / Audit Log", "Trazabilidad inmutable")
+  Container(pipelineDevOps, "Automatización CI/CD", "GitHub Actions + Docker", "Pipeline de despliegue continuo")
 }
 
 Rel(operador, webApp, "Opera vía navegador", "HTTPS")
@@ -117,33 +135,12 @@ Rel(srv_2, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")
 Rel(srv_3, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")
 Rel(srv_1, cacheMem, "Caché de alto rendimiento", "TCP")
 Rel(srv_1, auditStorage, "Registra trazabilidad", "REST")
+Rel(srv_2, auditStorage, "Registra trazabilidad", "REST")
 Rel(seguridadFilter, ext_auth, "Verifica token", "HTTPS")
 Rel(adp_ext, ext_ext, "Consume API externa", "REST")
 Rel(srv_3, ext_notif, "Emite avisos y reportes", "SMTP")
-@enduml`;
-
-    case "systemArchitecture":
-      return `@startuml
-!include <C4/C4_Deployment>
-title Arquitectura de Sistema e Infraestructura - ${safeName}
-
-Deployment_Node(server, "Servidor Standalone VPS", "Ubuntu Linux / Docker Host") {
-  Deployment_Node(netZone, "Zona de Red del Servidor", "Firewall UFW") {
-    Deployment_Node(appNode, "Contenedor de Aplicación", "Docker Runtime") {
-      Container(appBackend, "Servicio API Backend", "Node.js / Express", "Instancia única de servicios")
-    }
-    Deployment_Node(dbNode, "Contenedor de Persistencia", "Docker Volume") {
-      ContainerDb(dbMaster, "Base de Datos Primaria", "PostgreSQL", "Instancia transaccional sin réplica en caliente")
-    }
-    Deployment_Node(monNode, "Contenedor de Observabilidad", "Docker Host") {
-      Container(monAgent, "Agente de Monitoreo", "Prometheus Exporter", "Supervisión de salud del host")
-    }
-  }
-}
-
-Rel(appBackend, dbMaster, "Operaciones de datos", "TCP :5432")
-Rel(monAgent, appBackend, "Chequeo de salud", "HTTP :3000/health")
-Rel(monAgent, dbMaster, "Métricas de DB", "TCP :5432")
+Rel(pipelineDevOps, webApp, "Despliega SPA")
+Rel(pipelineDevOps, reverseProxy, "Aplica configuración")
 @enduml`;
 
     case "classDiagram":
@@ -189,51 +186,6 @@ class MetricaConsolidada {
 UsuarioSistema "1" -- "*" RegistroOperativo : registra
 RegistroOperativo "1" *-- "1..*" ControlCalidad : valida
 UsuarioSistema "1" -- "*" MetricaConsolidada : emite
-@enduml`;
-
-    case "designClasses":
-      return `@startuml
-skinparam classAttributeIconSize 0
-skinparam linetype ortho
-
-package "Módulo Autenticación y Usuarios" {
-  class UsuarioController <<Controller>> {
-    +registrar(dto: CrearUsuarioDTO): UsuarioResponseDTO
-  }
-  class RegistrarUsuarioUseCase <<UseCase>> {
-    +ejecutar(dto: CrearUsuarioDTO): UsuarioResponseDTO
-  }
-  interface IUsuarioRepository <<Repository>> {
-    +guardar(usuario: Usuario): Promise<void>
-    +obtenerPorId(id: String): Promise<Usuario>
-  }
-  class MongoUsuarioRepository <<Repository>> {
-    +guardar(usuario: Usuario): Promise<void>
-    +obtenerPorId(id: String): Promise<Usuario>
-  }
-  class Usuario <<Entity>> {
-    -id: String
-    -email: String
-    -rol: String
-  }
-  class CrearUsuarioDTO <<DTO>> {
-    +email: String
-    +password: String
-  }
-  class UsuarioResponseDTO <<DTO>> {
-    +id: String
-    +email: String
-  }
-}
-
-UsuarioController ..> RegistrarUsuarioUseCase : invoca
-UsuarioController ..> CrearUsuarioDTO : recibe
-UsuarioController ..> UsuarioResponseDTO : retorna
-RegistrarUsuarioUseCase ..> IUsuarioRepository : requiere
-RegistrarUsuarioUseCase ..> Usuario : gestiona
-MongoUsuarioRepository --|> IUsuarioRepository : implementa
-
-note top of UsuarioController : Trazabilidad Requisito: RF-01 | Origen: casos_de_uso, clases_dominio
 @enduml`;
 
     case "navigationTree":
@@ -300,20 +252,16 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       nonFunctional: nonFuncReqs
     };
 
-    const ucDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("caso"));
-    const archDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arqui"));
-    const designClassDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("diseno"));
-    const softDiag = (aiResult.diagramas || []).find(d => {
-      const t = (d.tipo || "").toLowerCase();
-      return t === "arquitectura_software" || t.includes("software") || (t.includes("arqui") && !t.includes("sistema") && !t.includes("system"));
-    });
-    const sysDiag = (aiResult.diagramas || []).find(d => {
-      const t = (d.tipo || "").toLowerCase();
-      return t === "arquitectura_sistema" || t.includes("sistema") || t.includes("system") || t.includes("despliegue") || t.includes("deploy");
-    });
-    const legacyArch = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase() === "arquitectura");
-    const classDiag = (aiResult.diagramas || []).find(d => ((d.tipo || "").toLowerCase().includes("clase") || (d.tipo || "").toLowerCase().includes("entidad") || (d.tipo || "").toLowerCase().includes("dominio")) && !(d.tipo || "").toLowerCase().includes("diseno"));
-    const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav"));
+    const diagramList = aiResult.diagramas || [];
+    const latestMatching = (predicate) => diagramList
+      .filter((diagram) => predicate(String(diagram.tipo || "").toLowerCase()))
+      .sort((a, b) => Number(b.version || 1) - Number(a.version || 1) || new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
+    const ucDiag = latestMatching((type) => type.includes("caso"));
+    const archDiag = latestMatching((type) => (type === "arquitectura" || type.includes("software")) && !type.includes("sistema"));
+    const systemArchDiag = latestMatching((type) => type.includes("arquitectura_sistema"));
+    const classDiag = latestMatching((type) => (type === "clases" || type.includes("clases_dominio") || type.includes("entidad")) && !type.includes("diseno"));
+    const designClassDiag = latestMatching((type) => type.includes("clases_diseno"));
+    const navDiag = latestMatching((type) => type.includes("arbol") || type.includes("nav"));
 
     const extractPuml = (diagObj, typeKey) => {
       const code = diagObj?.codigo_plantuml || diagObj?.codigo_puml || diagObj?.plantumlCode;
@@ -326,90 +274,46 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       return sanitizePlantUML(generateDefaultPuml(typeKey, fallbackName));
     };
 
-    const effectiveSoftDiag = softDiag || legacyArch || archDiag;
-
-    diags = {
-      useCase: {
-        id: ucDiag?.id || ucDiag?._id || "diag-uc",
-        title: (ucDiag?.titulo || "Diagrama de Casos de Uso").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "casos_uso",
-        code: extractPuml(ucDiag, "useCase"),
-        plantumlCode: extractPuml(ucDiag, "useCase"),
-        description: ucDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(ucDiag?.descripcion_jerarquica) && ucDiag.descripcion_jerarquica.length > 0
-          ? ucDiag.descripcion_jerarquica
-          : []
-      },
-      softwareArchitecture: {
-        id: "diag-soft-arch",
-        title: (effectiveSoftDiag?.titulo || "Diagrama de Arquitectura de Software").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "arquitectura_software",
-        code: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
-        plantumlCode: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
-        description: effectiveSoftDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(effectiveSoftDiag?.descripcion_jerarquica) && effectiveSoftDiag.descripcion_jerarquica.length > 0
-          ? effectiveSoftDiag.descripcion_jerarquica
-          : [],
-        trazabilidad_rnf: Array.isArray(effectiveSoftDiag?.trazabilidad_rnf) ? effectiveSoftDiag.trazabilidad_rnf : []
-      },
-      systemArchitecture: {
-        id: "diag-sys-arch",
-        title: (sysDiag?.titulo || "Diagrama de Arquitectura de Sistema e Infraestructura").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "arquitectura_sistema",
-        code: extractPuml(sysDiag, "systemArchitecture"),
-        plantumlCode: extractPuml(sysDiag, "systemArchitecture"),
-        description: sysDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(sysDiag?.descripcion_jerarquica) && sysDiag.descripcion_jerarquica.length > 0
-          ? sysDiag.descripcion_jerarquica
-          : [],
-        trazabilidad_rnf: Array.isArray(sysDiag?.trazabilidad_rnf) ? sysDiag.trazabilidad_rnf : []
-      },
-      architecture: {
-        id: "diag-arch",
-        title: (effectiveSoftDiag?.titulo || "Diagrama de Arquitectura de Software").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "arquitectura_software",
-        code: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
-        plantumlCode: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
-        description: effectiveSoftDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(effectiveSoftDiag?.descripcion_jerarquica) && effectiveSoftDiag.descripcion_jerarquica.length > 0
-          ? effectiveSoftDiag.descripcion_jerarquica
-          : [],
-        trazabilidad_rnf: Array.isArray(effectiveSoftDiag?.trazabilidad_rnf) ? effectiveSoftDiag.trazabilidad_rnf : []
-      },
-      classDiagram: {
-        id: classDiag?.id || classDiag?._id || "diag-class",
-        title: (classDiag?.titulo || "Diagrama de Clases del Dominio").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "clases",
-        code: extractPuml(classDiag, "classDiagram"),
-        plantumlCode: extractPuml(classDiag, "classDiagram"),
-        description: classDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(classDiag?.descripcion_jerarquica) && classDiag.descripcion_jerarquica.length > 0
-          ? classDiag.descripcion_jerarquica
-          : []
-      },
-      designClasses: {
-        id: designClassDiag?.id || designClassDiag?._id || "diag-design-class",
-        title: (designClassDiag?.titulo || "Diagrama de Clases de Diseño").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "clases_diseno",
-        code: extractPuml(designClassDiag, "designClasses"),
-        plantumlCode: extractPuml(designClassDiag, "designClasses"),
-        description: designClassDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(designClassDiag?.descripcion_jerarquica) && designClassDiag.descripcion_jerarquica.length > 0
-          ? designClassDiag.descripcion_jerarquica
-          : []
-      },
-      navigationTree: {
-        id: navDiag?.id || navDiag?._id || "diag-nav",
-        title: (navDiag?.titulo || "Árbol de Navegación del Sistema").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "navegacion",
-        code: extractPuml(navDiag, "navigationTree"),
-        plantumlCode: extractPuml(navDiag, "navigationTree"),
-        description: navDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(navDiag?.descripcion_jerarquica) && navDiag.descripcion_jerarquica.length > 0
-          ? navDiag.descripcion_jerarquica
-          : []
-      }
+    const mapDiagram = (diag, key, fallbackTitle, type) => {
+      if (!diag && !existingDiagrams?.[key]) return null;
+      const existing = existingDiagrams?.[key] || {};
+      const source = diag || existing;
+      const code = extractPuml(diag, key);
+      return {
+        ...existing,
+        id: source.id || source._id || existing.id,
+        title: (source.titulo || source.title || fallbackTitle).replace(/\s*\([^)]*\)/g, '').trim(),
+        type,
+        code,
+        plantumlCode: code,
+        description: source.descripcion || source.description || "",
+        descripcion_jerarquica: Array.isArray(source.descripcion_jerarquica) ? source.descripcion_jerarquica : [],
+        trazabilidad_rnf: Array.isArray(source.trazabilidad_rnf) ? source.trazabilidad_rnf : (existing.trazabilidad_rnf || []),
+        approved: Boolean(source.aprobado ?? source.approved),
+        status: source.estado || source.status || (source.aprobado ? "aprobado" : "pendiente_revision"),
+        stale: Boolean(source.desactualizado ?? source.stale),
+        version: Number(source.version || existing.version || 1),
+        staleReasons: source.motivos_desactualizacion || source.staleReasons || [],
+        originVersions: source.versiones_origen || source.originVersions || {},
+        approvedAt: source.aprobado_en || source.approvedAt || null,
+        approvedBy: source.aprobado_por || source.approvedBy || null,
+        qualityStatus: source.estado_calidad || source.qualityStatus || null,
+        validationErrors: source.errores_validacion || source.validationErrors || [],
+        validationWarnings: source.advertencias_validacion || source.validationWarnings || [],
+        validationMetrics: source.metricas_validacion || source.validationMetrics || {},
+        reviewHistory: source.revisiones || source.reviewHistory || [],
+        restoredFromVersion: source.restaurada_desde_version || source.restoredFromVersion || null
+      };
     };
+
+    diags = Object.fromEntries(Object.entries({
+      useCase: mapDiagram(ucDiag, "useCase", "Diagrama de Casos de Uso", "casos_de_uso"),
+      classDiagram: mapDiagram(classDiag, "classDiagram", "Diagrama de Clases del Dominio", "clases_dominio"),
+      architecture: mapDiagram(archDiag, "architecture", "Arquitectura de Software", "arquitectura_software"),
+      systemArchitecture: mapDiagram(systemArchDiag, "systemArchitecture", "Arquitectura del Sistema", "arquitectura_sistema"),
+      designClassDiagram: mapDiagram(designClassDiag, "designClassDiagram", "Diagrama de Clases de Diseño", "clases_diseno"),
+      navigationTree: mapDiagram(navDiag, "navigationTree", "Árbol de Navegación del Sistema", "arbol_navegacion")
+    }).filter(([, diagram]) => Boolean(diagram)));
   }
 
   return { reqs, diags };
@@ -440,9 +344,50 @@ export default function ProjectWorkspace({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGeneratingDiagrams, setIsGeneratingDiagrams] = useState(false);
+  const [diagramJob, setDiagramJob] = useState(null);
+  const handledDiagramJobs = React.useRef(new Set());
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
   const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(project.currentPhase >= 2);
+
+  const applyDiagramJobResponse = React.useCallback((response) => {
+    const job = response?.trabajo;
+    if (!job) return;
+    setDiagramJob(job);
+    setIsGeneratingDiagrams(['encolado', 'procesando'].includes(job.estado));
+    if (job.estado === 'completado' && response.resultado && !handledDiagramJobs.current.has(job.id)) {
+      handledDiagramJobs.current.add(job.id);
+      const current = project;
+      const { diags } = transformAiOutput(response.resultado, current.name, current.diagrams || {});
+      onUpdateProject({
+        ...current,
+        isAnalysisApproved: true,
+        diagrams: diags,
+        diagramFlow: response.resultado.flujoDiagramas || current.diagramFlow,
+        currentPhase: 2
+      });
+    }
+  }, [onUpdateProject, project]);
+
+  React.useEffect(() => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!backendId) return undefined;
+    let cancelled = false;
+    fetchLatestDiagramJobApi(backendId)
+      .then((response) => { if (!cancelled) applyDiagramJobResponse(response); })
+      .catch((error) => console.warn('[Workspace] No se pudo recuperar el trabajo de diagrama:', error.message));
+    return () => { cancelled = true; };
+  }, [project.backendId, project.id, applyDiagramJobResponse]);
+
+  React.useEffect(() => {
+    if (!diagramJob?.id || !['encolado', 'procesando'].includes(diagramJob.estado)) return undefined;
+    const timer = setInterval(() => {
+      fetchDiagramJobApi(diagramJob.id)
+        .then(applyDiagramJobResponse)
+        .catch((error) => console.warn('[Workspace] Error consultando trabajo de diagrama:', error.message));
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [diagramJob?.id, diagramJob?.estado, applyDiagramJobResponse]);
 
   React.useEffect(() => {
     fetchAiModelsApi()
@@ -809,36 +754,20 @@ export default function ProjectWorkspace({
 `,
             description: "Actores con silueta humana (muñequito), módulo delimitado y casos de uso en elipse."
           },
-          softwareArchitecture: {
-            id: "diag-soft-arch",
-            title: "Diagrama de Arquitectura de Software",
-            type: "arquitectura_software",
-            plantumlCode: generateDefaultPuml("softwareArchitecture", updatedName),
-            code: `graph TB\n  Web[SPA React] --> API[Backend Express]\n  API --> DB[(BD Primaria)]`,
-            description: "Modelo de contenedores C4 con arquitectura de software desacoplada.",
-            trazabilidad_rnf: [
-              { rnf_id: "RNF-01", elemento: "Redis Cache", justificacion: "Cumple tiempo de respuesta < 0.8s" },
-              { rnf_id: "RNF-02", elemento: "API Gateway", justificacion: "Garantiza seguridad y control de acceso" }
-            ]
-          },
-          systemArchitecture: {
-            id: "diag-sys-arch",
-            title: "Diagrama de Arquitectura de Sistema e Infraestructura",
-            type: "arquitectura_sistema",
-            plantumlCode: generateDefaultPuml("systemArchitecture", updatedName),
-            code: `graph TD\n  Host[Servidor VPS Standalone] --> App[Contenedor Docker App]\n  Host --> DB[(Contenedor Docker BD)]`,
-            description: "Topología de infraestructura mononodo optimizada sin sobre-dimensionar alta disponibilidad.",
-            trazabilidad_rnf: [
-              { rnf_id: "RNF-04", elemento: "Servidor Standalone VPS", justificacion: "Infraestructura ajustada a requisitos" }
-            ]
-          },
           architecture: {
             id: "diag-arch",
-            title: "Diagrama de Arquitectura de Software",
-            type: "arquitectura_software",
-            plantumlCode: generateDefaultPuml("softwareArchitecture", updatedName),
-            code: `graph TB\n  Web[SPA React] --> API[Backend Express]\n  API --> DB[(BD Primaria)]`,
-            description: "Modelo de contenedores C4 con arquitectura de software desacoplada."
+            title: "Diagrama de Arquitectura (Structurizr C4)",
+            type: "arquitectura",
+            plantumlCode: generateDefaultPuml("architecture", updatedName),
+            code: `graph TD
+    Client["Terminales Cliente (Web / Táctil)"] --> LB["Balanceador de Carga NGINX (Failover)"]
+    LB -->|Peticiones Primarias| Master["Servidor de Aplicación Maestro"]
+    LB -.->|Conmutación <= 3s| Slave["Servidor Réplica Esclavo (Hot Standby)"]
+    Master --> DB[("PostgreSQL Maestro")]
+    Slave --> DBReplica[("PostgreSQL Replica Standby")]
+    DB -.->|Replicación WAL| DBReplica
+`,
+            description: "Modelo de contenedores C4 con balanceador y réplica failover."
           },
           classDiagram: {
             id: "diag-class",
@@ -867,14 +796,6 @@ export default function ProjectWorkspace({
     OrdenOperativa "1" *-- "1..*" DetalleItem : contiene
 `,
             description: "Entidades del modelo de datos con tipado y relaciones."
-          },
-          designClasses: {
-            id: "diag-design-class",
-            title: "Diagrama de Clases de Diseño (PlantUML)",
-            type: "clases_diseno",
-            plantumlCode: generateDefaultPuml("designClasses", updatedName),
-            code: generateDefaultPuml("designClasses", updatedName),
-            description: "Estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades y DTOs."
           },
           navigationTree: {
             id: "diag-nav",
@@ -954,45 +875,151 @@ export default function ProjectWorkspace({
       if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de generar los diagramas.");
       await approvePhaseApi(backendId, "analisis");
       approvalCompleted = true;
-      const aiResult = await processWithAiApi(backendId, '', '', selectedAiProvider || 'auto', null, 'diagramas');
-      const { diags } = transformAiOutput(aiResult, project.name, {});
-      if (!diags?.useCase || !diags?.architecture || !diags?.classDiagram || !diags?.navigationTree) {
-        throw new Error("La generación no devolvió todos los diagramas requeridos.");
-      }
+      const jobResponse = await startDiagramJobApi(backendId, DIAGRAM_TYPES.USE_CASES, '', '', selectedAiProvider || 'auto');
+      applyDiagramJobResponse(jobResponse);
       onUpdateProject({
         ...project,
         isAnalysisApproved: true,
         currentPhase: 2,
-        diagrams: diags
+        diagrams: project.diagrams || {}
       });
-      return { success: true };
+      return { success: true, pending: true, job: jobResponse.trabajo };
     } catch (e) {
+      setIsGeneratingDiagrams(false);
       console.warn("[Workspace] Error generando diagramas después de aprobar requisitos:", e);
       onUpdateProject({ ...project, isAnalysisApproved: approvalCompleted, currentPhase: 1, diagrams: {} });
       alert(`${approvalCompleted ? "Los requisitos fueron aprobados, pero no se pudieron generar los diagramas." : "No se pudieron aprobar los requisitos."} Puedes reintentar desde esta pantalla.\n\n${e.message}`);
       return { success: false, error: e.message };
-    } finally {
-      setIsGeneratingDiagrams(false);
     }
   };
 
-  const handleApproveDiagrams = async () => {
+  const handleGenerateDiagram = async (diagramType) => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
-    if (backendId) {
-      try {
-        await approvePhaseApi(backendId, "diagramas");
-      } catch (e) {
-        console.warn("[Workspace] Error aprobando diseño en backend:", e);
-        return { success: false, error: e.message };
-      }
+    if (!backendId) return { success: false, error: "Proyecto no persistido" };
+    setIsGeneratingDiagrams(true);
+    try {
+      const response = await startDiagramJobApi(
+        backendId,
+        diagramType,
+        '',
+        '',
+        selectedAiProvider || 'auto',
+        null
+      );
+      applyDiagramJobResponse(response);
+      return {
+        success: true,
+        pending: ['encolado', 'procesando'].includes(response.trabajo?.estado),
+        job: response.trabajo,
+        diagramKey: DIAGRAM_KEY_BY_TYPE[diagramType]
+      };
+    } catch (error) {
+      setIsGeneratingDiagrams(false);
+      return { success: false, error: error.message };
     }
-    setIsSourcesCollapsed(true);
-    onUpdateProject({
-      ...project,
-      isDiagramsApproved: true,
-      currentPhase: 2
-    });
-    return { success: true };
+  };
+
+  const handleApproveDiagram = async (diagramType) => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!backendId) return { success: false, error: "Proyecto no persistido" };
+    try {
+      const result = await approveDiagramApi(backendId, diagramType);
+      if (result.flujoDiagramas?.todos_aprobados) setIsSourcesCollapsed(true);
+      const key = DIAGRAM_KEY_BY_TYPE[diagramType];
+      const updatedDiagrams = {
+        ...(project.diagrams || {}),
+        ...(key && project.diagrams?.[key] ? {
+          [key]: {
+            ...project.diagrams[key],
+            approved: true,
+            status: "aprobado",
+            stale: false
+          }
+        } : {})
+      };
+      onUpdateProject({
+        ...project,
+        diagrams: updatedDiagrams,
+        diagramFlow: result.flujoDiagramas,
+        isDiagramsApproved: Boolean(result.flujoDiagramas?.todos_aprobados),
+        currentPhase: 2
+      });
+      return { success: true, flow: result.flujoDiagramas };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const handleRejectDiagram = async (diagramType, observations) => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!backendId) return { success: false, error: "Proyecto no persistido" };
+    try {
+      const result = await rejectDiagramApi(backendId, diagramType, observations);
+      const key = DIAGRAM_KEY_BY_TYPE[diagramType];
+      const updatedDiagrams = {
+        ...(project.diagrams || {}),
+        ...(key && project.diagrams?.[key] ? {
+          [key]: {
+            ...project.diagrams[key],
+            approved: false,
+            status: "rechazado",
+            reviewHistory: result.diagrama?.revisiones || project.diagrams[key].reviewHistory || []
+          }
+        } : {})
+      };
+      onUpdateProject({
+        ...project,
+        diagrams: updatedDiagrams,
+        diagramFlow: result.flujoDiagramas,
+        isDiagramsApproved: false,
+        currentPhase: 2
+      });
+      return { success: true, flow: result.flujoDiagramas };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const handleLoadDiagramVersions = async (diagramKey) => {
+    const diagramId = project.diagrams?.[diagramKey]?.id;
+    if (!diagramId) throw new Error("El diagrama todavía no está persistido.");
+    return fetchDiagramVersionsApi(diagramId);
+  };
+
+  const handleRestoreDiagramVersion = async (diagramKey, version) => {
+    const diagram = project.diagrams?.[diagramKey];
+    if (!diagram?.id) return { success: false, error: "El diagrama todavía no está persistido." };
+    try {
+      const restored = await restoreDiagramVersionApi(diagram.id, version);
+      const backendId = project.backendId || project.id;
+      const flow = await fetchDiagramWorkflowApi(backendId);
+      const code = sanitizePlantUML(restored.codigo_plantuml) || restored.codigo_mermaid || "";
+      onUpdateProject({
+        ...project,
+        diagrams: {
+          ...project.diagrams,
+          [diagramKey]: {
+            ...diagram,
+            title: restored.titulo || diagram.title,
+            description: restored.descripcion || "",
+            code,
+            plantumlCode: code,
+            version: Number(restored.version || diagram.version || 1),
+            approved: false,
+            status: restored.estado || "pendiente_revision",
+            restoredFromVersion: restored.restaurada_desde_version || version,
+            qualityStatus: restored.estado_calidad || null,
+            validationErrors: restored.errores_validacion || [],
+            validationWarnings: restored.advertencias_validacion || []
+          }
+        },
+        diagramFlow: flow,
+        isDiagramsApproved: false
+      });
+      return { success: true, diagram: restored, flow };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   };
 
   const handleUpdateSource = async (sourceId, changes) => {
@@ -1108,17 +1135,17 @@ export default function ProjectWorkspace({
     }
 
     let insumoAdicional = "";
+    let targetType = null;
     if (phase === "diagrams") {
       const diagTitleMap = {
-        useCase: "casos_de_uso",
-        softwareArchitecture: "arquitectura_software",
-        systemArchitecture: "arquitectura_sistema",
-        architecture: "arquitectura_software",
-        classDiagram: "clases",
-        designClasses: "clases_diseno",
-        navigationTree: "arbol_navegacion"
+        useCase: DIAGRAM_TYPES.USE_CASES,
+        architecture: DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE,
+        systemArchitecture: DIAGRAM_TYPES.SYSTEM_ARCHITECTURE,
+        classDiagram: DIAGRAM_TYPES.DOMAIN_CLASSES,
+        designClassDiagram: DIAGRAM_TYPES.DESIGN_CLASSES,
+        navigationTree: DIAGRAM_TYPES.NAVIGATION_TREE
       };
-      const targetType = diagTitleMap[diagKey] || diagKey || "diagramas";
+      targetType = diagTitleMap[diagKey] || diagKey || DIAGRAM_TYPES.USE_CASES;
       const curDiag = diagKey && project.diagrams?.[diagKey];
       const curPuml = curDiag ? (curDiag.plantumlCode || curDiag.code || "") : "";
 
@@ -1131,8 +1158,20 @@ export default function ProjectWorkspace({
 
     if (backendId) {
       try {
+        if (phase === "diagrams") {
+          setIsGeneratingDiagrams(true);
+          const response = await startDiagramJobApi(
+            backendId,
+            targetType,
+            insumoBruto,
+            insumoAdicional,
+            selectedAiProvider || 'auto'
+          );
+          applyDiagramJobResponse(response);
+          return { success: true, pending: true, job: response.trabajo };
+        }
         const objetivo = phase === "diagrams" ? "diagramas" : "requisitos";
-        const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo);
+        const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo, phase === "diagrams" ? targetType : null);
         if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
           const { reqs, diags } = transformAiOutput(aiResult, project.name, project.diagrams);
 
@@ -1150,6 +1189,7 @@ export default function ProjectWorkspace({
               nonFunctional: cleanedRNF
             },
             diagrams: phase === "diagrams" ? (diags || project.diagrams) : {},
+            diagramFlow: phase === "diagrams" ? (aiResult.flujoDiagramas || project.diagramFlow) : null,
             ...(phase === "diagrams" ? {} : {
               isAnalysisApproved: false,
               isDiagramsApproved: false,
@@ -1165,6 +1205,7 @@ export default function ProjectWorkspace({
           };
         }
       } catch (err) {
+        if (phase === "diagrams") setIsGeneratingDiagrams(false);
         console.error("[Workspace] Error en corrección agéntica:", err);
         return {
           success: false,
@@ -1292,9 +1333,25 @@ export default function ProjectWorkspace({
           <RequirementsView
             requirements={project.requirements}
             onUpdateRequirements={(newReqs) => {
+              const staleDiagrams = Object.fromEntries(Object.entries(project.diagrams || {}).map(([key, diagram]) => [
+                key,
+                {
+                  ...diagram,
+                  approved: false,
+                  status: "desactualizado",
+                  stale: true,
+                  staleReasons: ["Cambió la especificación de requisitos."]
+                }
+              ]));
               onUpdateProject({
                 ...project,
-                requirements: newReqs
+                requirements: newReqs,
+                diagrams: staleDiagrams,
+                diagramFlow: null,
+                isAnalysisApproved: false,
+                isDiagramsApproved: false,
+                isMockupsApproved: false,
+                currentPhase: 1
               });
               const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
               if (backendId) {
@@ -1317,32 +1374,42 @@ export default function ProjectWorkspace({
             diagrams={project.diagrams}
             mockups={project.mockups || []}
             onUpdateMockups={handleUpdateMockups}
-            onUpdateDiagramCode={(key, newCode) => {
-              onUpdateProject({
-                ...project,
-                diagrams: {
-                  ...project.diagrams,
-                  [key]: {
-                    ...project.diagrams[key],
-                    plantumlCode: newCode,
-                    code: newCode
-                  }
-                }
-              });
-
+            onUpdateDiagramCode={async (key, newCode) => {
               const diagId = project.diagrams?.[key]?.id;
               if (diagId && diagId.length === 24) {
-                updateDiagramApi(diagId, {
+                const updated = await updateDiagramApi(diagId, {
                   codigo_plantuml: newCode,
                   codigo_mermaid: newCode
-                }).catch((err) => {
-                  console.warn("[Workspace] Error persistiendo código de diagrama:", err);
                 });
+                if (!updated) return { success: false, error: "No se pudo guardar el diagrama." };
+                onUpdateProject({
+                  ...project,
+                  diagrams: {
+                    ...project.diagrams,
+                    [key]: {
+                      ...project.diagrams[key],
+                      plantumlCode: newCode,
+                      code: newCode,
+                      version: Number(updated.version || project.diagrams[key].version || 1),
+                      approved: false,
+                      status: updated.estado || "pendiente_revision"
+                    }
+                  }
+                });
+                return { success: true, diagram: updated };
               }
+              return { success: false, error: "El diagrama todavía no está persistido." };
             }}
-            onApproveDiagrams={handleApproveDiagrams}
+            onLoadDiagramVersions={handleLoadDiagramVersions}
+            onRestoreDiagramVersion={handleRestoreDiagramVersion}
+            onGenerateDiagram={handleGenerateDiagram}
+            onApproveDiagram={handleApproveDiagram}
+            onRejectDiagram={handleRejectDiagram}
             onApproveMockups={handleApproveMockups}
             isDiagramsApproved={Boolean(project.isDiagramsApproved)}
+            diagramFlow={project.diagramFlow}
+            isGeneratingDiagram={isGeneratingDiagrams}
+            diagramJob={diagramJob}
             onBackToAnalysis={() => {
               setIsSourcesCollapsed(false);
               onUpdateProject({ ...project, currentPhase: 1 });

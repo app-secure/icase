@@ -4,6 +4,8 @@ function buildDiagramaRoutes(diagramaController) {
   const router = express.Router();
 
   router.put('/:id', (req, res) => diagramaController.actualizar(req, res));
+  router.get('/:id/versiones', (req, res) => diagramaController.listarVersiones(req, res));
+  router.post('/:id/restaurar', (req, res) => diagramaController.restaurarVersion(req, res));
   router.post('/validar-sintaxis', (req, res) => diagramaController.validarSintaxis(req, res));
 
   return router;

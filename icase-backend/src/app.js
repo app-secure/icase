@@ -18,12 +18,14 @@ const PlantUMLValidatorService = require('./infrastructure/services/PlantUMLVali
 const MarkdownCompilerService = require('./infrastructure/services/MarkdownCompilerService');
 const FileIngestionService = require('./infrastructure/services/FileIngestionService');
 const MockupIaService = require('./infrastructure/services/MockupIaService');
+const RequirementChangeService = require('./core/services/RequirementChangeService');
 
 // Casos de Uso
 const CrearProyecto = require('./core/use-cases/CrearProyecto');
 const ProcesarConIA = require('./core/use-cases/ProcesarConIA');
 const ActualizarRequerimientoManual = require('./core/use-cases/ActualizarRequerimientoManual');
 const ActualizarDiagramaManual = require('./core/use-cases/ActualizarDiagramaManual');
+const RestaurarVersionDiagrama = require('./core/use-cases/RestaurarVersionDiagrama');
 const AprobarFase = require('./core/use-cases/AprobarFase');
 const GenerarMockups = require('./core/use-cases/GenerarMockups');
 const ActualizarMockupManual = require('./core/use-cases/ActualizarMockupManual');
@@ -67,6 +69,11 @@ function createApp() {
   const markdownCompiler = new MarkdownCompilerService();
   const fileIngestionService = new FileIngestionService();
   const mockupIaService = new MockupIaService();
+  const requirementChangeService = new RequirementChangeService({
+    proyectoRepository: proyectoRepo,
+    diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo
+  });
 
   const crearProyectoUseCase = new CrearProyecto({ proyectoRepository: proyectoRepo });
   const procesarConIAUseCase = new ProcesarConIA({
@@ -84,13 +91,19 @@ function createApp() {
   });
   const actualizarDiagramaManualUseCase = new ActualizarDiagramaManual({
     diagramaRepository: diagramaRepo,
-    plantumlValidatorService: plantumlValidator
+    plantumlValidatorService: plantumlValidator,
+    proyectoRepository: proyectoRepo
+  });
+  const restaurarVersionDiagramaUseCase = new RestaurarVersionDiagrama({
+    diagramaRepository: diagramaRepo,
+    actualizarDiagramaManualUseCase
   });
   const aprobarFaseUseCase = new AprobarFase({
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
-    disenoRepository: disenoRepo
+    disenoRepository: disenoRepo,
+    plantumlValidatorService: plantumlValidator
   });
   const generarMockupsUseCase = new GenerarMockups({
     proyectoRepository: proyectoRepo,
@@ -113,16 +126,19 @@ function createApp() {
     fuenteRepository: fuenteRepo,
     casoDeUsoRepository: casoDeUsoRepo,
     disenoRepository: disenoRepo,
-    markdownCompilerService: markdownCompiler
+    markdownCompilerService: markdownCompiler,
+    trabajoGeneracionRepository: trabajoGeneracionRepo
   });
 
   const requerimientoController = new RequerimientoController({
     actualizarRequerimientoManualUseCase,
-    requerimientoRepository: requerimientoRepo
+    requerimientoRepository: requerimientoRepo,
+    requirementChangeService
   });
 
   const diagramaController = new DiagramaController({
     actualizarDiagramaManualUseCase,
+    restaurarVersionDiagramaUseCase,
     plantumlValidatorService: plantumlValidator,
     diagramaRepository: diagramaRepo
   });
@@ -164,7 +180,8 @@ function createApp() {
 
   return {
     app,
-    estandarRepo
+    estandarRepo,
+    reanudarTrabajosDiagrama: () => proyectoController.reanudarTrabajosDiagrama()
   };
 }
 

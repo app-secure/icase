@@ -1,6 +1,25 @@
 const Requerimiento = require('../entities/Requerimiento');
 const Diagrama = require('../entities/Diagrama');
-const { DiagramTypes, TIPOS_VALIDOS } = require('../constants/DiagramTypes');
+const {
+  DIAGRAM_TYPE_VALUES,
+  DIAGRAM_DEFINITIONS,
+  normalizeDiagramType,
+  isValidDiagramType
+} = require('../constants/DiagramTypes');
+const { DiagramWorkflowService, DIAGRAM_STATES } = require('../services/DiagramWorkflowService');
+const crypto = require('crypto');
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  }
+  return value;
+}
+
+function fingerprint(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
+}
 
 class ProcesarConIA {
   constructor({
@@ -21,6 +40,8 @@ class ProcesarConIA {
     this.disenoRepository = disenoRepository;
     this.plantumlValidatorService = plantumlValidatorService;
     this.aiOrchestratorService = aiOrchestratorService;
+    this.diagramWorkflowService = new DiagramWorkflowService();
+    this.generacionesEnCurso = new Set();
   }
 
   async obtenerModelosDisponibles() {
@@ -30,12 +51,16 @@ class ProcesarConIA {
     return { provider_defecto: 'auto', proveedores: [] };
   }
 
-  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo' }) {
+  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null }) {
     const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
     if (!proyecto) {
       throw new Error(`Proyecto con ID ${proyectoId} no encontrado.`);
     }
     const objetivoNormalizado = ['requisitos', 'diagramas', 'completo'].includes(objetivo) ? objetivo : 'completo';
+    const tipoDiagramaNormalizado = tipoDiagrama ? normalizeDiagramType(tipoDiagrama) : null;
+    if (tipoDiagramaNormalizado && !isValidDiagramType(tipoDiagramaNormalizado)) {
+      throw new Error(`Tipo de diagrama inválido: ${tipoDiagrama}.`);
+    }
     if (objetivoNormalizado === 'diagramas') {
       const estadosPermitidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
       if (!estadosPermitidos.has(proyecto.estado_fase)) {
@@ -102,12 +127,75 @@ class ProcesarConIA {
     const requerimientosAprobados = requerimientosPrevios.filter(r => r.aprobado);
     const diagramasAprobados = diagramasPrevios.filter(d => d.aprobado);
 
+    if (objetivoNormalizado === 'diagramas' && tipoDiagramaNormalizado) {
+      const flujo = this.diagramWorkflowService.build({ requirementsApproved: true, diagrams: diagramasPrevios });
+      const item = flujo.items.find((candidate) => candidate.tipo === tipoDiagramaNormalizado);
+      if (!item?.habilitado) {
+        const faltantes = item?.unmet_dependencies || [];
+        throw new Error(`No se puede generar ${item?.label || tipoDiagramaNormalizado}. Primero aprueba: ${faltantes.join(', ')}.`);
+      }
+    }
+
+    const diagramaObjetivoActual = tipoDiagramaNormalizado
+      ? this.diagramWorkflowService.latestByType(diagramasPrevios).get(tipoDiagramaNormalizado)
+      : null;
+    const ultimaRevisionRechazada = [...(diagramaObjetivoActual?.revisiones || [])]
+      .reverse()
+      .find((revision) => revision.decision === 'rechazado');
+    const retroalimentacionAplicable = ultimaRevisionRechazada?.observaciones ||
+      diagramaObjetivoActual?.retroalimentacion_aplicada || '';
     const contextoProyecto = {
       requerimientos_aprobados: requerimientosAprobados,
       diagramas_aprobados: diagramasAprobados,
       requerimientos_actuales: requerimientosPrevios,
-      diagramas_actuales: diagramasPrevios
+      diagramas_actuales: diagramasPrevios,
+      retroalimentacion_diagrama: retroalimentacionAplicable
     };
+
+    const latestByType = this.diagramWorkflowService.latestByType(diagramasPrevios);
+    const dependencyVersions = Object.fromEntries(
+      (DIAGRAM_DEFINITIONS[tipoDiagramaNormalizado]?.dependencies || []).map((dependency) => [
+        dependency,
+        Number(latestByType.get(dependency)?.version || 1)
+      ])
+    );
+    const inputFingerprint = tipoDiagramaNormalizado ? fingerprint({
+      tipo: tipoDiagramaNormalizado,
+      insumo: insumoBruto,
+      instrucciones: insumoAdicional,
+      provider,
+      specificModel,
+      requisitos: requerimientosAprobados.map((requirement) => ({
+        identificador: requirement.identificador,
+        tipo: requirement.tipo,
+        nombre: requirement.nombre,
+        descripcion: requirement.descripcion,
+        actores: requirement.actores,
+        prioridad: requirement.prioridad,
+        precondiciones: requirement.precondiciones,
+        poscondiciones: requirement.poscondiciones,
+        metrica_medible: requirement.metrica_medible
+      })).sort((a, b) => String(a.identificador).localeCompare(String(b.identificador))),
+      dependencias: dependencyVersions,
+      retroalimentacion: contextoProyecto.retroalimentacion_diagrama
+    }) : null;
+
+    const reusableDiagram = inputFingerprint && diagramaObjetivoActual?.huella_entrada === inputFingerprint &&
+      ['pendiente_revision', 'aprobado'].includes(diagramaObjetivoActual.estado) &&
+      ['valido', 'advertencia'].includes(diagramaObjetivoActual.estado_calidad);
+    if (reusableDiagram) {
+      return {
+        proyecto_id: proyectoId,
+        nombre_proyecto: proyecto.nombre,
+        descripcion_proyecto: proyecto.descripcion,
+        objetivo: objetivoNormalizado,
+        requerimientos: requerimientosPrevios,
+        diagramas: diagramasPrevios,
+        flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved: true, diagrams: diagramasPrevios }),
+        cache_hit: true,
+        cache_reason: 'La entrada y las versiones aprobadas no cambiaron.'
+      };
+    }
 
     // Construcción del payload de tres bloques explícitos
     const payload = {
@@ -118,12 +206,23 @@ class ProcesarConIA {
       provider,
       specificModel,
       objetivo: objetivoNormalizado,
+      tipo_diagrama: tipoDiagramaNormalizado,
       diccionario_estandares: estandares,
       contexto_proyecto: contextoProyecto
     };
 
-    // Llamada única a n8n / IA
-    const resultadoIA = await this.aiOrchestratorService.procesar(payload);
+    // Llamada única a n8n / IA, protegida contra solicitudes simultáneas del mismo artefacto.
+    const generationKey = `${proyectoId}:${tipoDiagramaNormalizado || objetivoNormalizado}`;
+    if (this.generacionesEnCurso.has(generationKey)) {
+      throw new Error('Ya existe una generación en curso para este artefacto. Espera a que termine antes de reintentar.');
+    }
+    this.generacionesEnCurso.add(generationKey);
+    let resultadoIA;
+    try {
+      resultadoIA = await this.aiOrchestratorService.procesar(payload);
+    } finally {
+      this.generacionesEnCurso.delete(generationKey);
+    }
 
     if (objetivoNormalizado === 'requisitos' && (!resultadoIA.requerimientos || resultadoIA.requerimientos.length === 0)) {
       throw new Error('La IA no devolvió requerimientos válidos. Se conservaron los datos existentes.');
@@ -133,8 +232,11 @@ class ProcesarConIA {
         const codigo = String(diagrama.codigo_plantuml || '');
         return codigo.includes('@start') && !codigo.includes('No hay diagrama disponible') && !codigo.includes('No hay diagrama de navegación disponible');
       });
-      if (diagramasValidos.length < 4) {
-        throw new Error('La IA no devolvió los cuatro diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
+      const cantidadEsperada = tipoDiagramaNormalizado ? 1 : 4;
+      if (diagramasValidos.length < cantidadEsperada) {
+        throw new Error(tipoDiagramaNormalizado
+          ? `La IA no devolvió un diagrama válido de tipo ${tipoDiagramaNormalizado}. Puedes reintentar sin perder los artefactos aprobados.`
+          : 'La IA no devolvió los cuatro diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
       }
       if (this.plantumlValidatorService) {
         const errores = diagramasValidos
@@ -160,35 +262,10 @@ class ProcesarConIA {
           .map(normalizarActor)
           .filter(Boolean))];
         const codigoCasosUso = String(casosUso.codigo_plantuml || '');
-        const actoresDiagramados = [
-          ...codigoCasosUso.matchAll(/^\s*actor\s+(?:"([^"]+)"|:([^:]+):|([^\s\n]+))(?:\s+as\s+([\w.]+))?/gim),
-          ...codigoCasosUso.matchAll(/^\s*:([^:\n]+):\s*(?:as\s+([\w.]+))?/gim)
-        ]
-          .map((match) => {
-            const rawNombre = match[1] || match[2] || match[3] || '';
-            const rawAlias = match[4] || match[2] || match[1] || match[3] || '';
-            return {
-              nombre: normalizarActor(rawNombre),
-              alias: (rawAlias.trim().replace(/^:|:$/g, ''))
-            };
-          })
+        const actoresDiagramados = [...codigoCasosUso.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s]+))(?:\s+as\s+([\w.]+))?/gim)]
+          .map((match) => ({ nombre: normalizarActor(match[1] || match[2]), alias: match[3] || match[2] }))
           .filter((actor) => actor.nombre);
-
-        const coincideActor = (actorReq, actorDiag) => {
-          if (!actorReq || !actorDiag) return false;
-          if (actorReq === actorDiag) return true;
-          if (actorReq.includes(actorDiag) || actorDiag.includes(actorReq)) return true;
-          const stopWords = new Set(['de', 'del', 'el', 'la', 'los', 'las', 'en', 'para', 'y', 'e', 'o']);
-          const tReq = actorReq.split(' ').filter(w => !stopWords.has(w));
-          const tDiag = actorDiag.split(' ').filter(w => !stopWords.has(w));
-          if (tReq.length > 0 && tDiag.length > 0) {
-            const matches = tReq.filter(w => tDiag.includes(w));
-            if (matches.length >= Math.min(tReq.length, tDiag.length)) return true;
-          }
-          return false;
-        };
-
-        const faltantes = actoresRequeridos.filter((actor) => !actoresDiagramados.some(({ nombre }) => coincideActor(actor, nombre)));
+        const faltantes = actoresRequeridos.filter((actor) => !actoresDiagramados.some(({ nombre }) => nombre === actor || nombre.includes(actor) || actor.includes(nombre)));
         if (faltantes.length) {
           throw new Error(`El diagrama de casos de uso omitió actores definidos en los requisitos aprobados: ${faltantes.join(', ')}. Reintenta la generación para obtener trazabilidad completa.`);
         }
@@ -196,8 +273,8 @@ class ProcesarConIA {
           .filter(({ alias }) => {
             const aliasEscapado = String(alias || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             if (!aliasEscapado) return true;
-            return !new RegExp(`(?:^|\\s)${aliasEscapado}\\s*(?:--+|\\.\\.+|<[-.]+|[-.]+>)`, 'im').test(codigoCasosUso) &&
-              !new RegExp(`(?:--+|\\.\\.+|<[-.]+|[-.]+>)\\s*${aliasEscapado}(?:\\s|$)`, 'im').test(codigoCasosUso);
+            return !new RegExp(`^\\s*${aliasEscapado}\\s*(?:--+|\\.\\.+|<[-.]+|[-.]+>)`, 'im').test(codigoCasosUso) &&
+              !new RegExp(`(?:--+|\\.\\.+|<[-.]+|[-.]+>)\\s*${aliasEscapado}\\s*$`, 'im').test(codigoCasosUso);
           })
           .map(({ nombre }) => nombre);
         if (actoresSinRelacion.length) {
@@ -252,7 +329,27 @@ class ProcesarConIA {
     // Persistir diagramas únicamente después de aprobar el análisis.
     const diagramasGenerados = [];
     if (objetivoNormalizado !== 'requisitos' && resultadoIA.diagramas && Array.isArray(resultadoIA.diagramas)) {
-      await this.diagramaRepository.eliminarPorProyecto(proyectoId);
+      if (!tipoDiagramaNormalizado) {
+        await this.diagramaRepository.eliminarPorProyecto(proyectoId);
+      } else {
+        const tiposDependientes = this.diagramWorkflowService.dependentTypes(tipoDiagramaNormalizado);
+        for (const diagram of diagramasPrevios) {
+          const tipoExistente = normalizeDiagramType(diagram.tipo);
+          if (tipoExistente === tipoDiagramaNormalizado || tiposDependientes.includes(tipoExistente)) {
+            const motivo = tipoExistente === tipoDiagramaNormalizado
+              ? `Se generó una nueva versión de ${tipoDiagramaNormalizado}.`
+              : `Cambió la dependencia ${tipoDiagramaNormalizado}; este diagrama debe regenerarse.`;
+            await this.diagramaRepository.actualizar(diagram.id, {
+              aprobado: false,
+              estado: DIAGRAM_STATES.STALE,
+              desactualizado: true,
+              motivos_desactualizacion: [motivo],
+              aprobado_en: null,
+              aprobado_por: null
+            });
+          }
+        }
+      }
 
       for (const diagData of resultadoIA.diagramas) {
         // Extraer el código Mermaid bajo cualquier nombre común que devuelva el LLM
@@ -265,22 +362,41 @@ class ProcesarConIA {
           .trim();
 
         // Normalizar el tipo de diagrama
-        let tipo = String(diagData.tipo || DiagramTypes.CASOS_DE_USO).toLowerCase().replace(/-/g, '_');
-        if (!TIPOS_VALIDOS.includes(tipo)) {
-          if (tipo.includes('diseno')) tipo = DiagramTypes.CLASES_DISENO;
-          else if (tipo.includes('caso') || tipo.includes('use')) tipo = DiagramTypes.CASOS_DE_USO;
-          else if (tipo.includes('dominio')) tipo = DiagramTypes.CLASES_DOMINIO;
-          else if (tipo.includes('clase') || tipo.includes('class')) tipo = DiagramTypes.CLASES;
-          else if (tipo.includes('sistema') || tipo.includes('system') || tipo.includes('infra') || tipo.includes('deploy')) tipo = DiagramTypes.ARQUITECTURA_SISTEMA;
-          else if (tipo.includes('software') || (tipo.includes('arqui') && !tipo.includes('sistema'))) tipo = DiagramTypes.ARQUITECTURA_SOFTWARE;
-          else if (tipo.includes('arbol') || tipo.includes('nav') || tipo.includes('wbs')) tipo = DiagramTypes.ARBOL_NAVEGACION;
-          else tipo = DiagramTypes.CASOS_DE_USO;
+        let tipo = tipoDiagramaNormalizado || String(diagData.tipo || 'casos_de_uso').toLowerCase().replace(/-/g, '_');
+        const tiposValidos = [...DIAGRAM_TYPE_VALUES, 'clases', 'er', 'arquitectura', 'secuencia', 'actividad'];
+        if (!tiposValidos.includes(tipo)) {
+          if (tipo.includes('caso') || tipo.includes('use')) tipo = 'casos_de_uso';
+          else if (tipo.includes('clase') || tipo.includes('class')) tipo = 'clases';
+          else if (tipo.includes('arqui') || tipo.includes('arch')) tipo = 'arquitectura';
+          else if (tipo.includes('arbol') || tipo.includes('nav')) tipo = 'arbol_navegacion';
+          else tipo = 'casos_de_uso';
         }
+
+        if (tipoDiagramaNormalizado && normalizeDiagramType(tipo) !== tipoDiagramaNormalizado) continue;
 
         // Si el LLM devolvió el código vacío, proveer un diagrama base válido por defecto
         if (!cleanMermaid) {
           cleanMermaid = `graph TD\n    A[Inicio: ${diagData.titulo || 'Proceso'}] --> B[Ejecución de Módulo]\n    B --> C[Fin]`;
         }
+
+        const versionesMismoTipo = diagramasPrevios
+          .filter((diagram) => normalizeDiagramType(diagram.tipo) === normalizeDiagramType(tipo))
+          .map((diagram) => Number(diagram.version || 1));
+        const version = versionesMismoTipo.length ? Math.max(...versionesMismoTipo) + 1 : 1;
+        const latest = this.diagramWorkflowService.latestByType(diagramasPrevios);
+        const versionesOrigen = tipoDiagramaNormalizado
+          ? Object.fromEntries((DIAGRAM_DEFINITIONS[tipoDiagramaNormalizado]?.dependencies || []).map((dependency) => [
+            dependency,
+            Number(latest.get(dependency)?.version || 1)
+          ]))
+          : {};
+        const validacionCalidad = this.plantumlValidatorService
+          ? this.plantumlValidatorService.validar(diagData.codigo_plantuml || diagData.codigo_puml || '', {
+            tipo,
+            rnfList: requerimientosPrevios.filter((req) => String(req.tipo || '').toUpperCase() === 'RNF'),
+            trazabilidad_rnf: diagData.trazabilidad_rnf
+          })
+          : { valido: true, errores: [], advertencias: [], metricas: {} };
 
         const diagEntity = new Diagrama({
           proyecto_id: proyectoId,
@@ -290,8 +406,22 @@ class ProcesarConIA {
           codigo_mermaid: cleanMermaid,
           codigo_plantuml: diagData.codigo_plantuml || diagData.codigo_puml || '',
           trazabilidad_rnf: Array.isArray(diagData.trazabilidad_rnf) ? diagData.trazabilidad_rnf : [],
+          requisitos_relacionados: Array.isArray(diagData.requisitos_relacionados) ? diagData.requisitos_relacionados : [],
+          versiones_origen: versionesOrigen,
           descripcion_jerarquica: Array.isArray(diagData.descripcion_jerarquica) ? diagData.descripcion_jerarquica : (diagData.descripcion_jerarquica ? [diagData.descripcion_jerarquica] : []),
-          aprobado: false
+          aprobado: false,
+          estado: DIAGRAM_STATES.PENDING_REVIEW,
+          version,
+          desactualizado: false,
+          estado_calidad: validacionCalidad.valido
+            ? (validacionCalidad.advertencias?.length ? 'advertencia' : 'valido')
+            : 'invalido',
+          errores_validacion: validacionCalidad.errores || [],
+          advertencias_validacion: validacionCalidad.advertencias || [],
+          metricas_validacion: validacionCalidad.metricas || {},
+          validado_en: new Date(),
+          huella_entrada: inputFingerprint,
+          retroalimentacion_aplicada: contextoProyecto.retroalimentacion_diagrama
         });
         diagramasGenerados.push(diagEntity);
       }
@@ -331,13 +461,17 @@ class ProcesarConIA {
     await this.proyectoRepository.actualizar(proyectoId, updates);
     console.log(`[ProcesarConIA] Proyecto actualizado en MongoDB: "${nombreFinal}"`);
 
+    const diagramasActuales = await this.diagramaRepository.listarPorProyecto(proyectoId);
     return {
       proyecto_id: proyectoId,
       nombre_proyecto: nombreFinal,
       descripcion_proyecto: descripcionFinal,
       objetivo: objetivoNormalizado,
       requerimientos: await this.requerimientoRepository.listarPorProyecto(proyectoId),
-      diagramas: await this.diagramaRepository.listarPorProyecto(proyectoId)
+      diagramas: diagramasActuales,
+      flujoDiagramas: objetivoNormalizado === 'diagramas'
+        ? this.diagramWorkflowService.build({ requirementsApproved: true, diagrams: diagramasActuales })
+        : undefined
     };
   }
 }

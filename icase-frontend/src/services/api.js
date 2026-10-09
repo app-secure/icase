@@ -248,7 +248,7 @@ export async function fetchAiModelsApi() {
   }
 }
 
-export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo') {
+export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null) {
   try {
     const res = await fetch(`${API_URL}/proyectos/${projectId}/procesar-ia`, {
       method: 'POST',
@@ -258,7 +258,8 @@ export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicio
         insumo_adicional: insumoAdicional,
         provider,
         specificModel,
-        objetivo
+        objetivo,
+        tipo_diagrama: tipoDiagrama
       })
     });
     const data = await res.json().catch(() => ({}));
@@ -284,6 +285,62 @@ export async function approvePhaseApi(projectId, fase) {
     throw new Error(data.error || 'Error al aprobar fase');
   }
   return await res.json();
+}
+
+export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tipo_diagrama: diagramType, insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional, provider, specificModel })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo iniciar la generación del diagrama.');
+  return data;
+}
+
+export async function fetchDiagramJobApi(jobId) {
+  const res = await fetch(`${API_URL}/proyectos/trabajos-diagramas/${jobId}`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar la generación del diagrama.');
+  return data;
+}
+
+export async function fetchLatestDiagramJobApi(projectId) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo recuperar la generación del diagrama.');
+  return data;
+}
+
+export async function approveDiagramApi(projectId, diagramType, observaciones = '') {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ fase: 'diagrama', tipo_diagrama: diagramType, decision: 'aprobar', observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al aprobar el diagrama');
+  return data;
+}
+
+export async function rejectDiagramApi(projectId, diagramType, observaciones) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ fase: 'diagrama', tipo_diagrama: diagramType, decision: 'rechazar', observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al solicitar cambios en el diagrama');
+  return data;
+}
+
+export async function fetchDiagramWorkflowApi(projectId) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/flujo-diagramas`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al consultar el flujo de diagramas');
+  return data;
 }
 
 export async function fetchDocumentoConsolidado(projectId) {
@@ -312,6 +369,24 @@ export async function updateDiagramApi(diagramId, data) {
     console.warn('[API] Error al actualizar diagrama:', err.message);
     return null;
   }
+}
+
+export async function fetchDiagramVersionsApi(diagramId) {
+  const res = await fetch(`${API_URL}/diagramas/${diagramId}/versiones`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al consultar las versiones del diagrama');
+  return data;
+}
+
+export async function restoreDiagramVersionApi(diagramId, version) {
+  const res = await fetch(`${API_URL}/diagramas/${diagramId}/restaurar`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ version })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al restaurar la versión del diagrama');
+  return data;
 }
 
 // === MOCKUPS ===

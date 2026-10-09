@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
 const AiModelConfig = require('./AiModelConfig');
+const { normalizeDiagramType, DIAGRAM_DEFINITIONS } = require('../../core/constants/DiagramTypes');
 
 class ModelosIaService {
   constructor() {
@@ -32,13 +33,11 @@ class ModelosIaService {
     }
   }
 
-  construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo = 'completo' }) {
+  construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo = 'completo', tipoDiagrama = null }) {
     const plantilla = this.leerPrompt('plantilla_orquestador.md');
 
     const directivas = [
       this.leerPrompt('analista_ieee830.md'),
-      this.leerPrompt('disenador_arquitectura_software.md'),
-      this.leerPrompt('disenador_arquitectura_sistema.md'),
       this.leerPrompt('disenador_arquitectura.md'),
       this.leerPrompt('auditor_qa.md')
     ].filter(Boolean).join('\n\n');
@@ -48,7 +47,9 @@ class ModelosIaService {
     const directivaFase = objetivo === 'requisitos'
       ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nGenera y devuelve únicamente el análisis y los requerimientos RF/RNF. El arreglo "diagramas" DEBE ser []. No diseñes, sintetices ni anticipes diagramas todavía.`
       : objetivo === 'diagramas'
-        ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos requerimientos incluidos en el contexto ya fueron revisados y aprobados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera los diagramas obligatorios (casos_de_uso, arquitectura_software, arquitectura_sistema, clases y arbol_navegacion) trazados estrictamente desde esos requerimientos aprobados.\n\nREGLA CRÍTICA DE ACTORES EN CASOS DE USO: Revisa atentamente el campo 'Actores' de CADA Requerimiento Funcional (RF) aprobado. Absolutamente TODOS los actores citados (incluyendo actores humanos como clientes, cajeros, administradores y SISTEMAS EXTERNOS como pasarelas de pago, sistemas de pagos externos, etc.) DEBEN figurar explícitamente declarados con \`actor "Nombre Exacto" as Alias\` y conectados con al menos un caso de uso (\`-->\`). La validación del sistema rechazará la respuesta si falta cualquier actor citado en los RF aprobados.`
+        ? tipoDiagrama
+          ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos artefactos incluidos en el contexto ya fueron revisados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera únicamente UN diagrama de tipo "${tipoDiagrama}" trazado desde sus dependencias aprobadas. El arreglo "diagramas" DEBE contener exactamente ese diagrama y ningún otro. Si es casos_de_uso, declara y conecta TODOS los actores citados en los RF. Si es una arquitectura, refleja los RNF aplicables y devuelve trazabilidad_rnf.`
+          : `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos requerimientos incluidos en el contexto ya fueron revisados y aprobados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera los seis diagramas obligatorios (casos_de_uso, clases_dominio, arquitectura_software, arquitectura_sistema, clases_diseno y arbol_navegacion) trazados estrictamente desde esos requerimientos aprobados.`
         : '';
 
     return plantilla
@@ -147,6 +148,7 @@ class ModelosIaService {
     const requestedProvider = (payload.provider || payload.modelo || payload.proveedor || this.provider).toLowerCase();
     const specificModel = payload.specificModel || payload.modelName || null;
     const objetivo = ['requisitos', 'diagramas'].includes(payload.objetivo) ? payload.objetivo : 'completo';
+    const tipoDiagrama = payload.tipo_diagrama ? normalizeDiagramType(payload.tipo_diagrama) : null;
 
     let contextoActualTexto = '';
     if (reqsActuales.length > 0) {
@@ -164,9 +166,30 @@ class ModelosIaService {
         }).join('\n');
     }
 
+    if (tipoDiagrama) {
+      const dependencies = DIAGRAM_DEFINITIONS[tipoDiagrama]?.dependencies || [];
+      const approvedDiagrams = payload.contexto_proyecto?.diagramas_aprobados || [];
+      const dependencyBlocks = dependencies.map((dependencyType) => {
+        const candidates = approvedDiagrams
+          .filter((diagram) => normalizeDiagramType(diagram.tipo) === dependencyType)
+          .sort((a, b) => Number(b.version || 1) - Number(a.version || 1));
+        const diagram = candidates[0];
+        if (!diagram) return '';
+        const code = String(diagram.codigo_plantuml || diagram.codigo_mermaid || '').slice(0, 6000);
+        return `[ARTEFACTO APROBADO: ${dependencyType} v${diagram.version || 1}]\n${diagram.descripcion || ''}\n${code}`;
+      }).filter(Boolean);
+      if (dependencyBlocks.length) {
+        contextoActualTexto += `\n\nDIAGRAMAS APROBADOS QUE DEBEN RESPETARSE:\n${dependencyBlocks.join('\n\n')}`;
+      }
+      const feedback = String(payload.contexto_proyecto?.retroalimentacion_diagrama || '').trim();
+      if (feedback) {
+        contextoActualTexto += `\n\nOBSERVACIONES DE LA REVISIÓN MANUAL QUE DEBES CORREGIR:\n${feedback}`;
+      }
+    }
+
     console.log(`[ModelosIaService] Procesando ${insumo.length} caracteres de insumo (Proveedor solicitado: ${requestedProvider})...`);
 
-    const promptCompleto = this.construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo });
+    const promptCompleto = this.construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo, tipoDiagrama });
 
     let respuestaData = null;
     if (requestedProvider === 'groq') {
@@ -201,7 +224,7 @@ class ModelosIaService {
       };
     }
 
-    return this.normalizarResultado(respuestaData, objetivo);
+    return this.normalizarResultado(respuestaData, objetivo, tipoDiagrama);
   }
 
   async _ejecutarProveedor(proveedor, prompt, specificModel) {
@@ -515,7 +538,7 @@ class ModelosIaService {
     return cleaned;
   }
 
-  normalizarResultado(data, objetivo = 'completo') {
+  normalizarResultado(data, objetivo = 'completo', tipoDiagrama = null) {
     const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
     const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
     const requerimientos = objetivo === 'diagramas' ? [] : (Array.isArray(data?.requerimientos) ? data.requerimientos : []);
@@ -533,12 +556,31 @@ class ModelosIaService {
 
     palabrasClave = palabrasClave.filter(k => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
 
-    const diagramas = objetivo === 'requisitos'
-      ? []
-      : PlantUMLSynthesizer.normalizar(data?.diagramas, {
+    let diagramas = [];
+    if (objetivo !== 'requisitos') {
+      if (tipoDiagrama) {
+        const recibidos = Array.isArray(data?.diagramas) ? data.diagramas : [];
+        const matchesTarget = (diagram) => {
+          const raw = String(diagram?.tipo || '').toLowerCase();
+          const normalized = normalizeDiagramType(raw);
+          if (normalized === tipoDiagrama) return true;
+          if (tipoDiagrama === 'casos_de_uso') return raw.includes('caso') || raw.includes('use');
+          if (tipoDiagrama === 'clases_dominio') return raw === 'clases' || raw.includes('dominio');
+          if (tipoDiagrama === 'arquitectura_software') return raw === 'arquitectura' || raw.includes('software');
+          if (tipoDiagrama === 'arquitectura_sistema') return raw.includes('sistema') || raw.includes('despliegue');
+          if (tipoDiagrama === 'clases_diseno') return raw.includes('diseno') || raw.includes('diseño');
+          if (tipoDiagrama === 'arbol_navegacion') return raw.includes('arbol') || raw.includes('naveg');
+          return false;
+        };
+        const selected = recibidos.find(matchesTarget) || (recibidos.length === 1 ? recibidos[0] : null);
+        diagramas = selected ? [{ ...selected, tipo: tipoDiagrama }] : [];
+      } else {
+        diagramas = PlantUMLSynthesizer.normalizar(data?.diagramas, {
           nombreProyecto: safeProjectName,
-          requerimientos
+          requerimientos: Array.isArray(data?.requerimientos) ? data.requerimientos : []
         });
+      }
+    }
 
     return {
       nombre_proyecto: safeProjectName,
