@@ -1,24 +1,57 @@
+const ArquitecturaSoftwareValidatorService = require('./ArquitecturaSoftwareValidatorService');
+const ArquitecturaSistemaValidatorService = require('./ArquitecturaSistemaValidatorService');
+const { DiagramTypes } = require('../../core/constants/DiagramTypes');
+
 class PlantUMLValidatorService {
-  validar(codigo, tipo = '') {
+  constructor() {
+    this.softwareValidator = new ArquitecturaSoftwareValidatorService();
+    this.sistemaValidator = new ArquitecturaSistemaValidatorService();
+  }
+
+  validar(codigo, options = {}) {
     if (!codigo || typeof codigo !== 'string' || codigo.trim() === '') {
       return { valido: false, error: 'El código PlantUML está vacío.' };
     }
 
     const trimmed = codigo.trim();
+    const esUml = trimmed.startsWith('@startuml') && trimmed.endsWith('@enduml');
+    const esArbol = (trimmed.startsWith('@startwbs') && trimmed.endsWith('@endwbs'))
+      || (trimmed.startsWith('@startmindmap') && trimmed.endsWith('@endmindmap'));
 
-    if (!trimmed.startsWith('@start')) {
+    if (!esUml && !esArbol) {
       return {
         valido: false,
-        error: 'El diagrama debe comenzar con @startuml o @startwbs'
+        error: 'El código debe iniciar con @startuml o @startwbs y finalizar con @enduml o @endwbs.'
       };
     }
 
-    const esArbol = String(tipo).toLowerCase().includes('arbol') || trimmed.startsWith('@startwbs');
-    const cierreEsperado = esArbol ? '@endwbs' : '@enduml';
-    if (!trimmed.includes(cierreEsperado)) {
+    const opts = typeof options === 'string' ? { tipo: options } : (options || {});
+    const tipo = opts.tipo || opts.type || '';
+    const tipoNormalizado = String(tipo).toLowerCase();
+
+    if (tipo === DiagramTypes.ARQUITECTURA_SOFTWARE || tipoNormalizado === 'arquitectura_software') {
+      const res = this.softwareValidator.validar({
+        codigo: trimmed,
+        rnfList: opts.rnfList,
+        trazabilidad_rnf: opts.trazabilidad_rnf
+      });
       return {
-        valido: false,
-        error: `El diagrama debe finalizar con ${cierreEsperado}`
+        valido: res.valido,
+        error: res.errores.length > 0 ? res.errores.join(' | ') : null,
+        detalles: res
+      };
+    }
+
+    if (tipo === DiagramTypes.ARQUITECTURA_SISTEMA || tipoNormalizado === 'arquitectura_sistema') {
+      const res = this.sistemaValidator.validar({
+        codigo: trimmed,
+        rnfList: opts.rnfList,
+        trazabilidad_rnf: opts.trazabilidad_rnf
+      });
+      return {
+        valido: res.valido,
+        error: res.errores.length > 0 ? res.errores.join(' | ') : null,
+        detalles: res
       };
     }
 
@@ -33,7 +66,6 @@ class PlantUMLValidatorService {
       if (aperturas !== cierres) return { valido: false, error: 'El diagrama contiene bloques con llaves desbalanceadas.' };
     }
 
-    const tipoNormalizado = String(tipo).toLowerCase();
     if (tipoNormalizado.includes('caso')) {
       const actores = (trimmed.match(/^\s*actor\s+/gim) || []).length;
       const casos = (trimmed.match(/^\s*usecase\s+/gim) || []).length;
@@ -42,7 +74,7 @@ class PlantUMLValidatorService {
       if (!/^\s*(?:rectangle|package)\s+/im.test(trimmed)) return { valido: false, error: 'Los casos de uso deben estar delimitados por el sistema o por módulos.' };
     }
 
-    if (tipoNormalizado.includes('arqui')) {
+    if (tipoNormalizado === 'arquitectura') {
       const personas = (trimmed.match(/^\s*Person\s*\(/gim) || []).length;
       const contenedores = (trimmed.match(/^\s*Container(?:Db)?\s*\(/gim) || []).length;
       const relaciones = (trimmed.match(/^\s*Rel\s*\(/gim) || []).length;

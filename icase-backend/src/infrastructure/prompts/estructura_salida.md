@@ -61,16 +61,34 @@ Tu respuesta debe ser EXCLUSIVAMENTE un objeto JSON válido, sin texto introduct
       "codigo_plantuml": "@startuml\\nleft to right direction\\nskinparam packageStyle rectangle\\n..."
     },
     {
-      "tipo": "arquitectura",
-      "titulo": "Diagrama de Arquitectura Técnica Integral (C4 Container)",
-      "descripcion": "Explicación detallada de cómo va a funcionar la arquitectura del sistema: flujo de peticiones desde el cliente hacia el gateway, delegación a microservicios de negocio, persistencia ACID y sincronización de eventos.",
+      "tipo": "arquitectura_software",
+      "titulo": "Diagrama de Arquitectura de Software (C4 Container)",
+      "descripcion": "Explicación detallada de cómo funciona la arquitectura de software: capas, aplicaciones cliente, gateway de seguridad, servicios de dominio, bases de datos y colas de mensajería.",
       "descripcion_jerarquica": [
-        "Canal de Entrada y Presentación: Interfaces web o móviles seleccionadas según la necesidad operativa del cliente.",
+        "Capa de Presentación: Interfaces web o móviles seleccionadas según la necesidad operativa del cliente.",
         "Seguridad y Enrutamiento: Gateway perimetral que autentica solicitudes y enruta el tráfico.",
-        "Servicios del Dominio: Componentes backend seleccionados según la carga de trabajo para ejecutar las reglas de negocio.",
-        "Persistencia y Datos: Almacén de datos seleccionado (relacional, documental o en memoria) para garantizar la integridad operativa."
+        "Servicios del Dominio: Componentes backend desacoplados para ejecutar las reglas de negocio.",
+        "Persistencia y Datos: Almacén de datos (relacional, documental o en memoria) para garantizar integridad."
+      ],
+      "trazabilidad_rnf": [
+        { "rnf_id": "RNF-01", "elemento": "Redis Cache", "justificacion": "Cumple tiempo de respuesta <= 0.8s en consultas frecuentes" }
       ],
       "codigo_plantuml": "@startuml\\n!include <C4/C4_Container>\\n..."
+    },
+    {
+      "tipo": "arquitectura_sistema",
+      "titulo": "Diagrama de Arquitectura de Sistema e Infraestructura (C4 Deployment)",
+      "descripcion": "Explicación de la infraestructura física o cloud: servidores, nodos, redes, despliegue y monitoreo. Si los requisitos no solicitaron alta disponibilidad, se modela un despliegue mononodo sin failover redundante.",
+      "descripcion_jerarquica": [
+        "Zonas de Red y Perímetro: Segmentación de red, DMZ y cortafuegos de acceso.",
+        "Nodos de Cómputo: Servidores de aplicaciones (standalone o cluster según RNF) donde residen los servicios.",
+        "Almacenamiento de Datos: Servidor de base de datos aprovisionado según la demanda de disponibilidad.",
+        "Observabilidad y Monitoreo: Agentes de telemetría y salud para supervisión del entorno."
+      ],
+      "trazabilidad_rnf": [
+        { "rnf_id": "RNF-01", "elemento": "Servidor Cloud Standalone", "justificacion": "Alineado a no sobre-dimensionar alta disponibilidad ya que no fue requerida" }
+      ],
+      "codigo_plantuml": "@startuml\\n!include <C4/C4_Deployment>\\n..."
     },
     {
       "tipo": "clases",

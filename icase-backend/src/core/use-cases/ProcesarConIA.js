@@ -1,5 +1,6 @@
 const Requerimiento = require('../entities/Requerimiento');
 const Diagrama = require('../entities/Diagrama');
+const { DiagramTypes, TIPOS_VALIDOS } = require('../constants/DiagramTypes');
 
 class ProcesarConIA {
   constructor({
@@ -239,14 +240,14 @@ class ProcesarConIA {
           .trim();
 
         // Normalizar el tipo de diagrama
-        let tipo = String(diagData.tipo || 'casos_de_uso').toLowerCase().replace(/-/g, '_');
-        const tiposValidos = ['casos_de_uso', 'clases', 'er', 'arquitectura', 'arbol_navegacion', 'secuencia', 'actividad'];
-        if (!tiposValidos.includes(tipo)) {
-          if (tipo.includes('caso') || tipo.includes('use')) tipo = 'casos_de_uso';
-          else if (tipo.includes('clase') || tipo.includes('class')) tipo = 'clases';
-          else if (tipo.includes('arqui') || tipo.includes('arch')) tipo = 'arquitectura';
-          else if (tipo.includes('arbol') || tipo.includes('nav')) tipo = 'arbol_navegacion';
-          else tipo = 'casos_de_uso';
+        let tipo = String(diagData.tipo || DiagramTypes.CASOS_DE_USO).toLowerCase().replace(/-/g, '_');
+        if (!TIPOS_VALIDOS.includes(tipo)) {
+          if (tipo.includes('caso') || tipo.includes('use')) tipo = DiagramTypes.CASOS_DE_USO;
+          else if (tipo.includes('clase') || tipo.includes('class')) tipo = DiagramTypes.CLASES;
+          else if (tipo.includes('sistema') || tipo.includes('system') || tipo.includes('infra') || tipo.includes('deploy')) tipo = DiagramTypes.ARQUITECTURA_SISTEMA;
+          else if (tipo.includes('software') || (tipo.includes('arqui') && !tipo.includes('sistema'))) tipo = DiagramTypes.ARQUITECTURA_SOFTWARE;
+          else if (tipo.includes('arbol') || tipo.includes('nav') || tipo.includes('wbs')) tipo = DiagramTypes.ARBOL_NAVEGACION;
+          else tipo = DiagramTypes.CASOS_DE_USO;
         }
 
         // Si el LLM devolvió el código vacío, proveer un diagrama base válido por defecto

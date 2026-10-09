@@ -1,0 +1,42 @@
+{
+  "nombre_proyecto": "SmartLibrary - Gestión Bibliotecaria",
+  "descripcion_proyecto": "Sistema integral de control de préstamos, catálogo bibliográfico y gestión de socios.",
+  "requerimientos": [
+    {
+      "tipo": "RF",
+      "identificador": "RF-01",
+      "nombre": "Préstamo de Libros",
+      "descripcion": "El sistema DEBE registrar el préstamo de libros verificando disponibilidad y estado del socio.",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RF",
+      "identificador": "RF-02",
+      "nombre": "Catálogo y Búsqueda",
+      "descripcion": "El sistema DEBE permitir la búsqueda rápida de títulos por autor, ISBN y categoría.",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RNF",
+      "identificador": "RNF-01",
+      "nombre": "Rendimiento y Latencia",
+      "descripcion": "El sistema DEBE responder a búsquedas de catálogo en menos de 0.8s.",
+      "metrica_medible": "Tiempo de respuesta <= 0.8s en el 95% de consultas bajo carga normal",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RNF",
+      "identificador": "RNF-02",
+      "nombre": "Seguridad y Autenticación",
+      "descripcion": "El sistema DEBE validar credenciales mediante tokens JWT y control de acceso basado en roles (RBAC).",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RNF",
+      "identificador": "RNF-03",
+      "nombre": "Auditoría de Transacciones",
+      "descripcion": "El sistema DEBE conservar una bitácora inmutable de préstamos y devoluciones realizadas.",
+      "prioridad": "Media"
+    }
+  ]
+}

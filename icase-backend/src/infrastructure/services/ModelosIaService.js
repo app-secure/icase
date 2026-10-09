@@ -37,6 +37,8 @@ class ModelosIaService {
 
     const directivas = [
       this.leerPrompt('analista_ieee830.md'),
+      this.leerPrompt('disenador_arquitectura_software.md'),
+      this.leerPrompt('disenador_arquitectura_sistema.md'),
       this.leerPrompt('disenador_arquitectura.md'),
       this.leerPrompt('auditor_qa.md')
     ].filter(Boolean).join('\n\n');
@@ -531,7 +533,12 @@ class ModelosIaService {
 
     palabrasClave = palabrasClave.filter(k => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
 
-    const diagramas = objetivo === 'requisitos' ? [] : PlantUMLSynthesizer.normalizar(data?.diagramas);
+    const diagramas = objetivo === 'requisitos'
+      ? []
+      : PlantUMLSynthesizer.normalizar(data?.diagramas, {
+          nombreProyecto: safeProjectName,
+          requerimientos
+        });
 
     return {
       nombre_proyecto: safeProjectName,

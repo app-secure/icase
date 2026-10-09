@@ -47,7 +47,7 @@ const DiagramaSchema = new mongoose.Schema({
     default: false
   },
   trazabilidad_rnf: {
-    type: [String],
+    type: [mongoose.Schema.Types.Mixed],
     default: []
   },
   requisitos_relacionados: {
