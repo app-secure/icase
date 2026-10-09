@@ -391,7 +391,11 @@ class ProcesarConIA {
           ]))
           : {};
         const validacionCalidad = this.plantumlValidatorService
-          ? this.plantumlValidatorService.validar(diagData.codigo_plantuml || diagData.codigo_puml || '', tipo)
+          ? this.plantumlValidatorService.validar(diagData.codigo_plantuml || diagData.codigo_puml || '', {
+            tipo,
+            rnfList: requerimientosPrevios.filter((req) => String(req.tipo || '').toUpperCase() === 'RNF'),
+            trazabilidad_rnf: diagData.trazabilidad_rnf
+          })
           : { valido: true, errores: [], advertencias: [], metricas: {} };
 
         const diagEntity = new Diagrama({

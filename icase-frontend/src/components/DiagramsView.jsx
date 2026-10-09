@@ -468,6 +468,16 @@ export default function DiagramsView({
                   {validationWarnings.map((message) => <p key={message}>• {message}</p>)}
                 </div>
               )}
+              {Array.isArray(currentDiagram?.trazabilidad_rnf) && currentDiagram.trazabilidad_rnf.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Trazabilidad RNF:</span>
+                  {currentDiagram.trazabilidad_rnf.map((trace, index) => (
+                    <span key={`${trace?.rnf_id || trace}-${index}`} className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                      {typeof trace === "object" ? `${trace.rnf_id || trace.rnf || "RNF"} → ${trace.elemento || trace.componente || "elemento"}` : trace}
+                    </span>
+                  ))}
+                </div>
+              )}
               {currentState === "rechazado" && latestRejectedReview?.observaciones && (
                 <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[11px] text-violet-800">
                   <p className="font-semibold">Cambios solicitados para la versión {latestRejectedReview.version}</p>

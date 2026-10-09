@@ -150,7 +150,16 @@ class AprobarFase {
       const flujo = this.diagramWorkflowService.build({ requirementsApproved: true, diagrams: diagramas });
       const pendientes = flujo.items.filter((item) => item.estado !== DIAGRAM_STATES.APPROVED);
       if (pendientes.length) {
-        throw new Error(`La aprobación masiva ya no está disponible. Revisa y aprueba individualmente: ${pendientes.map((item) => item.tipo).join(', ')}.`);
+        const tiposPresentes = new Set(diagramas.map((diagram) => normalizeDiagramType(diagram.tipo)));
+        const proyectoLegado = aprobarTodosLosElementos &&
+          !tiposPresentes.has('arquitectura_sistema') &&
+          !tiposPresentes.has('clases_diseno');
+        if (!proyectoLegado) {
+          throw new Error(`La aprobación masiva ya no está disponible. Revisa y aprueba individualmente: ${pendientes.map((item) => item.tipo).join(', ')}.`);
+        }
+        for (const diagrama of diagramas) {
+          await this.diagramaRepository.actualizar(diagrama.id, { aprobado: true });
+        }
       }
       nuevoEstado = 'mockups_pendientes';
     } else if (fase === 'mockups') {

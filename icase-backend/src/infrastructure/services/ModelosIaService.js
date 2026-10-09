@@ -48,8 +48,8 @@ class ModelosIaService {
       ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nGenera y devuelve únicamente el análisis y los requerimientos RF/RNF. El arreglo "diagramas" DEBE ser []. No diseñes, sintetices ni anticipes diagramas todavía.`
       : objetivo === 'diagramas'
         ? tipoDiagrama
-          ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos artefactos incluidos en el contexto ya fueron revisados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera únicamente UN diagrama de tipo "${tipoDiagrama}" trazado desde sus dependencias aprobadas. El arreglo "diagramas" DEBE contener exactamente ese diagrama y ningún otro.`
-          : `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos requerimientos incluidos en el contexto ya fueron revisados y aprobados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera los cuatro diagramas obligatorios (casos_de_uso, arquitectura, clases y arbol_navegacion) trazados estrictamente desde esos requerimientos aprobados.`
+          ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos artefactos incluidos en el contexto ya fueron revisados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera únicamente UN diagrama de tipo "${tipoDiagrama}" trazado desde sus dependencias aprobadas. El arreglo "diagramas" DEBE contener exactamente ese diagrama y ningún otro. Si es casos_de_uso, declara y conecta TODOS los actores citados en los RF. Si es una arquitectura, refleja los RNF aplicables y devuelve trazabilidad_rnf.`
+          : `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos requerimientos incluidos en el contexto ya fueron revisados y aprobados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera los seis diagramas obligatorios (casos_de_uso, clases_dominio, arquitectura_software, arquitectura_sistema, clases_diseno y arbol_navegacion) trazados estrictamente desde esos requerimientos aprobados.`
         : '';
 
     return plantilla
@@ -575,7 +575,10 @@ class ModelosIaService {
         const selected = recibidos.find(matchesTarget) || (recibidos.length === 1 ? recibidos[0] : null);
         diagramas = selected ? [{ ...selected, tipo: tipoDiagrama }] : [];
       } else {
-        diagramas = PlantUMLSynthesizer.normalizar(data?.diagramas);
+        diagramas = PlantUMLSynthesizer.normalizar(data?.diagramas, {
+          nombreProyecto: safeProjectName,
+          requerimientos: Array.isArray(data?.requerimientos) ? data.requerimientos : []
+        });
       }
     }
 

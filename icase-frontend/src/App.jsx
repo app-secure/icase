@@ -177,6 +177,7 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         plantumlCode: sanitizePlantUML(item.codigo_plantuml) || fallbackCode,
         description: item.descripcion || description,
         descripcion_jerarquica: item.descripcion_jerarquica || [],
+        trazabilidad_rnf: item.trazabilidad_rnf || [],
         approved: Boolean(item.aprobado),
         status: item.estado || (item.aprobado ? "aprobado" : "pendiente_revision"),
         stale: Boolean(item.desactualizado),

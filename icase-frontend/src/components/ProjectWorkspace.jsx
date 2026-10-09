@@ -288,6 +288,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
         plantumlCode: code,
         description: source.descripcion || source.description || "",
         descripcion_jerarquica: Array.isArray(source.descripcion_jerarquica) ? source.descripcion_jerarquica : [],
+        trazabilidad_rnf: Array.isArray(source.trazabilidad_rnf) ? source.trazabilidad_rnf : (existing.trazabilidad_rnf || []),
         approved: Boolean(source.aprobado ?? source.approved),
         status: source.estado || source.status || (source.aprobado ? "aprobado" : "pendiente_revision"),
         stale: Boolean(source.desactualizado ?? source.stale),

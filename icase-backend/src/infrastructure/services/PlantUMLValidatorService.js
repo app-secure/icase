@@ -1,17 +1,28 @@
 const { DIAGRAM_TYPES, normalizeDiagramType } = require('../../core/constants/DiagramTypes');
+const ArquitecturaSoftwareValidatorService = require('./ArquitecturaSoftwareValidatorService');
+const ArquitecturaSistemaValidatorService = require('./ArquitecturaSistemaValidatorService');
+const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 
 class PlantUMLValidatorService {
-  validar(codigo, tipo = '') {
+  constructor() {
+    this.softwareValidator = new ArquitecturaSoftwareValidatorService();
+    this.sistemaValidator = new ArquitecturaSistemaValidatorService();
+    this.disenoValidator = new ClasesDisenoValidatorService();
+  }
+
+  validar(codigo, options = '') {
     const errores = [];
     const advertencias = [];
     const metricas = {};
+    const opts = typeof options === 'string' ? { tipo: options } : (options || {});
+    const tipoNormalizado = normalizeDiagramType(opts.tipo || opts.type || '');
+    let detalles = null;
 
     if (!codigo || typeof codigo !== 'string' || codigo.trim() === '') {
       return this.resultado(['El código PlantUML está vacío.'], advertencias, metricas);
     }
 
     const trimmed = codigo.trim();
-    const tipoNormalizado = normalizeDiagramType(tipo);
     const inicio = trimmed.match(/^@(startuml|startwbs|startmindmap)\b/i)?.[1]?.toLowerCase();
     if (!inicio) {
       errores.push('El diagrama debe comenzar con @startuml, @startwbs o @startmindmap.');
@@ -30,6 +41,38 @@ class PlantUMLValidatorService {
       const aperturas = (trimmed.match(/\{/g) || []).length;
       const cierres = (trimmed.match(/\}/g) || []).length;
       if (aperturas !== cierres) errores.push('El diagrama contiene bloques con llaves desbalanceadas.');
+    }
+
+    if (tipoNormalizado === DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE) {
+      detalles = this.softwareValidator.validar({
+        codigo: trimmed,
+        rnfList: opts.rnfList,
+        trazabilidad_rnf: opts.trazabilidad_rnf
+      });
+      return {
+        ...this.resultado(detalles.errores || [], detalles.advertencias || [], metricas),
+        detalles
+      };
+    }
+
+    if (tipoNormalizado === DIAGRAM_TYPES.SYSTEM_ARCHITECTURE) {
+      detalles = this.sistemaValidator.validar({
+        codigo: trimmed,
+        rnfList: opts.rnfList,
+        trazabilidad_rnf: opts.trazabilidad_rnf
+      });
+      return {
+        ...this.resultado(detalles.errores || [], detalles.advertencias || [], metricas),
+        detalles
+      };
+    }
+
+    if (tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES) {
+      detalles = this.disenoValidator.validar(trimmed, tipoNormalizado);
+      return {
+        ...this.resultado(detalles.valido ? [] : [detalles.error].filter(Boolean), [], metricas),
+        detalles
+      };
     }
 
     if (tipoNormalizado === DIAGRAM_TYPES.USE_CASES) {
@@ -90,7 +133,7 @@ class PlantUMLValidatorService {
       if (metricas.profundidad < 3) errores.push('El árbol de navegación debe tener al menos tres niveles jerárquicos.');
     }
 
-    return this.resultado(errores, advertencias, metricas);
+    return { ...this.resultado([...new Set(errores)], [...new Set(advertencias)], metricas), detalles };
   }
 
   resultado(errores, advertencias, metricas) {

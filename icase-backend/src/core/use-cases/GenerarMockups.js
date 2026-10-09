@@ -235,11 +235,15 @@ class GenerarMockups {
 
     const diagClases = diagramas.find(d => d.tipo === 'clases' || d.tipo === 'clases_dominio');
     const diagCasosUso = diagramas.find(d => d.tipo === 'casos_de_uso' || d.tipo === 'casos_uso');
+    const diagArqui = diagramas.find(d => d.tipo === 'arquitectura_software' || d.tipo === 'arquitectura') || diagramas.find(d => d.tipo === 'arquitectura_sistema');
     const { pantallas: pantallasArbol } = this._pantallasDelProyecto(diagramas);
 
     const pantallas = pantallasPrevias || pantallasArbol;
 
     let seccionesDiagramas = '';
+    if (diagArqui) {
+      seccionesDiagramas += `\n\nARQUITECTURA (extracto):\n${this._limitarTexto(diagArqui.codigo_plantuml || diagArqui.codigo_mermaid || 'No disponible', 2000)}`;
+    }
     if (diagClases) {
       seccionesDiagramas += `\n\nCLASES DEL DOMINIO (extracto):\n${this._limitarTexto(diagClases.codigo_plantuml || diagClases.codigo_mermaid || 'No disponible', 3500)}`;
     }

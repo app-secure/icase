@@ -179,18 +179,28 @@ class MarkdownCompilerService {
       md += `\`\`\`plantuml\n${navCode}\n\`\`\`\n\n`;
     }
 
-    // 8.3 Arquitectura del Sistema y Software
-    md += `### 8.3 Arquitectura del Sistema y Software (Structurizr C4)\n\n`;
-    md += `#### Arquitectura de Frontend\n`;
-    md += `${diseno?.arquitectura_frontend?.descripcion || 'Estructura modular dividida en capas bien definidas: App Layer (rutas y layouts), Features Layer (lógica por dominio y llamadas API), y Shared Layer (componentes reutilizables).'}\n\n`;
+    // 8.3 Arquitectura de Software y Sistema
+    md += `### 8.3 Arquitectura Técnica (Software y Sistema)\n\n`;
 
-    md += `#### Arquitectura de Backend e Infraestructura\n`;
-    md += `${diseno?.arquitectura_backend?.descripcion || 'Construida bajo enfoque de monolito modular con separación lógica clara, autenticación JWT y persistencia en base de datos central con réplica en caliente.'}\n\n`;
-
-    const archCode = diagramas.find((d) => d.tipo === 'arquitectura')?.codigo_plantuml || diseno?.arquitectura_backend?.codigo_plantuml || diagramas.find((d) => d.tipo === 'arquitectura')?.codigo_mermaid;
+    // 8.3.1 Arquitectura de Software
+    const softDiag = diagramas.find((d) => d.tipo === 'arquitectura_software');
+    const archCode = softDiag?.codigo_plantuml || diagramas.find((d) => d.tipo === 'arquitectura')?.codigo_plantuml || diseno?.arquitectura_backend?.codigo_plantuml;
+    md += `#### 8.3.1 Arquitectura de Software (C4 Container)\n\n`;
+    md += `${softDiag?.descripcion || diseno?.arquitectura_frontend?.descripcion || 'Estructura modular dividida en capas lógicas: aplicaciones cliente, gateway de seguridad, servicios de dominio, persistencia transaccional y mensajería desacoplada.'}\n\n`;
     if (archCode) {
-      md += `> **Diagrama de Infraestructura y Arquitectura C4:**\n\n`;
+      md += `> **Diagrama de Arquitectura de Software:**\n\n`;
       md += `\`\`\`plantuml\n${archCode}\n\`\`\`\n\n`;
+    }
+
+    // 8.3.2 Arquitectura de Sistema e Infraestructura
+    const sysDiag = diagramas.find((d) => d.tipo === 'arquitectura_sistema');
+    if (sysDiag || diagramas.some((d) => d.tipo === 'arquitectura_sistema')) {
+      md += `#### 8.3.2 Arquitectura de Sistema e Infraestructura (C4 Deployment)\n\n`;
+      md += `${sysDiag?.descripcion || 'Topología de infraestructura, nodos de computación, segmentación de redes, servidores y agentes de monitoreo.'}\n\n`;
+      if (sysDiag?.codigo_plantuml) {
+        md += `> **Diagrama de Despliegue e Infraestructura:**\n\n`;
+        md += `\`\`\`plantuml\n${sysDiag.codigo_plantuml}\n\`\`\`\n\n`;
+      }
     }
 
     // 8.4 Wireframes y Mockups de Interfaz

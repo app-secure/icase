@@ -1,8 +1,10 @@
+const { DiagramTypes, TIPOS_VALIDOS } = require('../constants/DiagramTypes');
+
 class Diagrama {
   constructor({
     id,
     proyecto_id,
-    tipo, // Usar los valores oficiales definidos en core/constants/DiagramTypes.
+    tipo, // Usar los valores oficiales definidos en core/constants/DiagramTypes
     titulo,
     descripcion = '',
     codigo_mermaid = '',
