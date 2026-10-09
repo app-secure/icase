@@ -18,6 +18,7 @@ const PlantUMLValidatorService = require('./infrastructure/services/PlantUMLVali
 const MarkdownCompilerService = require('./infrastructure/services/MarkdownCompilerService');
 const FileIngestionService = require('./infrastructure/services/FileIngestionService');
 const MockupIaService = require('./infrastructure/services/MockupIaService');
+const RequirementChangeService = require('./core/services/RequirementChangeService');
 
 // Casos de Uso
 const CrearProyecto = require('./core/use-cases/CrearProyecto');
@@ -68,6 +69,11 @@ function createApp() {
   const markdownCompiler = new MarkdownCompilerService();
   const fileIngestionService = new FileIngestionService();
   const mockupIaService = new MockupIaService();
+  const requirementChangeService = new RequirementChangeService({
+    proyectoRepository: proyectoRepo,
+    diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo
+  });
 
   const crearProyectoUseCase = new CrearProyecto({ proyectoRepository: proyectoRepo });
   const procesarConIAUseCase = new ProcesarConIA({
@@ -125,7 +131,8 @@ function createApp() {
 
   const requerimientoController = new RequerimientoController({
     actualizarRequerimientoManualUseCase,
-    requerimientoRepository: requerimientoRepo
+    requerimientoRepository: requerimientoRepo,
+    requirementChangeService
   });
 
   const diagramaController = new DiagramaController({

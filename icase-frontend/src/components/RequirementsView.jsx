@@ -93,7 +93,10 @@ export default function RequirementsView({
     onUpdateRequirements?.({ functional: updatedFunctional, nonFunctional: updatedNonFunctional });
     setEditing(null);
     setFormError("");
-    setCorrectionFeedback({ type: "success", message: isNew ? "Requisito añadido y sincronizado." : "Requisito actualizado y sincronizado." });
+    setCorrectionFeedback({
+      type: "success",
+      message: `${isNew ? "Requisito añadido" : "Requisito actualizado"}. Debes aprobar nuevamente el análisis antes de continuar.`
+    });
   };
 
   const deleteRequirement = (type, index) => {
@@ -102,7 +105,10 @@ export default function RequirementsView({
     onUpdateRequirements?.({ functional: updatedFunctional, nonFunctional: updatedNonFunctional });
     setPendingDelete(null);
     if (editing?.type === type && editing?.index === index) setEditing(null);
-    setCorrectionFeedback({ type: "success", message: "Requisito eliminado y sincronizado." });
+    setCorrectionFeedback({
+      type: "success",
+      message: "Requisito eliminado. Debes aprobar nuevamente el análisis antes de continuar."
+    });
   };
 
   const updateDraft = (field, value) => setEditing(current => ({

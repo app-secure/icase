@@ -80,6 +80,12 @@ Cada generación individual calcula `huella_entrada` mediante SHA-256 sobre el t
 
 Las ediciones manuales y restauraciones eliminan la huella para impedir reutilizaciones incorrectas. Una versión generada después de un rechazo conserva `retroalimentacion_aplicada`, de modo que solicitudes idénticas posteriores reconozcan que esas observaciones ya fueron incorporadas. También se bloquean solicitudes simultáneas para el mismo proyecto y tipo mientras la llamada al proveedor está en curso.
 
+## Cambios posteriores en requisitos
+
+Agregar, editar o eliminar un requisito después de aprobar el análisis retira esa aprobación y devuelve el proyecto a `analisis_pendiente`. Todos los diagramas obligatorios se marcan `desactualizado`, se limpian sus aprobaciones y huellas de entrada, y los mockups derivados se invalidan. El usuario debe revisar y aprobar nuevamente los requisitos antes de regenerar el modelado.
+
+La sincronización compara únicamente campos funcionales normalizados. Enviar una lista semánticamente idéntica no recrea documentos, no cambia sus identificadores y no invalida el trabajo aprobado.
+
 ## Formato de intercambio
 
 Todo generador nuevo debe devolver como mínimo:

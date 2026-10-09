@@ -1289,9 +1289,25 @@ export default function ProjectWorkspace({
           <RequirementsView
             requirements={project.requirements}
             onUpdateRequirements={(newReqs) => {
+              const staleDiagrams = Object.fromEntries(Object.entries(project.diagrams || {}).map(([key, diagram]) => [
+                key,
+                {
+                  ...diagram,
+                  approved: false,
+                  status: "desactualizado",
+                  stale: true,
+                  staleReasons: ["Cambió la especificación de requisitos."]
+                }
+              ]));
               onUpdateProject({
                 ...project,
-                requirements: newReqs
+                requirements: newReqs,
+                diagrams: staleDiagrams,
+                diagramFlow: null,
+                isAnalysisApproved: false,
+                isDiagramsApproved: false,
+                isMockupsApproved: false,
+                currentPhase: 1
               });
               const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
               if (backendId) {

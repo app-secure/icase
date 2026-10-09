@@ -7,6 +7,7 @@ const ModelosIaService = require('../src/infrastructure/services/ModelosIaServic
 const ProcesarConIA = require('../src/core/use-cases/ProcesarConIA');
 const PlantUMLValidatorService = require('../src/infrastructure/services/PlantUMLValidatorService');
 const PlantUMLSynthesizer = require('../src/infrastructure/services/PlantUMLSynthesizer');
+const RequirementChangeService = require('../src/core/services/RequirementChangeService');
 
 describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
   test('ModelosIaService debe usar catálogos configurables sin fallbacks obsoletos', async () => {
@@ -73,6 +74,39 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(mockRepo.obtenerPorId).toHaveBeenCalledWith('req-1');
     expect(mockRepo.actualizar).toHaveBeenCalledWith('req-1', { nombre: 'Nombre editado manualmente' });
     expect(actualizado.nombre).toBe('Nombre editado manualmente');
+  });
+
+  test('RequirementChangeService invalida diagramas y devuelve el proyecto a análisis', async () => {
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockResolvedValue([
+        { id: 'd1', tipo: 'casos_de_uso', aprobado: true, estado: 'aprobado' },
+        { id: 'aux', tipo: 'secuencia', aprobado: true, estado: 'aprobado' }
+      ]),
+      actualizar: jest.fn().mockResolvedValue(true)
+    };
+    const proyectoRepository = { actualizarEstadoFase: jest.fn().mockResolvedValue(true) };
+    const disenoRepository = { invalidarDerivados: jest.fn().mockResolvedValue(true) };
+    const service = new RequirementChangeService({ proyectoRepository, diagramaRepository, disenoRepository });
+
+    expect(service.changed(
+      [{ identificador: 'RF-01', tipo: 'RF', nombre: 'Consultar', actores: ['Cliente'] }],
+      [{ tipo: 'RF', actores: ['Cliente'], nombre: 'Consultar', identificador: 'RF-01' }]
+    )).toBe(false);
+    expect(service.changed(
+      [{ identificador: 'RF-01', tipo: 'RF', nombre: 'Consultar' }],
+      [{ identificador: 'RF-01', tipo: 'RF', nombre: 'Reservar' }]
+    )).toBe(true);
+
+    await service.invalidate('p1');
+
+    expect(diagramaRepository.actualizar).toHaveBeenCalledTimes(1);
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
+      aprobado: false,
+      estado: 'desactualizado',
+      huella_entrada: null
+    }));
+    expect(disenoRepository.invalidarDerivados).toHaveBeenCalledWith('p1');
+    expect(proyectoRepository.actualizarEstadoFase).toHaveBeenCalledWith('p1', 'analisis_pendiente');
   });
 
   test('ActualizarDiagramaManual debe validar sintaxis PlantUML antes de persistir', async () => {
