@@ -28,7 +28,12 @@ class AprobarFase {
         throw new Error('La fase de análisis debe estar aprobada antes de aprobar los diagramas.');
       }
       const diagramas = await this.diagramaRepository.listarPorProyecto(proyectoId);
-      const tiposPresentes = new Set((diagramas || []).map(d => String(d.tipo || '').toLowerCase()));
+      const tiposPresentes = new Set((diagramas || []).map(d => {
+        const t = String(d.tipo || '').toLowerCase();
+        if (t === 'arquitectura_software') return 'arquitectura';
+        if (t === 'clases_dominio') return 'clases';
+        return t;
+      }));
       const requeridos = ['casos_de_uso', 'arquitectura', 'clases', 'arbol_navegacion'];
       const faltantes = requeridos.filter(tipo => !tiposPresentes.has(tipo));
 

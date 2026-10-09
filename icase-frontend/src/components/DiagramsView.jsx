@@ -3,6 +3,7 @@ import {
   GitBranch,
   Network,
   Box,
+  Layers,
   Compass,
   Check,
   Send,
@@ -37,6 +38,7 @@ export default function DiagramsView({
     { key: "useCase", label: "Casos de Uso", icon: GitBranch },
     { key: "architecture", label: "Arquitectura", icon: Network },
     { key: "classDiagram", label: "Clases de Dominio", icon: Box },
+    { key: "designClasses", label: "Clases de Diseño", icon: Layers },
     { key: "navigationTree", label: "Árbol de Navegación", icon: Compass },
     { key: "mockups", label: "Mockups", icon: Layout }
   ];
@@ -67,6 +69,11 @@ export default function DiagramsView({
         return {
           badge: "Clases de Dominio",
           placeholder: "Pide un ajuste a Clases con IA (ej: 'añade entidad Factura con atributos monto y fecha')..."
+        };
+      case "designClasses":
+        return {
+          badge: "Clases de Diseño",
+          placeholder: "Pide un ajuste a Clases de Diseño con IA (ej: 'añade controlador AuthController y DTO LoginDTO')..."
         };
       case "navigationTree":
         return {

@@ -22,8 +22,9 @@ export default function App() {
     const diags = p.diagramas || [];
     const safePName = (p.nombre || "Sistema de Software").replace(/["“”]/g, "'");
     const cuItem = diags.find((d) => d.tipo === "casos_de_uso" || d.tipo === "casos_uso");
-    const archItem = diags.find((d) => d.tipo === "arquitectura");
-    const classItem = diags.find((d) => d.tipo === "clases" || d.tipo === "clases_dominio" || d.tipo === "entidad_relacion");
+    const archItem = diags.find((d) => d.tipo === "arquitectura" || d.tipo === "arquitectura_software");
+    const classItem = diags.find((d) => (d.tipo === "clases" || d.tipo === "clases_dominio" || d.tipo === "entidad_relacion") && d.tipo !== "clases_diseno");
+    const designClassItem = diags.find((d) => d.tipo === "clases_diseno");
     const navItem = diags.find((d) => ["arbol_navegacion", "navegacion"].includes(d.tipo));
 
     // Extraer actores dinámicos de los RF reales
@@ -120,6 +121,22 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
       `** Panel Principal\n*** Tablero Principal\n*** Alertas y Notificaciones\n` +
       `** Módulo Principal\n*** Listado de Registros\n*** Detalle de Registro\n*** Formulario de Nuevo Registro\n` +
       `** Administración\n*** Gestión de Usuarios\n*** Gestión de Roles y Permisos\n*** Configuración del Sistema\n@endmindmap`;
+
+    const defDesignClassPlant =
+      `@startuml\nskinparam classAttributeIconSize 0\nskinparam linetype ortho\n` +
+      `package "Módulo Autenticación y Usuarios" {\n` +
+      `  class UsuarioController <<Controller>> {\n    +registrar(dto: CrearUsuarioDTO): UsuarioResponseDTO\n  }\n` +
+      `  class RegistrarUsuarioUseCase <<UseCase>> {\n    +ejecutar(dto: CrearUsuarioDTO): UsuarioResponseDTO\n  }\n` +
+      `  interface IUsuarioRepository <<Repository>> {\n    +guardar(usuario: Usuario): Promise<void>\n  }\n` +
+      `  class MongoUsuarioRepository <<Repository>> {\n    +guardar(usuario: Usuario): Promise<void>\n  }\n` +
+      `  class Usuario <<Entity>> {\n    -id: String\n  }\n` +
+      `  class CrearUsuarioDTO <<DTO>> {\n    +email: String\n  }\n` +
+      `}\n` +
+      `UsuarioController ..> RegistrarUsuarioUseCase : invoca\n` +
+      `RegistrarUsuarioUseCase ..> IUsuarioRepository : requiere\n` +
+      `MongoUsuarioRepository --|> IUsuarioRepository : implementa\n` +
+      `note top of UsuarioController : Trazabilidad Requisito: RF-01\n` +
+      `@enduml`;
 
     // Deduplicar fuentes
     const seenNames = new Set();
@@ -242,6 +259,15 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
           plantumlCode: sanitizePlantUML(classItem?.codigo_plantuml) || defClassPlant,
           description: classItem?.descripcion || "Entidades del modelo de datos con tipado, llaves y cardinalidad.",
           descripcion_jerarquica: classItem?.descripcion_jerarquica || []
+        },
+        designClasses: {
+          id: designClassItem?.id || designClassItem?._id || "diag-design-class",
+          title: designClassItem?.titulo || "Diagrama de Clases de Diseño",
+          type: "clases_diseno",
+          code: sanitizePlantUML(designClassItem?.codigo_plantuml) || defDesignClassPlant,
+          plantumlCode: sanitizePlantUML(designClassItem?.codigo_plantuml) || defDesignClassPlant,
+          description: designClassItem?.descripcion || "Estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades y DTOs.",
+          descripcion_jerarquica: designClassItem?.descripcion_jerarquica || []
         },
         navigationTree: {
           id: navItem?.id || navItem?._id || "diag-nav",

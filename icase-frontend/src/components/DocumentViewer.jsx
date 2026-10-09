@@ -403,10 +403,26 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             {renderDiagramExplanation(project.diagrams?.classDiagram, "Diagrama de Clases de Dominio")}
           </div>
 
-          {/* 8.3 Árbol de Navegación */}
+          {/* 8.3 Clases de Diseño */}
           <div className="space-y-3 pt-2">
             <h3 className="text-sm font-bold text-slate-800">
-              8.3 Árbol de Navegación
+              8.3 Diagrama de Clases de Diseño
+            </h3>
+            <p className="text-sm text-slate-700 leading-relaxed">
+              {project.diagrams?.designClasses?.description || "Define la estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades de dominio y DTOs."}
+            </p>
+            <StaticDiagram
+              code={project.diagrams?.designClasses?.code}
+              plantumlCode={project.diagrams?.designClasses?.plantumlCode}
+              caption="Figura 8.3: Diagrama de Clases de Diseño en Capas"
+            />
+            {renderDiagramExplanation(project.diagrams?.designClasses, "Diagrama de Clases de Diseño")}
+          </div>
+
+          {/* 8.4 Árbol de Navegación */}
+          <div className="space-y-3 pt-2">
+            <h3 className="text-sm font-bold text-slate-800">
+              8.4 Árbol de Navegación
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.navigationTree?.description || "Mapa de pantallas y rutas de navegación de la solución, desde el portal de acceso y el panel principal hasta las vistas de cada módulo."}
@@ -414,15 +430,15 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             <StaticDiagram
               code={project.diagrams?.navigationTree?.code}
               plantumlCode={project.diagrams?.navigationTree?.plantumlCode}
-              caption="Figura 8.3: Árbol de Navegación del Sistema"
+              caption="Figura 8.4: Árbol de Navegación del Sistema"
             />
             {renderDiagramExplanation(project.diagrams?.navigationTree, "Árbol de Navegación")}
           </div>
 
-          {/* 8.4 Arquitectura del Sistema */}
+          {/* 8.5 Arquitectura del Sistema */}
           <div className="space-y-3 pt-2">
             <h3 className="text-sm font-bold text-slate-800">
-              8.4 Diagrama de Arquitectura
+              8.5 Diagrama de Arquitectura
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.architecture?.description || "Modelo de arquitectura técnica integral en contenedores adaptado a las necesidades operativas del sistema."}

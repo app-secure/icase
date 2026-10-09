@@ -34,6 +34,13 @@ class PlantUMLValidatorService {
     }
 
     const tipoNormalizado = String(tipo).toLowerCase();
+
+    if (tipoNormalizado === 'clases_diseno' || tipoNormalizado.includes('diseno')) {
+      const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
+      const disenoValidator = new ClasesDisenoValidatorService();
+      return disenoValidator.validar(codigo, tipo);
+    }
+
     if (tipoNormalizado.includes('caso')) {
       const actores = (trimmed.match(/^\s*actor\s+/gim) || []).length;
       const casos = (trimmed.match(/^\s*usecase\s+/gim) || []).length;
