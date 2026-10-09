@@ -77,7 +77,10 @@ class ClasesDisenoValidatorService {
 
     // 7. División por módulos (packages) si el diagrama es grande (>6 clases)
     const cantidadClases = (trimmed.match(/^\s*(?:abstract\s+)?(?:class|interface)\s+/gim) || []).length;
-    const tienePackages = /^\s*package\s+"?[^"{\n]+"?(?:\s+as\s+[A-Za-z_][\w.]*)?\s*\{/im.test(trimmed);
+    const tienePackages = trimmed
+      .split(/\r?\n/)
+      .map((linea) => linea.trim().toLowerCase())
+      .some((linea) => linea.startsWith('package ') && linea.includes('{'));
     if (cantidadClases > 6 && !tienePackages) {
       return { valido: false, error: 'El diagrama de clases de diseño resulta demasiado grande y debe dividirse por módulos utilizando bloques package.' };
     }
