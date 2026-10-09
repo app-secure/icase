@@ -56,6 +56,52 @@ class PlantUMLSynthesizer {
         ? existing.trazabilidad_rnf
         : (existing?.trazabilidad_rnf ? [existing.trazabilidad_rnf] : []);
 
+      // Si es casos de uso y tenemos requerimientos, asegurar que todos los actores de los RFs estén presentes
+      if (cfg.tipo === DiagramTypes.CASOS_DE_USO && esValido && requerimientos.length > 0) {
+        const normalizarActor = (value) => String(value || '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, ' ')
+          .trim();
+
+        const rawActores = requerimientos
+          .filter((requisito) => String(requisito.tipo || '').toUpperCase() === 'RF')
+          .flatMap((requisito) => {
+            const arr = Array.isArray(requisito.actores) ? requisito.actores : [requisito.actores];
+            return arr.flatMap(a => String(a || '').split(/[,;|]/)).map(s => s.trim()).filter(Boolean);
+          });
+
+        const actoresRequeridos = [...new Set(rawActores.map(normalizarActor).filter(Boolean))];
+        const actoresDiagramados = [...code.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s]+))(?:\s+as\s+([\w.]+))?/gim)]
+          .map((match) => ({ nombre: normalizarActor(match[1] || match[2]), alias: match[3] || match[2] }))
+          .filter((actor) => actor.nombre);
+
+        const faltantes = actoresRequeridos.filter((actor) => !actoresDiagramados.some(({ nombre }) => nombre === actor || nombre.includes(actor) || actor.includes(nombre)));
+
+        if (faltantes.length > 0) {
+          console.warn(`[PlantUMLSynthesizer] Asegurando actores requeridos en Casos de Uso: ${faltantes.join(', ')}`);
+          const ucMatches = [...code.matchAll(/(?:usecase\s+"[^"]+"\s+as\s+([\w.]+)|usecase\s+([\w.]+)\s+as|\(([^\)]+)\)\s+as\s+([\w.]+))/gim)]
+            .map(m => m[1] || m[2] || m[4])
+            .filter(Boolean);
+          const targetUc = ucMatches[0] || 'UC_Principal';
+
+          let inyeccion = '\n\' === ACTORES DE REQUISITOS ASEGURADOS POR TRAZABILIDAD ===\n';
+          faltantes.forEach((nomNorm, idx) => {
+            const originalNombre = rawActores.find(r => normalizarActor(r) === nomNorm) || nomNorm;
+            const safeAlias = `ActorReq_${idx}_${nomNorm.replace(/\s+/g, '_').slice(0, 15)}`;
+            inyeccion += `actor "${originalNombre}" as ${safeAlias}\n`;
+            inyeccion += `${safeAlias} --> ${targetUc} : <<interactúa>>\n`;
+          });
+
+          if (code.includes('@enduml')) {
+            code = code.replace('@enduml', `${inyeccion}\n@enduml`);
+          } else {
+            code += `${inyeccion}\n@enduml`;
+          }
+        }
+      }
+
       // Si es arquitectura de software y no vino o no es válido, sintetizar con requerimientos
       if (cfg.tipo === DiagramTypes.ARQUITECTURA_SOFTWARE && (!esValido || requerimientos.length > 0)) {
         if (!esValido) {
