@@ -13,6 +13,8 @@ import {
   fetchFuentesApi,
   processWithAiApi,
   approvePhaseApi,
+  approveDiagramApi,
+  rejectDiagramApi,
   updateDiagramApi,
   fetchAiModelsApi,
   fetchMockupsApi,
@@ -20,6 +22,16 @@ import {
   syncProjectRequirementsApi
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
+import { DIAGRAM_TYPES } from "../constants/diagramTypes";
+
+const DIAGRAM_KEY_BY_TYPE = Object.freeze({
+  [DIAGRAM_TYPES.USE_CASES]: "useCase",
+  [DIAGRAM_TYPES.DOMAIN_CLASSES]: "classDiagram",
+  [DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE]: "architecture",
+  [DIAGRAM_TYPES.SYSTEM_ARCHITECTURE]: "systemArchitecture",
+  [DIAGRAM_TYPES.DESIGN_CLASSES]: "designClassDiagram",
+  [DIAGRAM_TYPES.NAVIGATION_TREE]: "navigationTree"
+});
 
 const extractInsumoBruto = async (sources) => {
   let insumoBruto = "";
@@ -234,10 +246,16 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       nonFunctional: nonFuncReqs
     };
 
-    const ucDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("caso"));
-    const archDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arqui"));
-    const classDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("clase") || (d.tipo || "").toLowerCase().includes("entidad") || (d.tipo || "").toLowerCase().includes("dominio"));
-    const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav"));
+    const diagramList = aiResult.diagramas || [];
+    const latestMatching = (predicate) => diagramList
+      .filter((diagram) => predicate(String(diagram.tipo || "").toLowerCase()))
+      .sort((a, b) => Number(b.version || 1) - Number(a.version || 1) || new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
+    const ucDiag = latestMatching((type) => type.includes("caso"));
+    const archDiag = latestMatching((type) => (type === "arquitectura" || type.includes("software")) && !type.includes("sistema"));
+    const systemArchDiag = latestMatching((type) => type.includes("arquitectura_sistema"));
+    const classDiag = latestMatching((type) => (type === "clases" || type.includes("clases_dominio") || type.includes("entidad")) && !type.includes("diseno"));
+    const designClassDiag = latestMatching((type) => type.includes("clases_diseno"));
+    const navDiag = latestMatching((type) => type.includes("arbol") || type.includes("nav"));
 
     const extractPuml = (diagObj, typeKey) => {
       const code = diagObj?.codigo_plantuml || diagObj?.codigo_puml || diagObj?.plantumlCode;
@@ -250,52 +268,44 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       return sanitizePlantUML(generateDefaultPuml(typeKey, fallbackName));
     };
 
-    diags = {
-      useCase: {
-        id: "diag-uc",
-        title: (ucDiag?.titulo || "Diagrama de Casos de Uso").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "casos_uso",
-        code: extractPuml(ucDiag, "useCase"),
-        plantumlCode: extractPuml(ucDiag, "useCase"),
-        description: ucDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(ucDiag?.descripcion_jerarquica) && ucDiag.descripcion_jerarquica.length > 0
-          ? ucDiag.descripcion_jerarquica
-          : []
-      },
-      architecture: {
-        id: "diag-arch",
-        title: (archDiag?.titulo || "Diagrama de Arquitectura (C4 Container)").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "arquitectura",
-        code: extractPuml(archDiag, "architecture"),
-        plantumlCode: extractPuml(archDiag, "architecture"),
-        description: archDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(archDiag?.descripcion_jerarquica) && archDiag.descripcion_jerarquica.length > 0
-          ? archDiag.descripcion_jerarquica
-          : []
-      },
-      classDiagram: {
-        id: "diag-class",
-        title: (classDiag?.titulo || "Diagrama de Clases del Dominio").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "clases",
-        code: extractPuml(classDiag, "classDiagram"),
-        plantumlCode: extractPuml(classDiag, "classDiagram"),
-        description: classDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(classDiag?.descripcion_jerarquica) && classDiag.descripcion_jerarquica.length > 0
-          ? classDiag.descripcion_jerarquica
-          : []
-      },
-      navigationTree: {
-        id: "diag-nav",
-        title: (navDiag?.titulo || "Árbol de Navegación del Sistema").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "navegacion",
-        code: extractPuml(navDiag, "navigationTree"),
-        plantumlCode: extractPuml(navDiag, "navigationTree"),
-        description: navDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(navDiag?.descripcion_jerarquica) && navDiag.descripcion_jerarquica.length > 0
-          ? navDiag.descripcion_jerarquica
-          : []
-      }
+    const mapDiagram = (diag, key, fallbackTitle, type) => {
+      if (!diag && !existingDiagrams?.[key]) return null;
+      const existing = existingDiagrams?.[key] || {};
+      const source = diag || existing;
+      const code = extractPuml(diag, key);
+      return {
+        ...existing,
+        id: source.id || source._id || existing.id,
+        title: (source.titulo || source.title || fallbackTitle).replace(/\s*\([^)]*\)/g, '').trim(),
+        type,
+        code,
+        plantumlCode: code,
+        description: source.descripcion || source.description || "",
+        descripcion_jerarquica: Array.isArray(source.descripcion_jerarquica) ? source.descripcion_jerarquica : [],
+        approved: Boolean(source.aprobado ?? source.approved),
+        status: source.estado || source.status || (source.aprobado ? "aprobado" : "pendiente_revision"),
+        stale: Boolean(source.desactualizado ?? source.stale),
+        version: Number(source.version || existing.version || 1),
+        staleReasons: source.motivos_desactualizacion || source.staleReasons || [],
+        originVersions: source.versiones_origen || source.originVersions || {},
+        approvedAt: source.aprobado_en || source.approvedAt || null,
+        approvedBy: source.aprobado_por || source.approvedBy || null,
+        qualityStatus: source.estado_calidad || source.qualityStatus || null,
+        validationErrors: source.errores_validacion || source.validationErrors || [],
+        validationWarnings: source.advertencias_validacion || source.validationWarnings || [],
+        validationMetrics: source.metricas_validacion || source.validationMetrics || {},
+        reviewHistory: source.revisiones || source.reviewHistory || []
+      };
     };
+
+    diags = Object.fromEntries(Object.entries({
+      useCase: mapDiagram(ucDiag, "useCase", "Diagrama de Casos de Uso", "casos_de_uso"),
+      classDiagram: mapDiagram(classDiag, "classDiagram", "Diagrama de Clases del Dominio", "clases_dominio"),
+      architecture: mapDiagram(archDiag, "architecture", "Arquitectura de Software", "arquitectura_software"),
+      systemArchitecture: mapDiagram(systemArchDiag, "systemArchitecture", "Arquitectura del Sistema", "arquitectura_sistema"),
+      designClassDiagram: mapDiagram(designClassDiag, "designClassDiagram", "Diagrama de Clases de Diseño", "clases_diseno"),
+      navigationTree: mapDiagram(navDiag, "navigationTree", "Árbol de Navegación del Sistema", "arbol_navegacion")
+    }).filter(([, diagram]) => Boolean(diagram)));
   }
 
   return { reqs, diags };
@@ -816,16 +826,17 @@ export default function ProjectWorkspace({
       if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de generar los diagramas.");
       await approvePhaseApi(backendId, "analisis");
       approvalCompleted = true;
-      const aiResult = await processWithAiApi(backendId, '', '', selectedAiProvider || 'auto', null, 'diagramas');
+      const aiResult = await processWithAiApi(backendId, '', '', selectedAiProvider || 'auto', null, 'diagramas', DIAGRAM_TYPES.USE_CASES);
       const { diags } = transformAiOutput(aiResult, project.name, {});
-      if (!diags?.useCase || !diags?.architecture || !diags?.classDiagram || !diags?.navigationTree) {
-        throw new Error("La generación no devolvió todos los diagramas requeridos.");
+      if (!diags?.useCase) {
+        throw new Error("La generación no devolvió el diagrama de casos de uso.");
       }
       onUpdateProject({
         ...project,
         isAnalysisApproved: true,
         currentPhase: 2,
-        diagrams: diags
+        diagrams: diags,
+        diagramFlow: aiResult.flujoDiagramas || null
       });
       return { success: true };
     } catch (e) {
@@ -838,23 +849,96 @@ export default function ProjectWorkspace({
     }
   };
 
-  const handleApproveDiagrams = async () => {
+  const handleGenerateDiagram = async (diagramType) => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
-    if (backendId) {
-      try {
-        await approvePhaseApi(backendId, "diagramas");
-      } catch (e) {
-        console.warn("[Workspace] Error aprobando diseño en backend:", e);
-        return { success: false, error: e.message };
-      }
+    if (!backendId) return { success: false, error: "Proyecto no persistido" };
+    setIsGeneratingDiagrams(true);
+    try {
+      const aiResult = await processWithAiApi(
+        backendId,
+        '',
+        '',
+        selectedAiProvider || 'auto',
+        null,
+        'diagramas',
+        diagramType
+      );
+      const { diags } = transformAiOutput(aiResult, project.name, project.diagrams || {});
+      const key = DIAGRAM_KEY_BY_TYPE[diagramType];
+      if (!key || !diags?.[key]) throw new Error(`No se recibió el diagrama ${diagramType}.`);
+      onUpdateProject({
+        ...project,
+        diagrams: diags,
+        diagramFlow: aiResult.flujoDiagramas || project.diagramFlow,
+        currentPhase: 2
+      });
+      return { success: true, flow: aiResult.flujoDiagramas, diagramKey: key };
+    } catch (error) {
+      return { success: false, error: error.message };
+    } finally {
+      setIsGeneratingDiagrams(false);
     }
-    setIsSourcesCollapsed(true);
-    onUpdateProject({
-      ...project,
-      isDiagramsApproved: true,
-      currentPhase: 2
-    });
-    return { success: true };
+  };
+
+  const handleApproveDiagram = async (diagramType) => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!backendId) return { success: false, error: "Proyecto no persistido" };
+    try {
+      const result = await approveDiagramApi(backendId, diagramType);
+      if (result.flujoDiagramas?.todos_aprobados) setIsSourcesCollapsed(true);
+      const key = DIAGRAM_KEY_BY_TYPE[diagramType];
+      const updatedDiagrams = {
+        ...(project.diagrams || {}),
+        ...(key && project.diagrams?.[key] ? {
+          [key]: {
+            ...project.diagrams[key],
+            approved: true,
+            status: "aprobado",
+            stale: false
+          }
+        } : {})
+      };
+      onUpdateProject({
+        ...project,
+        diagrams: updatedDiagrams,
+        diagramFlow: result.flujoDiagramas,
+        isDiagramsApproved: Boolean(result.flujoDiagramas?.todos_aprobados),
+        currentPhase: 2
+      });
+      return { success: true, flow: result.flujoDiagramas };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
+  const handleRejectDiagram = async (diagramType, observations) => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!backendId) return { success: false, error: "Proyecto no persistido" };
+    try {
+      const result = await rejectDiagramApi(backendId, diagramType, observations);
+      const key = DIAGRAM_KEY_BY_TYPE[diagramType];
+      const updatedDiagrams = {
+        ...(project.diagrams || {}),
+        ...(key && project.diagrams?.[key] ? {
+          [key]: {
+            ...project.diagrams[key],
+            approved: false,
+            status: "rechazado",
+            reviewHistory: result.diagrama?.revisiones || project.diagrams[key].reviewHistory || []
+          }
+        } : {})
+      };
+      onUpdateProject({
+        ...project,
+        diagrams: updatedDiagrams,
+        diagramFlow: result.flujoDiagramas,
+        isDiagramsApproved: false,
+        currentPhase: 2
+      });
+      return { success: true, flow: result.flujoDiagramas };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   };
 
   const handleUpdateSource = async (sourceId, changes) => {
@@ -972,10 +1056,12 @@ export default function ProjectWorkspace({
     let insumoAdicional = "";
     if (phase === "diagrams") {
       const diagTitleMap = {
-        useCase: "casos_de_uso",
-        architecture: "arquitectura",
-        classDiagram: "clases",
-        navigationTree: "arbol_navegacion"
+        useCase: DIAGRAM_TYPES.USE_CASES,
+        architecture: DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE,
+        systemArchitecture: DIAGRAM_TYPES.SYSTEM_ARCHITECTURE,
+        classDiagram: DIAGRAM_TYPES.DOMAIN_CLASSES,
+        designClassDiagram: DIAGRAM_TYPES.DESIGN_CLASSES,
+        navigationTree: DIAGRAM_TYPES.NAVIGATION_TREE
       };
       const targetType = diagTitleMap[diagKey] || diagKey || "diagramas";
       const curDiag = diagKey && project.diagrams?.[diagKey];
@@ -991,7 +1077,7 @@ export default function ProjectWorkspace({
     if (backendId) {
       try {
         const objetivo = phase === "diagrams" ? "diagramas" : "requisitos";
-        const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo);
+        const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo, phase === "diagrams" ? targetType : null);
         if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
           const { reqs, diags } = transformAiOutput(aiResult, project.name, project.diagrams);
 
@@ -1009,6 +1095,7 @@ export default function ProjectWorkspace({
               nonFunctional: cleanedRNF
             },
             diagrams: phase === "diagrams" ? (diags || project.diagrams) : {},
+            diagramFlow: phase === "diagrams" ? (aiResult.flujoDiagramas || project.diagramFlow) : null,
             ...(phase === "diagrams" ? {} : {
               isAnalysisApproved: false,
               isDiagramsApproved: false,
@@ -1199,9 +1286,13 @@ export default function ProjectWorkspace({
                 });
               }
             }}
-            onApproveDiagrams={handleApproveDiagrams}
+            onGenerateDiagram={handleGenerateDiagram}
+            onApproveDiagram={handleApproveDiagram}
+            onRejectDiagram={handleRejectDiagram}
             onApproveMockups={handleApproveMockups}
             isDiagramsApproved={Boolean(project.isDiagramsApproved)}
+            diagramFlow={project.diagramFlow}
+            isGeneratingDiagram={isGeneratingDiagrams}
             onBackToAnalysis={() => {
               setIsSourcesCollapsed(false);
               onUpdateProject({ ...project, currentPhase: 1 });

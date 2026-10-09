@@ -46,6 +46,64 @@ const DiagramaSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  estado: {
+    type: String,
+    enum: ['bloqueado', 'disponible', 'generando', 'pendiente_revision', 'aprobado', 'desactualizado', 'rechazado', 'error'],
+    default: 'pendiente_revision'
+  },
+  version: {
+    type: Number,
+    min: 1,
+    default: 1
+  },
+  desactualizado: {
+    type: Boolean,
+    default: false
+  },
+  motivos_desactualizacion: {
+    type: [String],
+    default: []
+  },
+  aprobado_en: {
+    type: Date,
+    default: null
+  },
+  aprobado_por: {
+    type: String,
+    default: null,
+    trim: true
+  },
+  estado_calidad: {
+    type: String,
+    enum: ['valido', 'advertencia', 'invalido'],
+    default: 'advertencia'
+  },
+  errores_validacion: {
+    type: [String],
+    default: []
+  },
+  advertencias_validacion: {
+    type: [String],
+    default: []
+  },
+  metricas_validacion: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+  validado_en: {
+    type: Date,
+    default: null
+  },
+  revisiones: {
+    type: [{
+      decision: { type: String, enum: ['aprobado', 'rechazado'], required: true },
+      observaciones: { type: String, default: '' },
+      usuario: { type: String, default: null },
+      version: { type: Number, required: true },
+      fecha: { type: Date, default: Date.now }
+    }],
+    default: []
+  },
   trazabilidad_rnf: {
     type: [String],
     default: []

@@ -21,10 +21,15 @@ export default function App() {
     const reqs = p.requerimientos || [];
     const diags = p.diagramas || [];
     const safePName = (p.nombre || "Sistema de Software").replace(/["“”]/g, "'");
-    const cuItem = diags.find((d) => d.tipo === "casos_de_uso" || d.tipo === "casos_uso");
-    const archItem = diags.find((d) => d.tipo === "arquitectura");
-    const classItem = diags.find((d) => d.tipo === "clases" || d.tipo === "clases_dominio" || d.tipo === "entidad_relacion");
-    const navItem = diags.find((d) => ["arbol_navegacion", "navegacion"].includes(d.tipo));
+    const latestMatching = (predicate) => diags
+      .filter((diagram) => predicate(String(diagram.tipo || "").toLowerCase()))
+      .sort((a, b) => Number(b.version || 1) - Number(a.version || 1) || new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0];
+    const cuItem = latestMatching((type) => type === "casos_de_uso" || type === "casos_uso");
+    const archItem = latestMatching((type) => (type === "arquitectura" || type === "arquitectura_software") && !type.includes("sistema"));
+    const systemArchItem = latestMatching((type) => type === "arquitectura_sistema");
+    const classItem = latestMatching((type) => ["clases", "clases_dominio", "entidad_relacion"].includes(type));
+    const designClassItem = latestMatching((type) => type === "clases_diseno");
+    const navItem = latestMatching((type) => ["arbol_navegacion", "navegacion"].includes(type));
 
     // Extraer actores dinámicos de los RF reales
     const rfList = reqs.filter((r) => (r.tipo || "").toUpperCase() === "RF");
@@ -162,6 +167,59 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
       ? (cleanRawName.charAt(0).toUpperCase() + cleanRawName.slice(1))
       : (p.nombre || "Proyecto de Software");
 
+    const mapStoredDiagram = (item, { title, type, fallbackCode, description }) => {
+      if (!item) return null;
+      return {
+        id: item.id || item._id,
+        title: item.titulo || title,
+        type,
+        code: item.codigo_mermaid && !item.codigo_mermaid.includes("@start") ? item.codigo_mermaid : fallbackCode,
+        plantumlCode: sanitizePlantUML(item.codigo_plantuml) || fallbackCode,
+        description: item.descripcion || description,
+        descripcion_jerarquica: item.descripcion_jerarquica || [],
+        approved: Boolean(item.aprobado),
+        status: item.estado || (item.aprobado ? "aprobado" : "pendiente_revision"),
+        stale: Boolean(item.desactualizado),
+        version: Number(item.version || 1),
+        staleReasons: item.motivos_desactualizacion || [],
+        originVersions: item.versiones_origen || {},
+        approvedAt: item.aprobado_en || null,
+        approvedBy: item.aprobado_por || null,
+        qualityStatus: item.estado_calidad || null,
+        validationErrors: item.errores_validacion || [],
+        validationWarnings: item.advertencias_validacion || [],
+        validationMetrics: item.metricas_validacion || {},
+        reviewHistory: item.revisiones || []
+      };
+    };
+
+    const mappedDiagrams = Object.fromEntries(Object.entries({
+      useCase: mapStoredDiagram(cuItem, {
+        title: "Diagrama de Casos de Uso", type: "casos_de_uso", fallbackCode: defUcPlant,
+        description: "Actores y operaciones principales del sistema."
+      }),
+      classDiagram: mapStoredDiagram(classItem, {
+        title: "Diagrama de Clases del Dominio", type: "clases_dominio", fallbackCode: defClassPlant,
+        description: "Entidades y relaciones propias del negocio."
+      }),
+      architecture: mapStoredDiagram(archItem, {
+        title: "Arquitectura de Software", type: "arquitectura_software", fallbackCode: defArchPlant,
+        description: "Aplicaciones, contenedores y comunicaciones del software."
+      }),
+      systemArchitecture: mapStoredDiagram(systemArchItem, {
+        title: "Arquitectura del Sistema", type: "arquitectura_sistema", fallbackCode: "@startuml\nnode Sistema\n@enduml",
+        description: "Infraestructura, despliegue y mecanismos asociados a los RNF."
+      }),
+      designClassDiagram: mapStoredDiagram(designClassItem, {
+        title: "Diagrama de Clases de Diseño", type: "clases_diseno", fallbackCode: defClassPlant,
+        description: "Clases técnicas y dependencias entre capas."
+      }),
+      navigationTree: mapStoredDiagram(navItem, {
+        title: "Árbol de Navegación del Sistema", type: "arbol_navegacion", fallbackCode: defNavPlant,
+        description: "Mapa jerárquico de pantallas y rutas de navegación."
+      })
+    }).filter(([, diagram]) => Boolean(diagram)));
+
     return {
       id: p.id || p._id,
       backendId: p.id || p._id,
@@ -215,44 +273,8 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
             approved: r.aprobado
           }))
       },
-      diagrams: {
-        useCase: {
-          id: cuItem?.id || cuItem?._id || "diag-uc",
-          title: cuItem?.titulo || "Diagrama de Casos de Uso (UML Estándar)",
-          type: "casos_uso",
-          code: cuItem?.codigo_mermaid && !cuItem.codigo_mermaid.includes("@start") ? cuItem.codigo_mermaid : "graph LR\n  Op[Operador Principal] --> UC1((Control y Registro))\n  Op --> UC2((Despacho y Coordinación))",
-          plantumlCode: sanitizePlantUML(cuItem?.codigo_plantuml) || defUcPlant,
-          description: cuItem?.descripcion || "Actores con silueta humana, módulo delimitador y casos de uso en elipse.",
-          descripcion_jerarquica: cuItem?.descripcion_jerarquica || []
-        },
-        architecture: {
-          id: archItem?.id || archItem?._id || "diag-arch",
-          title: archItem?.titulo || "Diagrama de Arquitectura (Structurizr C4)",
-          type: "arquitectura",
-          code: archItem?.codigo_mermaid && !archItem.codigo_mermaid.includes("@start") ? archItem.codigo_mermaid : "graph TB\n  Web[SPA React] --> API[Backend Express]\n  API --> DB[(BD Primaria)]",
-          plantumlCode: sanitizePlantUML(archItem?.codigo_plantuml) || defArchPlant,
-          description: archItem?.descripcion || "Modelo de contenedores C4 con arquitectura nodal desacoplada.",
-          descripcion_jerarquica: archItem?.descripcion_jerarquica || []
-        },
-        classDiagram: {
-          id: classItem?.id || classItem?._id || "diag-class",
-          title: classItem?.titulo || "Diagrama de Clases del Dominio",
-          type: "clases",
-          code: classItem?.codigo_mermaid && !classItem.codigo_mermaid.includes("@start") ? classItem.codigo_mermaid : defClassPlant,
-          plantumlCode: sanitizePlantUML(classItem?.codigo_plantuml) || defClassPlant,
-          description: classItem?.descripcion || "Entidades del modelo de datos con tipado, llaves y cardinalidad.",
-          descripcion_jerarquica: classItem?.descripcion_jerarquica || []
-        },
-        navigationTree: {
-          id: navItem?.id || navItem?._id || "diag-nav",
-          title: navItem?.titulo || "Árbol de Navegación del Sistema",
-          type: "navegacion",
-          code: navItem?.codigo_mermaid && !navItem.codigo_mermaid.includes("@start") ? navItem.codigo_mermaid : "graph TD\n  Inicio[\"Inicio de Sesión\"] --> Recuperacion[\"Recuperación de Contraseña\"]\n  Inicio --> Dashboard[\"Panel Principal\"]\n  Dashboard --> ModPrincipal[\"Módulo Principal\"]\n  ModPrincipal --> Listado[\"Listado de Registros\"]\n  ModPrincipal --> Detalle[\"Detalle de Registro\"]\n  Dashboard --> Administracion[\"Administración\"]\n  Administracion --> Usuarios[\"Gestión de Usuarios\"]\n  Administracion --> Configuracion[\"Configuración del Sistema\"]",
-          plantumlCode: sanitizePlantUML(navItem?.codigo_plantuml) || defNavPlant,
-          description: navItem?.descripcion || "Mapa jerárquico de pantallas y rutas de navegación.",
-          descripcion_jerarquica: navItem?.descripcion_jerarquica || []
-        }
-      },
+      diagrams: mappedDiagrams,
+      diagramFlow: p.flujoDiagramas || null,
       mockups: (p.diseno?.mockups || []).map(m => ({
         pantalla_id: m.pantalla_id,
         nombre_pantalla: m.nombre_pantalla,

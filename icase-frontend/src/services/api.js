@@ -248,7 +248,7 @@ export async function fetchAiModelsApi() {
   }
 }
 
-export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo') {
+export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null) {
   try {
     const res = await fetch(`${API_URL}/proyectos/${projectId}/procesar-ia`, {
       method: 'POST',
@@ -258,7 +258,8 @@ export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicio
         insumo_adicional: insumoAdicional,
         provider,
         specificModel,
-        objetivo
+        objetivo,
+        tipo_diagrama: tipoDiagrama
       })
     });
     const data = await res.json().catch(() => ({}));
@@ -284,6 +285,37 @@ export async function approvePhaseApi(projectId, fase) {
     throw new Error(data.error || 'Error al aprobar fase');
   }
   return await res.json();
+}
+
+export async function approveDiagramApi(projectId, diagramType, observaciones = '') {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ fase: 'diagrama', tipo_diagrama: diagramType, decision: 'aprobar', observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al aprobar el diagrama');
+  return data;
+}
+
+export async function rejectDiagramApi(projectId, diagramType, observaciones) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ fase: 'diagrama', tipo_diagrama: diagramType, decision: 'rechazar', observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al solicitar cambios en el diagrama');
+  return data;
+}
+
+export async function fetchDiagramWorkflowApi(projectId) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/flujo-diagramas`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al consultar el flujo de diagramas');
+  return data;
 }
 
 export async function fetchDocumentoConsolidado(projectId) {

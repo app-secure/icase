@@ -1,3 +1,5 @@
+const { DiagramWorkflowService } = require('../../core/services/DiagramWorkflowService');
+
 class ProyectoController {
   constructor({
     crearProyectoUseCase,
@@ -21,6 +23,7 @@ class ProyectoController {
     this.casoDeUsoRepository = casoDeUsoRepository;
     this.disenoRepository = disenoRepository;
     this.markdownCompilerService = markdownCompilerService;
+    this.diagramWorkflowService = new DiagramWorkflowService();
   }
 
   async crear(req, res) {
@@ -55,7 +58,15 @@ class ProyectoController {
             this.requerimientoRepository ? this.requerimientoRepository.listarPorProyecto(p.id) : [],
             this.diagramaRepository ? this.diagramaRepository.listarPorProyecto(p.id) : []
           ]);
-          return { ...p, fuentes, requerimientos, diagramas };
+          const requirementsApproved = ['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']
+            .includes(p.estado_fase);
+          return {
+            ...p,
+            fuentes,
+            requerimientos,
+            diagramas,
+            flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved, diagrams })
+          };
         })
       );
       res.json(proyectosCompletos);
@@ -100,7 +111,12 @@ class ProyectoController {
         diagramas,
         fuentes,
         casosDeUso,
-        diseno
+        diseno,
+        flujoDiagramas: this.diagramWorkflowService.build({
+          requirementsApproved: ['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']
+            .includes(proyecto.estado_fase),
+          diagrams: diagramas
+        })
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -132,14 +148,15 @@ class ProyectoController {
   async procesarConIA(req, res) {
     try {
       const { id } = req.params;
-      const { insumo_adicional, insumo_bruto, provider, modelo, proveedor, specificModel, objetivo } = req.body;
+      const { insumo_adicional, insumo_bruto, provider, modelo, proveedor, specificModel, objetivo, tipo_diagrama } = req.body;
       const resultado = await this.procesarConIAUseCase.ejecutar({
         proyectoId: id,
         insumoBrutoInput: insumo_bruto,
         insumoAdicional: insumo_adicional,
         provider: provider || modelo || proveedor || 'auto',
         specificModel,
-        objetivo: objetivo || 'completo'
+        objetivo: objetivo || 'completo',
+        tipoDiagrama: tipo_diagrama
       });
       res.json(resultado);
     } catch (err) {
@@ -151,15 +168,33 @@ class ProyectoController {
   async aprobarFase(req, res) {
     try {
       const { id } = req.params;
-      const { fase, aprobar_todos } = req.body;
+      const { fase, aprobar_todos, tipo_diagrama, decision, observaciones } = req.body;
       const resultado = await this.aprobarFaseUseCase.ejecutar({
         proyectoId: id,
         fase,
-        aprobarTodosLosElementos: Boolean(aprobar_todos)
+        aprobarTodosLosElementos: Boolean(aprobar_todos),
+        tipoDiagrama: tipo_diagrama,
+        aprobadoPor: req.usuario?.id || req.usuario?.email || null,
+        decision: decision || 'aprobar',
+        observaciones: observaciones || ''
       });
       res.json(resultado);
     } catch (err) {
       res.status(400).json({ error: err.message });
+    }
+  }
+
+  async obtenerFlujoDiagramas(req, res) {
+    try {
+      const { id } = req.params;
+      const proyecto = await this.proyectoRepository.obtenerPorId(id);
+      if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
+      const diagramas = await this.diagramaRepository.listarPorProyecto(id);
+      const requirementsApproved = ['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']
+        .includes(proyecto.estado_fase);
+      res.json(this.diagramWorkflowService.build({ requirementsApproved, diagrams }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   }
 

@@ -25,10 +25,10 @@ class DiagramaController {
 
   async validarSintaxis(req, res) {
     try {
-      const { codigo_plantuml, codigo_mermaid } = req.body;
+      const { codigo_plantuml, codigo_mermaid, tipo } = req.body;
       const codigo = codigo_plantuml || codigo_mermaid;
       const resultado = this.plantumlValidatorService
-        ? this.plantumlValidatorService.validar(codigo)
+        ? this.plantumlValidatorService.validar(codigo, tipo)
         : { valido: true };
       res.json(resultado);
     } catch (err) {

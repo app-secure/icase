@@ -84,13 +84,15 @@ function createApp() {
   });
   const actualizarDiagramaManualUseCase = new ActualizarDiagramaManual({
     diagramaRepository: diagramaRepo,
-    plantumlValidatorService: plantumlValidator
+    plantumlValidatorService: plantumlValidator,
+    proyectoRepository: proyectoRepo
   });
   const aprobarFaseUseCase = new AprobarFase({
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
-    disenoRepository: disenoRepo
+    disenoRepository: disenoRepo,
+    plantumlValidatorService: plantumlValidator
   });
   const generarMockupsUseCase = new GenerarMockups({
     proyectoRepository: proyectoRepo,

@@ -14,6 +14,7 @@ function buildProyectoRoutes(proyectoController) {
   router.delete('/:id', (req, res) => proyectoController.eliminar(req, res));
   router.post('/:id/procesar-ia', (req, res) => proyectoController.procesarConIA(req, res));
   router.post('/:id/aprobar-fase', (req, res) => proyectoController.aprobarFase(req, res));
+  router.get('/:id/flujo-diagramas', (req, res) => proyectoController.obtenerFlujoDiagramas(req, res));
   router.get('/:id/exportar-markdown', (req, res) => proyectoController.exportarMarkdown(req, res));
   router.get('/:id/documento-consolidado', (req, res) => proyectoController.documentoConsolidado(req, res));
 
