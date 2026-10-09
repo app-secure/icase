@@ -548,6 +548,7 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     });
 
     const result = await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas', tipoDiagrama: 'casos_de_uso' });
+    const cachedResult = await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas', tipoDiagrama: 'casos_de_uso' });
 
     expect(aiOrchestratorService.procesar).toHaveBeenCalledWith(expect.objectContaining({
       tipo_diagrama: 'casos_de_uso',
@@ -559,6 +560,8 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(creados).toHaveLength(1);
     expect(creados[0]).toEqual(expect.objectContaining({ tipo: 'casos_de_uso', version: 2, estado: 'pendiente_revision' }));
     expect(result.flujoDiagramas.siguiente).toBe('casos_de_uso');
+    expect(cachedResult.cache_hit).toBe(true);
+    expect(aiOrchestratorService.procesar).toHaveBeenCalledTimes(1);
   });
 
   test('ProcesarConIA rechaza diagramas antes de aprobar los requisitos', async () => {

@@ -54,6 +54,8 @@ class ActualizarDiagramaManual {
             }
           ].slice(-20),
           restaurada_desde_version: datos.restaurada_desde_version || null,
+          huella_entrada: null,
+          retroalimentacion_aplicada: '',
           version: Number(existente.version || 1) + 1
         }
       : datos;

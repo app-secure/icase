@@ -74,6 +74,12 @@ Las versiones generadas por IA y las ediciones manuales forman un único histori
 
 El editor de código utiliza guardado explícito mediante **Guardar versión**. Los cambios locales no crean versiones ni ejecutan solicitudes por cada pulsación de teclado.
 
+## Reutilización y ahorro de llamadas de IA
+
+Cada generación individual calcula `huella_entrada` mediante SHA-256 sobre el tipo, los insumos, requisitos aprobados, versiones de dependencias, proveedor/modelo y retroalimentación aplicable. Si existe una versión válida pendiente o aprobada con la misma huella, el backend la devuelve con `cache_hit: true` sin invocar al proveedor de IA.
+
+Las ediciones manuales y restauraciones eliminan la huella para impedir reutilizaciones incorrectas. Una versión generada después de un rechazo conserva `retroalimentacion_aplicada`, de modo que solicitudes idénticas posteriores reconozcan que esas observaciones ya fueron incorporadas. También se bloquean solicitudes simultáneas para el mismo proyecto y tipo mientras la llamada al proveedor está en curso.
+
 ## Formato de intercambio
 
 Todo generador nuevo debe devolver como mínimo:

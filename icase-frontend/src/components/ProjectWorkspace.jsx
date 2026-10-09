@@ -876,7 +876,12 @@ export default function ProjectWorkspace({
         diagramFlow: aiResult.flujoDiagramas || project.diagramFlow,
         currentPhase: 2
       });
-      return { success: true, flow: aiResult.flujoDiagramas, diagramKey: key };
+      return {
+        success: true,
+        flow: aiResult.flujoDiagramas,
+        diagramKey: key,
+        cacheHit: Boolean(aiResult.cache_hit)
+      };
     } catch (error) {
       return { success: false, error: error.message };
     } finally {

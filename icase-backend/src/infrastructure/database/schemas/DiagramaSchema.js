@@ -120,6 +120,15 @@ const DiagramaSchema = new mongoose.Schema({
     type: Number,
     default: null
   },
+  huella_entrada: {
+    type: String,
+    default: null,
+    index: true
+  },
+  retroalimentacion_aplicada: {
+    type: String,
+    default: ''
+  },
   trazabilidad_rnf: {
     type: [String],
     default: []

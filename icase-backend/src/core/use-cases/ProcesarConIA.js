@@ -7,6 +7,19 @@ const {
   isValidDiagramType
 } = require('../constants/DiagramTypes');
 const { DiagramWorkflowService, DIAGRAM_STATES } = require('../services/DiagramWorkflowService');
+const crypto = require('crypto');
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  }
+  return value;
+}
+
+function fingerprint(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
+}
 
 class ProcesarConIA {
   constructor({
@@ -28,6 +41,7 @@ class ProcesarConIA {
     this.plantumlValidatorService = plantumlValidatorService;
     this.aiOrchestratorService = aiOrchestratorService;
     this.diagramWorkflowService = new DiagramWorkflowService();
+    this.generacionesEnCurso = new Set();
   }
 
   async obtenerModelosDisponibles() {
@@ -128,13 +142,60 @@ class ProcesarConIA {
     const ultimaRevisionRechazada = [...(diagramaObjetivoActual?.revisiones || [])]
       .reverse()
       .find((revision) => revision.decision === 'rechazado');
+    const retroalimentacionAplicable = ultimaRevisionRechazada?.observaciones ||
+      diagramaObjetivoActual?.retroalimentacion_aplicada || '';
     const contextoProyecto = {
       requerimientos_aprobados: requerimientosAprobados,
       diagramas_aprobados: diagramasAprobados,
       requerimientos_actuales: requerimientosPrevios,
       diagramas_actuales: diagramasPrevios,
-      retroalimentacion_diagrama: ultimaRevisionRechazada?.observaciones || ''
+      retroalimentacion_diagrama: retroalimentacionAplicable
     };
+
+    const latestByType = this.diagramWorkflowService.latestByType(diagramasPrevios);
+    const dependencyVersions = Object.fromEntries(
+      (DIAGRAM_DEFINITIONS[tipoDiagramaNormalizado]?.dependencies || []).map((dependency) => [
+        dependency,
+        Number(latestByType.get(dependency)?.version || 1)
+      ])
+    );
+    const inputFingerprint = tipoDiagramaNormalizado ? fingerprint({
+      tipo: tipoDiagramaNormalizado,
+      insumo: insumoBruto,
+      instrucciones: insumoAdicional,
+      provider,
+      specificModel,
+      requisitos: requerimientosAprobados.map((requirement) => ({
+        identificador: requirement.identificador,
+        tipo: requirement.tipo,
+        nombre: requirement.nombre,
+        descripcion: requirement.descripcion,
+        actores: requirement.actores,
+        prioridad: requirement.prioridad,
+        precondiciones: requirement.precondiciones,
+        poscondiciones: requirement.poscondiciones,
+        metrica_medible: requirement.metrica_medible
+      })).sort((a, b) => String(a.identificador).localeCompare(String(b.identificador))),
+      dependencias: dependencyVersions,
+      retroalimentacion: contextoProyecto.retroalimentacion_diagrama
+    }) : null;
+
+    const reusableDiagram = inputFingerprint && diagramaObjetivoActual?.huella_entrada === inputFingerprint &&
+      ['pendiente_revision', 'aprobado'].includes(diagramaObjetivoActual.estado) &&
+      ['valido', 'advertencia'].includes(diagramaObjetivoActual.estado_calidad);
+    if (reusableDiagram) {
+      return {
+        proyecto_id: proyectoId,
+        nombre_proyecto: proyecto.nombre,
+        descripcion_proyecto: proyecto.descripcion,
+        objetivo: objetivoNormalizado,
+        requerimientos: requerimientosPrevios,
+        diagramas: diagramasPrevios,
+        flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved: true, diagrams: diagramasPrevios }),
+        cache_hit: true,
+        cache_reason: 'La entrada y las versiones aprobadas no cambiaron.'
+      };
+    }
 
     // Construcción del payload de tres bloques explícitos
     const payload = {
@@ -150,8 +211,18 @@ class ProcesarConIA {
       contexto_proyecto: contextoProyecto
     };
 
-    // Llamada única a n8n / IA
-    const resultadoIA = await this.aiOrchestratorService.procesar(payload);
+    // Llamada única a n8n / IA, protegida contra solicitudes simultáneas del mismo artefacto.
+    const generationKey = `${proyectoId}:${tipoDiagramaNormalizado || objetivoNormalizado}`;
+    if (this.generacionesEnCurso.has(generationKey)) {
+      throw new Error('Ya existe una generación en curso para este artefacto. Espera a que termine antes de reintentar.');
+    }
+    this.generacionesEnCurso.add(generationKey);
+    let resultadoIA;
+    try {
+      resultadoIA = await this.aiOrchestratorService.procesar(payload);
+    } finally {
+      this.generacionesEnCurso.delete(generationKey);
+    }
 
     if (objetivoNormalizado === 'requisitos' && (!resultadoIA.requerimientos || resultadoIA.requerimientos.length === 0)) {
       throw new Error('La IA no devolvió requerimientos válidos. Se conservaron los datos existentes.');
@@ -344,7 +415,9 @@ class ProcesarConIA {
           errores_validacion: validacionCalidad.errores || [],
           advertencias_validacion: validacionCalidad.advertencias || [],
           metricas_validacion: validacionCalidad.metricas || {},
-          validado_en: new Date()
+          validado_en: new Date(),
+          huella_entrada: inputFingerprint,
+          retroalimentacion_aplicada: contextoProyecto.retroalimentacion_diagrama
         });
         diagramasGenerados.push(diagEntity);
       }

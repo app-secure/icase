@@ -22,6 +22,8 @@ class Diagrama {
     revisiones = [],
     historial_versiones = [],
     restaurada_desde_version = null,
+    huella_entrada = null,
+    retroalimentacion_aplicada = '',
     trazabilidad_rnf = [],
     requisitos_relacionados = [],
     versiones_origen = {},
@@ -53,6 +55,8 @@ class Diagrama {
     this.revisiones = Array.isArray(revisiones) ? revisiones : [];
     this.historial_versiones = Array.isArray(historial_versiones) ? historial_versiones : [];
     this.restaurada_desde_version = restaurada_desde_version;
+    this.huella_entrada = huella_entrada;
+    this.retroalimentacion_aplicada = retroalimentacion_aplicada;
     this.trazabilidad_rnf = Array.isArray(trazabilidad_rnf) ? trazabilidad_rnf : [trazabilidad_rnf].filter(Boolean);
     this.requisitos_relacionados = Array.isArray(requisitos_relacionados)
       ? requisitos_relacionados

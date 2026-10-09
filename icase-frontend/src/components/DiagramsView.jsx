@@ -167,7 +167,9 @@ export default function DiagramsView({
       }
       setCorrectionFeedback({
         type: "success",
-        message: result?.flow?.todos_aprobados
+        message: result?.cacheHit
+          ? "No hubo cambios en las entradas. Se reutilizó la versión existente sin consumir una llamada de IA."
+          : result?.flow?.todos_aprobados
           ? "Todos los diagramas fueron aprobados. Ya puedes generar los mockups."
           : currentDiagram && currentState !== "desactualizado"
             ? "Diagrama aprobado. Se habilitó el siguiente artefacto."
