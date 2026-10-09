@@ -1,0 +1,50 @@
+{
+  "nombre_proyecto": "PayFlow - Pasarela de Pagos Transaccional",
+  "descripcion_proyecto": "Plataforma de alta concurrencia para procesamiento y liquidación de pagos digitales.",
+  "requerimientos": [
+    {
+      "tipo": "RF",
+      "identificador": "RF-01",
+      "nombre": "Procesamiento de Transacciones",
+      "descripcion": "El sistema DEBE debitar y confirmar transferencias financieras de manera atómica.",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RF",
+      "identificador": "RF-02",
+      "nombre": "Liquidación y Conciliación",
+      "descripcion": "El sistema DEBE conciliar los lotes de pago con el banco central al cierre de cada jornada.",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RNF",
+      "identificador": "RNF-01",
+      "nombre": "Alta Disponibilidad y Tolerancia a Fallos",
+      "descripcion": "El sistema DEBE garantizar disponibilidad del 99.99% con failover automático y conmutación en menos de 2.0s sin pérdida de transacciones.",
+      "metrica_medible": "Disponibilidad >= 99.99% y conmutación failover <= 2.0s",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RNF",
+      "identificador": "RNF-02",
+      "nombre": "Rendimiento y Tiempo de Respuesta",
+      "descripcion": "El sistema DEBE autorizar pagos en menos de 0.3s.",
+      "metrica_medible": "Latencia <= 0.3s bajo 5000 peticiones concurrentes",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RNF",
+      "identificador": "RNF-03",
+      "nombre": "Seguridad Financiera y Cifrado",
+      "descripcion": "El sistema DEBE implementar terminación TLS 1.3, tokenización PCI-DSS y validación JWT.",
+      "prioridad": "Alta"
+    },
+    {
+      "tipo": "RNF",
+      "identificador": "RNF-04",
+      "nombre": "Monitoreo Continuo y Salud del Clúster",
+      "descripcion": "El sistema DEBE emitir telemetría cada 5s y alertar caídas de nodos en tiempo real con Prometheus y Grafana.",
+      "prioridad": "Alta"
+    }
+  ]
+}

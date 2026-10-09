@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import {
   GitBranch,
   Network,
+  Server,
   Box,
   Layers,
   Compass,
@@ -36,14 +37,17 @@ export default function DiagramsView({
 
   const options = [
     { key: "useCase", label: "Casos de Uso", icon: GitBranch },
-    { key: "architecture", label: "Arquitectura", icon: Network },
+    { key: "softwareArchitecture", label: "Arqui. Software", icon: Network },
+    { key: "systemArchitecture", label: "Arqui. Sistema", icon: Server },
     { key: "classDiagram", label: "Clases de Dominio", icon: Box },
     { key: "designClasses", label: "Clases de Diseño", icon: Layers },
     { key: "navigationTree", label: "Árbol de Navegación", icon: Compass },
     { key: "mockups", label: "Mockups", icon: Layout }
   ];
 
-  const currentDiagram = diagrams?.[selectedKey] || {
+  const currentDiagram = diagrams?.[selectedKey] ||
+    (selectedKey === "softwareArchitecture" ? diagrams?.architecture : null) ||
+    (selectedKey === "architecture" ? diagrams?.softwareArchitecture : null) || {
     title: "Diagrama pendiente",
     code: "@startuml\nactor Usuario\nrectangle Sistema {\n  usecase Generar\n}\nUsuario --> Generar\n@enduml",
     plantumlCode: "@startuml\nactor Usuario\nrectangle Sistema {\n  usecase Generar\n}\nUsuario --> Generar\n@enduml",
@@ -59,6 +63,16 @@ export default function DiagramsView({
         return {
           badge: "Casos de Uso",
           placeholder: "Pide un ajuste a Casos de Uso con IA (ej: 'añade actor Cocinero y proceso KDS')..."
+        };
+      case "softwareArchitecture":
+        return {
+          badge: "Arqui. Software",
+          placeholder: "Pide un ajuste a Arquitectura de Software con IA (ej: 'agrega Redis para caché y gateway Nginx')..."
+        };
+      case "systemArchitecture":
+        return {
+          badge: "Arqui. Sistema",
+          placeholder: "Pide un ajuste a Arquitectura de Sistema con IA (ej: 'especifica nodo de base de datos y servidor standalone')..."
         };
       case "architecture":
         return {
@@ -261,11 +275,25 @@ export default function DiagramsView({
 
           {/* Descripción del Diagrama (para diagramas PlantUML) */}
           {selectedKey !== "mockups" && (
-            <div className="pb-3 text-xs text-slate-600 border-b border-slate-100 mb-3 shrink-0">
+            <div className="pb-3 text-xs text-slate-600 border-b border-slate-100 mb-3 shrink-0 flex flex-col gap-1.5">
               <p className="leading-relaxed whitespace-normal break-words">
                 <strong className="text-slate-800 font-semibold">{currentDiagram.title}:</strong>{" "}
                 {currentDiagram.description}
               </p>
+              {Array.isArray(currentDiagram.trazabilidad_rnf) && currentDiagram.trazabilidad_rnf.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Trazabilidad RNF:</span>
+                  {currentDiagram.trazabilidad_rnf.map((t, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-200"
+                      title={typeof t === "object" ? t.justificacion : t}
+                    >
+                      {typeof t === "object" ? `${t.rnf_id || t.rnf} ➔ ${t.elemento}` : t}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

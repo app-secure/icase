@@ -11,7 +11,7 @@ class ActualizarDiagramaManual {
     }
 
     if (datos.codigo_plantuml && this.plantumlValidatorService) {
-      const validacion = this.plantumlValidatorService.validar(datos.codigo_plantuml);
+      const validacion = this.plantumlValidatorService.validar(datos.codigo_plantuml, { tipo: datos.tipo || existente.tipo });
       if (!validacion.valido) {
         throw new Error(`Sintaxis PlantUML inválida: ${validacion.error}`);
       }

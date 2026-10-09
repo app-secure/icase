@@ -194,14 +194,14 @@ export default function StaticDiagram({ code, plantumlCode, caption }) {
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto p-6 flex items-start justify-center">
+          <div className="flex-1 overflow-auto p-6 flex items-start justify-start">
             <div
               style={{
                 transform: `scale(${zoomLevel})`,
-                transformOrigin: "top center",
+                transformOrigin: "top left",
                 transition: "transform 0.15s ease-out"
               }}
-              className="bg-white p-6 rounded-2xl shadow-2xl inline-block max-w-none"
+              className="bg-white p-6 rounded-2xl shadow-2xl inline-block max-w-none mx-auto"
             >
               {svgContent ? (
                 <div

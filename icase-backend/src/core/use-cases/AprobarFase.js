@@ -28,14 +28,17 @@ class AprobarFase {
         throw new Error('La fase de análisis debe estar aprobada antes de aprobar los diagramas.');
       }
       const diagramas = await this.diagramaRepository.listarPorProyecto(proyectoId);
-      const tiposPresentes = new Set((diagramas || []).map(d => {
-        const t = String(d.tipo || '').toLowerCase();
-        if (t === 'arquitectura_software') return 'arquitectura';
-        if (t === 'clases_dominio') return 'clases';
-        return t;
-      }));
-      const requeridos = ['casos_de_uso', 'arquitectura', 'clases', 'arbol_navegacion'];
-      const faltantes = requeridos.filter(tipo => !tiposPresentes.has(tipo));
+      const tiposPresentes = new Set((diagramas || []).map(d => String(d.tipo || '').toLowerCase()));
+      const tieneCasosUso = tiposPresentes.has('casos_de_uso') || tiposPresentes.has('casos_uso');
+      const tieneArquitectura = tiposPresentes.has('arquitectura') || tiposPresentes.has('arquitectura_software') || tiposPresentes.has('arquitectura_sistema');
+      const tieneClases = tiposPresentes.has('clases') || tiposPresentes.has('clases_dominio');
+      const tieneArbol = tiposPresentes.has('arbol_navegacion') || tiposPresentes.has('arbol');
+
+      const faltantes = [];
+      if (!tieneCasosUso) faltantes.push('casos_de_uso');
+      if (!tieneArquitectura) faltantes.push('arquitectura');
+      if (!tieneClases) faltantes.push('clases');
+      if (!tieneArbol) faltantes.push('arbol_navegacion');
 
       if (faltantes.length > 0) {
         throw new Error(`No se pueden aprobar los diagramas. Faltan: ${faltantes.join(', ')}.`);

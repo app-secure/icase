@@ -22,7 +22,10 @@ export default function App() {
     const diags = p.diagramas || [];
     const safePName = (p.nombre || "Sistema de Software").replace(/["“”]/g, "'");
     const cuItem = diags.find((d) => d.tipo === "casos_de_uso" || d.tipo === "casos_uso");
-    const archItem = diags.find((d) => d.tipo === "arquitectura" || d.tipo === "arquitectura_software");
+    const softItem = diags.find((d) => (d.tipo || "") === "arquitectura_software" || ((d.tipo || "").includes("software") && !(d.tipo || "").includes("sistema")));
+    const sysItem = diags.find((d) => (d.tipo || "") === "arquitectura_sistema" || (d.tipo || "").includes("sistema") || (d.tipo || "").includes("despliegue"));
+    const legacyArchItem = diags.find((d) => (d.tipo || "") === "arquitectura");
+    const archItem = softItem || legacyArchItem;
     const classItem = diags.find((d) => (d.tipo === "clases" || d.tipo === "clases_dominio" || d.tipo === "entidad_relacion") && d.tipo !== "clases_diseno");
     const designClassItem = diags.find((d) => d.tipo === "clases_diseno");
     const navItem = diags.find((d) => ["arbol_navegacion", "navegacion"].includes(d.tipo));
@@ -242,14 +245,35 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
           description: cuItem?.descripcion || "Actores con silueta humana, módulo delimitador y casos de uso en elipse.",
           descripcion_jerarquica: cuItem?.descripcion_jerarquica || []
         },
-        architecture: {
-          id: archItem?.id || archItem?._id || "diag-arch",
-          title: archItem?.titulo || "Diagrama de Arquitectura (Structurizr C4)",
-          type: "arquitectura",
+        softwareArchitecture: {
+          id: archItem?.id || archItem?._id || "diag-soft-arch",
+          title: archItem?.titulo || "Diagrama de Arquitectura de Software",
+          type: "arquitectura_software",
           code: archItem?.codigo_mermaid && !archItem.codigo_mermaid.includes("@start") ? archItem.codigo_mermaid : "graph TB\n  Web[SPA React] --> API[Backend Express]\n  API --> DB[(BD Primaria)]",
           plantumlCode: sanitizePlantUML(archItem?.codigo_plantuml) || defArchPlant,
-          description: archItem?.descripcion || "Modelo de contenedores C4 con arquitectura nodal desacoplada.",
-          descripcion_jerarquica: archItem?.descripcion_jerarquica || []
+          description: archItem?.descripcion || "Modelo de contenedores C4 con arquitectura de software desacoplada.",
+          descripcion_jerarquica: archItem?.descripcion_jerarquica || [],
+          trazabilidad_rnf: archItem?.trazabilidad_rnf || []
+        },
+        systemArchitecture: {
+          id: sysItem?.id || sysItem?._id || "diag-sys-arch",
+          title: sysItem?.titulo || "Diagrama de Arquitectura de Sistema e Infraestructura",
+          type: "arquitectura_sistema",
+          code: sysItem?.codigo_mermaid && !sysItem.codigo_mermaid.includes("@start") ? sysItem.codigo_mermaid : "graph TD\n  Host[Servidor VPS] --> App[App Docker]\n  Host --> DB[(DB Docker)]",
+          plantumlCode: sanitizePlantUML(sysItem?.codigo_plantuml) || `@startuml\n!include <C4/C4_Deployment>\ntitle Arquitectura de Sistema - ${safePName}\nDeployment_Node(srv, "Servidor Standalone VPS") {\n  Container(backend, "Servicio API")\n  ContainerDb(db, "Base de Datos")\n}\n@enduml`,
+          description: sysItem?.descripcion || "Topología de infraestructura mononodo optimizada.",
+          descripcion_jerarquica: sysItem?.descripcion_jerarquica || [],
+          trazabilidad_rnf: sysItem?.trazabilidad_rnf || []
+        },
+        architecture: {
+          id: archItem?.id || archItem?._id || "diag-arch",
+          title: archItem?.titulo || "Diagrama de Arquitectura de Software",
+          type: "arquitectura_software",
+          code: archItem?.codigo_mermaid && !archItem.codigo_mermaid.includes("@start") ? archItem.codigo_mermaid : "graph TB\n  Web[SPA React] --> API[Backend Express]\n  API --> DB[(BD Primaria)]",
+          plantumlCode: sanitizePlantUML(archItem?.codigo_plantuml) || defArchPlant,
+          description: archItem?.descripcion || "Modelo de contenedores C4 con arquitectura de software desacoplada.",
+          descripcion_jerarquica: archItem?.descripcion_jerarquica || [],
+          trazabilidad_rnf: archItem?.trazabilidad_rnf || []
         },
         classDiagram: {
           id: classItem?.id || classItem?._id || "diag-class",

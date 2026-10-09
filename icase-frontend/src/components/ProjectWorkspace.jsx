@@ -79,10 +79,11 @@ UC1 .> UC2 : <<include>>
 UC3 .> UC1 : <<include>>
 @enduml`;
 
+    case "softwareArchitecture":
     case "architecture":
       return `@startuml
 !include <C4/C4_Container>
-title Arquitectura Técnica Integral - ${safeName}
+title Arquitectura de Software - ${safeName}
 
 Person(operador, "Operador Principal", "Personal autorizado del sistema")
 Person(supervisor, "Supervisor / Administrador", "Gestión y auditoría")
@@ -102,7 +103,6 @@ System_Boundary(sys, "${safeName}") {
   ContainerDb(dbRelacional, "Base de Datos del Sistema", "PostgreSQL", "Persistencia transaccional ACID")
   ContainerDb(cacheMem, "Memoria Caché", "Redis", "Caché de latencia < 0.8s")
   Container(auditStorage, "Almacén de Auditoría", "Elasticsearch / Audit Log", "Trazabilidad inmutable")
-  Container(pipelineDevOps, "Automatización CI/CD", "GitHub Actions + Docker", "Pipeline de despliegue continuo")
 }
 
 Rel(operador, webApp, "Opera vía navegador", "HTTPS")
@@ -117,12 +117,33 @@ Rel(srv_2, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")
 Rel(srv_3, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")
 Rel(srv_1, cacheMem, "Caché de alto rendimiento", "TCP")
 Rel(srv_1, auditStorage, "Registra trazabilidad", "REST")
-Rel(srv_2, auditStorage, "Registra trazabilidad", "REST")
 Rel(seguridadFilter, ext_auth, "Verifica token", "HTTPS")
 Rel(adp_ext, ext_ext, "Consume API externa", "REST")
 Rel(srv_3, ext_notif, "Emite avisos y reportes", "SMTP")
-Rel(pipelineDevOps, webApp, "Despliega SPA")
-Rel(pipelineDevOps, reverseProxy, "Aplica configuración")
+@enduml`;
+
+    case "systemArchitecture":
+      return `@startuml
+!include <C4/C4_Deployment>
+title Arquitectura de Sistema e Infraestructura - ${safeName}
+
+Deployment_Node(server, "Servidor Standalone VPS", "Ubuntu Linux / Docker Host") {
+  Deployment_Node(netZone, "Zona de Red del Servidor", "Firewall UFW") {
+    Deployment_Node(appNode, "Contenedor de Aplicación", "Docker Runtime") {
+      Container(appBackend, "Servicio API Backend", "Node.js / Express", "Instancia única de servicios")
+    }
+    Deployment_Node(dbNode, "Contenedor de Persistencia", "Docker Volume") {
+      ContainerDb(dbMaster, "Base de Datos Primaria", "PostgreSQL", "Instancia transaccional sin réplica en caliente")
+    }
+    Deployment_Node(monNode, "Contenedor de Observabilidad", "Docker Host") {
+      Container(monAgent, "Agente de Monitoreo", "Prometheus Exporter", "Supervisión de salud del host")
+    }
+  }
+}
+
+Rel(appBackend, dbMaster, "Operaciones de datos", "TCP :5432")
+Rel(monAgent, appBackend, "Chequeo de salud", "HTTP :3000/health")
+Rel(monAgent, dbMaster, "Métricas de DB", "TCP :5432")
 @enduml`;
 
     case "classDiagram":
@@ -282,6 +303,15 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
     const ucDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("caso"));
     const archDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arqui"));
     const designClassDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("diseno"));
+    const softDiag = (aiResult.diagramas || []).find(d => {
+      const t = (d.tipo || "").toLowerCase();
+      return t === "arquitectura_software" || t.includes("software") || (t.includes("arqui") && !t.includes("sistema") && !t.includes("system"));
+    });
+    const sysDiag = (aiResult.diagramas || []).find(d => {
+      const t = (d.tipo || "").toLowerCase();
+      return t === "arquitectura_sistema" || t.includes("sistema") || t.includes("system") || t.includes("despliegue") || t.includes("deploy");
+    });
+    const legacyArch = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase() === "arquitectura");
     const classDiag = (aiResult.diagramas || []).find(d => ((d.tipo || "").toLowerCase().includes("clase") || (d.tipo || "").toLowerCase().includes("entidad") || (d.tipo || "").toLowerCase().includes("dominio")) && !(d.tipo || "").toLowerCase().includes("diseno"));
     const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav"));
 
@@ -296,6 +326,8 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       return sanitizePlantUML(generateDefaultPuml(typeKey, fallbackName));
     };
 
+    const effectiveSoftDiag = softDiag || legacyArch || archDiag;
+
     diags = {
       useCase: {
         id: ucDiag?.id || ucDiag?._id || "diag-uc",
@@ -308,16 +340,41 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
           ? ucDiag.descripcion_jerarquica
           : []
       },
+      softwareArchitecture: {
+        id: "diag-soft-arch",
+        title: (effectiveSoftDiag?.titulo || "Diagrama de Arquitectura de Software").replace(/\s*\([^)]*\)/g, '').trim(),
+        type: "arquitectura_software",
+        code: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
+        plantumlCode: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
+        description: effectiveSoftDiag?.descripcion || "",
+        descripcion_jerarquica: Array.isArray(effectiveSoftDiag?.descripcion_jerarquica) && effectiveSoftDiag.descripcion_jerarquica.length > 0
+          ? effectiveSoftDiag.descripcion_jerarquica
+          : [],
+        trazabilidad_rnf: Array.isArray(effectiveSoftDiag?.trazabilidad_rnf) ? effectiveSoftDiag.trazabilidad_rnf : []
+      },
+      systemArchitecture: {
+        id: "diag-sys-arch",
+        title: (sysDiag?.titulo || "Diagrama de Arquitectura de Sistema e Infraestructura").replace(/\s*\([^)]*\)/g, '').trim(),
+        type: "arquitectura_sistema",
+        code: extractPuml(sysDiag, "systemArchitecture"),
+        plantumlCode: extractPuml(sysDiag, "systemArchitecture"),
+        description: sysDiag?.descripcion || "",
+        descripcion_jerarquica: Array.isArray(sysDiag?.descripcion_jerarquica) && sysDiag.descripcion_jerarquica.length > 0
+          ? sysDiag.descripcion_jerarquica
+          : [],
+        trazabilidad_rnf: Array.isArray(sysDiag?.trazabilidad_rnf) ? sysDiag.trazabilidad_rnf : []
+      },
       architecture: {
-        id: archDiag?.id || archDiag?._id || "diag-arch",
-        title: (archDiag?.titulo || "Diagrama de Arquitectura (C4 Container)").replace(/\s*\([^)]*\)/g, '').trim(),
-        type: "arquitectura",
-        code: extractPuml(archDiag, "architecture"),
-        plantumlCode: extractPuml(archDiag, "architecture"),
-        description: archDiag?.descripcion || "",
-        descripcion_jerarquica: Array.isArray(archDiag?.descripcion_jerarquica) && archDiag.descripcion_jerarquica.length > 0
-          ? archDiag.descripcion_jerarquica
-          : []
+        id: "diag-arch",
+        title: (effectiveSoftDiag?.titulo || "Diagrama de Arquitectura de Software").replace(/\s*\([^)]*\)/g, '').trim(),
+        type: "arquitectura_software",
+        code: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
+        plantumlCode: extractPuml(effectiveSoftDiag, "softwareArchitecture"),
+        description: effectiveSoftDiag?.descripcion || "",
+        descripcion_jerarquica: Array.isArray(effectiveSoftDiag?.descripcion_jerarquica) && effectiveSoftDiag.descripcion_jerarquica.length > 0
+          ? effectiveSoftDiag.descripcion_jerarquica
+          : [],
+        trazabilidad_rnf: Array.isArray(effectiveSoftDiag?.trazabilidad_rnf) ? effectiveSoftDiag.trazabilidad_rnf : []
       },
       classDiagram: {
         id: classDiag?.id || classDiag?._id || "diag-class",
@@ -752,20 +809,36 @@ export default function ProjectWorkspace({
 `,
             description: "Actores con silueta humana (muñequito), módulo delimitado y casos de uso en elipse."
           },
+          softwareArchitecture: {
+            id: "diag-soft-arch",
+            title: "Diagrama de Arquitectura de Software",
+            type: "arquitectura_software",
+            plantumlCode: generateDefaultPuml("softwareArchitecture", updatedName),
+            code: `graph TB\n  Web[SPA React] --> API[Backend Express]\n  API --> DB[(BD Primaria)]`,
+            description: "Modelo de contenedores C4 con arquitectura de software desacoplada.",
+            trazabilidad_rnf: [
+              { rnf_id: "RNF-01", elemento: "Redis Cache", justificacion: "Cumple tiempo de respuesta < 0.8s" },
+              { rnf_id: "RNF-02", elemento: "API Gateway", justificacion: "Garantiza seguridad y control de acceso" }
+            ]
+          },
+          systemArchitecture: {
+            id: "diag-sys-arch",
+            title: "Diagrama de Arquitectura de Sistema e Infraestructura",
+            type: "arquitectura_sistema",
+            plantumlCode: generateDefaultPuml("systemArchitecture", updatedName),
+            code: `graph TD\n  Host[Servidor VPS Standalone] --> App[Contenedor Docker App]\n  Host --> DB[(Contenedor Docker BD)]`,
+            description: "Topología de infraestructura mononodo optimizada sin sobre-dimensionar alta disponibilidad.",
+            trazabilidad_rnf: [
+              { rnf_id: "RNF-04", elemento: "Servidor Standalone VPS", justificacion: "Infraestructura ajustada a requisitos" }
+            ]
+          },
           architecture: {
             id: "diag-arch",
-            title: "Diagrama de Arquitectura (Structurizr C4)",
-            type: "arquitectura",
-            plantumlCode: generateDefaultPuml("architecture", updatedName),
-            code: `graph TD
-    Client["Terminales Cliente (Web / Táctil)"] --> LB["Balanceador de Carga NGINX (Failover)"]
-    LB -->|Peticiones Primarias| Master["Servidor de Aplicación Maestro"]
-    LB -.->|Conmutación <= 3s| Slave["Servidor Réplica Esclavo (Hot Standby)"]
-    Master --> DB[("PostgreSQL Maestro")]
-    Slave --> DBReplica[("PostgreSQL Replica Standby")]
-    DB -.->|Replicación WAL| DBReplica
-`,
-            description: "Modelo de contenedores C4 con balanceador y réplica failover."
+            title: "Diagrama de Arquitectura de Software",
+            type: "arquitectura_software",
+            plantumlCode: generateDefaultPuml("softwareArchitecture", updatedName),
+            code: `graph TB\n  Web[SPA React] --> API[Backend Express]\n  API --> DB[(BD Primaria)]`,
+            description: "Modelo de contenedores C4 con arquitectura de software desacoplada."
           },
           classDiagram: {
             id: "diag-class",
@@ -1038,8 +1111,10 @@ export default function ProjectWorkspace({
     if (phase === "diagrams") {
       const diagTitleMap = {
         useCase: "casos_de_uso",
-        architecture: "arquitectura",
-        classDiagram: "clases_dominio",
+        softwareArchitecture: "arquitectura_software",
+        systemArchitecture: "arquitectura_sistema",
+        architecture: "arquitectura_software",
+        classDiagram: "clases",
         designClasses: "clases_diseno",
         navigationTree: "arbol_navegacion"
       };

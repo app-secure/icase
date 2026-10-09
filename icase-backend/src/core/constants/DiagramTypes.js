@@ -1,3 +1,6 @@
+/**
+ * Constantes estandarizadas de tipos de diagrama para I-CASE
+ */
 const DIAGRAM_TYPES = Object.freeze({
   USE_CASES: 'casos_de_uso',
   DOMAIN_CLASSES: 'clases_dominio',
@@ -70,11 +73,49 @@ function isValidDiagramType(type) {
   return DIAGRAM_TYPE_VALUES.includes(normalizeDiagramType(type));
 }
 
+// Compatibilidad con la nomenclatura en español / DiagramTypes
+const DiagramTypes = Object.freeze({
+  CASOS_DE_USO: DIAGRAM_TYPES.USE_CASES,
+  ARQUITECTURA_SOFTWARE: DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE,
+  ARQUITECTURA_SISTEMA: DIAGRAM_TYPES.SYSTEM_ARCHITECTURE,
+  CLASES: 'clases',
+  CLASES_DOMINIO: DIAGRAM_TYPES.DOMAIN_CLASSES,
+  CLASES_DISENO: DIAGRAM_TYPES.DESIGN_CLASSES,
+  ARBOL_NAVEGACION: DIAGRAM_TYPES.NAVIGATION_TREE,
+  ARQUITECTURA: 'arquitectura',
+  ER: 'er',
+  SECUENCIA: 'secuencia',
+  ACTIVIDAD: 'actividad',
+  ...DIAGRAM_TYPES
+});
+
+const TIPOS_VALIDOS = Object.freeze([
+  ...DIAGRAM_TYPE_VALUES,
+  'clases',
+  'arquitectura',
+  'er',
+  'secuencia',
+  'actividad'
+]);
+
+const TIPOS_PRINCIPALES = Object.freeze([
+  DIAGRAM_TYPES.USE_CASES,
+  DIAGRAM_TYPES.DOMAIN_CLASSES,
+  DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE,
+  DIAGRAM_TYPES.SYSTEM_ARCHITECTURE,
+  DIAGRAM_TYPES.DESIGN_CLASSES,
+  DIAGRAM_TYPES.NAVIGATION_TREE
+]);
+
 module.exports = {
   DIAGRAM_TYPES,
   DIAGRAM_TYPE_VALUES,
   DIAGRAM_DEFINITIONS,
   LEGACY_DIAGRAM_TYPES,
   normalizeDiagramType,
-  isValidDiagramType
+  isValidDiagramType,
+  DiagramTypes,
+  TIPOS_VALIDOS,
+  TIPOS_PRINCIPALES,
+  ...DiagramTypes
 };

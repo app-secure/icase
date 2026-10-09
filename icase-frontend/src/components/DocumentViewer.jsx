@@ -441,15 +441,33 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               8.5 Diagrama de Arquitectura
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
-              {project.diagrams?.architecture?.description || "Modelo de arquitectura técnica integral en contenedores adaptado a las necesidades operativas del sistema."}
+              {project.diagrams?.softwareArchitecture?.description || project.diagrams?.architecture?.description || "Modelo de arquitectura de software en contenedores C4 adaptado a los requerimientos funcionales y no funcionales del sistema."}
             </p>
             <StaticDiagram
-              code={project.diagrams?.architecture?.code}
-              plantumlCode={project.diagrams?.architecture?.plantumlCode}
-              caption="Figura 8.4: Diagrama de Arquitectura del Sistema"
+              code={project.diagrams?.softwareArchitecture?.code || project.diagrams?.architecture?.code}
+              plantumlCode={project.diagrams?.softwareArchitecture?.plantumlCode || project.diagrams?.architecture?.plantumlCode}
+              caption="Figura 8.5: Diagrama de Arquitectura de Software (C4 Container)"
             />
-            {renderDiagramExplanation(project.diagrams?.architecture, "Diagrama de Arquitectura")}
+            {renderDiagramExplanation(project.diagrams?.softwareArchitecture || project.diagrams?.architecture, "Arquitectura de Software")}
           </div>
+
+          {/* 8.6 Arquitectura de Sistema e Infraestructura */}
+          {project.diagrams?.systemArchitecture && (
+            <div className="space-y-3 pt-2">
+              <h3 className="text-sm font-bold text-slate-800">
+                8.6 Diagrama de Arquitectura de Sistema e Infraestructura
+              </h3>
+              <p className="text-sm text-slate-700 leading-relaxed">
+                {project.diagrams?.systemArchitecture?.description || "Topología de despliegue, servidores, nodos y observabilidad dimensionados según las necesidades operativas."}
+              </p>
+              <StaticDiagram
+                code={project.diagrams?.systemArchitecture?.code}
+                plantumlCode={project.diagrams?.systemArchitecture?.plantumlCode}
+                caption="Figura 8.6: Diagrama de Arquitectura de Sistema (C4 Deployment)"
+              />
+              {renderDiagramExplanation(project.diagrams?.systemArchitecture, "Arquitectura de Sistema")}
+            </div>
+          )}
         </section>
 
         {/* 9. Wireframes y Mockups de Interfaz */}

@@ -37,6 +37,8 @@ class ModelosIaService {
 
     const directivas = [
       this.leerPrompt('analista_ieee830.md'),
+      this.leerPrompt('disenador_arquitectura_software.md'),
+      this.leerPrompt('disenador_arquitectura_sistema.md'),
       this.leerPrompt('disenador_arquitectura.md'),
       this.leerPrompt('auditor_qa.md')
     ].filter(Boolean).join('\n\n');
@@ -46,7 +48,7 @@ class ModelosIaService {
     const directivaFase = objetivo === 'requisitos'
       ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nGenera y devuelve únicamente el análisis y los requerimientos RF/RNF. El arreglo "diagramas" DEBE ser []. No diseñes, sintetices ni anticipes diagramas todavía.`
       : objetivo === 'diagramas'
-        ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos requerimientos incluidos en el contexto ya fueron revisados y aprobados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera los cuatro diagramas obligatorios (casos_de_uso, arquitectura, clases y arbol_navegacion) trazados estrictamente desde esos requerimientos aprobados.`
+        ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nLos requerimientos incluidos en el contexto ya fueron revisados y aprobados por el usuario. No los reescribas. El arreglo "requerimientos" DEBE ser []. Genera los diagramas obligatorios (casos_de_uso, arquitectura_software, arquitectura_sistema, clases y arbol_navegacion) trazados estrictamente desde esos requerimientos aprobados.\n\nREGLA CRÍTICA DE ACTORES EN CASOS DE USO: Revisa atentamente el campo 'Actores' de CADA Requerimiento Funcional (RF) aprobado. Absolutamente TODOS los actores citados (incluyendo actores humanos como clientes, cajeros, administradores y SISTEMAS EXTERNOS como pasarelas de pago, sistemas de pagos externos, etc.) DEBEN figurar explícitamente declarados con \`actor "Nombre Exacto" as Alias\` y conectados con al menos un caso de uso (\`-->\`). La validación del sistema rechazará la respuesta si falta cualquier actor citado en los RF aprobados.`
         : '';
 
     return plantilla
@@ -531,7 +533,12 @@ class ModelosIaService {
 
     palabrasClave = palabrasClave.filter(k => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
 
-    const diagramas = objetivo === 'requisitos' ? [] : PlantUMLSynthesizer.normalizar(data?.diagramas);
+    const diagramas = objetivo === 'requisitos'
+      ? []
+      : PlantUMLSynthesizer.normalizar(data?.diagramas, {
+          nombreProyecto: safeProjectName,
+          requerimientos
+        });
 
     return {
       nombre_proyecto: safeProjectName,
