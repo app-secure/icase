@@ -20,6 +20,19 @@ class ArquitecturaSistemaGeneratorService {
   }
 
   /**
+   * Detecta si el sistema tiene usuarios o módulos móviles
+   * @param {Array} requerimientos
+   * @returns {boolean}
+   */
+  detectaComponenteMovil(requerimientos = []) {
+    const texto = requerimientos
+      .map(r => `${r.nombre || ''} ${r.descripcion || ''} ${r.actores || ''}`)
+      .join(' ');
+    // Si menciona explícitamente móvil, app, smartphone, campo, etc., o por defecto en sistemas con clientes
+    return /m[oó]vil|app\b|celular|smartphone|android|ios|flutter|react native|campo|repartidor|conductor|chofer|cliente/i.test(texto);
+  }
+
+  /**
    * Genera el diagrama de arquitectura de sistema a partir de requerimientos y metadatos
    * @param {Object} params
    * @param {string} params.nombreProyecto
@@ -31,6 +44,8 @@ class ArquitecturaSistemaGeneratorService {
     const rnfs = requerimientos.filter(r => (r.tipo || '').toUpperCase() === 'RNF');
 
     const tieneHA = this.solicitaAltaDisponibilidad(rnfs);
+    const incluyeMovil = this.detectaComponenteMovil(requerimientos);
+
     const rnfMonitoreo = rnfs.find(r => /monitoreo|observabilidad|m[eé]tricas|salud|alerta/i.test(`${r.nombre} ${r.descripcion}`));
     const rnfSeguridadRed = rnfs.find(r => /red|firewall|per[ií]metro|ssl|tls|vpc|puerto/i.test(`${r.nombre} ${r.descripcion}`));
     const rnfHA = rnfs.find(r => /alta disponibilidad|disponibilidad|tolerancia a fallos|failover|conmutaci/i.test(`${r.nombre} ${r.descripcion} ${r.metrica_medible}`));
@@ -80,20 +95,35 @@ class ArquitecturaSistemaGeneratorService {
     puml += `!include <C4/C4_Deployment>\n`;
     puml += `title Arquitectura de Sistema e Infraestructura - ${safeName}\n\n`;
 
+    // 1. DISPOSITIVOS CLIENTES (Nodos de despliegue donde se ejecutan las interfaces)
+    puml += `' === DISPOSITIVOS CLIENTES ===\n`;
+    if (incluyeMovil) {
+      puml += `Deployment_Node(clientMobile, "Dispositivo Móvil del Usuario", "Android / iOS Smartphone") {\n`;
+      puml += `  Container(appMobile, "Aplicación Móvil", "Flutter / React Native", "Cliente móvil instalado para operaciones y consultas rápidas")\n`;
+      puml += `}\n\n`;
+    }
+
+    puml += `Deployment_Node(clientPc, "Estación de Trabajo / Cliente Web", "Windows / macOS / Linux") {\n`;
+    puml += `  Deployment_Node(browser, "Navegador Web", "Google Chrome / Firefox / Edge") {\n`;
+    puml += `    Container(appWeb, "Aplicación Web / SPA", "React / TypeScript", "Interfaz web para administración y gestión")\n`;
+    puml += `  }\n`;
+    puml += `}\n\n`;
+
     if (tieneHA) {
       // TOPOLOGÍA CON ALTA DISPONIBILIDAD (Solicitada explícitamente)
-      puml += `Deployment_Node(cloud, "Nube Privada / Virtual Private Cloud", "Red VPC Segura") {\n`;
-      puml += `  Deployment_Node(dmz, "Zona DMZ / Red Pública", "Subred Externa") {\n`;
+      puml += `' === INFRAESTRUCTURA DE SERVIDOR (ALTA DISPONIBILIDAD) ===\n`;
+      puml += `Deployment_Node(cloud, "Nube Privada / Virtual Private Cloud", "Red VPC Segura Multi-AZ") {\n`;
+      puml += `  Deployment_Node(dmz, "Zona DMZ / Red Pública", "Subred Externa con SSL") {\n`;
       puml += `    Deployment_Node(lbNode, "Nodo Balanceador de Carga", "Linux / Nginx HAProxy") {\n`;
       puml += `      Container(lb, "Balanceador con Failover", "Nginx", "Distribución de tráfico y conmutación activa")\n`;
       puml += `    }\n`;
       puml += `  }\n\n`;
 
       puml += `  Deployment_Node(appZone, "Zona de Aplicación", "Subred Privada") {\n`;
-      puml += `    Deployment_Node(node1, "Servidor de Aplicación Primario", "Instancia Compute 1") {\n`;
+      puml += `    Deployment_Node(node1, "Servidor de Aplicación Primario", "Instancia Compute AZ-1") {\n`;
       puml += `      Container(appInst1, "Servicio Backend (Instancia 1)", "Docker Container", "Ejecución de procesos activos")\n`;
       puml += `    }\n`;
-      puml += `    Deployment_Node(node2, "Servidor de Aplicación Réplica", "Instancia Compute 2 (Hot Standby)") {\n`;
+      puml += `    Deployment_Node(node2, "Servidor de Aplicación Réplica", "Instancia Compute AZ-2 (Hot Standby)") {\n`;
       puml += `      Container(appInst2, "Servicio Backend (Instancia 2)", "Docker Container", "Réplica activa para failover")\n`;
       puml += `    }\n`;
       puml += `  }\n\n`;
@@ -114,6 +144,13 @@ class ArquitecturaSistemaGeneratorService {
       puml += `  }\n`;
       puml += `}\n\n`;
 
+      // Relaciones desde clientes hacia balanceador
+      if (incluyeMovil) {
+        puml += `Rel(appMobile, lb, "Solicitudes API Móvil", "HTTPS :443 / TLS 1.3")\n`;
+      }
+      puml += `Rel(appWeb, lb, "Tráfico Web y API", "HTTPS :443 / TLS 1.3")\n\n`;
+
+      // Relaciones internas de infraestructura
       puml += `Rel(lb, appInst1, "Enruta solicitudes primarias", "HTTPS :443")\n`;
       puml += `Rel(lb, appInst2, "Conmutación por error (Failover)", "HTTPS :443")\n`;
       puml += `Rel(appInst1, dbMaster, "Operaciones ACID", "TCP :5432")\n`;
@@ -124,6 +161,7 @@ class ArquitecturaSistemaGeneratorService {
       puml += `Rel(monAgent, dbMasterNode, "Telemetría de salud", "HTTP :9090")\n`;
     } else {
       // TOPOLOGÍA STANDALONE (Sin Alta Disponibilidad solicitada - REGLA ESTRICTA)
+      puml += `' === INFRAESTRUCTURA DE SERVIDOR (STANDALONE MONONODO) ===\n`;
       puml += `Deployment_Node(server, "Servidor Standalone VPS", "Ubuntu Linux / Docker Host") {\n`;
       puml += `  Deployment_Node(netZone, "Zona de Red del Servidor", "Firewall UFW") {\n`;
       puml += `    Deployment_Node(appContainerNode, "Contenedor de Aplicación", "Docker Runtime") {\n`;
@@ -138,6 +176,13 @@ class ArquitecturaSistemaGeneratorService {
       puml += `  }\n`;
       puml += `}\n\n`;
 
+      // Relaciones desde clientes hacia servidor
+      if (incluyeMovil) {
+        puml += `Rel(appMobile, appBackend, "Solicitudes API Móvil", "HTTPS :443 / TLS 1.3")\n`;
+      }
+      puml += `Rel(appWeb, appBackend, "Tráfico Web y API", "HTTPS :443 / TLS 1.3")\n\n`;
+
+      // Relaciones internas de infraestructura
       puml += `Rel(appBackend, dbStandalone, "Persistencia de datos", "TCP :5432")\n`;
       puml += `Rel(monAgent, appBackend, "Chequeo de salud del servicio", "HTTP :3000/health")\n`;
       puml += `Rel(monAgent, dbStandalone, "Supervisión de estado DB", "TCP :5432")\n`;
@@ -152,9 +197,10 @@ class ArquitecturaSistemaGeneratorService {
     return {
       tipo: DiagramTypes.ARQUITECTURA_SISTEMA,
       titulo: `Diagrama de Arquitectura de Sistema e Infraestructura - ${safeName}`,
-      descripcion: `Topología de despliegue e infraestructura física/cloud para ${safeName}. ${descHA}`,
+      descripcion: `Topología de despliegue e infraestructura física/cloud para ${safeName}, integrando dispositivos clientes (móvil y web) con el entorno de servidor. ${descHA}`,
       descripcion_jerarquica: [
-        'Zonas de Red y Seguridad: Segmentación de red y cortafuegos de acceso perimetral.',
+        'Dispositivos Clientes: Nodos de ejecución en smartphones y navegadores web para acceso del usuario.',
+        'Zonas de Red y Seguridad: Segmentación de red, cifrado TLS 1.3 y cortafuegos de acceso perimetral.',
         tieneHA
           ? 'Cómputo con Alta Disponibilidad: Nodos primario y réplica con conmutación en caliente.'
           : 'Cómputo Standalone: Servidor único de aplicación dimensionado a la demanda requerida.',

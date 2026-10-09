@@ -18,6 +18,9 @@ class ArquitecturaSoftwareGeneratorService {
     const rfs = requerimientos.filter(r => (r.tipo || '').toUpperCase() === 'RF');
     const rnfs = requerimientos.filter(r => (r.tipo || '').toUpperCase() === 'RNF');
 
+    // Detección de necesidades de clientes (móvil y web)
+    const incluyeMovil = requerimientos.some(r => /m[oó]vil|app\b|celular|smartphone|android|ios|flutter|react native|campo|repartidor|conductor|chofer|cliente/i.test(`${r.nombre} ${r.descripcion} ${r.actores || ''}`));
+
     // Detección de necesidades a partir de RNF
     const rnfRendimiento = rnfs.find(r => /latencia|tiempo de respuesta|rendimiento|velocidad|cache/i.test(`${r.nombre} ${r.descripcion} ${r.metrica_medible}`));
     const rnfSeguridad = rnfs.find(r => /seguridad|autenticaci|autorizaci|jwt|cifrado|roles|acceso/i.test(`${r.nombre} ${r.descripcion}`));
@@ -80,7 +83,11 @@ class ArquitecturaSoftwareGeneratorService {
     puml += `Person(admin, "Administrador", "Gestor administrativo y supervisor")\n\n`;
 
     puml += `System_Boundary(sys, "${safeName}") {\n`;
-    puml += `  Container(webApp, "Portal Web y Aplicación SPA", "React / TypeScript", "Interfaz interactiva de usuario")\n`;
+    puml += `  Container(webApp, "Portal Web y Aplicación SPA", "React / TypeScript", "Interfaz interactiva de usuario en escritorio")\n`;
+
+    if (incluyeMovil) {
+      puml += `  Container(mobileApp, "Aplicación Móvil", "Flutter / React Native", "Interfaz táctil para clientes y operaciones móviles")\n`;
+    }
 
     if (incluyeGatewayAuth) {
       puml += `  Container(apiGateway, "API Gateway & Seguridad", "Nginx / Express Gateway", "Terminación TLS, Auth JWT y control de acceso")\n`;
@@ -106,13 +113,22 @@ class ArquitecturaSoftwareGeneratorService {
 
     // Relaciones entre componentes
     puml += `Rel(usuario, webApp, "Interactúa con las pantallas", "HTTPS")\n`;
-    puml += `Rel(admin, webApp, "Gestiona y supervisa", "HTTPS")\n`;
+    if (incluyeMovil) {
+      puml += `Rel(usuario, mobileApp, "Opera desde dispositivo smartphone", "Táctil")\n`;
+    }
+    puml += `Rel(admin, webApp, "Gestiona y supervisa", "HTTPS")\n\n`;
 
     if (incluyeGatewayAuth) {
       puml += `Rel(webApp, apiGateway, "Peticiones API", "JSON/HTTPS")\n`;
+      if (incluyeMovil) {
+        puml += `Rel(mobileApp, apiGateway, "Peticiones API Móvil", "JSON/HTTPS")\n`;
+      }
       puml += `Rel(apiGateway, coreService, "Enruta tráfico autorizado", "gRPC / HTTP")\n`;
     } else {
       puml += `Rel(webApp, coreService, "Peticiones API", "JSON/HTTPS")\n`;
+      if (incluyeMovil) {
+        puml += `Rel(mobileApp, coreService, "Peticiones API Móvil", "JSON/HTTPS")\n`;
+      }
     }
 
     puml += `Rel(coreService, dbPrincipal, "Persiste operaciones transaccionales", "TCP/SQL")\n`;
@@ -134,9 +150,9 @@ class ArquitecturaSoftwareGeneratorService {
     return {
       tipo: DiagramTypes.ARQUITECTURA_SOFTWARE,
       titulo: `Diagrama de Arquitectura de Software - ${safeName}`,
-      descripcion: `Modelo de contenedores lógicos C4 para ${safeName}, detallando aplicaciones clientes, gateway de servicios, lógica de negocio y capas de almacenamiento.`,
+      descripcion: `Modelo de contenedores lógicos C4 para ${safeName}, detallando aplicaciones clientes (web${incluyeMovil ? ' y móvil' : ''}), gateway de servicios, lógica de negocio y capas de almacenamiento.`,
       descripcion_jerarquica: [
-        'Capa de Presentación: Aplicación web interactiva adaptada para la experiencia del usuario.',
+        `Capa de Presentación: Aplicación web interactiva${incluyeMovil ? ' y aplicación móvil' : ''} adaptada para la experiencia del usuario.`,
         'Capa de Borde y API: Gateway perimetral con validación de seguridad y distribución de llamadas.',
         'Capa de Servicios de Dominio: Componentes de lógica operativa que implementan las reglas funcionales.',
         'Capa de Persistencia y Caché: Almacén de base de datos relacional complementado con componentes según los RNF.'

@@ -44,7 +44,11 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - Código PlantUML con `@startuml` y `@enduml`.
 - Directiva: `!include <C4/C4_Deployment>` (o nodos PlantUML `node` / `rectangle`).
 - Título: `title Arquitectura de Sistema e Infraestructura - Nombre del Sistema`
-- Componentes: Servidores, nodos de cómputo, redes/VPC, balanceadores, réplicas, despliegue, failover y monitoreo.
+- Dispositivos Clientes (OBLIGATORIO):
+  * Dispositivo Móvil: `Deployment_Node(clientMobile, "Dispositivo Móvil del Usuario", "Android / iOS Smartphone") { Container(appMobile, "Aplicación Móvil", "Flutter / React Native", "Instalada en el cliente") }` (si hay usuarios/actores móviles).
+  * Estación de Trabajo / Navegador Web: `Deployment_Node(clientPc, "Estación de Trabajo", "Windows / macOS") { Deployment_Node(browser, "Navegador Web", "Chrome / Edge") { Container(appWeb, "Aplicación Web / SPA", "React / Vue", "Ejecutada en el navegador") } }`
+  * Conexión por red externa segura: `Rel(appMobile, ..., "Tráfico API", "HTTPS :443 / TLS 1.3")`.
+- Componentes de Servidor: Servidores, nodos de cómputo, redes/VPC, balanceadores, réplicas, despliegue, failover y monitoreo.
 - **REGLA ESTRICTA DE ALTA DISPONIBILIDAD**:
   * **Si los requisitos NO solicitan alta disponibilidad**: NO agregar balanceadores redundantes, ni nodos réplicas, ni failover en caliente. Modelar despliegue mononodo/servidor standalone y BD única.
   * **Si los requisitos SÍ solicitan alta disponibilidad**: Modelar balanceador de carga, múltiples nodos réplica de aplicación, cluster/réplica de base de datos y failover.

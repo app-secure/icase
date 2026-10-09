@@ -127,6 +127,9 @@ describe('Feature / Architecture Diagrams Unit Tests', () => {
       const traceInfra = diagSistema.trazabilidad_rnf.find(t => t.elemento.includes('Standalone'));
       expect(traceInfra).toBeDefined();
 
+      // Debe incluir dispositivos clientes (móvil y/o web)
+      expect(diagSistema.codigo_plantuml).toMatch(/clientMobile|clientPc|Dispositivo M[oó]vil|Navegador/i);
+
       // Validación con ArquitecturaSistemaValidatorService
       const validacion = sistemaValidator.validar({
         codigo: diagSistema.codigo_plantuml,
