@@ -77,13 +77,17 @@ class ClasesDisenoValidatorService {
 
     // 7. División por módulos (packages) si el diagrama es grande (>6 clases)
     const cantidadClases = (trimmed.match(/^\s*(?:abstract\s+)?(?:class|interface)\s+/gim) || []).length;
-    const tienePackages = /package\s+"?[^"{\n]+" ShortName /i.test(trimmed) || /package\s+"?[^"{\n]+"?\s*\{/i.test(trimmed);
+    const tienePackages = /^\s*package\s+"?[^"{\n]+"?(?:\s+as\s+[A-Za-z_][\w.]*)?\s*\{/im.test(trimmed);
     if (cantidadClases > 6 && !tienePackages) {
       return { valido: false, error: 'El diagrama de clases de diseño resulta demasiado grande y debe dividirse por módulos utilizando bloques package.' };
     }
 
     // 8. Trazabilidad a requisitos y artefactos de origen
-    const tieneTrazabilidad = /RF-\d+|RNF-\d+|note\s+.*trazabilidad|note\s+.*origen|casos_de_uso|clases_dominio|arquitectura_software/i.test(trimmed);
+    const lowerTrimmed = trimmed.toLowerCase();
+    const tieneTrazabilidadReq = /\b(?:RF|RNF)-\d+\b/i.test(trimmed);
+    const tieneTrazabilidadNota = lowerTrimmed.includes('note') && (lowerTrimmed.includes('trazabilidad') || lowerTrimmed.includes('origen'));
+    const tieneTrazabilidadArtefacto = ['casos_de_uso', 'clases_dominio', 'arquitectura_software'].some((token) => lowerTrimmed.includes(token));
+    const tieneTrazabilidad = tieneTrazabilidadReq || tieneTrazabilidadNota || tieneTrazabilidadArtefacto;
     if (!tieneTrazabilidad) {
       return { valido: false, error: 'El diagrama de clases de diseño debe incluir trazabilidad hacia requisitos (RF/RNF) u objetos de origen.' };
     }

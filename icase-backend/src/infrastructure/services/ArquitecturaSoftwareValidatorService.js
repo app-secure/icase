@@ -44,7 +44,7 @@ class ArquitecturaSoftwareValidatorService {
       errores.push('Debe modelar contenedores o componentes de software (Container, ContainerDb, component o rectangle).');
     }
 
-    const tieneRelaciones = /rel\s*\(|-->|--\>/i.test(trimmed);
+    const tieneRelaciones = /rel\s*\(/i.test(trimmed) || trimmed.includes('-->') || trimmed.includes('->');
     if (!tieneRelaciones) {
       errores.push('Debe definir la comunicación o relaciones explícitas entre los componentes de software (Rel o flechas).');
     }

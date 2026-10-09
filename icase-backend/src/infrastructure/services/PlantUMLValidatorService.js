@@ -94,8 +94,11 @@ class PlantUMLValidatorService {
 
     if (tipoNormalizado.includes('clase')) {
       const clases = (trimmed.match(/^\s*(?:abstract\s+)?class\s+/gim) || []).length;
-      const relaciones = (trimmed.match(/^\s*[A-Za-z_][\w.]*\s+"[^"]+"\s+[^\n]+\s+"[^"]+"\s+[A-Za-z_][\w.]*/gim) || []).length +
-        (trimmed.match(/^\s*[A-Za-z_][\w.]*\s+(?:--|\.\.|<\||\*--|o--)[^\n]+/gim) || []).length;
+      const relaciones = trimmed
+        .split(/\r?\n/)
+        .filter((linea) => /^\s*[A-Za-z_][\w.]*\s+/.test(linea))
+        .filter((linea) => /(?:--|\.\.|<\||\*--|o--|<\|--|--\|>|<\.\.)/.test(linea))
+        .length;
       if (clases < 3 || clases > 12) return { valido: false, error: 'El modelo de dominio debe contener entre 3 y 12 clases legibles.' };
       if (relaciones < 1) return { valido: false, error: 'El modelo de dominio debe incluir relaciones entre sus clases.' };
     }
