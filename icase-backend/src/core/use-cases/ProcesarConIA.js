@@ -160,10 +160,35 @@ class ProcesarConIA {
           .map(normalizarActor)
           .filter(Boolean))];
         const codigoCasosUso = String(casosUso.codigo_plantuml || '');
-        const actoresDiagramados = [...codigoCasosUso.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s]+))(?:\s+as\s+([\w.]+))?/gim)]
-          .map((match) => ({ nombre: normalizarActor(match[1] || match[2]), alias: match[3] || match[2] }))
+        const actoresDiagramados = [
+          ...codigoCasosUso.matchAll(/^\s*actor\s+(?:"([^"]+)"|:([^:]+):|([^\s\n]+))(?:\s+as\s+([\w.]+))?/gim),
+          ...codigoCasosUso.matchAll(/^\s*:([^:\n]+):\s*(?:as\s+([\w.]+))?/gim)
+        ]
+          .map((match) => {
+            const rawNombre = match[1] || match[2] || match[3] || '';
+            const rawAlias = match[4] || match[2] || match[1] || match[3] || '';
+            return {
+              nombre: normalizarActor(rawNombre),
+              alias: (rawAlias.trim().replace(/^:|:$/g, ''))
+            };
+          })
           .filter((actor) => actor.nombre);
-        const faltantes = actoresRequeridos.filter((actor) => !actoresDiagramados.some(({ nombre }) => nombre === actor || nombre.includes(actor) || actor.includes(nombre)));
+
+        const coincideActor = (actorReq, actorDiag) => {
+          if (!actorReq || !actorDiag) return false;
+          if (actorReq === actorDiag) return true;
+          if (actorReq.includes(actorDiag) || actorDiag.includes(actorReq)) return true;
+          const stopWords = new Set(['de', 'del', 'el', 'la', 'los', 'las', 'en', 'para', 'y', 'e', 'o']);
+          const tReq = actorReq.split(' ').filter(w => !stopWords.has(w));
+          const tDiag = actorDiag.split(' ').filter(w => !stopWords.has(w));
+          if (tReq.length > 0 && tDiag.length > 0) {
+            const matches = tReq.filter(w => tDiag.includes(w));
+            if (matches.length >= Math.min(tReq.length, tDiag.length)) return true;
+          }
+          return false;
+        };
+
+        const faltantes = actoresRequeridos.filter((actor) => !actoresDiagramados.some(({ nombre }) => coincideActor(actor, nombre)));
         if (faltantes.length) {
           throw new Error(`El diagrama de casos de uso omitió actores definidos en los requisitos aprobados: ${faltantes.join(', ')}. Reintenta la generación para obtener trazabilidad completa.`);
         }
@@ -171,8 +196,8 @@ class ProcesarConIA {
           .filter(({ alias }) => {
             const aliasEscapado = String(alias || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             if (!aliasEscapado) return true;
-            return !new RegExp(`^\\s*${aliasEscapado}\\s*(?:--+|\\.\\.+|<[-.]+|[-.]+>)`, 'im').test(codigoCasosUso) &&
-              !new RegExp(`(?:--+|\\.\\.+|<[-.]+|[-.]+>)\\s*${aliasEscapado}\\s*$`, 'im').test(codigoCasosUso);
+            return !new RegExp(`(?:^|\\s)${aliasEscapado}\\s*(?:--+|\\.\\.+|<[-.]+|[-.]+>)`, 'im').test(codigoCasosUso) &&
+              !new RegExp(`(?:--+|\\.\\.+|<[-.]+|[-.]+>)\\s*${aliasEscapado}(?:\\s|$)`, 'im').test(codigoCasosUso);
           })
           .map(({ nombre }) => nombre);
         if (actoresSinRelacion.length) {
@@ -242,7 +267,9 @@ class ProcesarConIA {
         // Normalizar el tipo de diagrama
         let tipo = String(diagData.tipo || DiagramTypes.CASOS_DE_USO).toLowerCase().replace(/-/g, '_');
         if (!TIPOS_VALIDOS.includes(tipo)) {
-          if (tipo.includes('caso') || tipo.includes('use')) tipo = DiagramTypes.CASOS_DE_USO;
+          if (tipo.includes('diseno')) tipo = DiagramTypes.CLASES_DISENO;
+          else if (tipo.includes('caso') || tipo.includes('use')) tipo = DiagramTypes.CASOS_DE_USO;
+          else if (tipo.includes('dominio')) tipo = DiagramTypes.CLASES_DOMINIO;
           else if (tipo.includes('clase') || tipo.includes('class')) tipo = DiagramTypes.CLASES;
           else if (tipo.includes('sistema') || tipo.includes('system') || tipo.includes('infra') || tipo.includes('deploy')) tipo = DiagramTypes.ARQUITECTURA_SISTEMA;
           else if (tipo.includes('software') || (tipo.includes('arqui') && !tipo.includes('sistema'))) tipo = DiagramTypes.ARQUITECTURA_SOFTWARE;

@@ -1,11 +1,13 @@
 const ArquitecturaSoftwareValidatorService = require('./ArquitecturaSoftwareValidatorService');
 const ArquitecturaSistemaValidatorService = require('./ArquitecturaSistemaValidatorService');
+const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const { DiagramTypes } = require('../../core/constants/DiagramTypes');
 
 class PlantUMLValidatorService {
   constructor() {
     this.softwareValidator = new ArquitecturaSoftwareValidatorService();
     this.sistemaValidator = new ArquitecturaSistemaValidatorService();
+    this.disenoValidator = new ClasesDisenoValidatorService();
   }
 
   validar(codigo, options = {}) {
@@ -66,6 +68,11 @@ class PlantUMLValidatorService {
       if (aperturas !== cierres) return { valido: false, error: 'El diagrama contiene bloques con llaves desbalanceadas.' };
     }
 
+    if (tipoNormalizado === 'clases_diseno' || tipoNormalizado.includes('diseno')) {
+      const res = this.disenoValidator.validar(codigo, tipo);
+      return { valido: res.valido, error: res.error || null, detalles: res };
+    }
+
     if (tipoNormalizado.includes('caso')) {
       const actores = (trimmed.match(/^\s*actor\s+/gim) || []).length;
       const casos = (trimmed.match(/^\s*usecase\s+/gim) || []).length;
@@ -87,8 +94,11 @@ class PlantUMLValidatorService {
 
     if (tipoNormalizado.includes('clase')) {
       const clases = (trimmed.match(/^\s*(?:abstract\s+)?class\s+/gim) || []).length;
-      const relaciones = (trimmed.match(/^\s*[A-Za-z_][\w.]*\s+"[^"]+"\s+[^\n]+\s+"[^"]+"\s+[A-Za-z_][\w.]*/gim) || []).length +
-        (trimmed.match(/^\s*[A-Za-z_][\w.]*\s+(?:--|\.\.|<\||\*--|o--)[^\n]+/gim) || []).length;
+      const relaciones = trimmed
+        .split(/\r?\n/)
+        .filter((linea) => /^\s*[A-Za-z_][\w.]*\s+/.test(linea))
+        .filter((linea) => /(?:--|\.\.|<\||\*--|o--|<\|--|--\|>|<\.\.)/.test(linea))
+        .length;
       if (clases < 3 || clases > 12) return { valido: false, error: 'El modelo de dominio debe contener entre 3 y 12 clases legibles.' };
       if (relaciones < 1) return { valido: false, error: 'El modelo de dominio debe incluir relaciones entre sus clases.' };
     }

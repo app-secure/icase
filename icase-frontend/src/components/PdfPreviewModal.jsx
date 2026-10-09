@@ -65,9 +65,10 @@ export default function PdfPreviewModal({ project, onClose }) {
         const softDiag = project.diagrams?.softwareArchitecture || project.diagrams?.architecture;
         const sysDiag = project.diagrams?.systemArchitecture;
 
-        const [useCaseImg, classImg, navImg, softImg, sysImg] = await Promise.all([
+        const [useCaseImg, classImg, designClassImg, navImg, softImg, sysImg] = await Promise.all([
           fetchPngDataUrl(project.diagrams?.useCase?.plantumlCode || project.diagrams?.useCase?.code),
           fetchPngDataUrl(project.diagrams?.classDiagram?.plantumlCode || project.diagrams?.classDiagram?.code),
+          fetchPngDataUrl(project.diagrams?.designClasses?.plantumlCode || project.diagrams?.designClasses?.code),
           fetchPngDataUrl(project.diagrams?.navigationTree?.plantumlCode || project.diagrams?.navigationTree?.code),
           fetchPngDataUrl(softDiag?.plantumlCode || softDiag?.code),
           fetchPngDataUrl(sysDiag?.plantumlCode || sysDiag?.code)
@@ -605,34 +606,45 @@ export default function PdfPreviewModal({ project, onClose }) {
           );
         }
 
-        // 8.3 Árbol de Navegación del Sistema
+        // 8.3 Clases de Diseño
+        if (designClassImg) {
+          await drawDiagramWithJerarquia(
+            designClassImg,
+            "8.3 Diagrama de Clases de Diseño",
+            "Figura 8.3: Diagrama de Clases de Diseño en Capas",
+            project.diagrams?.designClasses?.description,
+            project.diagrams?.designClasses?.descripcion_jerarquica
+          );
+        }
+
+        // 8.4 Árbol de Navegación del Sistema
         if (navImg) {
           await drawDiagramWithJerarquia(
             navImg,
-            "8.3 Árbol de Navegación",
-            "Figura 8.3: Jerarquía Estructurada de Pantallas y Módulos de Navegación",
+            "8.4 Árbol de Navegación",
+            "Figura 8.4: Jerarquía Estructurada de Pantallas y Módulos de Navegación",
             project.diagrams?.navigationTree?.description,
             project.diagrams?.navigationTree?.descripcion_jerarquica
           );
         }
 
-        // 8.4 Arquitectura de Software
+        // 8.5 Arquitectura de Software
         if (softImg) {
           await drawDiagramWithJerarquia(
             softImg,
-            "8.4 Diagrama de Arquitectura de Software",
-            "Figura 8.4: Arquitectura de Software en Capas (C4 Container)",
+            "8.5 Diagrama de Arquitectura de Software",
+            "Figura 8.5: Arquitectura de Software en Capas (C4 Container)",
             softDiag?.description,
             softDiag?.descripcion_jerarquica
           );
         }
 
-        // 8.5 Arquitectura de Sistema e Infraestructura
+        // 8.6 Arquitectura de Sistema e Infraestructura
         if (sysImg) {
           await drawDiagramWithJerarquia(
             sysImg,
-            "8.5 Diagrama de Arquitectura de Sistema",
-            "Figura 8.5: Arquitectura de Despliegue e Infraestructura (C4 Deployment)",
+            "8.6 Diagrama de Arquitectura de Sistema",
+            "Figura 8.6: Arquitectura de Despliegue e Infraestructura (C4 Deployment)",
             sysDiag?.description,
             sysDiag?.descripcion_jerarquica
           );

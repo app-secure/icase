@@ -191,6 +191,51 @@ RegistroOperativo "1" *-- "1..*" ControlCalidad : valida
 UsuarioSistema "1" -- "*" MetricaConsolidada : emite
 @enduml`;
 
+    case "designClasses":
+      return `@startuml
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+
+package "Módulo Autenticación y Usuarios" {
+  class UsuarioController <<Controller>> {
+    +registrar(dto: CrearUsuarioDTO): UsuarioResponseDTO
+  }
+  class RegistrarUsuarioUseCase <<UseCase>> {
+    +ejecutar(dto: CrearUsuarioDTO): UsuarioResponseDTO
+  }
+  interface IUsuarioRepository <<Repository>> {
+    +guardar(usuario: Usuario): Promise<void>
+    +obtenerPorId(id: String): Promise<Usuario>
+  }
+  class MongoUsuarioRepository <<Repository>> {
+    +guardar(usuario: Usuario): Promise<void>
+    +obtenerPorId(id: String): Promise<Usuario>
+  }
+  class Usuario <<Entity>> {
+    -id: String
+    -email: String
+    -rol: String
+  }
+  class CrearUsuarioDTO <<DTO>> {
+    +email: String
+    +password: String
+  }
+  class UsuarioResponseDTO <<DTO>> {
+    +id: String
+    +email: String
+  }
+}
+
+UsuarioController ..> RegistrarUsuarioUseCase : invoca
+UsuarioController ..> CrearUsuarioDTO : recibe
+UsuarioController ..> UsuarioResponseDTO : retorna
+RegistrarUsuarioUseCase ..> IUsuarioRepository : requiere
+RegistrarUsuarioUseCase ..> Usuario : gestiona
+MongoUsuarioRepository --|> IUsuarioRepository : implementa
+
+note top of UsuarioController : Trazabilidad Requisito: RF-01 | Origen: casos_de_uso, clases_dominio
+@enduml`;
+
     case "navigationTree":
       return `@startmindmap
 * ${safeName}
@@ -256,6 +301,8 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
     };
 
     const ucDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("caso"));
+    const archDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arqui"));
+    const designClassDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("diseno"));
     const softDiag = (aiResult.diagramas || []).find(d => {
       const t = (d.tipo || "").toLowerCase();
       return t === "arquitectura_software" || t.includes("software") || (t.includes("arqui") && !t.includes("sistema") && !t.includes("system"));
@@ -265,7 +312,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       return t === "arquitectura_sistema" || t.includes("sistema") || t.includes("system") || t.includes("despliegue") || t.includes("deploy");
     });
     const legacyArch = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase() === "arquitectura");
-    const classDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("clase") || (d.tipo || "").toLowerCase().includes("entidad") || (d.tipo || "").toLowerCase().includes("dominio"));
+    const classDiag = (aiResult.diagramas || []).find(d => ((d.tipo || "").toLowerCase().includes("clase") || (d.tipo || "").toLowerCase().includes("entidad") || (d.tipo || "").toLowerCase().includes("dominio")) && !(d.tipo || "").toLowerCase().includes("diseno"));
     const navDiag = (aiResult.diagramas || []).find(d => (d.tipo || "").toLowerCase().includes("arbol") || (d.tipo || "").toLowerCase().includes("nav"));
 
     const extractPuml = (diagObj, typeKey) => {
@@ -279,11 +326,11 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       return sanitizePlantUML(generateDefaultPuml(typeKey, fallbackName));
     };
 
-    const effectiveSoftDiag = softDiag || legacyArch;
+    const effectiveSoftDiag = softDiag || legacyArch || archDiag;
 
     diags = {
       useCase: {
-        id: "diag-uc",
+        id: ucDiag?.id || ucDiag?._id || "diag-uc",
         title: (ucDiag?.titulo || "Diagrama de Casos de Uso").replace(/\s*\([^)]*\)/g, '').trim(),
         type: "casos_uso",
         code: extractPuml(ucDiag, "useCase"),
@@ -330,7 +377,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
         trazabilidad_rnf: Array.isArray(effectiveSoftDiag?.trazabilidad_rnf) ? effectiveSoftDiag.trazabilidad_rnf : []
       },
       classDiagram: {
-        id: "diag-class",
+        id: classDiag?.id || classDiag?._id || "diag-class",
         title: (classDiag?.titulo || "Diagrama de Clases del Dominio").replace(/\s*\([^)]*\)/g, '').trim(),
         type: "clases",
         code: extractPuml(classDiag, "classDiagram"),
@@ -340,8 +387,19 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
           ? classDiag.descripcion_jerarquica
           : []
       },
+      designClasses: {
+        id: designClassDiag?.id || designClassDiag?._id || "diag-design-class",
+        title: (designClassDiag?.titulo || "Diagrama de Clases de Diseño").replace(/\s*\([^)]*\)/g, '').trim(),
+        type: "clases_diseno",
+        code: extractPuml(designClassDiag, "designClasses"),
+        plantumlCode: extractPuml(designClassDiag, "designClasses"),
+        description: designClassDiag?.descripcion || "",
+        descripcion_jerarquica: Array.isArray(designClassDiag?.descripcion_jerarquica) && designClassDiag.descripcion_jerarquica.length > 0
+          ? designClassDiag.descripcion_jerarquica
+          : []
+      },
       navigationTree: {
-        id: "diag-nav",
+        id: navDiag?.id || navDiag?._id || "diag-nav",
         title: (navDiag?.titulo || "Árbol de Navegación del Sistema").replace(/\s*\([^)]*\)/g, '').trim(),
         type: "navegacion",
         code: extractPuml(navDiag, "navigationTree"),
@@ -810,6 +868,14 @@ export default function ProjectWorkspace({
 `,
             description: "Entidades del modelo de datos con tipado y relaciones."
           },
+          designClasses: {
+            id: "diag-design-class",
+            title: "Diagrama de Clases de Diseño (PlantUML)",
+            type: "clases_diseno",
+            plantumlCode: generateDefaultPuml("designClasses", updatedName),
+            code: generateDefaultPuml("designClasses", updatedName),
+            description: "Estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades y DTOs."
+          },
           navigationTree: {
             id: "diag-nav",
             title: "Árbol de Navegación del Sistema",
@@ -1049,6 +1115,7 @@ export default function ProjectWorkspace({
         systemArchitecture: "arquitectura_sistema",
         architecture: "arquitectura_software",
         classDiagram: "clases",
+        designClasses: "clases_diseno",
         navigationTree: "arbol_navegacion"
       };
       const targetType = diagTitleMap[diagKey] || diagKey || "diagramas";

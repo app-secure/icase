@@ -403,10 +403,26 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             {renderDiagramExplanation(project.diagrams?.classDiagram, "Diagrama de Clases de Dominio")}
           </div>
 
-          {/* 8.3 Árbol de Navegación */}
+          {/* 8.3 Clases de Diseño */}
           <div className="space-y-3 pt-2">
             <h3 className="text-sm font-bold text-slate-800">
-              8.3 Árbol de Navegación
+              8.3 Diagrama de Clases de Diseño
+            </h3>
+            <p className="text-sm text-slate-700 leading-relaxed">
+              {project.diagrams?.designClasses?.description || "Define la estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades de dominio y DTOs."}
+            </p>
+            <StaticDiagram
+              code={project.diagrams?.designClasses?.code}
+              plantumlCode={project.diagrams?.designClasses?.plantumlCode}
+              caption="Figura 8.3: Diagrama de Clases de Diseño en Capas"
+            />
+            {renderDiagramExplanation(project.diagrams?.designClasses, "Diagrama de Clases de Diseño")}
+          </div>
+
+          {/* 8.4 Árbol de Navegación */}
+          <div className="space-y-3 pt-2">
+            <h3 className="text-sm font-bold text-slate-800">
+              8.4 Árbol de Navegación
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.navigationTree?.description || "Mapa de pantallas y rutas de navegación de la solución, desde el portal de acceso y el panel principal hasta las vistas de cada módulo."}
@@ -414,15 +430,15 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             <StaticDiagram
               code={project.diagrams?.navigationTree?.code}
               plantumlCode={project.diagrams?.navigationTree?.plantumlCode}
-              caption="Figura 8.3: Árbol de Navegación del Sistema"
+              caption="Figura 8.4: Árbol de Navegación del Sistema"
             />
             {renderDiagramExplanation(project.diagrams?.navigationTree, "Árbol de Navegación")}
           </div>
 
-          {/* 8.4 Arquitectura de Software */}
+          {/* 8.5 Arquitectura del Sistema */}
           <div className="space-y-3 pt-2">
             <h3 className="text-sm font-bold text-slate-800">
-              8.4 Diagrama de Arquitectura de Software
+              8.5 Diagrama de Arquitectura
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
               {project.diagrams?.softwareArchitecture?.description || project.diagrams?.architecture?.description || "Modelo de arquitectura de software en contenedores C4 adaptado a los requerimientos funcionales y no funcionales del sistema."}
@@ -430,16 +446,16 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             <StaticDiagram
               code={project.diagrams?.softwareArchitecture?.code || project.diagrams?.architecture?.code}
               plantumlCode={project.diagrams?.softwareArchitecture?.plantumlCode || project.diagrams?.architecture?.plantumlCode}
-              caption="Figura 8.4: Diagrama de Arquitectura de Software (C4 Container)"
+              caption="Figura 8.5: Diagrama de Arquitectura de Software (C4 Container)"
             />
             {renderDiagramExplanation(project.diagrams?.softwareArchitecture || project.diagrams?.architecture, "Arquitectura de Software")}
           </div>
 
-          {/* 8.5 Arquitectura de Sistema e Infraestructura */}
+          {/* 8.6 Arquitectura de Sistema e Infraestructura */}
           {project.diagrams?.systemArchitecture && (
             <div className="space-y-3 pt-2">
               <h3 className="text-sm font-bold text-slate-800">
-                8.5 Diagrama de Arquitectura de Sistema e Infraestructura
+                8.6 Diagrama de Arquitectura de Sistema e Infraestructura
               </h3>
               <p className="text-sm text-slate-700 leading-relaxed">
                 {project.diagrams?.systemArchitecture?.description || "Topología de despliegue, servidores, nodos y observabilidad dimensionados según las necesidades operativas."}
@@ -447,7 +463,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               <StaticDiagram
                 code={project.diagrams?.systemArchitecture?.code}
                 plantumlCode={project.diagrams?.systemArchitecture?.plantumlCode}
-                caption="Figura 8.5: Diagrama de Arquitectura de Sistema (C4 Deployment)"
+                caption="Figura 8.6: Diagrama de Arquitectura de Sistema (C4 Deployment)"
               />
               {renderDiagramExplanation(project.diagrams?.systemArchitecture, "Arquitectura de Sistema")}
             </div>
