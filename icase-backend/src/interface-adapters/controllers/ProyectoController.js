@@ -1,4 +1,5 @@
 const { DiagramWorkflowService } = require('../../core/services/DiagramWorkflowService');
+const { normalizeDiagramType, isValidDiagramType } = require('../../core/constants/DiagramTypes');
 
 class ProyectoController {
   constructor({
@@ -11,7 +12,8 @@ class ProyectoController {
     fuenteRepository,
     casoDeUsoRepository,
     disenoRepository,
-    markdownCompilerService
+    markdownCompilerService,
+    trabajoGeneracionRepository
   }) {
     this.crearProyectoUseCase = crearProyectoUseCase;
     this.procesarConIAUseCase = procesarConIAUseCase;
@@ -23,6 +25,7 @@ class ProyectoController {
     this.casoDeUsoRepository = casoDeUsoRepository;
     this.disenoRepository = disenoRepository;
     this.markdownCompilerService = markdownCompilerService;
+    this.trabajoGeneracionRepository = trabajoGeneracionRepository;
     this.diagramWorkflowService = new DiagramWorkflowService();
   }
 
@@ -182,6 +185,117 @@ class ProyectoController {
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
+  }
+
+  async iniciarTrabajoDiagrama(req, res) {
+    try {
+      const tipoDiagrama = normalizeDiagramType(req.body.tipo_diagrama);
+      if (!isValidDiagramType(tipoDiagrama)) {
+        return res.status(400).json({ error: 'tipo_diagrama no es válido' });
+      }
+      const payload = {
+        proyectoId: req.params.id,
+        tipoDiagrama,
+        insumoBruto: req.body.insumo_bruto || '',
+        insumoAdicional: req.body.insumo_adicional || '',
+        provider: req.body.provider || req.body.modelo || req.body.proveedor || 'auto',
+        specificModel: req.body.specificModel || null
+      };
+      const resultado = await this.trabajoGeneracionRepository.crearORecuperarActivoDiagrama(payload);
+      if (resultado.creado) void this._ejecutarTrabajoDiagrama(resultado.trabajo.id, payload);
+      res.status(resultado.creado ? 202 : 200).json({
+        trabajo: resultado.trabajo,
+        reutilizado: !resultado.creado,
+        reanudado: Boolean(resultado.reanudado)
+      });
+    } catch (err) {
+      console.error('[ProyectoController] Error iniciando trabajo de diagrama:', err);
+      res.status(400).json({ error: err.message });
+    }
+  }
+
+  async _respuestaTrabajoDiagrama(trabajo) {
+    const response = { trabajo };
+    if (trabajo?.estado !== 'completado') return response;
+    const [proyecto, requerimientos, diagramas] = await Promise.all([
+      this.proyectoRepository.obtenerPorId(trabajo.proyecto_id),
+      this.requerimientoRepository.listarPorProyecto(trabajo.proyecto_id),
+      this.diagramaRepository.listarPorProyecto(trabajo.proyecto_id)
+    ]);
+    response.resultado = {
+      ...(proyecto || {}),
+      proyecto_id: trabajo.proyecto_id,
+      requerimientos,
+      diagramas,
+      flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved: true, diagrams }),
+      cache_hit: Boolean(trabajo.cache_hit)
+    };
+    return response;
+  }
+
+  async obtenerTrabajoDiagrama(req, res) {
+    try {
+      const trabajo = await this.trabajoGeneracionRepository.obtenerPorId(req.params.trabajoId);
+      if (!trabajo || trabajo.tipo !== 'diagrama') return res.status(404).json({ error: 'Trabajo no encontrado' });
+      res.json(await this._respuestaTrabajoDiagrama(trabajo));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  async obtenerUltimoTrabajoDiagrama(req, res) {
+    try {
+      const tipo = req.query.tipo_diagrama ? normalizeDiagramType(req.query.tipo_diagrama) : null;
+      const trabajo = await this.trabajoGeneracionRepository.obtenerUltimoDiagramaPorProyecto(req.params.id, tipo);
+      if (!trabajo) return res.json({ trabajo: null });
+      res.json(await this._respuestaTrabajoDiagrama(trabajo));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+
+  async _ejecutarTrabajoDiagrama(trabajoId, payload) {
+    const heartbeat = setInterval(() => {
+      this.trabajoGeneracionRepository.actualizar(trabajoId, {
+        estado: 'procesando', mensaje: 'La IA continúa generando el diagrama'
+      }).catch(() => {});
+    }, 30000);
+    heartbeat.unref?.();
+    try {
+      await this.trabajoGeneracionRepository.actualizar(trabajoId, {
+        estado: 'procesando', progreso: 10, mensaje: 'Generando diagrama con IA'
+      });
+      const resultado = await this.procesarConIAUseCase.ejecutar({
+        proyectoId: payload.proyectoId,
+        insumoBrutoInput: payload.insumoBruto,
+        insumoAdicional: payload.insumoAdicional,
+        provider: payload.provider,
+        specificModel: payload.specificModel,
+        objetivo: 'diagramas',
+        tipoDiagrama: payload.tipoDiagrama
+      });
+      await this.trabajoGeneracionRepository.actualizar(trabajoId, {
+        estado: 'completado', progreso: 100, mensaje: 'Diagrama generado correctamente',
+        proveedor_usado: resultado?.proveedorUsado || resultado?.proveedor_usado || null,
+        total_generados: 1, cache_hit: Boolean(resultado?.cache_hit), error: null
+      }, true);
+    } catch (err) {
+      console.error(`[ProyectoController] Trabajo de diagrama ${trabajoId} falló:`, err);
+      await this.trabajoGeneracionRepository.actualizar(trabajoId, {
+        estado: 'fallido', progreso: 100, mensaje: 'La generación del diagrama falló', error: err.message
+      }, true);
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
+
+  async reanudarTrabajosDiagrama() {
+    const trabajos = await this.trabajoGeneracionRepository.reclamarDiagramasExpirados();
+    for (const trabajo of trabajos) {
+      const payload = await this.trabajoGeneracionRepository.obtenerPayloadDiagrama(trabajo.id);
+      if (payload) void this._ejecutarTrabajoDiagrama(trabajo.id, payload);
+    }
+    return trabajos.length;
   }
 
   async obtenerFlujoDiagramas(req, res) {

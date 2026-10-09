@@ -37,7 +37,8 @@ export default function DiagramsView({
   projectId,
   requirements = null,
   diagramFlow = null,
-  isGeneratingDiagram = false
+  isGeneratingDiagram = false,
+  diagramJob = null
 }) {
   const [selectedKey, setSelectedKey] = useState(isDiagramsApproved ? "mockups" : "useCase");
   const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
@@ -238,6 +239,13 @@ export default function DiagramsView({
       setCorrectionFeedback({ type: "error", message: result.error });
       return;
     }
+    if (result?.pending) {
+      setCorrectionFeedback({
+        type: "success",
+        message: "Generación iniciada en segundo plano. Puedes cambiar de pestaña o recargar; el avance se conservará."
+      });
+      return;
+    }
     setShowVersionHistory(false);
     setVersionHistory(null);
     setCorrectionFeedback({
@@ -331,6 +339,13 @@ export default function DiagramsView({
               ← Volver a Requerimientos
             </button>
           </div>
+
+          {diagramJob && ['encolado', 'procesando', 'fallido'].includes(diagramJob.estado) && (
+            <div className={`mb-3 rounded-lg border px-3 py-2 text-xs flex items-center justify-between gap-3 ${diagramJob.estado === 'fallido' ? 'border-red-200 bg-red-50 text-red-700' : 'border-violet-200 bg-violet-50 text-violet-800'}`}>
+              <span>{diagramJob.mensaje || 'Generando diagrama en segundo plano'}{diagramJob.tipo_diagrama ? ` · ${diagramJob.tipo_diagrama.replaceAll('_', ' ')}` : ''}</span>
+              <span className="font-semibold shrink-0">{diagramJob.progreso || 0}%</span>
+            </div>
+          )}
 
           {/* Fila Superior: Tabs de navegación (Casos de Uso, Arquitectura, Clases, Árbol de Navegación, Mockups) */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">

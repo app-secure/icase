@@ -126,7 +126,8 @@ function createApp() {
     fuenteRepository: fuenteRepo,
     casoDeUsoRepository: casoDeUsoRepo,
     disenoRepository: disenoRepo,
-    markdownCompilerService: markdownCompiler
+    markdownCompilerService: markdownCompiler,
+    trabajoGeneracionRepository: trabajoGeneracionRepo
   });
 
   const requerimientoController = new RequerimientoController({
@@ -179,7 +180,8 @@ function createApp() {
 
   return {
     app,
-    estandarRepo
+    estandarRepo,
+    reanudarTrabajosDiagrama: () => proyectoController.reanudarTrabajosDiagrama()
   };
 }
 

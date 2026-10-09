@@ -287,6 +287,31 @@ export async function approvePhaseApi(projectId, fase) {
   return await res.json();
 }
 
+export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ tipo_diagrama: diagramType, insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional, provider, specificModel })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo iniciar la generación del diagrama.');
+  return data;
+}
+
+export async function fetchDiagramJobApi(jobId) {
+  const res = await fetch(`${API_URL}/proyectos/trabajos-diagramas/${jobId}`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar la generación del diagrama.');
+  return data;
+}
+
+export async function fetchLatestDiagramJobApi(projectId) {
+  const res = await fetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo recuperar la generación del diagrama.');
+  return data;
+}
+
 export async function approveDiagramApi(projectId, diagramType, observaciones = '') {
   const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
     method: 'POST',

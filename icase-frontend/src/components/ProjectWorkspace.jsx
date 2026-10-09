@@ -12,6 +12,9 @@ import {
   deleteFuenteApi,
   fetchFuentesApi,
   processWithAiApi,
+  startDiagramJobApi,
+  fetchDiagramJobApi,
+  fetchLatestDiagramJobApi,
   approvePhaseApi,
   approveDiagramApi,
   rejectDiagramApi,
@@ -340,9 +343,50 @@ export default function ProjectWorkspace({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGeneratingDiagrams, setIsGeneratingDiagrams] = useState(false);
+  const [diagramJob, setDiagramJob] = useState(null);
+  const handledDiagramJobs = React.useRef(new Set());
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
   const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(project.currentPhase >= 2);
+
+  const applyDiagramJobResponse = React.useCallback((response) => {
+    const job = response?.trabajo;
+    if (!job) return;
+    setDiagramJob(job);
+    setIsGeneratingDiagrams(['encolado', 'procesando'].includes(job.estado));
+    if (job.estado === 'completado' && response.resultado && !handledDiagramJobs.current.has(job.id)) {
+      handledDiagramJobs.current.add(job.id);
+      const current = project;
+      const { diags } = transformAiOutput(response.resultado, current.name, current.diagrams || {});
+      onUpdateProject({
+        ...current,
+        isAnalysisApproved: true,
+        diagrams: diags,
+        diagramFlow: response.resultado.flujoDiagramas || current.diagramFlow,
+        currentPhase: 2
+      });
+    }
+  }, [onUpdateProject, project]);
+
+  React.useEffect(() => {
+    const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
+    if (!backendId) return undefined;
+    let cancelled = false;
+    fetchLatestDiagramJobApi(backendId)
+      .then((response) => { if (!cancelled) applyDiagramJobResponse(response); })
+      .catch((error) => console.warn('[Workspace] No se pudo recuperar el trabajo de diagrama:', error.message));
+    return () => { cancelled = true; };
+  }, [project.backendId, project.id, applyDiagramJobResponse]);
+
+  React.useEffect(() => {
+    if (!diagramJob?.id || !['encolado', 'procesando'].includes(diagramJob.estado)) return undefined;
+    const timer = setInterval(() => {
+      fetchDiagramJobApi(diagramJob.id)
+        .then(applyDiagramJobResponse)
+        .catch((error) => console.warn('[Workspace] Error consultando trabajo de diagrama:', error.message));
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [diagramJob?.id, diagramJob?.estado, applyDiagramJobResponse]);
 
   React.useEffect(() => {
     fetchAiModelsApi()
@@ -830,26 +874,21 @@ export default function ProjectWorkspace({
       if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de generar los diagramas.");
       await approvePhaseApi(backendId, "analisis");
       approvalCompleted = true;
-      const aiResult = await processWithAiApi(backendId, '', '', selectedAiProvider || 'auto', null, 'diagramas', DIAGRAM_TYPES.USE_CASES);
-      const { diags } = transformAiOutput(aiResult, project.name, {});
-      if (!diags?.useCase) {
-        throw new Error("La generación no devolvió el diagrama de casos de uso.");
-      }
+      const jobResponse = await startDiagramJobApi(backendId, DIAGRAM_TYPES.USE_CASES, '', '', selectedAiProvider || 'auto');
+      applyDiagramJobResponse(jobResponse);
       onUpdateProject({
         ...project,
         isAnalysisApproved: true,
         currentPhase: 2,
-        diagrams: diags,
-        diagramFlow: aiResult.flujoDiagramas || null
+        diagrams: project.diagrams || {}
       });
-      return { success: true };
+      return { success: true, pending: true, job: jobResponse.trabajo };
     } catch (e) {
+      setIsGeneratingDiagrams(false);
       console.warn("[Workspace] Error generando diagramas después de aprobar requisitos:", e);
       onUpdateProject({ ...project, isAnalysisApproved: approvalCompleted, currentPhase: 1, diagrams: {} });
       alert(`${approvalCompleted ? "Los requisitos fueron aprobados, pero no se pudieron generar los diagramas." : "No se pudieron aprobar los requisitos."} Puedes reintentar desde esta pantalla.\n\n${e.message}`);
       return { success: false, error: e.message };
-    } finally {
-      setIsGeneratingDiagrams(false);
     }
   };
 
@@ -858,34 +897,24 @@ export default function ProjectWorkspace({
     if (!backendId) return { success: false, error: "Proyecto no persistido" };
     setIsGeneratingDiagrams(true);
     try {
-      const aiResult = await processWithAiApi(
+      const response = await startDiagramJobApi(
         backendId,
+        diagramType,
         '',
         '',
         selectedAiProvider || 'auto',
-        null,
-        'diagramas',
-        diagramType
+        null
       );
-      const { diags } = transformAiOutput(aiResult, project.name, project.diagrams || {});
-      const key = DIAGRAM_KEY_BY_TYPE[diagramType];
-      if (!key || !diags?.[key]) throw new Error(`No se recibió el diagrama ${diagramType}.`);
-      onUpdateProject({
-        ...project,
-        diagrams: diags,
-        diagramFlow: aiResult.flujoDiagramas || project.diagramFlow,
-        currentPhase: 2
-      });
+      applyDiagramJobResponse(response);
       return {
         success: true,
-        flow: aiResult.flujoDiagramas,
-        diagramKey: key,
-        cacheHit: Boolean(aiResult.cache_hit)
+        pending: ['encolado', 'procesando'].includes(response.trabajo?.estado),
+        job: response.trabajo,
+        diagramKey: DIAGRAM_KEY_BY_TYPE[diagramType]
       };
     } catch (error) {
-      return { success: false, error: error.message };
-    } finally {
       setIsGeneratingDiagrams(false);
+      return { success: false, error: error.message };
     }
   };
 
@@ -1105,6 +1134,7 @@ export default function ProjectWorkspace({
     }
 
     let insumoAdicional = "";
+    let targetType = null;
     if (phase === "diagrams") {
       const diagTitleMap = {
         useCase: DIAGRAM_TYPES.USE_CASES,
@@ -1114,7 +1144,7 @@ export default function ProjectWorkspace({
         designClassDiagram: DIAGRAM_TYPES.DESIGN_CLASSES,
         navigationTree: DIAGRAM_TYPES.NAVIGATION_TREE
       };
-      const targetType = diagTitleMap[diagKey] || diagKey || "diagramas";
+      targetType = diagTitleMap[diagKey] || diagKey || DIAGRAM_TYPES.USE_CASES;
       const curDiag = diagKey && project.diagrams?.[diagKey];
       const curPuml = curDiag ? (curDiag.plantumlCode || curDiag.code || "") : "";
 
@@ -1127,6 +1157,18 @@ export default function ProjectWorkspace({
 
     if (backendId) {
       try {
+        if (phase === "diagrams") {
+          setIsGeneratingDiagrams(true);
+          const response = await startDiagramJobApi(
+            backendId,
+            targetType,
+            insumoBruto,
+            insumoAdicional,
+            selectedAiProvider || 'auto'
+          );
+          applyDiagramJobResponse(response);
+          return { success: true, pending: true, job: response.trabajo };
+        }
         const objetivo = phase === "diagrams" ? "diagramas" : "requisitos";
         const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo, phase === "diagrams" ? targetType : null);
         if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
@@ -1162,6 +1204,7 @@ export default function ProjectWorkspace({
           };
         }
       } catch (err) {
+        if (phase === "diagrams") setIsGeneratingDiagrams(false);
         console.error("[Workspace] Error en corrección agéntica:", err);
         return {
           success: false,
@@ -1365,6 +1408,7 @@ export default function ProjectWorkspace({
             isDiagramsApproved={Boolean(project.isDiagramsApproved)}
             diagramFlow={project.diagramFlow}
             isGeneratingDiagram={isGeneratingDiagrams}
+            diagramJob={diagramJob}
             onBackToAnalysis={() => {
               setIsSourcesCollapsed(false);
               onUpdateProject({ ...project, currentPhase: 1 });

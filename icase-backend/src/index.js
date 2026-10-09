@@ -10,10 +10,16 @@ async function start() {
     await mongoose.connect(MONGO_URI);
     console.log(`[MongoDB] Conectado exitosamente a ${MONGO_URI}`);
 
-    const { app, estandarRepo } = createApp();
+    const { app, estandarRepo, reanudarTrabajosDiagrama } = createApp();
 
     // Sembrar estándares obligatorios IEEE 830 y métricas cuantificables si no existen
     await estandarRepo.sembrarSiVacio();
+
+    await reanudarTrabajosDiagrama();
+    const recoveryTimer = setInterval(() => {
+      reanudarTrabajosDiagrama().catch(err => console.error('[Jobs] Error recuperando diagramas:', err.message));
+    }, 30000);
+    recoveryTimer.unref?.();
 
     const server = app.listen(PORT, () => {
       console.log(`[Backend I-CASE] Servidor escuchando en http://localhost:${PORT}`);
