@@ -16,6 +16,9 @@ import {
   approveDiagramApi,
   rejectDiagramApi,
   updateDiagramApi,
+  fetchDiagramVersionsApi,
+  restoreDiagramVersionApi,
+  fetchDiagramWorkflowApi,
   fetchAiModelsApi,
   fetchMockupsApi,
   updateMockupApi,
@@ -294,7 +297,8 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
         validationErrors: source.errores_validacion || source.validationErrors || [],
         validationWarnings: source.advertencias_validacion || source.validationWarnings || [],
         validationMetrics: source.metricas_validacion || source.validationMetrics || {},
-        reviewHistory: source.revisiones || source.reviewHistory || []
+        reviewHistory: source.revisiones || source.reviewHistory || [],
+        restoredFromVersion: source.restaurada_desde_version || source.restoredFromVersion || null
       };
     };
 
@@ -941,6 +945,48 @@ export default function ProjectWorkspace({
     }
   };
 
+  const handleLoadDiagramVersions = async (diagramKey) => {
+    const diagramId = project.diagrams?.[diagramKey]?.id;
+    if (!diagramId) throw new Error("El diagrama todavía no está persistido.");
+    return fetchDiagramVersionsApi(diagramId);
+  };
+
+  const handleRestoreDiagramVersion = async (diagramKey, version) => {
+    const diagram = project.diagrams?.[diagramKey];
+    if (!diagram?.id) return { success: false, error: "El diagrama todavía no está persistido." };
+    try {
+      const restored = await restoreDiagramVersionApi(diagram.id, version);
+      const backendId = project.backendId || project.id;
+      const flow = await fetchDiagramWorkflowApi(backendId);
+      const code = sanitizePlantUML(restored.codigo_plantuml) || restored.codigo_mermaid || "";
+      onUpdateProject({
+        ...project,
+        diagrams: {
+          ...project.diagrams,
+          [diagramKey]: {
+            ...diagram,
+            title: restored.titulo || diagram.title,
+            description: restored.descripcion || "",
+            code,
+            plantumlCode: code,
+            version: Number(restored.version || diagram.version || 1),
+            approved: false,
+            status: restored.estado || "pendiente_revision",
+            restoredFromVersion: restored.restaurada_desde_version || version,
+            qualityStatus: restored.estado_calidad || null,
+            validationErrors: restored.errores_validacion || [],
+            validationWarnings: restored.advertencias_validacion || []
+          }
+        },
+        diagramFlow: flow,
+        isDiagramsApproved: false
+      });
+      return { success: true, diagram: restored, flow };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  };
+
   const handleUpdateSource = async (sourceId, changes) => {
     const source = (project.sources || []).find((item) => item.id === sourceId);
     if (!source) throw new Error("No se encontró la fuente que deseas actualizar.");
@@ -1263,29 +1309,34 @@ export default function ProjectWorkspace({
             diagrams={project.diagrams}
             mockups={project.mockups || []}
             onUpdateMockups={handleUpdateMockups}
-            onUpdateDiagramCode={(key, newCode) => {
-              onUpdateProject({
-                ...project,
-                diagrams: {
-                  ...project.diagrams,
-                  [key]: {
-                    ...project.diagrams[key],
-                    plantumlCode: newCode,
-                    code: newCode
-                  }
-                }
-              });
-
+            onUpdateDiagramCode={async (key, newCode) => {
               const diagId = project.diagrams?.[key]?.id;
               if (diagId && diagId.length === 24) {
-                updateDiagramApi(diagId, {
+                const updated = await updateDiagramApi(diagId, {
                   codigo_plantuml: newCode,
                   codigo_mermaid: newCode
-                }).catch((err) => {
-                  console.warn("[Workspace] Error persistiendo código de diagrama:", err);
                 });
+                if (!updated) return { success: false, error: "No se pudo guardar el diagrama." };
+                onUpdateProject({
+                  ...project,
+                  diagrams: {
+                    ...project.diagrams,
+                    [key]: {
+                      ...project.diagrams[key],
+                      plantumlCode: newCode,
+                      code: newCode,
+                      version: Number(updated.version || project.diagrams[key].version || 1),
+                      approved: false,
+                      status: updated.estado || "pendiente_revision"
+                    }
+                  }
+                });
+                return { success: true, diagram: updated };
               }
+              return { success: false, error: "El diagrama todavía no está persistido." };
             }}
+            onLoadDiagramVersions={handleLoadDiagramVersions}
+            onRestoreDiagramVersion={handleRestoreDiagramVersion}
             onGenerateDiagram={handleGenerateDiagram}
             onApproveDiagram={handleApproveDiagram}
             onRejectDiagram={handleRejectDiagram}

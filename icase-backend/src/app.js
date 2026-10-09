@@ -24,6 +24,7 @@ const CrearProyecto = require('./core/use-cases/CrearProyecto');
 const ProcesarConIA = require('./core/use-cases/ProcesarConIA');
 const ActualizarRequerimientoManual = require('./core/use-cases/ActualizarRequerimientoManual');
 const ActualizarDiagramaManual = require('./core/use-cases/ActualizarDiagramaManual');
+const RestaurarVersionDiagrama = require('./core/use-cases/RestaurarVersionDiagrama');
 const AprobarFase = require('./core/use-cases/AprobarFase');
 const GenerarMockups = require('./core/use-cases/GenerarMockups');
 const ActualizarMockupManual = require('./core/use-cases/ActualizarMockupManual');
@@ -87,6 +88,10 @@ function createApp() {
     plantumlValidatorService: plantumlValidator,
     proyectoRepository: proyectoRepo
   });
+  const restaurarVersionDiagramaUseCase = new RestaurarVersionDiagrama({
+    diagramaRepository: diagramaRepo,
+    actualizarDiagramaManualUseCase
+  });
   const aprobarFaseUseCase = new AprobarFase({
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
@@ -125,6 +130,7 @@ function createApp() {
 
   const diagramaController = new DiagramaController({
     actualizarDiagramaManualUseCase,
+    restaurarVersionDiagramaUseCase,
     plantumlValidatorService: plantumlValidator,
     diagramaRepository: diagramaRepo
   });

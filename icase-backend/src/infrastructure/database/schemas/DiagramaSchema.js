@@ -104,6 +104,22 @@ const DiagramaSchema = new mongoose.Schema({
     }],
     default: []
   },
+  historial_versiones: {
+    type: [{
+      version: { type: Number, required: true },
+      titulo: { type: String, default: '' },
+      descripcion: { type: String, default: '' },
+      codigo_mermaid: { type: String, default: '' },
+      codigo_plantuml: { type: String, default: '' },
+      estado_calidad: { type: String, default: 'advertencia' },
+      guardado_en: { type: Date, default: Date.now }
+    }],
+    default: []
+  },
+  restaurada_desde_version: {
+    type: Number,
+    default: null
+  },
   trazabilidad_rnf: {
     type: [String],
     default: []

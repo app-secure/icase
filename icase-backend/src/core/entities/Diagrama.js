@@ -20,6 +20,8 @@ class Diagrama {
     metricas_validacion = {},
     validado_en = null,
     revisiones = [],
+    historial_versiones = [],
+    restaurada_desde_version = null,
     trazabilidad_rnf = [],
     requisitos_relacionados = [],
     versiones_origen = {},
@@ -49,6 +51,8 @@ class Diagrama {
     this.metricas_validacion = metricas_validacion && typeof metricas_validacion === 'object' ? metricas_validacion : {};
     this.validado_en = validado_en;
     this.revisiones = Array.isArray(revisiones) ? revisiones : [];
+    this.historial_versiones = Array.isArray(historial_versiones) ? historial_versiones : [];
+    this.restaurada_desde_version = restaurada_desde_version;
     this.trazabilidad_rnf = Array.isArray(trazabilidad_rnf) ? trazabilidad_rnf : [trazabilidad_rnf].filter(Boolean);
     this.requisitos_relacionados = Array.isArray(requisitos_relacionados)
       ? requisitos_relacionados

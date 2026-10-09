@@ -68,6 +68,12 @@ El resultado queda persistido en `estado_calidad`, `errores_validacion`, `advert
 
 Una versión pendiente puede aprobarse o rechazarse. Rechazar exige una observación concreta y no habilita los artefactos dependientes. Cada decisión se agrega a `revisiones` con usuario, fecha, versión y comentario. Al regenerar un diagrama rechazado, la última observación se incorpora automáticamente al contexto de la IA para corregirla sin reenviar todos los artefactos ni repetir instrucciones manualmente.
 
+## Historial y restauración
+
+Las versiones generadas por IA y las ediciones manuales forman un único historial lógico. Antes de guardar una edición se conserva una instantánea de título, descripción, código y calidad; se retienen las últimas 20 instantáneas manuales por documento. Restaurar nunca sobrescribe silenciosamente la versión vigente: crea una versión nueva pendiente de revisión, registra `restaurada_desde_version`, retira la aprobación e invalida los diagramas dependientes.
+
+El editor de código utiliza guardado explícito mediante **Guardar versión**. Los cambios locales no crean versiones ni ejecutan solicitudes por cada pulsación de teclado.
+
 ## Formato de intercambio
 
 Todo generador nuevo debe devolver como mínimo:

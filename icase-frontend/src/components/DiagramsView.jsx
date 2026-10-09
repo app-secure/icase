@@ -11,7 +11,9 @@ import {
   Workflow,
   LockKeyhole,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  History,
+  Save
 } from "lucide-react";
 import BrainGearsIcon from "./BrainGearsIcon";
 import PlantUMLViewer from "./PlantUMLViewer";
@@ -23,6 +25,8 @@ export default function DiagramsView({
   mockups = [],
   onUpdateMockups,
   onUpdateDiagramCode,
+  onLoadDiagramVersions,
+  onRestoreDiagramVersion,
   onGenerateDiagram,
   onApproveDiagram,
   onRejectDiagram,
@@ -44,6 +48,11 @@ export default function DiagramsView({
   const [showReviewPanel, setShowReviewPanel] = useState(false);
   const [reviewComment, setReviewComment] = useState("");
   const [isReviewing, setIsReviewing] = useState(false);
+  const [codeDrafts, setCodeDrafts] = useState({});
+  const [isSavingCode, setIsSavingCode] = useState(false);
+  const [versionHistory, setVersionHistory] = useState(null);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [restoringVersion, setRestoringVersion] = useState(null);
 
   const options = [
     { key: "useCase", type: "casos_de_uso", label: "Casos de Uso", icon: GitBranch },
@@ -73,6 +82,11 @@ export default function DiagramsView({
   const qualityInvalid = qualityStatus === "invalido" || validationErrors.length > 0;
   const reviewHistory = currentFlowItem?.diagrama?.revisiones || currentDiagram?.reviewHistory || [];
   const latestRejectedReview = [...reviewHistory].reverse().find((review) => review.decision === "rechazado");
+  const persistedCode = currentDiagram?.plantumlCode || currentDiagram?.code || "";
+  const codeDraft = Object.prototype.hasOwnProperty.call(codeDrafts, selectedKey)
+    ? codeDrafts[selectedKey]
+    : persistedCode;
+  const hasUnsavedCode = codeDraft !== persistedCode;
 
   const activeMockup = mockups[selectedScreen] || mockups[0] || null;
 
@@ -144,8 +158,13 @@ export default function DiagramsView({
     if (selectedKey !== "mockups") {
       const nextType = result?.flow?.siguiente;
       const nextOption = options.find((option) => option.type === nextType);
-      if (nextOption) setSelectedKey(nextOption.key);
-      else if (result?.flow?.todos_aprobados) setSelectedKey("mockups");
+      if (nextOption) {
+        setSelectedKey(nextOption.key);
+        setShowVersionHistory(false);
+      } else if (result?.flow?.todos_aprobados) {
+        setSelectedKey("mockups");
+        setShowVersionHistory(false);
+      }
       setCorrectionFeedback({
         type: "success",
         message: result?.flow?.todos_aprobados
@@ -176,6 +195,53 @@ export default function DiagramsView({
     } finally {
       setIsReviewing(false);
     }
+  };
+
+  const handleSaveCode = async () => {
+    if (!hasUnsavedCode || isSavingCode) return;
+    setIsSavingCode(true);
+    const result = await onUpdateDiagramCode?.(selectedKey, codeDraft);
+    setIsSavingCode(false);
+    if (result?.success !== false) {
+      setCodeDrafts((drafts) => {
+        const next = { ...drafts };
+        delete next[selectedKey];
+        return next;
+      });
+    }
+    setCorrectionFeedback(result?.success === false
+      ? { type: "error", message: result.error || "No se pudo guardar el código." }
+      : { type: "success", message: "Nueva versión guardada. La aprobación anterior fue retirada." });
+  };
+
+  const handleToggleVersionHistory = async () => {
+    const nextVisible = !showVersionHistory;
+    setShowVersionHistory(nextVisible);
+    if (nextVisible && versionHistory?.diagramId !== currentDiagram?.id) {
+      try {
+        const versions = await onLoadDiagramVersions?.(selectedKey);
+        setVersionHistory({ ...versions, diagramId: currentDiagram?.id });
+      } catch (error) {
+        setCorrectionFeedback({ type: "error", message: error.message });
+        setShowVersionHistory(false);
+      }
+    }
+  };
+
+  const handleRestoreVersion = async (version) => {
+    setRestoringVersion(version);
+    const result = await onRestoreDiagramVersion?.(selectedKey, version);
+    setRestoringVersion(null);
+    if (result?.success === false) {
+      setCorrectionFeedback({ type: "error", message: result.error });
+      return;
+    }
+    setShowVersionHistory(false);
+    setVersionHistory(null);
+    setCorrectionFeedback({
+      type: "success",
+      message: `Se restauró la versión ${version} como una nueva versión pendiente de aprobación.`
+    });
   };
 
   // Envío inteligente: enruta la corrección según el artefacto activo
@@ -283,6 +349,7 @@ export default function DiagramsView({
                     onClick={() => {
                       if (isBlocked) return;
                       setSelectedKey(opt.key);
+                      setShowVersionHistory(false);
                       setCorrectionFeedback(null);
                     }}
                     className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
@@ -345,6 +412,11 @@ export default function DiagramsView({
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-700">
                     Versión {currentDiagram.version || currentFlowItem?.diagrama?.version || 1}
                   </span>
+                  {(currentFlowItem?.diagrama?.restaurada_desde_version || currentDiagram.restoredFromVersion) && (
+                    <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700">
+                      Restaurada desde v{currentFlowItem?.diagrama?.restaurada_desde_version || currentDiagram.restoredFromVersion}
+                    </span>
+                  )}
                   {Object.entries(originVersions).map(([type, version]) => (
                     <span key={type} className="rounded-full bg-violet-50 px-2 py-0.5 text-violet-700">
                       {type.replaceAll("_", " ")} · v{version}
@@ -429,11 +501,31 @@ export default function DiagramsView({
               <div className="flex-1 flex flex-col min-h-[460px] bg-slate-50 border border-slate-200 rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] font-mono text-slate-500">PlantUML Source</span>
-                  <span className="text-[11px] text-slate-400">Edición en tiempo real</span>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={handleToggleVersionHistory} className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 hover:border-violet-300">
+                      <History size={12} /> Historial
+                    </button>
+                    <button type="button" onClick={handleSaveCode} disabled={!hasUnsavedCode || isSavingCode} className="flex items-center gap-1 rounded-lg bg-violet-700 px-2 py-1 text-[11px] font-semibold text-white disabled:bg-slate-300">
+                      <Save size={12} /> {isSavingCode ? "Guardando..." : "Guardar versión"}
+                    </button>
+                  </div>
                 </div>
+                {showVersionHistory && (
+                  <div className="mb-3 max-h-40 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2">
+                    <p className="mb-1 text-[11px] font-semibold text-slate-700">Versión actual: {versionHistory?.actual?.version || currentDiagram?.version || 1}</p>
+                    {versionHistory?.historial?.length ? versionHistory.historial.map((entry) => (
+                      <div key={`${entry.version}-${entry.guardado_en}`} className="flex items-center justify-between border-t border-slate-100 py-1.5 text-[11px]">
+                        <span className="text-slate-600">Versión {entry.version} · {entry.guardado_en ? new Date(entry.guardado_en).toLocaleString("es-ES") : "sin fecha"}</span>
+                        <button type="button" disabled={restoringVersion !== null} onClick={() => handleRestoreVersion(entry.version)} className="font-semibold text-violet-700 disabled:text-slate-300">
+                          {restoringVersion === entry.version ? "Restaurando..." : "Restaurar"}
+                        </button>
+                      </div>
+                    )) : <p className="py-2 text-[11px] text-slate-400">Todavía no hay versiones anteriores.</p>}
+                  </div>
+                )}
                 <textarea
-                  value={currentDiagram?.plantumlCode || currentDiagram?.code || ""}
-                  onChange={(e) => onUpdateDiagramCode(selectedKey, e.target.value)}
+                  value={codeDraft}
+                  onChange={(e) => setCodeDrafts((drafts) => ({ ...drafts, [selectedKey]: e.target.value }))}
                   rows={16}
                   className="flex-1 w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-600 resize-none leading-relaxed"
                   spellCheck="false"

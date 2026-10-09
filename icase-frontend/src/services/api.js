@@ -346,6 +346,24 @@ export async function updateDiagramApi(diagramId, data) {
   }
 }
 
+export async function fetchDiagramVersionsApi(diagramId) {
+  const res = await fetch(`${API_URL}/diagramas/${diagramId}/versiones`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al consultar las versiones del diagrama');
+  return data;
+}
+
+export async function restoreDiagramVersionApi(diagramId, version) {
+  const res = await fetch(`${API_URL}/diagramas/${diagramId}/restaurar`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ version })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error al restaurar la versión del diagrama');
+  return data;
+}
+
 // === MOCKUPS ===
 export async function generateMockupsApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null) {
   try {

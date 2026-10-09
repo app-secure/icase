@@ -189,7 +189,8 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         validationErrors: item.errores_validacion || [],
         validationWarnings: item.advertencias_validacion || [],
         validationMetrics: item.metricas_validacion || {},
-        reviewHistory: item.revisiones || []
+        reviewHistory: item.revisiones || [],
+        restoredFromVersion: item.restaurada_desde_version || null
       };
     };
 

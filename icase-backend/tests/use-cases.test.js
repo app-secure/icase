@@ -1,6 +1,7 @@
 const CrearProyecto = require('../src/core/use-cases/CrearProyecto');
 const ActualizarRequerimientoManual = require('../src/core/use-cases/ActualizarRequerimientoManual');
 const ActualizarDiagramaManual = require('../src/core/use-cases/ActualizarDiagramaManual');
+const RestaurarVersionDiagrama = require('../src/core/use-cases/RestaurarVersionDiagrama');
 const AprobarFase = require('../src/core/use-cases/AprobarFase');
 const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
 const ProcesarConIA = require('../src/core/use-cases/ProcesarConIA');
@@ -117,8 +118,46 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     await useCase.ejecutar({ id: 'd1', datos: { descripcion: 'Nueva descripción' } });
 
     expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({ aprobado: false, version: 2 }));
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
+      historial_versiones: [expect.objectContaining({ version: 1 })]
+    }));
     expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d2', expect.objectContaining({ estado: 'desactualizado', desactualizado: true }));
     expect(proyectoRepository.actualizarEstadoFase).toHaveBeenCalledWith('p1', 'diseno_pendiente');
+  });
+
+  test('RestaurarVersionDiagrama recupera una versión anterior como una nueva versión', async () => {
+    const actual = {
+      id: 'd2', proyecto_id: 'p1', tipo: 'casos_de_uso', version: 2,
+      titulo: 'Actual', descripcion: 'Versión actual', codigo_mermaid: 'actual',
+      codigo_plantuml: '@startuml\nactor Actual\n@enduml', historial_versiones: []
+    };
+    const anterior = {
+      id: 'd1', proyecto_id: 'p1', tipo: 'casos_de_uso', version: 1,
+      titulo: 'Anterior', descripcion: 'Versión anterior', codigo_mermaid: 'anterior',
+      codigo_plantuml: '@startuml\nactor Anterior\n@enduml'
+    };
+    const actualizarDiagramaManualUseCase = {
+      ejecutar: jest.fn().mockImplementation(({ id, datos }) => Promise.resolve({ id, ...datos, version: 3 }))
+    };
+    const useCase = new RestaurarVersionDiagrama({
+      diagramaRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue(actual),
+        listarPorProyecto: jest.fn().mockResolvedValue([anterior, actual])
+      },
+      actualizarDiagramaManualUseCase
+    });
+
+    const result = await useCase.ejecutar({ id: 'd2', version: 1 });
+
+    expect(actualizarDiagramaManualUseCase.ejecutar).toHaveBeenCalledWith({
+      id: 'd2',
+      datos: expect.objectContaining({
+        titulo: 'Anterior',
+        codigo_plantuml: anterior.codigo_plantuml,
+        restaurada_desde_version: 1
+      })
+    });
+    expect(result.version).toBe(3);
   });
 
   test('AprobarFase debe cambiar estado y opcionalmente aprobar todos los requerimientos', async () => {

@@ -41,6 +41,19 @@ class ActualizarDiagramaManual {
           advertencias_validacion: validacion?.advertencias || [],
           metricas_validacion: validacion?.metricas || {},
           validado_en: validacion ? new Date() : null,
+          historial_versiones: [
+            ...(Array.isArray(existente.historial_versiones) ? existente.historial_versiones : []),
+            {
+              version: Number(existente.version || 1),
+              titulo: existente.titulo || '',
+              descripcion: existente.descripcion || '',
+              codigo_mermaid: existente.codigo_mermaid || '',
+              codigo_plantuml: existente.codigo_plantuml || '',
+              estado_calidad: existente.estado_calidad || 'advertencia',
+              guardado_en: new Date()
+            }
+          ].slice(-20),
+          restaurada_desde_version: datos.restaurada_desde_version || null,
           version: Number(existente.version || 1) + 1
         }
       : datos;
