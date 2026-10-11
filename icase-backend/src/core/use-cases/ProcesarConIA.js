@@ -21,6 +21,58 @@ function fingerprint(value) {
   return crypto.createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
 }
 
+function normalizarActor(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function asegurarActoresCasosUso(diagramas, requerimientos) {
+  const casosUso = (diagramas || []).find((diagrama) => normalizeDiagramType(diagrama.tipo) === 'casos_de_uso');
+  if (!casosUso?.codigo_plantuml) return diagramas;
+
+  const actoresOriginales = (requerimientos || [])
+    .filter((requisito) => String(requisito.tipo || '').toUpperCase() === 'RF')
+    .flatMap((requisito) => Array.isArray(requisito.actores) ? requisito.actores : [requisito.actores])
+    .flatMap((actor) => String(actor || '').split(/[,;|]/))
+    .map((actor) => actor.trim())
+    .filter(Boolean);
+  const actoresRequeridos = [...new Map(actoresOriginales.map((actor) => [normalizarActor(actor), actor])).entries()]
+    .filter(([normalizado]) => Boolean(normalizado));
+
+  let codigo = String(casosUso.codigo_plantuml);
+  const actoresDiagramados = [...codigo.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s]+))(?:\s+as\s+([\w.]+))?/gim)]
+    .map((match) => normalizarActor(match[1] || match[2]));
+  const faltantes = actoresRequeridos.filter(([actor]) =>
+    !actoresDiagramados.some((existente) => existente === actor || existente.includes(actor) || actor.includes(existente))
+  );
+  if (!faltantes.length) return diagramas;
+
+  const aliasesCasosUso = [...codigo.matchAll(/usecase\s+(?:"[^"]+"\s+as\s+([\w.]+)|([\w.]+)\s+as\s+"[^"]+"|([\w.]+))/gim)]
+    .map((match) => match[1] || match[2] || match[3])
+    .filter(Boolean);
+  let casoObjetivo = aliasesCasosUso[0];
+  let inyeccion = "\n' Actores completados desde requisitos aprobados\n";
+  if (!casoObjetivo) {
+    casoObjetivo = 'UC_Trazabilidad';
+    inyeccion += 'usecase "Interacción con el sistema" as UC_Trazabilidad\n';
+  }
+  faltantes.forEach(([actorNormalizado, actorOriginal], index) => {
+    const alias = `ActorReq_${index + 1}_${actorNormalizado.replace(/\s+/g, '_').slice(0, 24)}`;
+    inyeccion += `actor "${actorOriginal.replace(/"/g, "'")}" as ${alias}\n`;
+    inyeccion += `${alias} --> ${casoObjetivo} : participa\n`;
+  });
+  codigo = codigo.includes('@enduml')
+    ? codigo.replace(/@enduml\s*$/i, `${inyeccion}@enduml`)
+    : `${codigo}${inyeccion}@enduml`;
+  casosUso.codigo_plantuml = codigo;
+  console.warn(`[ProcesarConIA] Se completaron actores omitidos por la IA: ${faltantes.map(([, nombre]) => nombre).join(', ')}`);
+  return diagramas;
+}
+
 class ProcesarConIA {
   constructor({
     proyectoRepository,
@@ -220,6 +272,9 @@ class ProcesarConIA {
     let resultadoIA;
     try {
       resultadoIA = await this.aiOrchestratorService.procesar(payload);
+      if (objetivoNormalizado === 'diagramas' && Array.isArray(resultadoIA?.diagramas)) {
+        resultadoIA.diagramas = asegurarActoresCasosUso(resultadoIA.diagramas, requerimientosAprobados);
+      }
     } finally {
       this.generacionesEnCurso.delete(generationKey);
     }
@@ -239,8 +294,18 @@ class ProcesarConIA {
           : 'La IA no devolvió los cuatro diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
       }
       if (this.plantumlValidatorService) {
+        const rnfsAprobados = requerimientosAprobados.filter((requisito) =>
+          String(requisito.tipo || '').toUpperCase() === 'RNF'
+        );
         const errores = diagramasValidos
-          .map((diagrama) => ({ tipo: diagrama.tipo, resultado: this.plantumlValidatorService.validar(diagrama.codigo_plantuml, diagrama.tipo) }))
+          .map((diagrama) => ({
+            tipo: diagrama.tipo,
+            resultado: this.plantumlValidatorService.validar(diagrama.codigo_plantuml, {
+              tipo: diagrama.tipo,
+              rnfList: rnfsAprobados,
+              trazabilidad_rnf: diagrama.trazabilidad_rnf
+            })
+          }))
           .filter(({ resultado }) => !resultado.valido);
         if (errores.length) {
           const detalle = errores.map(({ tipo, resultado }) => `${tipo}: ${resultado.error}`).join(' | ');
@@ -249,13 +314,7 @@ class ProcesarConIA {
       }
       const casosUso = diagramasValidos.find((diagrama) => String(diagrama.tipo).toLowerCase().includes('caso'));
       if (casosUso) {
-        const normalizarActor = (value) => String(value || '')
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, ' ')
-          .trim();
-        const actoresRequeridos = [...new Set(requerimientosPrevios
+        const actoresRequeridos = [...new Set(requerimientosAprobados
           .filter((requisito) => String(requisito.tipo || '').toUpperCase() === 'RF')
           .flatMap((requisito) => Array.isArray(requisito.actores) ? requisito.actores : [requisito.actores])
           .flatMap((actor) => String(actor || '').split(/[,;|]/))
@@ -263,7 +322,10 @@ class ProcesarConIA {
           .filter(Boolean))];
         const codigoCasosUso = String(casosUso.codigo_plantuml || '');
         const actoresDiagramados = [...codigoCasosUso.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s]+))(?:\s+as\s+([\w.]+))?/gim)]
-          .map((match) => ({ nombre: normalizarActor(match[1] || match[2]), alias: match[3] || match[2] }))
+          .map((match) => ({
+            nombre: normalizarActor(match[1] || match[2]),
+            alias: match[3] || match[2] || `"${match[1]}"`
+          }))
           .filter((actor) => actor.nombre);
         const faltantes = actoresRequeridos.filter((actor) => !actoresDiagramados.some(({ nombre }) => nombre === actor || nombre.includes(actor) || actor.includes(nombre)));
         if (faltantes.length) {
@@ -393,7 +455,7 @@ class ProcesarConIA {
         const validacionCalidad = this.plantumlValidatorService
           ? this.plantumlValidatorService.validar(diagData.codigo_plantuml || diagData.codigo_puml || '', {
             tipo,
-            rnfList: requerimientosPrevios.filter((req) => String(req.tipo || '').toUpperCase() === 'RNF'),
+            rnfList: requerimientosAprobados.filter((req) => String(req.tipo || '').toUpperCase() === 'RNF'),
             trazabilidad_rnf: diagData.trazabilidad_rnf
           })
           : { valido: true, errores: [], advertencias: [], metricas: {} };

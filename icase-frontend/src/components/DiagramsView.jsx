@@ -65,6 +65,33 @@ export default function DiagramsView({
     { key: "mockups", label: "Mockups", icon: Layout }
   ];
 
+  React.useEffect(() => {
+    const keyByType = {
+      casos_de_uso: "useCase",
+      clases_dominio: "classDiagram",
+      arquitectura_software: "architecture",
+      arquitectura_sistema: "systemArchitecture",
+      clases_diseno: "designClassDiagram",
+      arbol_navegacion: "navigationTree"
+    };
+    const jobActive = ["encolado", "procesando"].includes(diagramJob?.estado);
+    const jobKey = jobActive ? keyByType[diagramJob?.tipo_diagrama] : null;
+
+    if (jobKey && selectedKey !== jobKey) {
+      setSelectedKey(jobKey);
+      setShowVersionHistory(false);
+      return;
+    }
+
+    if (selectedKey === "mockups" && !isDiagramsApproved) {
+      const pendingType = diagramFlow?.items?.find(
+        (item) => item.estado !== "bloqueado" && item.estado !== "aprobado"
+      )?.tipo;
+      setSelectedKey(keyByType[diagramFlow?.siguiente] || keyByType[pendingType] || "useCase");
+      setShowVersionHistory(false);
+    }
+  }, [diagramJob?.estado, diagramJob?.tipo_diagrama, diagramFlow, isDiagramsApproved, selectedKey]);
+
   const currentOption = options.find((option) => option.key === selectedKey);
   const currentDiagram = diagrams?.[selectedKey] || null;
   const currentFlowItem = currentOption?.type
@@ -211,6 +238,8 @@ export default function DiagramsView({
         delete next[selectedKey];
         return next;
       });
+      setVersionHistory(null);
+      setShowVersionHistory(false);
     }
     setCorrectionFeedback(result?.success === false
       ? { type: "error", message: result.error || "No se pudo guardar el código." }
@@ -246,11 +275,15 @@ export default function DiagramsView({
       });
       return;
     }
+    const restoredCode = result?.diagram?.codigo_plantuml || result?.diagram?.codigo_mermaid || "";
+    if (restoredCode) {
+      setCodeDrafts((drafts) => ({ ...drafts, [selectedKey]: restoredCode }));
+    }
     setShowVersionHistory(false);
     setVersionHistory(null);
     setCorrectionFeedback({
       type: "success",
-      message: `Se restauró la versión ${version} como una nueva versión pendiente de aprobación.`
+      message: `Se cargó la versión ${version} como borrador. Guarda solo si deseas crear una nueva versión.`
     });
   };
 
@@ -517,8 +550,8 @@ export default function DiagramsView({
             ) : viewMode === "visual" ? (
               <div className="flex-1 flex flex-col relative min-h-0">
                 <PlantUMLViewer
-                  key={selectedKey + (currentDiagram?.plantumlCode || currentDiagram?.code)}
-                  code={currentDiagram.plantumlCode || currentDiagram.code}
+                  key={selectedKey + codeDraft}
+                  code={codeDraft}
                   title={currentDiagram.title}
                   diagramType={selectedKey}
                   hierarchicalDescription={currentDiagram.descripcion_jerarquica}

@@ -1,6 +1,7 @@
 const ClasesDisenoValidatorService = require('../src/infrastructure/services/ClasesDisenoValidatorService');
 const ClasesDisenoSynthesizer = require('../src/infrastructure/services/ClasesDisenoSynthesizer');
 const PlantUMLValidatorService = require('../src/infrastructure/services/PlantUMLValidatorService');
+const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
 const { DIAGRAM_TYPES } = require('../src/core/constants/DiagramTypes');
 
 describe('Módulo de Clases de Diseño (clases_diseno)', () => {
@@ -108,6 +109,25 @@ note top of UsuarioController : Trazabilidad RF-01
       const resultado = validator.validar(sinRepos, 'clases_diseno');
       expect(resultado.valido).toBe(false);
       expect(resultado.error).toContain('repositorios');
+    });
+
+    test('acepta implementaciones con sufijo RepositoryImpl o nombres Repositorio', () => {
+      const codigo = `@startuml
+package "Módulo" {
+  class PedidoController <<Controller>> {}
+  class CrearPedidoUseCase <<UseCase>> {}
+  interface RepositorioPedido <<Repository>> {}
+  class PedidoRepositoryImpl <<Repository>> {}
+  class Pedido <<Entity>> {}
+  class CrearPedidoDTO <<DTO>> {}
+}
+PedidoController ..> CrearPedidoUseCase
+CrearPedidoUseCase ..> RepositorioPedido
+PedidoRepositoryImpl --|> RepositorioPedido
+note top of PedidoController : Trazabilidad RF-01
+@enduml`;
+
+      expect(validator.validar(codigo, 'clases_diseno').valido).toBe(true);
     });
 
     test('rechaza si faltan entidades de dominio', () => {
@@ -307,6 +327,82 @@ note top of UsuarioController : Trazabilidad RF-01 | Origen: casos_de_uso
 
       const res = plantUmlValidator.validar(codigoValido, 'clases_diseno');
       expect(res.valido).toBe(true);
+    });
+
+    test('el prompt dirigido incluye las reglas especializadas de clases de diseño', () => {
+      const service = new ModelosIaService();
+      const prompt = service.construirPrompt({
+        insumo: 'Sistema de pedidos',
+        contextoActualTexto: 'RF-01 Crear pedido',
+        objetivo: 'diagramas',
+        tipoDiagrama: 'clases_diseno'
+      });
+
+      expect(prompt).toContain('IUsuarioRepository');
+      expect(prompt).toContain('MongoUsuarioRepository');
+      expect(prompt).toContain('Data Transfer Objects');
+    });
+
+    test('reemplaza una respuesta incompleta de IA por un diagrama válido trazado desde dependencias aprobadas', () => {
+      const service = new ModelosIaService();
+      const resultado = service.normalizarResultado({
+        nombre_proyecto: 'GourmetFlow',
+        diagramas: [{
+          tipo: 'clases_diseno',
+          codigo_plantuml: '@startuml\nclass PedidoController\nclass CrearPedidoUseCase\nPedidoController --> CrearPedidoUseCase\n@enduml'
+        }]
+      }, 'diagramas', 'clases_diseno', {
+        requerimientos: [{ tipo: 'RF', identificador: 'RF-01', nombre: 'Crear pedido' }],
+        diagramasAprobados: [{
+          tipo: 'clases_dominio',
+          version: 2,
+          codigo_plantuml: '@startuml\nclass Pedido\nclass Comanda\nPedido --> Comanda\n@enduml'
+        }, {
+          tipo: 'arquitectura_software',
+          version: 3,
+          codigo_plantuml: '@startuml\nContainerDb(db, "PostgreSQL")\n@enduml'
+        }, {
+          tipo: 'casos_de_uso',
+          version: 4,
+          codigo_plantuml: '@startuml\nusecase CrearPedido\n@enduml'
+        }]
+      });
+
+      expect(resultado.diagramas).toHaveLength(1);
+      expect(resultado.diagramas[0].codigo_plantuml).toContain('interface IPedidoRepository');
+      expect(resultado.diagramas[0].codigo_plantuml).toContain('class SqlPedidoRepository');
+      expect(resultado.diagramas[0].versiones_origen).toEqual({
+        casos_de_uso: 4,
+        clases_dominio: 2,
+        arquitectura_software: 3
+      });
+      expect(validator.validar(resultado.diagramas[0].codigo_plantuml, 'clases_diseno').valido).toBe(true);
+    });
+
+    test('normaliza entidades HTML, escapes y notas partidas antes de persistir', () => {
+      const service = new ModelosIaService();
+      const codigoCodificado = `@startuml
+&#x20; class PedidoController \\<\\<Controller>> {}
+&#x20; class CrearPedidoUseCase \\<\\<UseCase>> {}
+&#x20; interface IPedidoRepository \\<\\<Repository>> {}
+&#x20; class PedidoRepositoryImpl \\<\\<Repository>> {}
+&#x20; class Pedido \\<\\<Entity>> {}
+&#x20; class CrearPedidoDTO \\<\\<DTO>> {}
+PedidoController ..> CrearPedidoUseCase
+CrearPedidoUseCase ..> IPedidoRepository
+PedidoRepositoryImpl --|> IPedidoRepository
+note top of PedidoController : Trazabilidad: RF-01
+Origen: casos_de_uso, clases_dominio, arquitectura_software
+@enduml`;
+      const resultado = service.normalizarResultado({
+        diagramas: [{ tipo: 'clases_diseno', codigo_plantuml: codigoCodificado }]
+      }, 'diagramas', 'clases_diseno', { requerimientos: [] });
+      const codigo = resultado.diagramas[0].codigo_plantuml;
+
+      expect(codigo).not.toContain('&#x20;');
+      expect(codigo).toContain('<<Controller>>');
+      expect(codigo).toContain('Trazabilidad: RF-01\\nOrigen: casos_de_uso');
+      expect(validator.validar(codigo, 'clases_diseno').valido).toBe(true);
     });
   });
 });

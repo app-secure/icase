@@ -2,8 +2,37 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
+const ClasesDisenoSynthesizer = require('./ClasesDisenoSynthesizer');
+const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const AiModelConfig = require('./AiModelConfig');
 const { normalizeDiagramType, DIAGRAM_DEFINITIONS } = require('../../core/constants/DiagramTypes');
+
+function normalizarCodigoPlantUML(value) {
+  if (!value || typeof value !== 'string') return '';
+  let codigo = value
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, decimal) => String.fromCodePoint(Number.parseInt(decimal, 10)))
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/\\([<>])/g, '$1')
+    .replace(/\\\r?\n/g, '\n');
+
+  if (/^\s*@start(?:uml|wbs|mindmap)\\n/i.test(codigo)) {
+    codigo = codigo.replace(/\\n/g, '\n').replace(/\\t/g, '  ');
+  }
+
+  return codigo.split(/\r?\n/).reduce((lineas, linea) => {
+    if (/^\s*(?:Origen|Trazabilidad)\s*:/i.test(linea) && /^\s*note\s+.+\s*:/i.test(lineas.at(-1) || '')) {
+      lineas[lineas.length - 1] += `\\n${linea.trim()}`;
+    } else {
+      lineas.push(linea);
+    }
+    return lineas;
+  }, []).join('\n').trim();
+}
 
 class ModelosIaService {
   constructor() {
@@ -36,9 +65,17 @@ class ModelosIaService {
   construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo = 'completo', tipoDiagrama = null }) {
     const plantilla = this.leerPrompt('plantilla_orquestador.md');
 
+    const promptsEspecializados = {
+      arquitectura_software: 'disenador_arquitectura_software.md',
+      arquitectura_sistema: 'disenador_arquitectura_sistema.md',
+      clases_diseno: 'disenador_clases_diseno.md'
+    };
     const directivas = [
       this.leerPrompt('analista_ieee830.md'),
       this.leerPrompt('disenador_arquitectura.md'),
+      tipoDiagrama && promptsEspecializados[tipoDiagrama]
+        ? this.leerPrompt(promptsEspecializados[tipoDiagrama])
+        : '',
       this.leerPrompt('auditor_qa.md')
     ].filter(Boolean).join('\n\n');
 
@@ -145,15 +182,20 @@ class ModelosIaService {
     const insumo = payload.insumo_bruto || payload.nombre_proyecto || '';
     const insumoAdicional = payload.insumo_adicional || '';
     const reqsActuales = payload.contexto_proyecto?.requerimientos_actuales || [];
+    const reqsAprobados = payload.contexto_proyecto?.requerimientos_aprobados || [];
     const requestedProvider = (payload.provider || payload.modelo || payload.proveedor || this.provider).toLowerCase();
     const specificModel = payload.specificModel || payload.modelName || null;
     const objetivo = ['requisitos', 'diagramas'].includes(payload.objetivo) ? payload.objetivo : 'completo';
     const tipoDiagrama = payload.tipo_diagrama ? normalizeDiagramType(payload.tipo_diagrama) : null;
 
+    // Durante el modelado, solo los requisitos aprobados constituyen restricciones.
+    // Esto evita que sugerencias o borradores de la IA contaminen los diagramas.
+    const reqsContexto = objetivo === 'diagramas' ? reqsAprobados : reqsActuales;
+
     let contextoActualTexto = '';
-    if (reqsActuales.length > 0) {
+    if (reqsContexto.length > 0) {
       contextoActualTexto = `REQUERIMIENTOS PREVIOS EN EL SISTEMA (fuente obligatoria para la trazabilidad):\n` +
-        reqsActuales.map(r => {
+        reqsContexto.map(r => {
           const actores = Array.isArray(r.actores) ? r.actores.join(', ') : (r.actores || 'Sin actores definidos');
           return [
             `- [${r.identificador}] (${r.tipo}) ${r.nombre}`,
@@ -224,7 +266,11 @@ class ModelosIaService {
       };
     }
 
-    return this.normalizarResultado(respuestaData, objetivo, tipoDiagrama);
+    return this.normalizarResultado(respuestaData, objetivo, tipoDiagrama, {
+      nombreProyecto: payload.nombre_proyecto,
+      requerimientos: reqsContexto,
+      diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || []
+    });
   }
 
   async _ejecutarProveedor(proveedor, prompt, specificModel) {
@@ -538,7 +584,7 @@ class ModelosIaService {
     return cleaned;
   }
 
-  normalizarResultado(data, objetivo = 'completo', tipoDiagrama = null) {
+  normalizarResultado(data, objetivo = 'completo', tipoDiagrama = null, contexto = {}) {
     const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
     const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
     const requerimientos = objetivo === 'diagramas' ? [] : (Array.isArray(data?.requerimientos) ? data.requerimientos : []);
@@ -573,7 +619,61 @@ class ModelosIaService {
           return false;
         };
         const selected = recibidos.find(matchesTarget) || (recibidos.length === 1 ? recibidos[0] : null);
-        diagramas = selected ? [{ ...selected, tipo: tipoDiagrama }] : [];
+        diagramas = selected ? [{
+          ...selected,
+          tipo: tipoDiagrama,
+          codigo_plantuml: normalizarCodigoPlantUML(selected.codigo_plantuml || selected.codigo_puml || '')
+        }] : [];
+
+        // La generación secuencial antes omitía el normalizador global. En
+        // arquitectura_sistema esto permitía que una sugerencia de la IA
+        // introdujera HA aunque ningún RNF aprobado la solicitara. Reutilizar el
+        // sintetizador garantiza una topología conservadora antes de validar.
+        if (diagramas.length && tipoDiagrama === 'arquitectura_sistema') {
+          const [arquitecturaNormalizada] = PlantUMLSynthesizer.normalizar(diagramas, {
+            nombreProyecto: contexto.nombreProyecto || safeProjectName,
+            requerimientos: Array.isArray(contexto.requerimientos) ? contexto.requerimientos : []
+          }).filter((diagram) => normalizeDiagramType(diagram.tipo) === tipoDiagrama);
+          diagramas = arquitecturaNormalizada ? [arquitecturaNormalizada] : diagramas;
+        }
+
+        if (tipoDiagrama === 'clases_diseno') {
+          const validator = new ClasesDisenoValidatorService();
+          const codigo = diagramas[0]?.codigo_plantuml || diagramas[0]?.codigo_puml || '';
+          const validacion = validator.validar(codigo, tipoDiagrama);
+
+          if (!validacion.valido) {
+            console.warn(`[ModelosIaService] Corrigiendo clases_diseno incompleto: ${validacion.error}`);
+            const aprobados = Array.isArray(contexto.diagramasAprobados) ? contexto.diagramasAprobados : [];
+            const obtenerAprobado = (tipo) => aprobados
+              .filter((diagrama) => normalizeDiagramType(diagrama.tipo) === tipo)
+              .sort((a, b) => Number(b.version || 1) - Number(a.version || 1))[0];
+            const dominio = obtenerAprobado('clases_dominio');
+            const arquitectura = obtenerAprobado('arquitectura_software');
+            const codigoDominio = String(dominio?.codigo_plantuml || '');
+            const entidades = [...codigoDominio.matchAll(/^\s*(?:abstract\s+)?class\s+(?:"[^"]+"\s+as\s+)?([A-Za-z_][\w]*)/gim)]
+              .map((match) => match[1])
+              .filter((nombre) => !/(?:Controller|Service|UseCase|Repository|DTO)$/i.test(nombre))
+              .slice(0, 4)
+              .map((nombre) => ({ nombre }));
+            const codigoArquitectura = String(arquitectura?.codigo_plantuml || '');
+            const database = /postgres/i.test(codigoArquitectura)
+              ? 'PostgreSQL'
+              : (/sql/i.test(codigoArquitectura) ? 'SQL' : 'MongoDB');
+            const versionesOrigen = Object.fromEntries(['casos_de_uso', 'clases_dominio', 'arquitectura_software'].map((tipo) => [
+              tipo,
+              Number(obtenerAprobado(tipo)?.version || 1)
+            ]));
+
+            diagramas = [ClasesDisenoSynthesizer.sintetizar({
+              casosDeUsoAprobados: (contexto.requerimientos || []).filter((req) => String(req.tipo || '').toUpperCase() === 'RF'),
+              clasesDominio: entidades,
+              arquitecturaSoftware: codigoArquitectura,
+              tecnologiasSeleccionadas: { database },
+              versionesOrigen
+            })];
+          }
+        }
       } else {
         diagramas = PlantUMLSynthesizer.normalizar(data?.diagramas, {
           nombreProyecto: safeProjectName,
@@ -581,6 +681,11 @@ class ModelosIaService {
         });
       }
     }
+
+    diagramas = diagramas.map((diagrama) => ({
+      ...diagrama,
+      codigo_plantuml: normalizarCodigoPlantUML(diagrama.codigo_plantuml || diagrama.codigo_puml || '')
+    }));
 
     return {
       nombre_proyecto: safeProjectName,

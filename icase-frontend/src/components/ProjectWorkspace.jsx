@@ -346,6 +346,7 @@ export default function ProjectWorkspace({
   const [isGeneratingDiagrams, setIsGeneratingDiagrams] = useState(false);
   const [diagramJob, setDiagramJob] = useState(null);
   const handledDiagramJobs = React.useRef(new Set());
+  const diagramPollingFailures = React.useRef(0);
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
   const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(project.currentPhase >= 2);
@@ -353,6 +354,7 @@ export default function ProjectWorkspace({
   const applyDiagramJobResponse = React.useCallback((response) => {
     const job = response?.trabajo;
     if (!job) return;
+    diagramPollingFailures.current = 0;
     setDiagramJob(job);
     setIsGeneratingDiagrams(['encolado', 'procesando'].includes(job.estado));
     if (job.estado === 'completado' && response.resultado && !handledDiagramJobs.current.has(job.id)) {
@@ -384,7 +386,17 @@ export default function ProjectWorkspace({
     const timer = setInterval(() => {
       fetchDiagramJobApi(diagramJob.id)
         .then(applyDiagramJobResponse)
-        .catch((error) => console.warn('[Workspace] Error consultando trabajo de diagrama:', error.message));
+        .catch((error) => {
+          diagramPollingFailures.current += 1;
+          console.warn('[Workspace] Error consultando trabajo de diagrama:', error.message);
+          if (diagramPollingFailures.current >= 3) {
+            setIsGeneratingDiagrams(false);
+            setDiagramJob((current) => current ? {
+              ...current,
+              mensaje: 'No se pudo consultar el avance. La tarea continúa en el servidor; recarga para recuperar su estado.'
+            } : current);
+          }
+        });
     }, 2000);
     return () => clearInterval(timer);
   }, [diagramJob?.id, diagramJob?.estado, applyDiagramJobResponse]);
@@ -991,32 +1003,7 @@ export default function ProjectWorkspace({
     if (!diagram?.id) return { success: false, error: "El diagrama todavía no está persistido." };
     try {
       const restored = await restoreDiagramVersionApi(diagram.id, version);
-      const backendId = project.backendId || project.id;
-      const flow = await fetchDiagramWorkflowApi(backendId);
-      const code = sanitizePlantUML(restored.codigo_plantuml) || restored.codigo_mermaid || "";
-      onUpdateProject({
-        ...project,
-        diagrams: {
-          ...project.diagrams,
-          [diagramKey]: {
-            ...diagram,
-            title: restored.titulo || diagram.title,
-            description: restored.descripcion || "",
-            code,
-            plantumlCode: code,
-            version: Number(restored.version || diagram.version || 1),
-            approved: false,
-            status: restored.estado || "pendiente_revision",
-            restoredFromVersion: restored.restaurada_desde_version || version,
-            qualityStatus: restored.estado_calidad || null,
-            validationErrors: restored.errores_validacion || [],
-            validationWarnings: restored.advertencias_validacion || []
-          }
-        },
-        diagramFlow: flow,
-        isDiagramsApproved: false
-      });
-      return { success: true, diagram: restored, flow };
+      return { success: true, diagram: restored };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -1292,23 +1279,19 @@ export default function ProjectWorkspace({
 
       {/* SECCIÓN DERECHA: Contenido Organizado con Máximo Espacio de Visualización */}
       <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0">
-        {isProcessing || isGeneratingDiagrams ? (
+        {isProcessing ? (
           /* Efecto Gemini en procesamiento */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
             <div className="w-full flex flex-col items-center space-y-4">
               <div className="w-48 h-48 rounded-full gemini-aura-glow absolute -z-10 pointer-events-none"></div>
               <h3 className="text-base font-semibold gemini-gradient-text tracking-normal">
-                {isGeneratingDiagrams
-                  ? "Requisitos aprobados. Generando diagramas..."
-                  : project.isProcessed ? "Reprocesando insumos y actualizando requisitos..." : "Generando especificación de requisitos..."}
+                {project.isProcessed ? "Reprocesando insumos y actualizando requisitos..." : "Generando especificación de requisitos..."}
               </h3>
               <div className="w-56 h-1.5 rounded-full gemini-wave-bar shadow-xs"></div>
               <p className="text-xs text-slate-400 font-normal">
-                {isGeneratingDiagrams
-                  ? "Construyendo casos de uso, arquitectura, clases y árbol de navegación desde los requisitos definitivos"
-                  : project.isProcessed
-                    ? "Analizando nuevos insumos y actualizando únicamente los requisitos"
-                    : "Extrayendo y estructurando los requisitos del sistema para su revisión"}
+                {project.isProcessed
+                  ? "Analizando nuevos insumos y actualizando únicamente los requisitos"
+                  : "Extrayendo y estructurando los requisitos del sistema para su revisión"}
               </p>
 
               <div className="w-full max-w-sm mt-4 space-y-2.5">

@@ -105,6 +105,9 @@ export default function PlantUMLViewer({ code, title }) {
                 }
               }
             }
+          } else if (isMounted) {
+            setRenderError(`El servidor de PlantUML no pudo renderizar el diagrama (HTTP ${res.status}). Revisa el código generado.`);
+            setSvgUrl("");
           }
         } catch (fetchErr) {
           console.warn("[PlantUML] Fetch inline omitido, usando tag img fallback:", fetchErr);
@@ -183,6 +186,10 @@ export default function PlantUMLViewer({ code, title }) {
               <img
                 src={svgUrl}
                 alt={title}
+                onError={() => {
+                  setRenderError("No se pudo cargar la imagen del diagrama. Revisa la sintaxis PlantUML o vuelve a intentar.");
+                  setSvgUrl("");
+                }}
                 onLoad={(event) => {
                   const naturalWidth = event.currentTarget.naturalWidth;
                   const naturalHeight = event.currentTarget.naturalHeight;

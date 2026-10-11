@@ -170,28 +170,56 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
       titulo: 'Anterior', descripcion: 'Versión anterior', codigo_mermaid: 'anterior',
       codigo_plantuml: '@startuml\nactor Anterior\n@enduml'
     };
-    const actualizarDiagramaManualUseCase = {
-      ejecutar: jest.fn().mockImplementation(({ id, datos }) => Promise.resolve({ id, ...datos, version: 3 }))
-    };
     const useCase = new RestaurarVersionDiagrama({
       diagramaRepository: {
         obtenerPorId: jest.fn().mockResolvedValue(actual),
         listarPorProyecto: jest.fn().mockResolvedValue([anterior, actual])
-      },
-      actualizarDiagramaManualUseCase
+      }
     });
 
     const result = await useCase.ejecutar({ id: 'd2', version: 1 });
 
-    expect(actualizarDiagramaManualUseCase.ejecutar).toHaveBeenCalledWith({
+    expect(result).toEqual(expect.objectContaining({
       id: 'd2',
-      datos: expect.objectContaining({
-        titulo: 'Anterior',
-        codigo_plantuml: anterior.codigo_plantuml,
-        restaurada_desde_version: 1
-      })
+      titulo: 'Anterior',
+      codigo_plantuml: anterior.codigo_plantuml,
+      version: 2,
+      restaurada_desde_version: 1,
+      es_borrador_restaurado: true
+    }));
+  });
+
+  test('RestaurarVersionDiagrama encuentra historiales del documento vigente aunque reciba un id antiguo', async () => {
+    const antigua = {
+      id: 'd1', proyecto_id: 'p1', tipo: 'casos_de_uso', version: 1,
+      titulo: 'V1', codigo_mermaid: 'v1', codigo_plantuml: '@startuml\nactor V1\n@enduml'
+    };
+    const vigente = {
+      id: 'd3', proyecto_id: 'p1', tipo: 'casos_de_uso', version: 3,
+      titulo: 'V3', codigo_mermaid: 'v3', codigo_plantuml: '@startuml\nactor V3\n@enduml',
+      historial_versiones: [{
+        version: 2,
+        titulo: 'V2',
+        codigo_mermaid: 'v2',
+        codigo_plantuml: '@startuml\nactor V2\n@enduml'
+      }]
+    };
+    const useCase = new RestaurarVersionDiagrama({
+      diagramaRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue(antigua),
+        listarPorProyecto: jest.fn().mockResolvedValue([antigua, vigente])
+      }
     });
-    expect(result.version).toBe(3);
+
+    const result = await useCase.ejecutar({ id: 'd1', version: 2 });
+
+    expect(result).toEqual(expect.objectContaining({
+      id: 'd3',
+      version: 3,
+      titulo: 'V2',
+      restaurada_desde_version: 2,
+      es_borrador_restaurado: true
+    }));
   });
 
   test('AprobarFase debe cambiar estado y opcionalmente aprobar todos los requerimientos', async () => {
@@ -617,7 +645,7 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
       provider: 'auto',
       insumo_bruto: 'Contexto del proyecto',
       contexto_proyecto: {
-        requerimientos_actuales: [{
+        requerimientos_aprobados: [{
           identificador: 'RF-06',
           tipo: 'RF',
           nombre: 'Procesar cobro',
@@ -625,7 +653,15 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
           actores: ['Cajero', 'Cliente'],
           prioridad: 'Alta',
           precondiciones: 'Cuenta abierta',
-          poscondiciones: 'Pago confirmado'
+          poscondiciones: 'Pago confirmado',
+          aprobado: true
+        }],
+        requerimientos_actuales: [{
+          identificador: 'RNF-BORRADOR',
+          tipo: 'RNF',
+          nombre: 'Sugerencia no aprobada de alta disponibilidad',
+          descripcion: 'Agregar failover y réplicas.',
+          aprobado: false
         }]
       }
     });
@@ -635,10 +671,12 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(contexto).toContain('Actores: Cajero, Cliente');
     expect(contexto).toContain('Precondición: Cuenta abierta');
     expect(contexto).toContain('Poscondición: Pago confirmado');
+    expect(contexto).not.toContain('RNF-BORRADOR');
+    expect(contexto).not.toContain('failover y réplicas');
     expect(prompt).toContain('trazados estrictamente desde esos requerimientos aprobados');
   });
 
-  test('ProcesarConIA rechaza casos de uso que omiten actores de los RF aprobados', async () => {
+  test('ProcesarConIA completa actores omitidos por la IA antes de validar casos de uso', async () => {
     const requerimientos = [{
       tipo: 'RF', identificador: 'RF-01', nombre: 'Cobrar', descripcion: 'Registrar pago',
       actores: ['Cliente', 'Cajero'], aprobado: true
@@ -659,16 +697,26 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
       { tipo: 'arbol_navegacion', codigo_plantuml: '@startwbs\n* Sistema\n** Portal\n*** Inicio\n*** Recuperar acceso\n@endwbs' }
     ];
     const useCase = new ProcesarConIA({
-      proyectoRepository: { obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Acta', estado_fase: 'analisis_aprobado' }) },
+      proyectoRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Acta', estado_fase: 'analisis_aprobado' }),
+        actualizar: jest.fn().mockResolvedValue(true)
+      },
       requerimientoRepository: { listarPorProyecto: jest.fn().mockResolvedValue(requerimientos) },
-      diagramaRepository: { listarPorProyecto: jest.fn().mockResolvedValue([]) },
+      diagramaRepository: {
+        listarPorProyecto: jest.fn().mockResolvedValue([]),
+        eliminarPorProyecto: jest.fn().mockResolvedValue(true),
+        crearMuchos: jest.fn().mockResolvedValue(true)
+      },
       estandarRepository: { obtenerEstandares: jest.fn().mockResolvedValue([]) },
       plantumlValidatorService: new PlantUMLValidatorService(),
       aiOrchestratorService: { procesar: jest.fn().mockResolvedValue({ diagramas }) }
     });
 
-    await expect(useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas' }))
-      .rejects.toThrow('omitió actores definidos en los requisitos aprobados: cajero');
+    await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas' });
+    const creados = useCase.diagramaRepository.crearMuchos.mock.calls[0][0];
+    const casosUsoCreado = creados.find((diagrama) => diagrama.tipo === 'casos_de_uso');
+    expect(casosUsoCreado.codigo_plantuml).toContain('actor "Cajero"');
+    expect(casosUsoCreado.codigo_plantuml).toMatch(/ActorReq_\d+_cajero --> UC1/);
   });
 
 });

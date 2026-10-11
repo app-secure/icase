@@ -20,28 +20,66 @@ class DiagramaController {
       const documentos = diagrama.proyecto_id
         ? await this.diagramaRepository.listarPorProyecto(diagrama.proyecto_id)
         : [];
-      const versionesGeneradas = documentos
-        .filter((item) => item.id !== diagrama.id && normalizeDiagramType(item.tipo) === normalizeDiagramType(diagrama.tipo))
-        .map((item) => ({
-          version: Number(item.version || 1),
-          titulo: item.titulo,
-          descripcion: item.descripcion,
-          codigo_mermaid: item.codigo_mermaid,
-          codigo_plantuml: item.codigo_plantuml,
-          estado_calidad: item.estado_calidad,
-          guardado_en: item.updatedAt || item.createdAt
-        }));
-      const unicas = new Map();
-      for (const item of [...versionesGeneradas, ...(diagrama.historial_versiones || [])]) {
-        unicas.set(Number(item.version), item);
+      const tipo = normalizeDiagramType(diagrama.tipo);
+      const versionesDelTipo = [...documentos, diagrama]
+        .filter((item, index, collection) =>
+          normalizeDiagramType(item.tipo) === tipo &&
+          collection.findIndex((candidate) => candidate.id === item.id) === index
+        )
+        .sort((a, b) => {
+          const diferenciaVersion = Number(b.version || 1) - Number(a.version || 1);
+          if (diferenciaVersion) return diferenciaVersion;
+          return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+        });
+
+      // El id que llega desde la interfaz puede pertenecer a una generación anterior.
+      // La versión vigente es siempre la mayor del mismo tipo dentro del proyecto.
+      const actual = versionesDelTipo[0] || diagrama;
+      const crearSnapshot = (item, sourceId = null) => ({
+        version: Number(item.version || 1),
+        titulo: item.titulo || '',
+        descripcion: item.descripcion || '',
+        codigo_mermaid: item.codigo_mermaid || '',
+        codigo_plantuml: item.codigo_plantuml || '',
+        estado_calidad: item.estado_calidad || 'advertencia',
+        guardado_en: item.guardado_en || item.updatedAt || item.createdAt || null,
+        sourceId
+      });
+
+      const entradas = versionesDelTipo.flatMap((documento) => [
+        crearSnapshot(documento, documento.id),
+        ...(documento.historial_versiones || []).map((snapshot) => crearSnapshot(snapshot, documento.id))
+      ]);
+      const porVersion = new Map();
+      for (const entrada of entradas) {
+        const existente = porVersion.get(entrada.version);
+        if (!existente || new Date(entrada.guardado_en || 0) > new Date(existente.guardado_en || 0)) {
+          porVersion.set(entrada.version, entrada);
+        }
       }
-      const historial = [...unicas.values()].sort((a, b) => Number(b.version) - Number(a.version));
+      const firmaContenido = (item) => JSON.stringify([
+        item.titulo || '',
+        item.descripcion || '',
+        item.codigo_mermaid || '',
+        item.codigo_plantuml || ''
+      ]);
+      const contenidosVistos = new Set([firmaContenido(actual)]);
+      const historial = [...porVersion.values()]
+        .filter((item) => Number(item.version) < Number(actual.version || 1))
+        .sort((a, b) => Number(b.version) - Number(a.version))
+        .filter((item) => {
+          const firma = firmaContenido(item);
+          if (contenidosVistos.has(firma)) return false;
+          contenidosVistos.add(firma);
+          return true;
+        });
       res.json({
         actual: {
-          version: Number(diagrama.version || 1),
-          titulo: diagrama.titulo,
-          estado: diagrama.estado,
-          updatedAt: diagrama.updatedAt
+          id: actual.id,
+          version: Number(actual.version || 1),
+          titulo: actual.titulo,
+          estado: actual.estado,
+          updatedAt: actual.updatedAt
         },
         historial
       });

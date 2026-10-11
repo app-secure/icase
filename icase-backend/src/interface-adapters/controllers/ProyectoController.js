@@ -68,7 +68,7 @@ class ProyectoController {
             fuentes,
             requerimientos,
             diagramas,
-            flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved, diagrams })
+            flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved, diagrams: diagramas })
           };
         })
       );
@@ -227,7 +227,7 @@ class ProyectoController {
       proyecto_id: trabajo.proyecto_id,
       requerimientos,
       diagramas,
-      flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved: true, diagrams }),
+      flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved: true, diagrams: diagramas }),
       cache_hit: Boolean(trabajo.cache_hit)
     };
     return response;
@@ -306,7 +306,7 @@ class ProyectoController {
       const diagramas = await this.diagramaRepository.listarPorProyecto(id);
       const requirementsApproved = ['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']
         .includes(proyecto.estado_fase);
-      res.json(this.diagramWorkflowService.build({ requirementsApproved, diagrams }));
+      res.json(this.diagramWorkflowService.build({ requirementsApproved, diagrams: diagramas }));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

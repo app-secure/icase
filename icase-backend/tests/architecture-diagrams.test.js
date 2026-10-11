@@ -7,6 +7,7 @@ const ArquitecturaSoftwareValidatorService = require('../src/infrastructure/serv
 const ArquitecturaSistemaValidatorService = require('../src/infrastructure/services/ArquitecturaSistemaValidatorService');
 const PlantUMLValidatorService = require('../src/infrastructure/services/PlantUMLValidatorService');
 const PlantUMLSynthesizer = require('../src/infrastructure/services/PlantUMLSynthesizer');
+const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
 const AprobarFase = require('../src/core/use-cases/AprobarFase');
 
 describe('Feature / Architecture Diagrams Unit Tests', () => {
@@ -237,6 +238,51 @@ Deployment_Node(cloud, "Cloud") {
       expect(tipos).toContain(DiagramTypes.ARQUITECTURA_SISTEMA);
       expect(tipos).toContain(DiagramTypes.CLASES);
       expect(tipos).toContain(DiagramTypes.ARBOL_NAVEGACION);
+    });
+
+    test('corrige HA inventada por la IA cuando ningún RNF aprobado la solicita', () => {
+      const codigoConHAInjustificada = `@startuml
+node "Balanceador Failover" as lb
+node "Servidor primario" as app1
+node "Servidor réplica Hot Standby" as app2
+lb --> app1
+lb --> app2
+@enduml`;
+
+      const [normalizado] = PlantUMLSynthesizer.normalizar([{
+        tipo: DiagramTypes.ARQUITECTURA_SISTEMA,
+        codigo_plantuml: codigoConHAInjustificada
+      }], {
+        nombreProyecto: fixtureSinHA.nombre_proyecto,
+        requerimientos: fixtureSinHA.requerimientos
+      }).filter((diagrama) => diagrama.tipo === DiagramTypes.ARQUITECTURA_SISTEMA);
+
+      expect(normalizado.codigo_plantuml).toMatch(/Standalone/i);
+      expect(normalizado.codigo_plantuml).not.toMatch(/failover|hot standby/i);
+      const validacion = sistemaValidator.validar({
+        codigo: normalizado.codigo_plantuml,
+        rnfList: fixtureSinHA.requerimientos.filter((r) => r.tipo === 'RNF')
+      });
+      expect(validacion.valido).toBe(true);
+      expect(validacion.alta_disponibilidad_detectada).toBe(false);
+    });
+
+    test('aplica la corrección también en la generación secuencial de un solo diagrama', () => {
+      const service = new ModelosIaService();
+      const resultado = service.normalizarResultado({
+        nombre_proyecto: fixtureSinHA.nombre_proyecto,
+        diagramas: [{
+          tipo: DiagramTypes.ARQUITECTURA_SISTEMA,
+          codigo_plantuml: '@startuml\nnode "Failover" as f\nnode "Hot Standby" as r\nf --> r\n@enduml'
+        }]
+      }, 'diagramas', DiagramTypes.ARQUITECTURA_SISTEMA, {
+        nombreProyecto: fixtureSinHA.nombre_proyecto,
+        requerimientos: fixtureSinHA.requerimientos
+      });
+
+      expect(resultado.diagramas).toHaveLength(1);
+      expect(resultado.diagramas[0].codigo_plantuml).toMatch(/Standalone/i);
+      expect(resultado.diagramas[0].codigo_plantuml).not.toMatch(/failover|hot standby/i);
     });
   });
 

@@ -46,10 +46,16 @@ class ClasesDisenoValidatorService {
     }
 
     // 3. Interfaces e Implementaciones de Repositorios
-    const tieneInterfaceRepo = /interface\s+[\w.]*Repository/i.test(trimmed) ||
-      /interface\s+I[\w.]*/i.test(trimmed) ||
-      /<<\s*Repository\s*>>/i.test(trimmed);
-    const tieneImplRepo = /class\s+[\w.]*(?:Mongo|Sql|Postgres|Memory|Impl)?Repository/i.test(trimmed);
+    const declaracionesInterfaces = [...trimmed.matchAll(/^\s*interface\s+([\w.]+)(?:\s+<<\s*([^>]+)\s*>>)?/gim)];
+    const declaracionesClases = [...trimmed.matchAll(/^\s*class\s+([\w.]+)(?:\s+<<\s*([^>]+)\s*>>)?/gim)];
+    const tieneInterfaceRepo = declaracionesInterfaces.some((match) =>
+      /(?:Repository|Repositorio)/i.test(match[1]) || /(?:Repository|Repositorio)/i.test(match[2] || '')
+    );
+    const tieneImplRepo = declaracionesClases.some((match) =>
+      /(?:Repository|Repositorio)(?:Impl|Adapter)?$/i.test(match[1]) ||
+      /^(?:Mongo|Sql|Postgres|PostgreSql|Memory)[\w.]*(?:Repository|Repositorio)(?:Impl)?$/i.test(match[1]) ||
+      /(?:Repository|Repositorio)/i.test(match[2] || '')
+    );
     if (!tieneInterfaceRepo || !tieneImplRepo) {
       return { valido: false, error: 'El diagrama de clases de diseño debe incluir interfaces e implementaciones de repositorios.' };
     }
