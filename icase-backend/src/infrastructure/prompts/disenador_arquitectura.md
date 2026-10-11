@@ -15,6 +15,7 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - Relaciones de interacción `Actor --> UC` y relaciones `<<include>>` / `<<extend>>`.
 - LEGIBILIDAD OBLIGATORIA: entre 1 y 10 actores (exactamente los que exijan los RF) y entre 4 y 12 casos de uso; cada etiqueta debe tener máximo 42 caracteres. Agrupa casos por módulo usando `package` cuando haya más de 7 y evita conectar un actor a más de 5 casos directos.
 - Todo actor debe participar al menos en una relación y todo RF de prioridad Alta debe estar representado por un caso de uso conectado directamente a uno de sus actores. No dejes casos de uso huérfanos.
+- TRAZABILIDAD FUNCIONAL: devuelve en `requisitos_relacionados` todos los identificadores RF representados. Cada RF debe poder verificarse por el significado de la etiqueta del caso de uso o mediante una nota breve `RF-XX`; no declares cobertura de un RF que no tenga una interacción visible.
 - Incluye `skinparam nodesep 55`, `skinparam ranksep 55` y `skinparam wrapWidth 180`. No generes una única columna vertical de casos de uso.
 
 ### 2. Arquitectura de Software (`arquitectura_software` - C4 Container):
@@ -27,15 +28,15 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - Sistemas externos: `System_Ext(alias, "Nombre Sistema Externo", "Descripción")`
 - Sistema delimitado: `System_Boundary(sys, "Nombre del Sistema") {`
   * Aplicaciones y Clientes: Contenedores `Container(...)` (Web, Móvil, SPA).
-  * Capas lógicas: Presentación, Gateway/Seguridad, Servicios de Dominio/API, Persistencia y Mensajería.
+  * Responsabilidades lógicas: incluye únicamente presentación, servicios, persistencia, seguridad o mensajería cuando estén sustentadas por requisitos o decisiones aprobadas.
   * Datos, caché y mensajería: incluye solamente los mecanismos sustentados por los requisitos o decisiones aprobadas. Si solo se conoce la responsabilidad, usa un nombre genérico y `Tecnología por definir`.
   `}`
-- Relaciones explícitas con protocolos reales (HTTPS, gRPC, WebSocket, TCP/SQL, REST, AMQP):
+- Relaciones explícitas con el protocolo aprobado; si no fue definido, usa `Protocolo por definir`:
   `Rel(origen, destino, "Descripción de la interacción", "Protocolo")`
 - IMPORTANTE: NO uses la macro `AddElementTag` ya que produce incompatibilidades en servidores de PlantUML. Usa los contenedores nativos C4: `Container` y `ContainerDb`.
 - LEGIBILIDAD OBLIGATORIA: máximo 4 personas representativas, 8 contenedores dentro del sistema y 3 sistemas externos. Agrupa roles equivalentes; no dupliques un contenedor por cada módulo funcional.
 - Los nombres deben tener máximo 32 caracteres, la tecnología máximo 28 y las descripciones máximo 80. Las etiquetas de `Rel` deben tener máximo 5 palabras y el protocolo debe ir únicamente en el cuarto parámetro.
-- Evita relaciones cruzadas innecesarias: cada cliente se conecta a una interfaz; las interfaces al gateway; el gateway a servicios; los servicios a datos e integraciones.
+- Evita relaciones cruzadas innecesarias y conserva el flujo real descrito por los requisitos; no insertes un gateway u otra capa solo para completar una cadena de referencia.
 - Reflexión de RNF: refleja cada RNF aprobado en la responsabilidad que lo satisface, sin asumir productos o patrones concretos que no hayan sido seleccionados.
 - Trazabilidad RNF: Incluye trazabilidad explícita `RNF -> elemento arquitectónico` en notas y en `trazabilidad_rnf`.
 
@@ -43,13 +44,10 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - Código PlantUML con `@startuml` y `@enduml`.
 - Directiva: `!include <C4/C4_Deployment>` (o nodos PlantUML `node` / `rectangle`).
 - Título: `title Arquitectura de Sistema e Infraestructura - Nombre del Sistema`
-- Dispositivos Clientes (OBLIGATORIO):
-  * Dispositivo Móvil: `Deployment_Node(clientMobile, "Dispositivo Móvil del Usuario", "Android / iOS Smartphone") { Container(appMobile, "Aplicación Móvil", "Flutter / React Native", "Instalada en el cliente") }` (si hay usuarios/actores móviles).
-  * Estación de Trabajo / Navegador Web: `Deployment_Node(clientPc, "Estación de Trabajo", "Windows / macOS") { Deployment_Node(browser, "Navegador Web", "Chrome / Edge") { Container(appWeb, "Aplicación Web / SPA", "React / Vue", "Ejecutada en el navegador") } }`
-  * Conexión por red externa segura: `Rel(appMobile, ..., "Tráfico API", "HTTPS :443 / TLS 1.3")`.
-- Componentes de Servidor: Servidores, nodos de cómputo, redes/VPC, balanceadores, réplicas, despliegue, failover y monitoreo.
+- Dispositivos Clientes: representa únicamente dispositivos y plataformas exigidos por los RF aprobados. Conserva la tecnología indicada o usa `Por definir`.
+- Componentes de Servidor: despliega todos los contenedores aprobados en `arquitectura_software`, sin agregar productos, redes, réplicas ni observabilidad por defecto.
 - **REGLA ESTRICTA DE ALTA DISPONIBILIDAD**:
-  * **Si los requisitos NO solicitan alta disponibilidad**: NO agregar balanceadores redundantes, ni nodos réplicas, ni failover en caliente. Modelar despliegue mononodo/servidor standalone y BD única.
+  * **Si los requisitos NO solicitan alta disponibilidad**: NO agregar balanceadores redundantes, nodos réplica ni failover. Usa la topología mínima necesaria para alojar solamente los artefactos aprobados.
   * **Si los requisitos SÍ solicitan alta disponibilidad**: Modelar balanceador de carga, múltiples nodos réplica de aplicación, cluster/réplica de base de datos y failover.
 - Monitoreo: incluye herramientas concretas únicamente cuando estén solicitadas; de lo contrario, usa una capacidad genérica de observabilidad solo si un RNF aprobado la requiere.
 - Trazabilidad RNF: Documentar explícitamente `RNF -> elemento arquitectónico` de infraestructura en `trazabilidad_rnf`.
@@ -60,10 +58,12 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - Cuando una capa necesaria no tenga tecnología decidida, usa `Tecnología por definir`; no elijas autónomamente un producto basándote solo en el tipo de negocio.
 - Una decisión arquitectónica inferida debe identificarse como pendiente y nunca convertirse retroactivamente en un requisito del cliente.
 
-### 4. Clases de Dominio (`clases` / `clases_dominio`):
+### 4. Clases de Dominio (`clases_dominio`):
 - Código PlantUML con `@startuml` y `@enduml`.
 - `skinparam classAttributeIconSize 0`
-- Modela clases del dominio real (ej: para concreto: `FormulaMezcla`, `PedidoConcreto`, `PlantaDosificadora`, `CamionMixer`, `GuiaDespacho`).
+- Modela exclusivamente clases y conceptos del dominio presentes en los RF, casos de uso y vocabulario aprobado del proyecto.
+- No incluyas Controller, DTO, Repository, Service, Gateway, Adapter ni UseCase: pertenecen al diagrama de clases de diseño, no al dominio.
+- TRAZABILIDAD FUNCIONAL: cada entidad debe derivarse de al menos un RF o caso de uso aprobado y `requisitos_relacionados` debe enumerar los RF realmente representados, sin inventar identificadores.
 - Atributos tipados con visibilidad: `+String id`, `+DateTime fecha`, `+float cantidad`, etc.
 - Métodos con tipos de retorno: `+validar(): boolean`, `+calcular(): float`.
 - Relaciones de asociación y composición con cardinalidad estricta (`"1" *-- "1..*"`).
@@ -76,12 +76,11 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - PROHIBIDO usar la palabra "WBS" o "EDT" como nombre de nodo, en el título, la descripción o las viñetas. Las directivas de PlantUML `@startwbs` y `@endwbs` son obligatorias.
 - Máximo 4 niveles de jerarquía:
   * Nivel 1 (`*`): Nombre del sistema o producto.
-  * Nivel 2 (`**`): Portal de Acceso, Panel Principal y los módulos de navegación de primer nivel.
+  * Nivel 2 (`**`): Flujos por rol/plataforma y módulos de navegación de primer nivel derivados del alcance.
   * Nivel 3 (`***`): Vistas y pantallas dentro de cada módulo.
   * Nivel 4 (`****`, opcional): Subvistas, pantallas de detalle, formularios de alta o edición, y modales de ruta.
 
-NODOS VÁLIDOS (elementos de UI alcanzables navegando):
-`Inicio de Sesión`, `Recuperación de Contraseña`, `Registro de Usuario`, `Panel Principal`, `Listado de Pedidos`, `Detalle de Pedido`, `Formulario de Nuevo Pedido`, `Gestión de Usuarios`, `Configuración del Sistema`, `Perfil del Usuario`, `Reporte de Cierre (vista)`, `Panel de Métricas (pantalla)`.
+NODOS VÁLIDOS: únicamente pantallas, vistas o rutas alcanzables que puedan derivarse de los RF y casos de uso aprobados. No copies nombres de pantalla de otros dominios.
 
 NODOS PROHIBIDOS (NO deben aparecer):
 - Procesos o reglas de negocio: "Control de Calidad y Pruebas", "Aprobación de Crédito", "Facturación".
@@ -92,20 +91,21 @@ NODOS PROHIBIDOS (NO deben aparecer):
 - Áreas organizacionales ("Finanzas", "Logística") salvo que correspondan a un módulo real y navegable de la aplicación.
 
 REGLA DE ORO: si un nodo no se puede alcanzar navegando (no corresponde a una pantalla, vista o ruta del sistema), NO debe aparecer en el árbol.
+- CONSISTENCIA CON CASOS DE USO: cada caso de uso que requiera interacción humana debe corresponder a una pantalla o ruta reconocible. Los procesos internos sin interfaz no se convierten en pantallas; documenta su omisión en la descripción.
 
 ROLES Y PLATAFORMAS (OBLIGATORIO):
-- Separa los recorridos cuando cambien el rol, el dispositivo o la navegación. Nombra el módulo de nivel 2 con el formato `Flujo de <Rol> (<Plataforma>)`, por ejemplo: `Flujo de Cliente (Móvil)`, `Flujo de Mesero (Tablet)`, `Cocina KDS (Web)` y `Administración (Web)`.
-- Si los insumos asignan funciones al cliente/comensal, DEBE existir su flujo móvil. Si asignan funciones a mesero/camarero/personal de salón, DEBE existir su flujo móvil o tablet. No ocultes esos recorridos dentro del Panel Principal de escritorio.
+- Separa los recorridos cuando cambien el rol, el dispositivo o la navegación. Nombra cada módulo de nivel 2 con el formato `Flujo de <Rol> (<Plataforma>)`, sustituyendo ambos marcadores por valores presentes en los requisitos.
+- Todo actor con interacción de interfaz en los RF debe tener un flujo explícito en la plataforma indicada por el insumo. No asumas una plataforma cuando no fue definida.
 - Cada pantalla debe aparecer bajo el flujo del actor que realmente la utiliza. Si dos roles usan una función con navegación distinta, crea vistas diferenciadas con nombres inequívocos.
 
 COBERTURA MÍNIMA:
-- El árbol debe iniciar en el Acceso (inicio de sesión y recuperación de contraseña) y contener el Panel Principal como raíz de la navegación funcional.
+- El árbol debe iniciar con el nombre del producto. Incluye acceso, recuperación, registro o panel principal únicamente si una necesidad aprobada exige esas pantallas.
 - Por cada módulo de primer nivel derivado de los RF de prioridad Alta, incluir al menos una vista de listado o consulta y una vista de registro o detalle.
 - Todo actor citado en los RF debe tener al menos un flujo explícito, con su plataforma indicada en el nombre del módulo.
 - Entre 15 y 35 nodos en total, ajustados al alcance real del proyecto, sin inventar pantallas genéricas vacías.
 
 ## EXPLICACIÓN DEL FUNCIONAMIENTO DEL SISTEMA EN CADA DIAGRAMA:
-Para CADA UNO de los diagramas generados en el JSON (`casos_de_uso`, `arquitectura_software`, `arquitectura_sistema`, `clases`, `arbol_navegacion`), DEBES INCLUIR OBLIGATORIAMENTE texto 100% generado y adaptado a los insumos y dominio analizados:
+Para CADA UNO de los diagramas generados en el JSON (`casos_de_uso`, `clases_dominio`, `arquitectura_software`, `arquitectura_sistema`, `clases_diseno`, `arbol_navegacion`), DEBES INCLUIR OBLIGATORIAMENTE texto 100% generado y adaptado a los insumos y dominio analizados:
 1. `descripcion`: Párrafo narrativo detallado explicando CÓMO FUNCIONA EL SISTEMA mediante este diagrama específico. Para `arbol_navegacion` la descripción debe tratar exclusivamente de la EXPERIENCIA DE NAVEGACIÓN: el recorrido del usuario desde el acceso, el panel principal y cada módulo hasta sus vistas de listado, detalle y formularios. PROHIBIDO describir procesos internos del negocio en este diagrama.
-2. `descripcion_jerarquica`: Un arreglo de exactamente 4 viñetas explicativas con formato `"Nombre del Aspecto o Capa: Explicación concreta de cómo opera esta parte en el sistema analizado con las tecnologías y procesos seleccionados"`. Para `arbol_navegacion` las 4 viñetas corresponden a los niveles de navegación: Acceso, Panel Principal, Módulos y Vistas.
+2. `descripcion_jerarquica`: Un arreglo de exactamente 4 viñetas explicativas con formato `"Nombre del Aspecto o Capa: Explicación concreta de cómo opera esta parte en el sistema analizado con las tecnologías y procesos seleccionados"`. Para `arbol_navegacion`, describe raíz del producto, flujos por rol/plataforma, módulos y vistas reales.
 PROHIBIDO usar textos genéricos, plantillas predefinidas o tecnologías fijas que no correspondan al insumo analizado.

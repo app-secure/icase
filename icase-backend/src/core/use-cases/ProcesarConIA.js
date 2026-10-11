@@ -103,6 +103,45 @@ class ProcesarConIA {
     return { provider_defecto: 'auto', proveedores: [] };
   }
 
+  _detectarProblemasDiagrama(resultadoIA, tipo, requerimientos, diagramasAprobados) {
+    const diagramas = Array.isArray(resultadoIA?.diagramas) ? resultadoIA.diagramas : [];
+    const objetivo = diagramas.find((diagram) => normalizeDiagramType(diagram?.tipo) === tipo);
+    if (!objetivo?.codigo_plantuml || !String(objetivo.codigo_plantuml).includes('@start')) {
+      return `No se recibió código PlantUML utilizable para ${tipo}.`;
+    }
+    if (!this.plantumlValidatorService) return '';
+    const result = this.plantumlValidatorService.validar(objetivo.codigo_plantuml, {
+      tipo,
+      rnfList: requerimientos.filter((requirement) => String(requirement.tipo || '').toUpperCase() === 'RNF'),
+      trazabilidad_rnf: objetivo.trazabilidad_rnf,
+      requisitos: requerimientos,
+      requisitos_relacionados: objetivo.requisitos_relacionados,
+      diagramasDependencia: diagramasAprobados
+    });
+    return result.valido ? '' : (result.errores || [result.error]).filter(Boolean).join(' | ');
+  }
+
+  _payloadReparacion(payload, resultadoIA, tipo, problemas, intento) {
+    const diagram = (resultadoIA?.diagramas || []).find((item) => normalizeDiagramType(item?.tipo) === tipo);
+    const codigoAnterior = String(diagram?.codigo_plantuml || '').slice(0, 14000);
+    const instruccion = [
+      `REPARACIÓN CONTROLADA ${intento}: corrige únicamente el diagrama ${tipo}.`,
+      `Problemas exactos detectados: ${problemas}`,
+      'Conserva todos los elementos correctos, nombres, relaciones y decisiones existentes.',
+      'Añade o ajusta solamente los elementos omitidos o inválidos indicados. No regeneres otro artefacto.',
+      'Devuelve exactamente un diagrama del mismo tipo dentro del JSON esperado.',
+      `CÓDIGO ANTERIOR A REPARAR:\n${codigoAnterior}`
+    ].join('\n');
+    return {
+      ...payload,
+      insumo_adicional: [payload.insumo_adicional, instruccion].filter(Boolean).join('\n\n'),
+      contexto_proyecto: {
+        ...payload.contexto_proyecto,
+        retroalimentacion_diagrama: instruccion
+      }
+    };
+  }
+
   async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null }) {
     const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
     if (!proyecto) {
@@ -271,10 +310,31 @@ class ProcesarConIA {
     }
     this.generacionesEnCurso.add(generationKey);
     let resultadoIA;
+    let reparacionesControladas = 0;
     try {
       resultadoIA = await this.aiOrchestratorService.procesar(payload);
       if (objetivoNormalizado === 'diagramas' && Array.isArray(resultadoIA?.diagramas)) {
         resultadoIA.diagramas = asegurarActoresCasosUso(resultadoIA.diagramas, requerimientosAprobados);
+      }
+      if (objetivoNormalizado === 'diagramas' && tipoDiagramaNormalizado) {
+        const maxReparaciones = Math.max(0, Math.min(2, Number(process.env.AI_DIAGRAM_REPAIR_RETRIES ?? 1)));
+        let problemas = this._detectarProblemasDiagrama(
+          resultadoIA, tipoDiagramaNormalizado, requerimientosAprobados, diagramasAprobados
+        );
+        while (problemas && reparacionesControladas < maxReparaciones) {
+          reparacionesControladas += 1;
+          console.warn(`[ProcesarConIA] Reparación controlada ${reparacionesControladas}/${maxReparaciones} para ${tipoDiagramaNormalizado}: ${problemas}`);
+          const repairPayload = this._payloadReparacion(
+            payload, resultadoIA, tipoDiagramaNormalizado, problemas, reparacionesControladas
+          );
+          resultadoIA = await this.aiOrchestratorService.procesar(repairPayload);
+          if (Array.isArray(resultadoIA?.diagramas)) {
+            resultadoIA.diagramas = asegurarActoresCasosUso(resultadoIA.diagramas, requerimientosAprobados);
+          }
+          problemas = this._detectarProblemasDiagrama(
+            resultadoIA, tipoDiagramaNormalizado, requerimientosAprobados, diagramasAprobados
+          );
+        }
       }
     } finally {
       this.generacionesEnCurso.delete(generationKey);
@@ -288,11 +348,21 @@ class ProcesarConIA {
         const codigo = String(diagrama.codigo_plantuml || '');
         return codigo.includes('@start') && !codigo.includes('No hay diagrama disponible') && !codigo.includes('No hay diagrama de navegación disponible');
       });
+      // La interfaz usa generación secuencial (un tipo por trabajo). Se mantiene
+      // compatibilidad con la operación masiva legada de cuatro artefactos; el
+      // flujo y la exportación final sí exigen los seis tipos canónicos.
       const cantidadEsperada = tipoDiagramaNormalizado ? 1 : 4;
       if (diagramasValidos.length < cantidadEsperada) {
         throw new Error(tipoDiagramaNormalizado
           ? `La IA no devolvió un diagrama válido de tipo ${tipoDiagramaNormalizado}. Puedes reintentar sin perder los artefactos aprobados.`
-          : 'La IA no devolvió los cuatro diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
+          : 'La IA no devolvió suficientes diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
+      }
+      if (!tipoDiagramaNormalizado && diagramasValidos.length >= DIAGRAM_TYPE_VALUES.length) {
+        const tiposGenerados = new Set(diagramasValidos.map((diagrama) => normalizeDiagramType(diagrama.tipo)));
+        const tiposFaltantes = DIAGRAM_TYPE_VALUES.filter((tipo) => !tiposGenerados.has(tipo));
+        if (tiposFaltantes.length > 0 || tiposGenerados.size !== DIAGRAM_TYPE_VALUES.length) {
+          throw new Error(`La IA no cubrió exactamente los seis tipos canónicos. Faltan: ${tiposFaltantes.join(', ') || 'ninguno'}; revisa tipos duplicados o legados.`);
+        }
       }
       if (this.plantumlValidatorService) {
         const rnfsAprobados = requerimientosAprobados.filter((requisito) =>
@@ -304,7 +374,10 @@ class ProcesarConIA {
             resultado: this.plantumlValidatorService.validar(diagrama.codigo_plantuml, {
               tipo: diagrama.tipo,
               rnfList: rnfsAprobados,
-              trazabilidad_rnf: diagrama.trazabilidad_rnf
+              trazabilidad_rnf: diagrama.trazabilidad_rnf,
+              requisitos: requerimientosAprobados,
+              requisitos_relacionados: diagrama.requisitos_relacionados,
+              diagramasDependencia: diagramasAprobados
             })
           }))
           .filter(({ resultado }) => !resultado.valido);
@@ -461,7 +534,10 @@ class ProcesarConIA {
           ? this.plantumlValidatorService.validar(diagData.codigo_plantuml || diagData.codigo_puml || '', {
             tipo,
             rnfList: requerimientosAprobados.filter((req) => String(req.tipo || '').toUpperCase() === 'RNF'),
-            trazabilidad_rnf: diagData.trazabilidad_rnf
+            trazabilidad_rnf: diagData.trazabilidad_rnf,
+            requisitos: requerimientosAprobados,
+            requisitos_relacionados: diagData.requisitos_relacionados,
+            diagramasDependencia: diagramasAprobados
           })
           : { valido: true, errores: [], advertencias: [], metricas: {} };
 
@@ -538,7 +614,8 @@ class ProcesarConIA {
       diagramas: diagramasActuales,
       flujoDiagramas: objetivoNormalizado === 'diagramas'
         ? this.diagramWorkflowService.build({ requirementsApproved: true, diagrams: diagramasActuales })
-        : undefined
+        : undefined,
+      reparaciones_controladas: reparacionesControladas
     };
   }
 }

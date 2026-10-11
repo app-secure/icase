@@ -2,12 +2,13 @@ const { normalizeDiagramType, isValidDiagramType } = require('../constants/Diagr
 const { DiagramWorkflowService, DIAGRAM_STATES } = require('../services/DiagramWorkflowService');
 
 class AprobarFase {
-  constructor({ proyectoRepository, requerimientoRepository, diagramaRepository, disenoRepository, plantumlValidatorService = null }) {
+  constructor({ proyectoRepository, requerimientoRepository, diagramaRepository, disenoRepository, plantumlValidatorService = null, mockupTraceabilityService = null }) {
     this.proyectoRepository = proyectoRepository;
     this.requerimientoRepository = requerimientoRepository;
     this.diagramaRepository = diagramaRepository;
     this.disenoRepository = disenoRepository;
     this.plantumlValidatorService = plantumlValidatorService;
+    this.mockupTraceabilityService = mockupTraceabilityService;
     this.diagramWorkflowService = new DiagramWorkflowService();
   }
 
@@ -92,8 +93,18 @@ class AprobarFase {
         };
       }
 
+      const requerimientosProyecto = typeof this.requerimientoRepository?.listarPorProyecto === 'function'
+        ? await this.requerimientoRepository.listarPorProyecto(proyectoId)
+        : [];
       const validacion = this.plantumlValidatorService
-        ? this.plantumlValidatorService.validar(item.diagrama.codigo_plantuml, tipo)
+        ? this.plantumlValidatorService.validar(item.diagrama.codigo_plantuml, {
+            tipo,
+            rnfList: requerimientosProyecto.filter((requisito) => String(requisito.tipo || '').toUpperCase() === 'RNF'),
+            trazabilidad_rnf: item.diagrama.trazabilidad_rnf,
+            requisitos: requerimientosProyecto.filter((requisito) => requisito.aprobado !== false),
+            requisitos_relacionados: item.diagrama.requisitos_relacionados,
+            diagramasDependencia: diagramas.filter((diagrama) => diagrama.aprobado)
+          })
         : { valido: true, errores: [], advertencias: [], metricas: {} };
       if (!validacion.valido) {
         await this.diagramaRepository.actualizar(item.diagrama.id, {
@@ -177,6 +188,30 @@ class AprobarFase {
       const invalidos = diseno.mockups.filter(m => m.estado_calidad === 'invalido');
       if (invalidos.length > 0) {
         throw new Error(`No se pueden aprobar los mockups. Hay ${invalidos.length} pantalla(s) inválida(s): ${invalidos.map(m => m.nombre_visible || m.nombre_pantalla).join(', ')}.`);
+      }
+      if (this.mockupTraceabilityService) {
+        const requerimientosProyecto = typeof this.requerimientoRepository?.listarPorProyecto === 'function'
+          ? await this.requerimientoRepository.listarPorProyecto(proyectoId)
+          : [];
+        const mockupsTrazados = this.mockupTraceabilityService.enrichAll(
+          diseno.mockups,
+          diseno.manifiesto_navegacion,
+          requerimientosProyecto
+        );
+        const trazabilidad = this.mockupTraceabilityService.validate({
+          manifest: diseno.manifiesto_navegacion,
+          mockups: mockupsTrazados,
+          requirements: requerimientosProyecto
+        });
+        if (typeof this.disenoRepository.guardarOActualizar === 'function') {
+          await this.disenoRepository.guardarOActualizar(proyectoId, {
+            mockups: mockupsTrazados,
+            trazabilidad_mockups: trazabilidad
+          });
+        }
+        if (!trazabilidad.valido) {
+          throw new Error(`No se pueden aprobar los mockups por inconsistencias de trazabilidad: ${trazabilidad.errores.join(' ')}`);
+        }
       }
       nuevoEstado = 'mockups_aprobados';
     } else if (fase === 'finalizar') {

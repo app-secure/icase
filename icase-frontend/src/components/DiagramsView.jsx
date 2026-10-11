@@ -43,6 +43,7 @@ export default function DiagramsView({
   const [selectedKey, setSelectedKey] = useState(isDiagramsApproved ? "mockups" : "useCase");
   const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
   const [selectedScreen, setSelectedScreen] = useState(0);
+  const [mockupTraceability, setMockupTraceability] = useState(null);
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
   const [correctionFeedback, setCorrectionFeedback] = useState(null);
@@ -530,6 +531,7 @@ export default function DiagramsView({
                 selectedScreen={selectedScreen}
                 onSelectScreen={setSelectedScreen}
                 requirements={requirements}
+                onTraceabilityChange={setMockupTraceability}
               />
             ) : !currentDiagram ? (
               <div className="flex-1 min-h-[460px] border border-dashed border-slate-300 rounded-2xl bg-slate-50 flex flex-col items-center justify-center text-center p-8">
@@ -691,7 +693,10 @@ export default function DiagramsView({
             <button
               type="button"
               onClick={handleApproveCurrentStage}
-              disabled={isGeneratingDiagram || currentState === "bloqueado" || (selectedKey !== "mockups" && currentState === "aprobado")}
+              disabled={isGeneratingDiagram || currentState === "bloqueado" || (selectedKey !== "mockups" && currentState === "aprobado") || (selectedKey === "mockups" && mockupTraceability?.valido === false)}
+              title={selectedKey === "mockups" && mockupTraceability?.valido === false
+                ? "Corrige la cobertura del árbol y requisitos antes de aprobar"
+                : undefined}
               className="px-5 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed shrink-0"
             >
               {isGeneratingDiagram ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}

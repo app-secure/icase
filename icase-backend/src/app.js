@@ -18,6 +18,8 @@ const PlantUMLValidatorService = require('./infrastructure/services/PlantUMLVali
 const MarkdownCompilerService = require('./infrastructure/services/MarkdownCompilerService');
 const FileIngestionService = require('./infrastructure/services/FileIngestionService');
 const MockupIaService = require('./infrastructure/services/MockupIaService');
+const MockupTraceabilityService = require('./infrastructure/services/MockupTraceabilityService');
+const FinalProjectAuditService = require('./infrastructure/services/FinalProjectAuditService');
 const RequirementChangeService = require('./core/services/RequirementChangeService');
 
 // Casos de Uso
@@ -69,6 +71,8 @@ function createApp() {
   const markdownCompiler = new MarkdownCompilerService();
   const fileIngestionService = new FileIngestionService();
   const mockupIaService = new MockupIaService();
+  const mockupTraceabilityService = new MockupTraceabilityService();
+  const finalProjectAuditService = new FinalProjectAuditService({ mockupTraceabilityService });
   const requirementChangeService = new RequirementChangeService({
     proyectoRepository: proyectoRepo,
     diagramaRepository: diagramaRepo,
@@ -103,7 +107,8 @@ function createApp() {
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
     disenoRepository: disenoRepo,
-    plantumlValidatorService: plantumlValidator
+    plantumlValidatorService: plantumlValidator,
+    mockupTraceabilityService
   });
   const generarMockupsUseCase = new GenerarMockups({
     proyectoRepository: proyectoRepo,
@@ -127,7 +132,8 @@ function createApp() {
     casoDeUsoRepository: casoDeUsoRepo,
     disenoRepository: disenoRepo,
     markdownCompilerService: markdownCompiler,
-    trabajoGeneracionRepository: trabajoGeneracionRepo
+    trabajoGeneracionRepository: trabajoGeneracionRepo,
+    finalProjectAuditService
   });
 
   const requerimientoController = new RequerimientoController({

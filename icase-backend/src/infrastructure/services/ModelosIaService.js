@@ -90,12 +90,14 @@ class ModelosIaService {
     this.groqApiKey = process.env.GROQ_API_KEY || '';
     this.deepseekApiKey = process.env.DEEPSEEK_API_KEY || '';
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
+    this.openaiApiKey = process.env.OPENAI_API_KEY || '';
     this.provider = (process.env.AI_PROVIDER || 'groq').toLowerCase();
     this.promptsDir = path.join(__dirname, '../prompts');
     this.models = {
       gemini: AiModelConfig.analysis.gemini(),
       groq: AiModelConfig.analysis.groq(),
-      openrouter: AiModelConfig.analysis.openrouter()
+      openrouter: AiModelConfig.analysis.openrouter(),
+      openai: AiModelConfig.analysis.openai()
     };
     this.providerOrder = AiModelConfig.analysis.providerOrder();
     this.modelosDeshabilitados = new Set();
@@ -225,6 +227,13 @@ class ModelosIaService {
           disponible: deepseekDisponible
         },
         {
+          id: 'openai',
+          nombre: 'OpenAI',
+          proveedor: 'OpenAI',
+          descripcion: 'Modelos de OpenAI con salida JSON para análisis y diagramas',
+          disponible: Boolean(this.openaiApiKey)
+        },
+        {
           id: 'openrouter',
           nombre: 'OpenRouter Fast',
           proveedor: 'OpenRouter',
@@ -310,6 +319,8 @@ class ModelosIaService {
       respuestaData = await this.generarConDeepSeek(promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider === 'openrouter') {
       respuestaData = await this.generarConOpenRouter(promptCompleto, specificModel, { allowFallback: false });
+    } else if (requestedProvider === 'openai') {
+      respuestaData = await this.generarConOpenAI(promptCompleto, specificModel, { allowFallback: false });
     } else {
       const orden = promptCompleto.length > 22000
         ? ['gemini', ...this.providerOrder.filter(p => p !== 'gemini')]
@@ -344,6 +355,7 @@ class ModelosIaService {
     if (proveedor === 'groq') return this.generarConGroq(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'deepseek') return this.generarConDeepSeek(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'openrouter') return this.generarConOpenRouter(prompt, specificModel, { allowFallback: true });
+    if (proveedor === 'openai') return this.generarConOpenAI(prompt, specificModel, { allowFallback: true });
     console.warn(`[ModelosIaService] Proveedor desconocido omitido: ${proveedor}`);
     return null;
   }
@@ -591,6 +603,42 @@ class ModelosIaService {
     if (!options.allowFallback) {
       throw new Error('El proveedor OpenRouter no devolvió una respuesta válida.');
     }
+    return null;
+  }
+
+  async generarConOpenAI(prompt, specificModel = null, options = { allowFallback: true }) {
+    if (!this.openaiApiKey) {
+      if (!options.allowFallback) throw new Error('OPENAI_API_KEY no está configurada en el servidor backend.');
+      return null;
+    }
+    const modelos = AiModelConfig.modelosConPreferencia(specificModel, this.models.openai);
+    for (const modelName of modelos) {
+      if (!this._modeloDisponible(`openai:${modelName}`)) continue;
+      try {
+        console.log(`[ModelosIaService] Procesando con OpenAI (${modelName})...`);
+        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+          model: modelName,
+          messages: [
+            { role: 'system', content: 'Responde exclusivamente con un objeto JSON válido según la plantilla solicitada.' },
+            { role: 'user', content: prompt }
+          ],
+          response_format: { type: 'json_object' }
+        }, {
+          headers: { Authorization: `Bearer ${this.openaiApiKey}`, 'Content-Type': 'application/json' },
+          timeout: Number(process.env.OPENAI_TIMEOUT_MS || 90000)
+        });
+        const rawText = response.data?.choices?.[0]?.message?.content;
+        if (rawText) return this.limpiarYParsearJson(rawText);
+      } catch (error) {
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        console.warn(`[ModelosIaService] OpenAI (${modelName}) falló:`, errorMessage);
+        this._registrarErrorModelo(`openai:${modelName}`, error);
+        if (!options.allowFallback && modelName === modelos.at(-1)) {
+          throw new Error(`El proveedor OpenAI no pudo completar la solicitud: ${errorMessage}`);
+        }
+      }
+    }
+    if (!options.allowFallback) throw new Error('El proveedor OpenAI no devolvió una respuesta válida.');
     return null;
   }
 

@@ -59,7 +59,7 @@ class ArquitecturaSoftwareValidatorService {
     if (/web|movil|mobile|frontend|portal|spa|pwa|cliente|app/i.test(trimmed)) {
       componentesDetectados.push('aplicacion_cliente');
     }
-    if (/queue|cola|kafka|rabbitmq|broker|mensajeria|event/i.test(trimmed)) {
+    if (/\bqueue\b|cola de mensajes|kafka|rabbitmq|broker de|mensajer[ií]a|event bus/i.test(trimmed)) {
       componentesDetectados.push('mensajeria');
     }
     if (/cache|redis|memcached/i.test(trimmed)) {
@@ -69,39 +69,32 @@ class ArquitecturaSoftwareValidatorService {
       componentesDetectados.push('seguridad_gateway');
     }
 
-    // 3. Reflejo concreto de RNF según lista
+    // 3. Trazabilidad de RNF sin prescribir productos. Un atributo de calidad
+    // define una responsabilidad y una métrica, no una tecnología concreta.
+    const trazabilidadProcesada = this.normalizarTrazabilidad(trazabilidad_rnf, lowerCode);
     if (Array.isArray(rnfList) && rnfList.length > 0) {
       for (const rnf of rnfList) {
         const desc = `${rnf.nombre || ''} ${rnf.descripcion || ''} ${rnf.metrica_medible || ''}`.toLowerCase();
-
-        // Rendimiento / Latencia
-        if (/rendimiento|latencia|tiempo de respuesta|velocidad|cache/i.test(desc)) {
-          const tieneComponenteRendimiento = /redis|cache|in-memory|memcached|cdn|pooling/i.test(lowerCode);
-          if (!tieneComponenteRendimiento) {
-            advertencias.push(`El RNF de rendimiento (${rnf.identificador || rnf.nombre}) debería reflejarse con un componente concreto (ej. Redis Cache o acelerador).`);
-          }
-        }
-
-        // Seguridad / Autenticación / Cifrado
-        if (/seguridad|autenticaci|autorizaci|cifrado|jwt|roles|rbac/i.test(desc)) {
-          const tieneComponenteSeguridad = /auth|gateway|jwt|filtro|token|oauth|firewall|ssl|tls/i.test(lowerCode);
-          if (!tieneComponenteSeguridad) {
-            advertencias.push(`El RNF de seguridad (${rnf.identificador || rnf.nombre}) debería reflejarse con un componente concreto (ej. API Gateway, Auth Filter o Token JWT).`);
-          }
-        }
-
-        // Auditoría / Trazabilidad
-        if (/auditor|trazabilidad|bit[aá]cora|logs/i.test(desc)) {
-          const tieneComponenteAuditoria = /audit|bitacora|log|loki|elastic/i.test(lowerCode);
-          if (!tieneComponenteAuditoria) {
-            advertencias.push(`El RNF de auditoría (${rnf.identificador || rnf.nombre}) debería reflejarse con un componente de bitácora o almacén de eventos.`);
-          }
+        const id = String(rnf.identificador || rnf.id || '').trim();
+        const esArquitectonico = /rendimiento|latencia|tiempo de respuesta|seguridad|autenticaci|autorizaci|cifrado|auditor|trazabilidad|bit[aá]cora|interoperabilidad|escalabilidad|disponibilidad/i.test(desc);
+        const mapeo = trazabilidadProcesada.find((item) => String(item.rnf_id || '').toLowerCase() === id.toLowerCase());
+        const citadoEnCodigo = id && lowerCode.includes(id.toLowerCase());
+        if (esArquitectonico && !mapeo && !citadoEnCodigo) {
+          advertencias.push(`El RNF ${id || rnf.nombre || 'sin identificador'} no tiene trazabilidad hacia una responsabilidad de la arquitectura de software.`);
+        } else if (mapeo && !mapeo.presente_en_codigo) {
+          advertencias.push(`La trazabilidad de ${id || rnf.nombre} apunta a "${mapeo.elemento}", pero ese elemento no aparece en el diagrama.`);
         }
       }
     }
 
-    // 4. Validación de Trazabilidad RNF -> elemento arquitectónico
-    const trazabilidadProcesada = this.normalizarTrazabilidad(trazabilidad_rnf, lowerCode);
+    const idsAprobados = new Set((Array.isArray(rnfList) ? rnfList : [])
+      .map((rnf) => String(rnf.identificador || rnf.id || '').toLowerCase())
+      .filter(Boolean));
+    for (const mapeo of trazabilidadProcesada) {
+      if (idsAprobados.size > 0 && !idsAprobados.has(String(mapeo.rnf_id || '').toLowerCase())) {
+        advertencias.push(`La trazabilidad referencia ${mapeo.rnf_id}, que no corresponde a un RNF aprobado.`);
+      }
+    }
 
     return {
       valido: errores.length === 0,

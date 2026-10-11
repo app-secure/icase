@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronLeft, CheckCircle2, FileText } from "lucide-react";
+import { ChevronLeft, CheckCircle2, FileText, AlertTriangle, ShieldAlert } from "lucide-react";
 import StaticDiagram from "./StaticDiagram";
 import PdfPreviewModal from "./PdfPreviewModal";
 
@@ -20,20 +20,22 @@ const capitalizeFirst = (text) => {
 
 export default function DocumentViewer({ project, onBackToDiagrams }) {
   const [showPdfModal, setShowPdfModal] = useState(false);
+  const finalAudit = project.finalAudit;
+  const exportBlocked = Boolean(finalAudit && !finalAudit.exportable);
 
   const objetivosGenerales = project.objetivos?.general ||
-    `Desarrollar e implementar el software ${project.name || "del sistema"} con arquitectura modular, garantizando la automatización de sus procesos clave, integridad y persistencia transaccional.`;
+    `Definir y documentar el software ${project.name || "del sistema"} a partir de los requisitos y decisiones técnicas aprobadas.`;
 
   const objetivosEspecificos = project.objetivos?.especificos && project.objetivos.especificos.length > 0
     ? project.objetivos.especificos
     : [
         `Realizar el análisis formal de requisitos funcionales y no funcionales cuantificables para ${project.name || "el sistema"}.`,
         `Diseñar los casos de uso fundamentales y el modelo de clases de dominio con tipado estricto.`,
-        `Modelar la arquitectura de software de alta disponibilidad con tolerancia a fallos y el mapa de pantallas y rutas de navegación.`
+        `Modelar la arquitectura de software, la arquitectura del sistema y el mapa de pantallas sin introducir decisiones no aprobadas.`
       ];
 
   const resumenTexto = project.resumenEjecutivo || project.resumen_ejecutivo || project.description ||
-    `El proyecto ${project.name || "del sistema"} busca implementar una solución tecnológica integral de software para la automatización y gestión de sus operaciones nodales, estableciendo una base analítica y arquitectónica con alta disponibilidad y persistencia transaccional.`;
+    `El proyecto ${project.name || "del sistema"} reúne los requisitos aprobados y los modelos derivados de ellos, manteniendo trazabilidad entre análisis, arquitectura, diseño e interfaces.`;
 
   const introduccionTexto = project.introduccion ||
     `En el entorno operacional contemporáneo, la ausencia de una adecuada especificación formal suele traducirse en sobrecostos, retrasos e inconsistencias operativas. El presente documento técnico estructura los requerimientos a partir de los insumos provistos por los interesados del dominio, asegurando consistencia, trazabilidad y cumplimiento de estándares de calidad para ${project.name || "el sistema"}.`;
@@ -120,13 +122,29 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             {/* Botón Principal: Previsualizar documento en PDF */}
             <button
               type="button"
-              onClick={() => setShowPdfModal(true)}
-              className="px-4 py-2 bg-[#0b57d0] hover:bg-blue-700 text-white rounded-full text-xs font-medium flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+              onClick={() => !exportBlocked && setShowPdfModal(true)}
+              disabled={exportBlocked}
+              title={exportBlocked ? "Corrige los errores críticos indicados por la auditoría" : "Previsualizar documento"}
+              className="px-4 py-2 bg-[#0b57d0] hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-full text-xs font-medium flex items-center gap-2 shadow-xs transition-all cursor-pointer"
             >
               <FileText size={15} />
               <span>Previsualizar documento en PDF</span>
             </button>
           </div>
+
+          {finalAudit && (
+            <div className={`mb-5 rounded-xl border p-4 text-sm ${exportBlocked ? "border-red-200 bg-red-50" : finalAudit.advertencias?.length ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+              <div className="flex items-center gap-2 font-semibold text-slate-900">
+                {exportBlocked ? <ShieldAlert size={17} className="text-red-600" /> : finalAudit.advertencias?.length ? <AlertTriangle size={17} className="text-amber-600" /> : <CheckCircle2 size={17} className="text-emerald-600" />}
+                Auditoría final: {exportBlocked ? "requiere correcciones" : finalAudit.advertencias?.length ? "exportable con advertencias" : "válida"}
+              </div>
+              <p className="mt-1 text-xs text-slate-600">
+                {finalAudit.resumen?.diagramas_aprobados || 0}/{finalAudit.resumen?.diagramas_requeridos || 6} diagramas aprobados · {finalAudit.resumen?.mockups_generados || 0} mockups · cobertura RF/UI {finalAudit.resumen?.cobertura_rf_mockups ?? "—"}%
+              </p>
+              {finalAudit.errores_criticos?.map((item) => <p key={item} className="mt-2 text-xs text-red-700">• {item}</p>)}
+              {finalAudit.advertencias?.map((item) => <p key={item} className="mt-2 text-xs text-amber-800">• {item}</p>)}
+            </div>
+          )}
 
           {/* Main Document Body */}
           <div className="space-y-8 text-slate-800 text-[15px] leading-relaxed">
@@ -263,7 +281,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
                             Prioridad
                           </td>
                           <td className="p-2.5 text-slate-700 font-medium">
-                            {rf.priority || "Alta"}
+                            {rf.priority || "No especificada"}
                           </td>
                         </tr>
                         <tr className="border-b border-slate-200">
@@ -271,7 +289,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
                             Actores
                           </td>
                           <td className="p-2.5 text-slate-700">
-                            {Array.isArray(rf.actors) ? rf.actors.join(", ") : rf.actors || "Operador Principal"}
+                            {Array.isArray(rf.actors) ? rf.actors.join(", ") : rf.actors || "No especificados"}
                           </td>
                         </tr>
                         <tr className="border-b border-slate-200">
@@ -279,7 +297,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
                             Precondiciones
                           </td>
                           <td className="p-2.5 text-slate-700">
-                            {rf.precondition || "El usuario accede a la plataforma con credenciales válidas"}
+                            {rf.precondition || "No especificadas en los insumos"}
                           </td>
                         </tr>
                         <tr>
@@ -287,7 +305,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
                             Postcondiciones
                           </td>
                           <td className="p-2.5 text-slate-700">
-                            {rf.postcondition || "Transacción registrada y confirmada en la base de datos"}
+                            {rf.postcondition || "No especificadas en los insumos"}
                           </td>
                         </tr>
                       </tbody>
@@ -339,7 +357,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
                             Criterio / Métrica Cuantitativa
                           </td>
                           <td className="p-2.5 text-blue-700 font-medium font-mono">
-                            {rnf.metric || rnf.metrica_medible}
+                            {rnf.metric || rnf.metrica_medible || "Por confirmar con el usuario"}
                           </td>
                         </tr>
                         <tr className="border-b border-slate-200">
@@ -355,7 +373,7 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
                             Prioridad
                           </td>
                           <td className="p-2.5 text-slate-700 font-medium">
-                            {rnf.priority || "Alta"}
+                            {rnf.priority || "No especificada"}
                           </td>
                         </tr>
                       </tbody>

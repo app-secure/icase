@@ -69,9 +69,9 @@ describe('Feature / Architecture Diagrams Unit Tests', () => {
       expect(diagSoftware.codigo_plantuml).toMatch(/!include <C4\/C4_Container>/);
       expect(diagSoftware.codigo_plantuml).toMatch(/@enduml/);
 
-      // Reflejo concreto de RNF: Redis para rendimiento, Gateway para seguridad
-      expect(diagSoftware.codigo_plantuml).toMatch(/Redis/i);
-      expect(diagSoftware.codigo_plantuml).toMatch(/Gateway/i);
+      // Los RNF se trazan hacia responsabilidades; no prescriben productos.
+      expect(diagSoftware.codigo_plantuml).not.toMatch(/Redis|API Gateway|Nginx|RabbitMQ/i);
+      expect(diagSoftware.codigo_plantuml).toMatch(/Servicio de Aplicación/i);
 
       // Trazabilidad RNF -> elemento arquitectónico
       expect(Array.isArray(diagSoftware.trazabilidad_rnf)).toBe(true);
@@ -79,7 +79,7 @@ describe('Feature / Architecture Diagrams Unit Tests', () => {
 
       const itemRendimiento = diagSoftware.trazabilidad_rnf.find(t => t.rnf_id === 'RNF-01');
       expect(itemRendimiento).toBeDefined();
-      expect(itemRendimiento.elemento).toMatch(/Redis/i);
+      expect(itemRendimiento.elemento).toMatch(/Servicio de Aplicación/i);
 
       // Validación con ArquitecturaSoftwareValidatorService
       const validacion = softwareValidator.validar({
@@ -92,7 +92,7 @@ describe('Feature / Architecture Diagrams Unit Tests', () => {
       expect(validacion.errores).toHaveLength(0);
       expect(validacion.componentes_detectados).toContain('base_de_datos');
       expect(validacion.componentes_detectados).toContain('servicios_api');
-      expect(validacion.componentes_detectados).toContain('cache');
+      expect(validacion.componentes_detectados).not.toContain('cache');
     });
 
     test('Validador de Software rechaza código inválido o sin componentes', () => {
@@ -117,19 +117,19 @@ describe('Feature / Architecture Diagrams Unit Tests', () => {
       expect(diagSistema.codigo_plantuml).toMatch(/@startuml/);
       expect(diagSistema.codigo_plantuml).toMatch(/@enduml/);
 
-      // Debe ser Standalone VPS sin failover ni réplicas redundantes
-      expect(diagSistema.codigo_plantuml).toMatch(/Standalone/i);
+      // Debe ser una topología mínima sin productos, failover ni réplicas.
+      expect(diagSistema.codigo_plantuml).toMatch(/Nodo de Aplicación/i);
       expect(diagSistema.codigo_plantuml).not.toMatch(/failover/i);
       expect(diagSistema.codigo_plantuml).not.toMatch(/hot standby/i);
       expect(diagSistema.codigo_plantuml).not.toMatch(/nodo replica/i);
+      expect(diagSistema.codigo_plantuml).not.toMatch(/Prometheus|Grafana|Docker|Ubuntu/i);
 
       // Trazabilidad RNF
       expect(Array.isArray(diagSistema.trazabilidad_rnf)).toBe(true);
-      const traceInfra = diagSistema.trazabilidad_rnf.find(t => t.elemento.includes('Standalone'));
-      expect(traceInfra).toBeDefined();
+      expect(diagSistema.trazabilidad_rnf).toHaveLength(0);
 
-      // Debe incluir dispositivos clientes (móvil y/o web)
-      expect(diagSistema.codigo_plantuml).toMatch(/clientMobile|clientPc|Dispositivo M[oó]vil|Navegador/i);
+      // Sin una plataforma aprobada conserva un dispositivo genérico por definir.
+      expect(diagSistema.codigo_plantuml).toMatch(/Dispositivo de Usuario/i);
 
       // Validación con ArquitecturaSistemaValidatorService
       const validacion = sistemaValidator.validar({
@@ -180,7 +180,7 @@ Deployment_Node(cloud, "Cloud") {
       });
 
       expect(diagSistema.tipo).toBe(DiagramTypes.ARQUITECTURA_SISTEMA);
-      expect(diagSistema.codigo_plantuml).toMatch(/Balanceador con Failover/i);
+      expect(diagSistema.codigo_plantuml).toMatch(/Mecanismo de Distribución y Failover/i);
       expect(diagSistema.codigo_plantuml).toMatch(/Hot Standby|Réplica|Replica/i);
       expect(diagSistema.codigo_plantuml).toMatch(/Failover/i);
 
@@ -224,19 +224,20 @@ Deployment_Node(cloud, "Cloud") {
       expect(resSys.valido).toBe(true);
     });
 
-    test('PlantUMLSynthesizer normaliza correctamente los 5 diagramas usando DiagramTypes', () => {
+    test('PlantUMLSynthesizer normaliza correctamente los 6 diagramas usando DiagramTypes', () => {
       const normalizados = PlantUMLSynthesizer.normalizar([
         { tipo: DiagramTypes.CASOS_DE_USO, codigo_plantuml: '@startuml\nusecase A\n@enduml' },
         { tipo: DiagramTypes.ARQUITECTURA_SOFTWARE, codigo_plantuml: '@startuml\nContainer(a, "A")\n@enduml' },
         { tipo: DiagramTypes.ARQUITECTURA_SISTEMA, codigo_plantuml: '@startuml\nnode S\n@enduml' }
       ]);
 
-      expect(normalizados).toHaveLength(5);
+      expect(normalizados).toHaveLength(6);
       const tipos = normalizados.map(d => d.tipo);
       expect(tipos).toContain(DiagramTypes.CASOS_DE_USO);
       expect(tipos).toContain(DiagramTypes.ARQUITECTURA_SOFTWARE);
       expect(tipos).toContain(DiagramTypes.ARQUITECTURA_SISTEMA);
-      expect(tipos).toContain(DiagramTypes.CLASES);
+      expect(tipos).toContain(DiagramTypes.CLASES_DOMINIO);
+      expect(tipos).toContain(DiagramTypes.CLASES_DISENO);
       expect(tipos).toContain(DiagramTypes.ARBOL_NAVEGACION);
     });
 
@@ -257,7 +258,7 @@ lb --> app2
         requerimientos: fixtureSinHA.requerimientos
       }).filter((diagrama) => diagrama.tipo === DiagramTypes.ARQUITECTURA_SISTEMA);
 
-      expect(normalizado.codigo_plantuml).toMatch(/Standalone/i);
+      expect(normalizado.codigo_plantuml).toMatch(/Nodo de Aplicación/i);
       expect(normalizado.codigo_plantuml).not.toMatch(/failover|hot standby/i);
       const validacion = sistemaValidator.validar({
         codigo: normalizado.codigo_plantuml,
@@ -281,7 +282,7 @@ lb --> app2
       });
 
       expect(resultado.diagramas).toHaveLength(1);
-      expect(resultado.diagramas[0].codigo_plantuml).toMatch(/Standalone/i);
+      expect(resultado.diagramas[0].codigo_plantuml).toMatch(/Nodo de Aplicación/i);
       expect(resultado.diagramas[0].codigo_plantuml).not.toMatch(/failover|hot standby/i);
     });
   });

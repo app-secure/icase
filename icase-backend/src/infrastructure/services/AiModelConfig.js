@@ -16,7 +16,8 @@ module.exports = {
     gemini: () => listaEnv('GEMINI_ANALYSIS_MODELS', 'gemini-3.5-flash-lite,gemini-3.8-flash'),
     groq: () => listaEnv('GROQ_ANALYSIS_MODELS', 'openai/gpt-oss-120b'),
     openrouter: () => listaEnv('OPENROUTER_ANALYSIS_MODELS', ''),
-    providerOrder: () => listaEnv('AI_PROVIDER_ORDER', 'gemini,deepseek,groq,openrouter')
+    openai: () => listaEnv('OPENAI_ANALYSIS_MODELS', 'gpt-5-mini'),
+    providerOrder: () => listaEnv('AI_PROVIDER_ORDER', 'gemini,openai,deepseek,groq,openrouter')
   },
   ingestion: {
     gemini: () => listaEnv('GEMINI_INGESTION_MODELS', 'gemini-3.5-flash-lite,gemini-3.8-flash'),

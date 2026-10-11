@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "jest"
+    "test": "jest",
+    "test:e2e:real": "set RUN_REAL_AI_E2E=true&& jest tests/real-model-flow.e2e.test.js --runInBand"
   },
   "keywords": [
     "icase",

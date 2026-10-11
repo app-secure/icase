@@ -1,164 +1,117 @@
 const { DiagramTypes } = require('../../core/constants/DiagramTypes');
 
-/**
- * Generador especializado para Arquitectura de Software
- * Tipo: arquitectura_software (C4 Container)
- */
+function requirementsText(requirements = []) {
+  return requirements.map((item) => [
+    item.nombre,
+    item.descripcion,
+    item.metrica_medible,
+    Array.isArray(item.actores) ? item.actores.join(' ') : item.actores
+  ].filter(Boolean).join(' ')).join('\n');
+}
+
+function firstTechnology(text, candidates) {
+  return candidates.find(([pattern]) => pattern.test(text))?.[1] || 'Tecnología por definir';
+}
+
+function safe(value) {
+  return String(value || '').replace(/["'“”\r\n]+/g, ' ').trim();
+}
+
 class ArquitecturaSoftwareGeneratorService {
-  /**
-   * Genera el diagrama de arquitectura de software a partir de requerimientos y metadatos
-   * @param {Object} params
-   * @param {string} params.nombreProyecto
-   * @param {Array} params.requerimientos - Lista de RF y RNF
-   * @param {Object} [params.opciones]
-   * @returns {Object} Diagrama estructurado con código PlantUML y trazabilidad
-   */
-  generar({ nombreProyecto = 'Sistema de Información', requerimientos = [], opciones = {} } = {}) {
-    const safeName = (nombreProyecto || 'Sistema').replace(/["'“”]/g, '').trim();
-    const rfs = requerimientos.filter(r => (r.tipo || '').toUpperCase() === 'RF');
-    const rnfs = requerimientos.filter(r => (r.tipo || '').toUpperCase() === 'RNF');
+  generar({ nombreProyecto = 'Sistema', requerimientos = [] } = {}) {
+    const projectName = safe(nombreProyecto) || 'Sistema';
+    const text = requirementsText(requerimientos);
+    const rfs = requerimientos.filter((item) => String(item.tipo || '').toUpperCase() === 'RF');
+    const rnfs = requerimientos.filter((item) => String(item.tipo || '').toUpperCase() === 'RNF');
 
-    // Detección de necesidades de clientes (móvil y web)
-    const incluyeMovil = requerimientos.some(r => /m[oó]vil|app\b|celular|smartphone|android|ios|flutter|react native|campo|repartidor|conductor|chofer|cliente/i.test(`${r.nombre} ${r.descripcion} ${r.actores || ''}`));
+    const hasMobile = /m[oó]vil|smartphone|android|ios|react native|flutter/i.test(text);
+    const hasWeb = /\bweb\b|navegador|spa|react|vue|angular|tailwind/i.test(text);
+    const needsData = /base de datos|persist|almacen|guardar|registr|historial|conservar|transacci/i.test(text);
+    const needsAudit = rnfs.some((item) => /auditor|trazabilidad|bit[aá]cora|registro hist/i.test(requirementsText([item])));
+    const needsMessaging = /broker|mensajer[ií]a|cola de mensajes|rabbitmq|kafka|event bus/i.test(text);
 
-    // Detección de necesidades a partir de RNF
-    const rnfRendimiento = rnfs.find(r => /latencia|tiempo de respuesta|rendimiento|velocidad|cache/i.test(`${r.nombre} ${r.descripcion} ${r.metrica_medible}`));
-    const rnfSeguridad = rnfs.find(r => /seguridad|autenticaci|autorizaci|jwt|cifrado|roles|acceso/i.test(`${r.nombre} ${r.descripcion}`));
-    const rnfAuditoria = rnfs.find(r => /auditor|trazabilidad|bit[aá]cora|registro hist/i.test(`${r.nombre} ${r.descripcion}`));
-    const rnfMensajeria = rnfs.find(r => /as[ií]ncron|cola|mensajer[ií]a|eventos|desacopl/i.test(`${r.nombre} ${r.descripcion}`));
+    const mobileTech = firstTechnology(text, [
+      [/react native/i, 'React Native'], [/flutter/i, 'Flutter']
+    ]);
+    const webTech = firstTechnology(text, [
+      [/\breact\b/i, /tailwind/i.test(text) ? 'React + Tailwind' : 'React'],
+      [/\bvue\b/i, 'Vue'], [/angular/i, 'Angular']
+    ]);
+    const backendTech = firstTechnology(text, [
+      [/nestjs/i, 'NestJS'], [/express/i, 'Express'], [/spring boot/i, 'Spring Boot'],
+      [/django/i, 'Django'], [/laravel/i, 'Laravel'], [/\.net/i, '.NET']
+    ]);
+    const dataTech = firstTechnology(text, [
+      [/postgres(?:ql)?/i, 'PostgreSQL'], [/mongodb/i, 'MongoDB'], [/mysql/i, 'MySQL'], [/sql server/i, 'SQL Server']
+    ]);
+    const messagingTech = firstTechnology(text, [
+      [/rabbitmq/i, 'RabbitMQ'], [/kafka/i, 'Kafka']
+    ]);
+    const protocol = firstTechnology(text, [
+      [/socket\.io/i, 'Socket.IO'], [/websocket/i, 'WebSocket'], [/grpc/i, 'gRPC'], [/\brest\b/i, 'REST']
+    ]).replace('Tecnología', 'Protocolo');
 
-    // Mapeo explícito de Trazabilidad RNF -> Elemento Arquitectónico
-    const trazabilidad = [];
+    const actors = [...new Set(rfs.flatMap((item) => Array.isArray(item.actores) ? item.actores : [item.actores])
+      .flatMap((item) => String(item || '').split(/[,;|]/))
+      .map((item) => safe(item))
+      .filter(Boolean))].slice(0, 4);
 
-    let incluyeCache = false;
-    if (rnfRendimiento) {
-      incluyeCache = true;
-      trazabilidad.push({
-        rnf_id: rnfRendimiento.identificador || 'RNF-Rendimiento',
-        elemento: 'Redis Cache (Caché en Memoria)',
-        justificacion: `Resuelve requerimiento de tiempo de respuesta y baja latencia (${rnfRendimiento.metrica_medible || rnfRendimiento.nombre}).`
-      });
-    }
+    const trace = rnfs.map((rnf) => {
+      const rnfText = requirementsText([rnf]);
+      const element = /auditor|trazabilidad|bit[aá]cora/i.test(rnfText) && needsAudit
+        ? 'Registro de Auditoría'
+        : 'Servicio de Aplicación';
+      return {
+        rnf_id: rnf.identificador || rnf.id || 'RNF',
+        elemento: element,
+        justificacion: `Responsabilidad asociada a la métrica aprobada: ${safe(rnf.metrica_medible || 'Por confirmar con el usuario')}`
+      };
+    });
 
-    let incluyeGatewayAuth = false;
-    if (rnfSeguridad) {
-      incluyeGatewayAuth = true;
-      trazabilidad.push({
-        rnf_id: rnfSeguridad.identificador || 'RNF-Seguridad',
-        elemento: 'API Gateway & Auth Service',
-        justificacion: `Centraliza autenticación JWT, RBAC y control perimetral (${rnfSeguridad.nombre}).`
-      });
-    } else {
-      // Gateway estándar
-      incluyeGatewayAuth = true;
-    }
+    const lines = [
+      '@startuml',
+      '!include <C4/C4_Container>',
+      'SHOW_PERSON_OUTLINE()',
+      'LAYOUT_LEFT_RIGHT()',
+      `title Arquitectura de Software - ${projectName}`,
+      ''
+    ];
+    actors.forEach((actor, index) => lines.push(`Person(actor${index + 1}, "${actor}", "Actor definido en requisitos")`));
+    if (actors.length) lines.push('');
+    lines.push(`System_Boundary(sys, "${projectName}") {`);
+    if (hasMobile) lines.push(`  Container(mobileApp, "Aplicación Móvil", "${mobileTech}", "Canal móvil solicitado")`);
+    if (hasWeb) lines.push(`  Container(webApp, "Aplicación Web", "${webTech}", "Canal web solicitado")`);
+    if (!hasMobile && !hasWeb) lines.push('  Container(userInterface, "Interfaz de Usuario", "Tecnología por definir", "Canal de interacción por definir")');
+    lines.push(`  Container(appService, "Servicio de Aplicación", "${backendTech}", "Realiza los casos de uso aprobados")`);
+    if (needsData) lines.push(`  ContainerDb(dataStore, "Almacén de Datos", "${dataTech}", "Persistencia requerida por los RF")`);
+    if (needsMessaging) lines.push(`  Container(eventChannel, "Canal de Mensajería", "${messagingTech}", "Comunicación asíncrona solicitada")`);
+    if (needsAudit) lines.push('  Container(auditStore, "Registro de Auditoría", "Tecnología por definir", "Conserva la trazabilidad solicitada")');
+    lines.push('}', '');
 
-    let incluyeAuditoria = false;
-    if (rnfAuditoria) {
-      incluyeAuditoria = true;
-      trazabilidad.push({
-        rnf_id: rnfAuditoria.identificador || 'RNF-Auditoria',
-        elemento: 'Almacén de Bitácoras & Auditoría',
-        justificacion: `Almacena eventos inmutables para cumplir trazabilidad (${rnfAuditoria.nombre}).`
-      });
-    }
-
-    let incluyeMensajeria = false;
-    if (rnfMensajeria) {
-      incluyeMensajeria = true;
-      trazabilidad.push({
-        rnf_id: rnfMensajeria.identificador || 'RNF-Mensajeria',
-        elemento: 'Broker de Mensajería RabbitMQ',
-        justificacion: `Garantiza desacoplamiento y procesamiento asíncrono (${rnfMensajeria.nombre}).`
-      });
-    }
-
-    // Construcción del código C4 Container PlantUML
-    let puml = `@startuml\n`;
-    puml += `!include <C4/C4_Container>\n`;
-    puml += `SHOW_PERSON_OUTLINE()\n`;
-    puml += `title Arquitectura de Software - ${safeName}\n\n`;
-
-    puml += `Person(usuario, "Usuario del Sistema", "Operador / Cliente del sistema")\n`;
-    puml += `Person(admin, "Administrador", "Gestor administrativo y supervisor")\n\n`;
-
-    puml += `System_Boundary(sys, "${safeName}") {\n`;
-    puml += `  Container(webApp, "Portal Web y Aplicación SPA", "React / TypeScript", "Interfaz interactiva de usuario en escritorio")\n`;
-
-    if (incluyeMovil) {
-      puml += `  Container(mobileApp, "Aplicación Móvil", "Flutter / React Native", "Interfaz táctil para clientes y operaciones móviles")\n`;
-    }
-
-    if (incluyeGatewayAuth) {
-      puml += `  Container(apiGateway, "API Gateway & Seguridad", "Nginx / Express Gateway", "Terminación TLS, Auth JWT y control de acceso")\n`;
-    }
-
-    puml += `  Container(coreService, "Servicio Central de Dominio", "Node.js / Express", "Procesa reglas de negocio y transacciones")\n`;
-
-    if (incluyeMensajeria) {
-      puml += `  Container(msgBroker, "Broker de Eventos", "RabbitMQ", "Canal de eventos asíncronos")\n`;
-    }
-
-    puml += `  ContainerDb(dbPrincipal, "Base de Datos Transaccional", "PostgreSQL", "Almacenamiento relacional ACID de entidades")\n`;
-
-    if (incluyeCache) {
-      puml += `  ContainerDb(cacheMem, "Memoria Caché", "Redis", "Caché de consultas de alto tráfico y baja latencia")\n`;
-    }
-
-    if (incluyeAuditoria) {
-      puml += `  Container(auditLog, "Servicio de Auditoría", "Audit Logger / Elasticsearch", "Registro inmutable de transacciones")\n`;
-    }
-
-    puml += `}\n\n`;
-
-    // Relaciones entre componentes
-    puml += `Rel(usuario, webApp, "Interactúa con las pantallas", "HTTPS")\n`;
-    if (incluyeMovil) {
-      puml += `Rel(usuario, mobileApp, "Opera desde dispositivo smartphone", "Táctil")\n`;
-    }
-    puml += `Rel(admin, webApp, "Gestiona y supervisa", "HTTPS")\n\n`;
-
-    if (incluyeGatewayAuth) {
-      puml += `Rel(webApp, apiGateway, "Peticiones API", "JSON/HTTPS")\n`;
-      if (incluyeMovil) {
-        puml += `Rel(mobileApp, apiGateway, "Peticiones API Móvil", "JSON/HTTPS")\n`;
-      }
-      puml += `Rel(apiGateway, coreService, "Enruta tráfico autorizado", "gRPC / HTTP")\n`;
-    } else {
-      puml += `Rel(webApp, coreService, "Peticiones API", "JSON/HTTPS")\n`;
-      if (incluyeMovil) {
-        puml += `Rel(mobileApp, coreService, "Peticiones API Móvil", "JSON/HTTPS")\n`;
-      }
-    }
-
-    puml += `Rel(coreService, dbPrincipal, "Persiste operaciones transaccionales", "TCP/SQL")\n`;
-
-    if (incluyeCache) {
-      puml += `Rel(coreService, cacheMem, "Lee/Escribe datos en caché rápida", "TCP")\n`;
-    }
-
-    if (incluyeMensajeria) {
-      puml += `Rel(coreService, msgBroker, "Publica eventos de dominio", "AMQP")\n`;
-    }
-
-    if (incluyeAuditoria) {
-      puml += `Rel(coreService, auditLog, "Envía bitácoras de eventos", "REST")\n`;
-    }
-
-    puml += `@enduml`;
+    const interfaceAliases = hasMobile || hasWeb
+      ? [['mobileApp', hasMobile], ['webApp', hasWeb]].filter(([, enabled]) => enabled).map(([alias]) => alias)
+      : ['userInterface'];
+    actors.forEach((actor, index) => lines.push(`Rel(actor${index + 1}, ${interfaceAliases[index % interfaceAliases.length]}, "Usa", "Canal aprobado")`));
+    interfaceAliases.forEach((alias) => lines.push(`Rel(${alias}, appService, "Solicita capacidades", "${protocol}")`));
+    if (needsData) lines.push('Rel(appService, dataStore, "Lee y persiste", "Protocolo por definir")');
+    if (needsMessaging) lines.push(`Rel(appService, eventChannel, "Publica y consume", "${messagingTech === 'Tecnología por definir' ? 'Protocolo por definir' : messagingTech}")`);
+    if (needsAudit) lines.push('Rel(appService, auditStore, "Registra eventos", "Protocolo por definir")');
+    trace.forEach((item, index) => lines.push(`note right of ${item.elemento === 'Registro de Auditoría' ? 'auditStore' : 'appService'} as RNF_NOTE_${index + 1}\n  ${safe(item.rnf_id)}: ${safe(rnfs[index]?.metrica_medible || 'Por confirmar con el usuario')}\nend note`));
+    lines.push('@enduml');
 
     return {
       tipo: DiagramTypes.ARQUITECTURA_SOFTWARE,
-      titulo: `Diagrama de Arquitectura de Software - ${safeName}`,
-      descripcion: `Modelo de contenedores lógicos C4 para ${safeName}, detallando aplicaciones clientes (web${incluyeMovil ? ' y móvil' : ''}), gateway de servicios, lógica de negocio y capas de almacenamiento.`,
+      titulo: `Diagrama de Arquitectura de Software - ${projectName}`,
+      descripcion: `Vista lógica de los canales y responsabilidades de software derivados de los requisitos aprobados de ${projectName}.`,
       descripcion_jerarquica: [
-        `Capa de Presentación: Aplicación web interactiva${incluyeMovil ? ' y aplicación móvil' : ''} adaptada para la experiencia del usuario.`,
-        'Capa de Borde y API: Gateway perimetral con validación de seguridad y distribución de llamadas.',
-        'Capa de Servicios de Dominio: Componentes de lógica operativa que implementan las reglas funcionales.',
-        'Capa de Persistencia y Caché: Almacén de base de datos relacional complementado con componentes según los RNF.'
+        'Canales: Interfaces exigidas por los requisitos aprobados.',
+        'Aplicación: Responsabilidad central que realiza los casos de uso.',
+        `Persistencia: ${needsData ? 'Almacén requerido por las operaciones aprobadas.' : 'No se añadió un almacén sin evidencia.'}`,
+        'Decisiones técnicas: Las tecnologías ausentes permanecen por definir.'
       ],
-      trazabilidad_rnf: trazabilidad,
-      codigo_plantuml: puml
+      requisitos_relacionados: requerimientos.map((item) => item.identificador || item.id).filter(Boolean),
+      trazabilidad_rnf: trace,
+      codigo_plantuml: lines.join('\n')
     };
   }
 }

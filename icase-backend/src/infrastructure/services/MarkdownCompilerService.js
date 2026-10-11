@@ -1,3 +1,41 @@
+const {
+  DIAGRAM_TYPES,
+  normalizeDiagramType
+} = require('../../core/constants/DiagramTypes');
+
+function diagramTimestamp(diagram) {
+  const parsed = new Date(diagram?.updatedAt || diagram?.createdAt || 0).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function latestDiagram(diagrams, expectedType) {
+  return (Array.isArray(diagrams) ? diagrams : [])
+    .filter((diagram) => normalizeDiagramType(diagram?.tipo) === expectedType)
+    .sort((left, right) => {
+      const approvalDelta = Number(Boolean(right?.aprobado)) - Number(Boolean(left?.aprobado));
+      if (approvalDelta !== 0) return approvalDelta;
+      const versionDelta = Number(right?.version || 1) - Number(left?.version || 1);
+      return versionDelta !== 0 ? versionDelta : diagramTimestamp(right) - diagramTimestamp(left);
+    })[0] || null;
+}
+
+function diagramCode(diagram) {
+  return diagram?.codigo_plantuml || diagram?.codigo_mermaid || '';
+}
+
+function diagramTracesRequirement(diagram, requirementId) {
+  if (!diagram || !requirementId) return false;
+  const expected = String(requirementId).trim().toUpperCase();
+  const related = Array.isArray(diagram.requisitos_relacionados) ? diagram.requisitos_relacionados : [];
+  const qualityTrace = Array.isArray(diagram.trazabilidad_rnf) ? diagram.trazabilidad_rnf : [];
+  const relatedIds = [
+    ...related.map((item) => typeof item === 'object' ? (item.identificador || item.id || item.rnf_id) : item),
+    ...qualityTrace.map((item) => typeof item === 'object' ? (item.rnf_id || item.identificador || item.id) : item)
+  ].map((item) => String(item || '').trim().toUpperCase());
+  if (relatedIds.includes(expected)) return true;
+  return String(diagramCode(diagram)).toUpperCase().includes(expected);
+}
+
 class MarkdownCompilerService {
   compilar({ proyecto, fuentes = [], requerimientos = [], casosDeUso = [], diseno = null, diagramas = [] }) {
     const fecha = new Date().toLocaleDateString('es-ES', {
@@ -8,6 +46,14 @@ class MarkdownCompilerService {
 
     const rfList = requerimientos.filter((r) => r.tipo === 'RF');
     const rnfList = requerimientos.filter((r) => r.tipo === 'RNF');
+    const currentDiagrams = {
+      useCases: latestDiagram(diagramas, DIAGRAM_TYPES.USE_CASES),
+      domainClasses: latestDiagram(diagramas, DIAGRAM_TYPES.DOMAIN_CLASSES),
+      softwareArchitecture: latestDiagram(diagramas, DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE),
+      systemArchitecture: latestDiagram(diagramas, DIAGRAM_TYPES.SYSTEM_ARCHITECTURE),
+      designClasses: latestDiagram(diagramas, DIAGRAM_TYPES.DESIGN_CLASSES),
+      navigationTree: latestDiagram(diagramas, DIAGRAM_TYPES.NAVIGATION_TREE)
+    };
 
     let md = `# DOCUMENTACIÓN DE ESPECIFICACIÓN Y DISEÑO DE SOFTWARE\n\n`;
     md += `## 1. Título del Proyecto\n${proyecto.nombre}\n\n`;
@@ -25,13 +71,13 @@ class MarkdownCompilerService {
     } else {
       md += `- Realizar el levantamiento y estructuración formal de requerimientos funcionales y no funcionales cuantificables bajo estándar IEEE 830.\n`;
       md += `- Diseñar los casos de uso para los 4 procesos fundamentales con especificación de flujos básicos, alternativos y excepciones.\n`;
-      md += `- Modelar la arquitectura de software (Frontend, Backend monolito modular e infraestructura redundante) y esquemas de datos relacionales.\n`;
+      md += `- Modelar la arquitectura de software y del sistema conforme a las tecnologías y restricciones expresamente aprobadas.\n`;
     }
     md += `\n`;
 
     // 3. Resumen
     md += `## 3. Resumen\n\n`;
-    md += `${proyecto.resumen || proyecto.descripcion || `El proyecto ${proyecto.nombre} aborda la digitalización y automatización integral de sus procesos centrales mediante una rigurosa especificación para la planificación, análisis y diseño de software, garantizando altos estándares de rendimiento, disponibilidad y mantenibilidad.`}\n\n`;
+    md += `${proyecto.resumen || proyecto.descripcion || `El proyecto ${proyecto.nombre} documenta sus necesidades de negocio, requisitos aprobados y decisiones de diseño con trazabilidad entre las distintas fases.`}\n\n`;
 
     // 4. Palabras Clave
     md += `## 4. Palabras Clave\n\n`;
@@ -45,7 +91,7 @@ class MarkdownCompilerService {
         .map(r => r.nombre.replace(/^(Gestión de|Control de|Registro de|Módulo de)\s*/i, ''));
     }
     if (keywords.length === 0) {
-      keywords = ['Control Operativo', 'Gestión de Procesos', 'Trazabilidad', 'Seguridad Transaccional'];
+      keywords = ['Especificación', 'Requisitos', 'Diseño', 'Trazabilidad'];
     }
     md += keywords.map((k) => `- ${k}`).join('\n') + `\n\n`;
 
@@ -65,6 +111,7 @@ class MarkdownCompilerService {
       }
       md += `\n`;
     }
+
     md += `---\n\n`;
 
     // 7. Análisis de Requerimientos
@@ -88,8 +135,8 @@ class MarkdownCompilerService {
         md += `- **Dependencias:** ${rf.dependencias || 'Ninguna'}\n`;
         md += `- **Prioridad:** ${rf.prioridad}\n`;
         md += `- **Actores:** ${Array.isArray(rf.actores) ? rf.actores.join(', ') : rf.actores}\n`;
-        md += `- **Precondiciones:** ${rf.precondiciones || 'Usuario autenticado en el sistema'}\n`;
-        md += `- **Postcondiciones:** ${rf.poscondiciones || 'Registro almacenado exitosamente'}\n\n`;
+        md += `- **Precondiciones:** ${rf.precondiciones || 'No especificadas en los insumos'}\n`;
+        md += `- **Postcondiciones:** ${rf.poscondiciones || 'No especificadas en los insumos'}\n\n`;
       }
     }
 
@@ -109,7 +156,7 @@ class MarkdownCompilerService {
     // 7.3 Casos de Uso (4 Procesos Fundamentales)
     md += `### 7.3 Casos de Uso y Procesos Fundamentales\n\n`;
     if (casosDeUso.length === 0) {
-      const cuDiag = diagramas.find((d) => d.tipo === 'casos_de_uso' || d.tipo === 'casos_uso');
+      const cuDiag = currentDiagrams.useCases;
       if (cuDiag) {
         const pCode = cuDiag.codigo_plantuml || cuDiag.codigo_mermaid;
         md += `\`\`\`plantuml\n${pCode}\n\`\`\`\n\n`;
@@ -151,7 +198,28 @@ class MarkdownCompilerService {
         }
       }
     }
-    md += `---\n\n`;
+    md += `### 7.4 Matriz de Trazabilidad entre Fases\n\n`;
+    md += `Esta matriz permite verificar qué artefactos aprobados representan cada requisito. Una celda vacía señala una relación que debe revisarse, no implica automáticamente que el diagrama sea incorrecto.\n\n`;
+    md += `| Requisito | Casos de uso | Dominio | Arq. software | Arq. sistema | Clases diseño | Navegación |\n`;
+    md += `|---|---|---|---|---|---|---|\n`;
+    const traceColumns = [
+      currentDiagrams.useCases,
+      currentDiagrams.domainClasses,
+      currentDiagrams.softwareArchitecture,
+      currentDiagrams.systemArchitecture,
+      currentDiagrams.designClasses,
+      currentDiagrams.navigationTree
+    ];
+    for (const requirement of [...rfList, ...rnfList]) {
+      const cells = traceColumns.map((diagram) => diagramTracesRequirement(diagram, requirement.identificador)
+        ? `Sí (v${Number(diagram?.version || 1)})`
+        : '—');
+      md += `| **${requirement.identificador}** | ${cells.join(' | ')} |\n`;
+    }
+    if (rfList.length === 0 && rnfList.length === 0) {
+      md += `| Sin requisitos aprobados | — | — | — | — | — | — |\n`;
+    }
+    md += `\n---\n\n`;
 
     // 8. Diseño de Software
     md += `## 8. Diseño de Software\n\n`;
@@ -167,44 +235,54 @@ class MarkdownCompilerService {
         md += `- **Relaciones y Cardinalidad:** ${ent.relaciones}\n\n`;
       }
     }
-    const classCode = diagramas.find((d) => d.tipo === 'clases')?.codigo_plantuml || diseno?.modelo_datos?.codigo_plantuml || diagramas.find((d) => d.tipo === 'clases')?.codigo_mermaid;
+    const classCode = diagramCode(currentDiagrams.domainClasses) || diseno?.modelo_datos?.codigo_plantuml;
     if (classCode) {
       md += `\`\`\`plantuml\n${classCode}\n\`\`\`\n\n`;
     }
 
-    // 8.2 Árbol de Navegación
-    md += `### 8.2 Árbol de Navegación (Pantallas y Rutas)\n\n`;
-    const navCode = diagramas.find((d) => d.tipo === 'arbol_navegacion')?.codigo_plantuml || diseno?.arbol_navegacion?.codigo_plantuml || diagramas.find((d) => d.tipo === 'arbol_navegacion')?.codigo_mermaid;
+    // 8.2 Clases de Diseño
+    md += `### 8.2 Diagrama de Clases de Diseño\n\n`;
+    const designClassCode = diagramCode(currentDiagrams.designClasses);
+    if (designClassCode) {
+      md += `${currentDiagrams.designClasses?.descripcion || 'Realización técnica del dominio mediante controladores, casos de uso, DTO, interfaces e implementaciones de repositorio.'}\n\n`;
+      md += `\`\`\`plantuml\n${designClassCode}\n\`\`\`\n\n`;
+    } else {
+      md += `*No existe una versión generada del diagrama de clases de diseño.*\n\n`;
+    }
+
+    // 8.3 Árbol de Navegación
+    md += `### 8.3 Árbol de Navegación (Pantallas y Rutas)\n\n`;
+    const navCode = diagramCode(currentDiagrams.navigationTree) || diseno?.arbol_navegacion?.codigo_plantuml;
     if (navCode) {
       md += `\`\`\`plantuml\n${navCode}\n\`\`\`\n\n`;
     }
 
-    // 8.3 Arquitectura de Software y Sistema
-    md += `### 8.3 Arquitectura Técnica (Software y Sistema)\n\n`;
+    // 8.4 Arquitectura de Software y Sistema
+    md += `### 8.4 Arquitectura Técnica (Software y Sistema)\n\n`;
 
-    // 8.3.1 Arquitectura de Software
-    const softDiag = diagramas.find((d) => d.tipo === 'arquitectura_software');
-    const archCode = softDiag?.codigo_plantuml || diagramas.find((d) => d.tipo === 'arquitectura')?.codigo_plantuml || diseno?.arquitectura_backend?.codigo_plantuml;
-    md += `#### 8.3.1 Arquitectura de Software (C4 Container)\n\n`;
-    md += `${softDiag?.descripcion || diseno?.arquitectura_frontend?.descripcion || 'Estructura modular dividida en capas lógicas: aplicaciones cliente, gateway de seguridad, servicios de dominio, persistencia transaccional y mensajería desacoplada.'}\n\n`;
+    // 8.4.1 Arquitectura de Software
+    const softDiag = currentDiagrams.softwareArchitecture;
+    const archCode = diagramCode(softDiag) || diseno?.arquitectura_backend?.codigo_plantuml;
+    md += `#### 8.4.1 Arquitectura de Software (C4 Container)\n\n`;
+    md += `${softDiag?.descripcion || diseno?.arquitectura_frontend?.descripcion || 'Vista lógica de los contenedores y responsabilidades aprobados para el sistema.'}\n\n`;
     if (archCode) {
       md += `> **Diagrama de Arquitectura de Software:**\n\n`;
       md += `\`\`\`plantuml\n${archCode}\n\`\`\`\n\n`;
     }
 
-    // 8.3.2 Arquitectura de Sistema e Infraestructura
-    const sysDiag = diagramas.find((d) => d.tipo === 'arquitectura_sistema');
-    if (sysDiag || diagramas.some((d) => d.tipo === 'arquitectura_sistema')) {
-      md += `#### 8.3.2 Arquitectura de Sistema e Infraestructura (C4 Deployment)\n\n`;
-      md += `${sysDiag?.descripcion || 'Topología de infraestructura, nodos de computación, segmentación de redes, servidores y agentes de monitoreo.'}\n\n`;
-      if (sysDiag?.codigo_plantuml) {
+    // 8.4.2 Arquitectura de Sistema e Infraestructura
+    const sysDiag = currentDiagrams.systemArchitecture;
+    if (sysDiag) {
+      md += `#### 8.4.2 Arquitectura de Sistema e Infraestructura (C4 Deployment)\n\n`;
+      md += `${sysDiag?.descripcion || 'Vista de despliegue de los artefactos aprobados sobre los nodos definidos para el sistema.'}\n\n`;
+      if (diagramCode(sysDiag)) {
         md += `> **Diagrama de Despliegue e Infraestructura:**\n\n`;
-        md += `\`\`\`plantuml\n${sysDiag.codigo_plantuml}\n\`\`\`\n\n`;
+        md += `\`\`\`plantuml\n${diagramCode(sysDiag)}\n\`\`\`\n\n`;
       }
     }
 
-    // 8.4 Wireframes y Mockups de Interfaz
-    md += `### 8.4 Wireframes y Mockups de Interfaz\n\n`;
+    // 8.5 Wireframes y Mockups de Interfaz
+    md += `### 8.5 Wireframes y Mockups de Interfaz\n\n`;
     if (diseno?.mockups && diseno.mockups.length > 0) {
       for (const mockup of diseno.mockups) {
         md += `#### ${mockup.nombre_pantalla}\n\n`;

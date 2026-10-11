@@ -1,216 +1,141 @@
 const { DiagramTypes } = require('../../core/constants/DiagramTypes');
 
-/**
- * Generador especializado para Arquitectura de Sistema e Infraestructura
- * Tipo: arquitectura_sistema (C4 Deployment / Infraestructura de Despliegue)
- */
+function textOf(requirements = []) {
+  return requirements.map((item) => [item.nombre, item.descripcion, item.metrica_medible, item.actores]
+    .flat().filter(Boolean).join(' ')).join('\n');
+}
+
+function safe(value) {
+  return String(value || '').replace(/["'“”\r\n]+/g, ' ').trim();
+}
+
+function selected(text, candidates, fallback = 'Por definir') {
+  return candidates.find(([pattern]) => pattern.test(text))?.[1] || fallback;
+}
+
 class ArquitecturaSistemaGeneratorService {
-  /**
-   * Determina si la lista de requerimientos o texto solicita explícitamente Alta Disponibilidad
-   * @param {Array} rnfs
-   * @returns {boolean}
-   */
   solicitaAltaDisponibilidad(rnfs = []) {
-    const textToCheck = rnfs
-      .map(r => `${r.nombre || ''} ${r.descripcion || ''} ${r.metrica_medible || ''}`)
-      .join(' ');
-
-    const patronHA = /alta disponibilidad|high availability|tolerancia a fallos|failover|conmutaci[oó]n|99\.9%|99\.99%|redundancia activa|activo-pasivo|cl[uú]ster redundante|balanceo de carga con r[eé]plica/i;
-    return patronHA.test(textToCheck);
+    return /alta disponibilidad|high availability|tolerancia a fallos|failover|conmutaci[oó]n|99\.9%|99\.99%|redundancia activa|activo-pasivo|cl[uú]ster redundante/i.test(textOf(rnfs));
   }
 
-  /**
-   * Detecta si el sistema tiene usuarios o módulos móviles
-   * @param {Array} requerimientos
-   * @returns {boolean}
-   */
   detectaComponenteMovil(requerimientos = []) {
-    const texto = requerimientos
-      .map(r => `${r.nombre || ''} ${r.descripcion || ''} ${r.actores || ''}`)
-      .join(' ');
-    // Si menciona explícitamente móvil, app, smartphone, campo, etc., o por defecto en sistemas con clientes
-    return /m[oó]vil|app\b|celular|smartphone|android|ios|flutter|react native|campo|repartidor|conductor|chofer|cliente/i.test(texto);
+    return /m[oó]vil|smartphone|android|ios|react native|flutter/i.test(textOf(requerimientos));
   }
 
-  /**
-   * Genera el diagrama de arquitectura de sistema a partir de requerimientos y metadatos
-   * @param {Object} params
-   * @param {string} params.nombreProyecto
-   * @param {Array} params.requerimientos - Lista de RF y RNF
-   * @returns {Object} Diagrama estructurado con código PlantUML y trazabilidad
-   */
-  generar({ nombreProyecto = 'Sistema de Información', requerimientos = [] } = {}) {
-    const safeName = (nombreProyecto || 'Sistema').replace(/["'“”]/g, '').trim();
-    const rnfs = requerimientos.filter(r => (r.tipo || '').toUpperCase() === 'RNF');
+  generar({ nombreProyecto = 'Sistema', requerimientos = [] } = {}) {
+    const projectName = safe(nombreProyecto) || 'Sistema';
+    const text = textOf(requerimientos);
+    const rnfs = requerimientos.filter((item) => String(item.tipo || '').toUpperCase() === 'RNF');
+    const hasHA = this.solicitaAltaDisponibilidad(rnfs);
+    const hasMobile = this.detectaComponenteMovil(requerimientos);
+    const hasWeb = /\bweb\b|navegador|spa|react|vue|angular|tailwind/i.test(text);
+    const needsData = /base de datos|persist|almacen|guardar|registr|historial|conservar|transacci/i.test(text);
+    const monitoringRnf = rnfs.find((item) => /monitor|observabilidad|telemetr|m[eé]tricas de salud|health check/i.test(textOf([item])));
+    const haRnf = rnfs.find((item) => this.solicitaAltaDisponibilidad([item]));
 
-    const tieneHA = this.solicitaAltaDisponibilidad(rnfs);
-    const incluyeMovil = this.detectaComponenteMovil(requerimientos);
+    const mobileTech = selected(text, [[/react native/i, 'React Native'], [/flutter/i, 'Flutter']]);
+    const webTech = selected(text, [[/\breact\b/i, 'React'], [/\bvue\b/i, 'Vue'], [/angular/i, 'Angular']]);
+    const backendTech = selected(text, [[/nestjs/i, 'NestJS'], [/express/i, 'Express'], [/spring boot/i, 'Spring Boot'], [/django/i, 'Django'], [/laravel/i, 'Laravel']]);
+    const dataTech = selected(text, [[/postgres(?:ql)?/i, 'PostgreSQL'], [/mongodb/i, 'MongoDB'], [/mysql/i, 'MySQL'], [/sql server/i, 'SQL Server']]);
+    const monitoringTech = selected(text, [[/prometheus/i, 'Prometheus'], [/grafana/i, 'Grafana'], [/cloudwatch/i, 'CloudWatch']]);
+    const externalProtocol = selected(text, [[/socket\.io/i, 'Socket.IO'], [/websocket/i, 'WebSocket'], [/https/i, 'HTTPS'], [/\brest\b/i, 'REST']], 'Canal por definir');
 
-    const rnfMonitoreo = rnfs.find(r => /monitoreo|observabilidad|m[eé]tricas|salud|alerta/i.test(`${r.nombre} ${r.descripcion}`));
-    const rnfSeguridadRed = rnfs.find(r => /red|firewall|per[ií]metro|ssl|tls|vpc|puerto/i.test(`${r.nombre} ${r.descripcion}`));
-    const rnfHA = rnfs.find(r => /alta disponibilidad|disponibilidad|tolerancia a fallos|failover|conmutaci/i.test(`${r.nombre} ${r.descripcion} ${r.metrica_medible}`));
-
-    const trazabilidad = [];
-
-    // Trazabilidad de Alta Disponibilidad o dimensionamiento ajustado
-    if (tieneHA && rnfHA) {
-      trazabilidad.push({
-        rnf_id: rnfHA.identificador || 'RNF-Disponibilidad',
-        elemento: 'Cluster con Nodos Réplica y Failover Activo-Pasivo',
-        justificacion: `Garantiza alta disponibilidad (${rnfHA.metrica_medible || rnfHA.nombre}) mediante balanceador y conmutación automática.`
+    const trace = [];
+    if (hasHA && haRnf) {
+      trace.push({
+        rnf_id: haRnf.identificador || haRnf.id || 'RNF',
+        elemento: 'Mecanismo de Distribución y Failover',
+        justificacion: `Realiza la disponibilidad aprobada: ${safe(haRnf.metrica_medible || haRnf.descripcion)}`
       });
-    } else {
-      trazabilidad.push({
-        rnf_id: 'RNF-Infraestructura',
-        elemento: 'Servidor Standalone Mononodo',
-        justificacion: 'Alineado al principio de no sobre-dimensionar alta disponibilidad ya que los requisitos no la solicitan.'
+    }
+    if (monitoringRnf) {
+      trace.push({
+        rnf_id: monitoringRnf.identificador || monitoringRnf.id || 'RNF',
+        elemento: 'Observabilidad',
+        justificacion: `Realiza el monitoreo aprobado: ${safe(monitoringRnf.metrica_medible || monitoringRnf.descripcion)}`
       });
     }
 
-    // Trazabilidad de Monitoreo
-    if (rnfMonitoreo) {
-      trazabilidad.push({
-        rnf_id: rnfMonitoreo.identificador || 'RNF-Monitoreo',
-        elemento: 'Agente Prometheus & Grafana',
-        justificacion: `Observabilidad y métricas de salud del sistema (${rnfMonitoreo.nombre}).`
-      });
-    } else {
-      trazabilidad.push({
-        rnf_id: 'RNF-Observabilidad',
-        elemento: 'Agente de Monitoreo del Servidor',
-        justificacion: 'Supervisión continua de consumo de recursos y estado del host.'
-      });
+    const lines = [
+      '@startuml',
+      '!include <C4/C4_Deployment>',
+      `title Arquitectura de Sistema e Infraestructura - ${projectName}`,
+      ''
+    ];
+    if (hasMobile) {
+      lines.push(`Deployment_Node(mobileDevice, "Dispositivo Móvil", "Plataforma aprobada") {`,
+        `  Container(mobileArtifact, "Aplicación Móvil", "${mobileTech}", "Artefacto cliente")`, '}');
     }
-
-    if (rnfSeguridadRed) {
-      trazabilidad.push({
-        rnf_id: rnfSeguridadRed.identificador || 'RNF-Seguridad-Red',
-        elemento: 'Firewall & Zona DMZ Perimetral',
-        justificacion: `Filtrado de puertos y protección perimetral (${rnfSeguridadRed.nombre}).`
-      });
+    if (hasWeb) {
+      lines.push(`Deployment_Node(webDevice, "Dispositivo Web", "Plataforma por definir") {`,
+        `  Container(webArtifact, "Aplicación Web", "${webTech}", "Artefacto cliente")`, '}');
     }
-
-    // Construcción del código PlantUML
-    let puml = `@startuml\n`;
-    puml += `!include <C4/C4_Deployment>\n`;
-    puml += `title Arquitectura de Sistema e Infraestructura - ${safeName}\n\n`;
-
-    // 1. DISPOSITIVOS CLIENTES (Nodos de despliegue donde se ejecutan las interfaces)
-    puml += `' === DISPOSITIVOS CLIENTES ===\n`;
-    if (incluyeMovil) {
-      puml += `Deployment_Node(clientMobile, "Dispositivo Móvil del Usuario", "Android / iOS Smartphone") {\n`;
-      puml += `  Container(appMobile, "Aplicación Móvil", "Flutter / React Native", "Cliente móvil instalado para operaciones y consultas rápidas")\n`;
-      puml += `}\n\n`;
+    if (!hasMobile && !hasWeb) {
+      lines.push('Deployment_Node(userDevice, "Dispositivo de Usuario", "Plataforma por definir") {',
+        '  Container(clientArtifact, "Interfaz de Usuario", "Tecnología por definir", "Artefacto cliente")', '}');
     }
+    lines.push('');
 
-    puml += `Deployment_Node(clientPc, "Estación de Trabajo / Cliente Web", "Windows / macOS / Linux") {\n`;
-    puml += `  Deployment_Node(browser, "Navegador Web", "Google Chrome / Firefox / Edge") {\n`;
-    puml += `    Container(appWeb, "Aplicación Web / SPA", "React / TypeScript", "Interfaz web para administración y gestión")\n`;
-    puml += `  }\n`;
-    puml += `}\n\n`;
-
-    if (tieneHA) {
-      // TOPOLOGÍA CON ALTA DISPONIBILIDAD (Solicitada explícitamente)
-      puml += `' === INFRAESTRUCTURA DE SERVIDOR (ALTA DISPONIBILIDAD) ===\n`;
-      puml += `Deployment_Node(cloud, "Nube Privada / Virtual Private Cloud", "Red VPC Segura Multi-AZ") {\n`;
-      puml += `  Deployment_Node(dmz, "Zona DMZ / Red Pública", "Subred Externa con SSL") {\n`;
-      puml += `    Deployment_Node(lbNode, "Nodo Balanceador de Carga", "Linux / Nginx HAProxy") {\n`;
-      puml += `      Container(lb, "Balanceador con Failover", "Nginx", "Distribución de tráfico y conmutación activa")\n`;
-      puml += `    }\n`;
-      puml += `  }\n\n`;
-
-      puml += `  Deployment_Node(appZone, "Zona de Aplicación", "Subred Privada") {\n`;
-      puml += `    Deployment_Node(node1, "Servidor de Aplicación Primario", "Instancia Compute AZ-1") {\n`;
-      puml += `      Container(appInst1, "Servicio Backend (Instancia 1)", "Docker Container", "Ejecución de procesos activos")\n`;
-      puml += `    }\n`;
-      puml += `    Deployment_Node(node2, "Servidor de Aplicación Réplica", "Instancia Compute AZ-2 (Hot Standby)") {\n`;
-      puml += `      Container(appInst2, "Servicio Backend (Instancia 2)", "Docker Container", "Réplica activa para failover")\n`;
-      puml += `    }\n`;
-      puml += `  }\n\n`;
-
-      puml += `  Deployment_Node(dataZone, "Zona de Datos Transaccionales", "Subred de Persistencia") {\n`;
-      puml += `    Deployment_Node(dbMasterNode, "Servidor Base de Datos Primario", "Master DB Instance") {\n`;
-      puml += `      ContainerDb(dbMaster, "PostgreSQL Master", "RDBMS", "Escrituras y transacciones primarias")\n`;
-      puml += `    }\n`;
-      puml += `    Deployment_Node(dbReplicaNode, "Servidor Base de Datos Standby", "Replica DB Instance") {\n`;
-      puml += `      ContainerDb(dbReplica, "PostgreSQL Replica", "RDBMS Standby", "Replicación en caliente y failover")\n`;
-      puml += `    }\n`;
-      puml += `  }\n\n`;
-
-      puml += `  Deployment_Node(monZone, "Zona de Monitoreo", "Observabilidad") {\n`;
-      puml += `    Deployment_Node(monNode, "Servidor de Monitoreo", "Prometheus & Grafana") {\n`;
-      puml += `      Container(monAgent, "Agente de Salud y Métricas", "Prometheus", "Monitoreo continuo de latencia y failover")\n`;
-      puml += `    }\n`;
-      puml += `  }\n`;
-      puml += `}\n\n`;
-
-      // Relaciones desde clientes hacia balanceador
-      if (incluyeMovil) {
-        puml += `Rel(appMobile, lb, "Solicitudes API Móvil", "HTTPS :443 / TLS 1.3")\n`;
+    if (hasHA) {
+      lines.push('Deployment_Node(trafficNode, "Mecanismo de Distribución y Failover", "Tecnología por definir") {',
+        '  Container(trafficManager, "Distribución de Tráfico", "Tecnología por definir", "Conmutación solicitada")', '}',
+        `Deployment_Node(appNode1, "Nodo de Aplicación 1", "Entorno por definir") {`,
+        `  Container(appInstance1, "Servicio de Aplicación 1", "${backendTech}", "Instancia de ejecución")`, '}',
+        `Deployment_Node(appNode2, "Nodo de Aplicación 2", "Entorno por definir") {`,
+        `  Container(appInstance2, "Servicio de Aplicación 2", "${backendTech}", "Instancia redundante")`, '}');
+      if (needsData) {
+        lines.push('Deployment_Node(dataPrimaryNode, "Nodo de Datos Primario", "Entorno por definir") {',
+          `  ContainerDb(dataPrimary, "Datos Primarios", "${dataTech}", "Persistencia principal")`, '}',
+          'Deployment_Node(dataReplicaNode, "Nodo de Datos Réplica", "Entorno por definir") {',
+          `  ContainerDb(dataReplica, "Réplica de Datos", "${dataTech}", "Réplica exigida por disponibilidad")`, '}');
       }
-      puml += `Rel(appWeb, lb, "Tráfico Web y API", "HTTPS :443 / TLS 1.3")\n\n`;
-
-      // Relaciones internas de infraestructura
-      puml += `Rel(lb, appInst1, "Enruta solicitudes primarias", "HTTPS :443")\n`;
-      puml += `Rel(lb, appInst2, "Conmutación por error (Failover)", "HTTPS :443")\n`;
-      puml += `Rel(appInst1, dbMaster, "Operaciones ACID", "TCP :5432")\n`;
-      puml += `Rel(appInst2, dbMaster, "Operaciones ACID", "TCP :5432")\n`;
-      puml += `Rel(dbMaster, dbReplica, "Replicación sincrónica / WAL", "TCP :5432")\n`;
-      puml += `Rel(monAgent, node1, "Telemetría de salud", "HTTP :9090")\n`;
-      puml += `Rel(monAgent, node2, "Telemetría de salud", "HTTP :9090")\n`;
-      puml += `Rel(monAgent, dbMasterNode, "Telemetría de salud", "HTTP :9090")\n`;
     } else {
-      // TOPOLOGÍA STANDALONE (Sin Alta Disponibilidad solicitada - REGLA ESTRICTA)
-      puml += `' === INFRAESTRUCTURA DE SERVIDOR (STANDALONE MONONODO) ===\n`;
-      puml += `Deployment_Node(server, "Servidor Standalone VPS", "Ubuntu Linux / Docker Host") {\n`;
-      puml += `  Deployment_Node(netZone, "Zona de Red del Servidor", "Firewall UFW") {\n`;
-      puml += `    Deployment_Node(appContainerNode, "Contenedor de Aplicación", "Docker Runtime") {\n`;
-      puml += `      Container(appBackend, "Servicio de Aplicación", "Node.js / Express", "Instancia única de ejecución de la aplicación")\n`;
-      puml += `    }\n`;
-      puml += `    Deployment_Node(dbContainerNode, "Contenedor de Base de Datos", "Docker Volume") {\n`;
-      puml += `      ContainerDb(dbStandalone, "Base de Datos Primaria", "PostgreSQL", "Instancia única sin réplica redundante")\n`;
-      puml += `    }\n`;
-      puml += `    Deployment_Node(monContainerNode, "Contenedor de Observabilidad", "Docker Host") {\n`;
-      puml += `      Container(monAgent, "Agente de Monitoreo y Salud", "Prometheus Exporter", "Supervisión de salud del host")\n`;
-      puml += `    }\n`;
-      puml += `  }\n`;
-      puml += `}\n\n`;
-
-      // Relaciones desde clientes hacia servidor
-      if (incluyeMovil) {
-        puml += `Rel(appMobile, appBackend, "Solicitudes API Móvil", "HTTPS :443 / TLS 1.3")\n`;
+      lines.push('Deployment_Node(appNode, "Nodo de Aplicación", "Entorno por definir") {',
+        `  Container(appInstance, "Servicio de Aplicación", "${backendTech}", "Instancia de ejecución")`, '}');
+      if (needsData) {
+        lines.push('Deployment_Node(dataNode, "Nodo de Datos", "Entorno por definir") {',
+          `  ContainerDb(dataInstance, "Almacén de Datos", "${dataTech}", "Persistencia requerida")`, '}');
       }
-      puml += `Rel(appWeb, appBackend, "Tráfico Web y API", "HTTPS :443 / TLS 1.3")\n\n`;
-
-      // Relaciones internas de infraestructura
-      puml += `Rel(appBackend, dbStandalone, "Persistencia de datos", "TCP :5432")\n`;
-      puml += `Rel(monAgent, appBackend, "Chequeo de salud del servicio", "HTTP :3000/health")\n`;
-      puml += `Rel(monAgent, dbStandalone, "Supervisión de estado DB", "TCP :5432")\n`;
     }
 
-    puml += `@enduml`;
+    if (monitoringRnf) {
+      lines.push('Deployment_Node(monitoringNode, "Observabilidad", "Entorno por definir") {',
+        `  Container(monitoringAgent, "Monitoreo", "${monitoringTech}", "Telemetría solicitada")`, '}');
+    }
+    lines.push('');
 
-    const descHA = tieneHA
-      ? 'Topología distribuida con balanceador de carga, nodos de aplicación redundantes y clúster de base de datos con réplica en caliente y conmutación automática (failover) conforme a los RNF de alta disponibilidad.'
-      : 'Topología standalone mononodo con servidor único de aplicación y base de datos local, optimizando recursos sin sobre-dimensionar alta disponibilidad ya que los requisitos no la solicitan.';
+    const clients = hasMobile || hasWeb
+      ? [['mobileArtifact', hasMobile], ['webArtifact', hasWeb]].filter(([, enabled]) => enabled).map(([alias]) => alias)
+      : ['clientArtifact'];
+    const entry = hasHA ? 'trafficManager' : 'appInstance';
+    clients.forEach((client) => lines.push(`Rel(${client}, ${entry}, "Accede", "${externalProtocol}")`));
+    if (hasHA) {
+      lines.push('Rel(trafficManager, appInstance1, "Distribuye", "Canal por definir")',
+        'Rel(trafficManager, appInstance2, "Conmuta", "Canal por definir")');
+      if (needsData) {
+        lines.push('Rel(appInstance1, dataPrimary, "Lee y escribe", "Protocolo por definir")',
+          'Rel(appInstance2, dataPrimary, "Lee y escribe", "Protocolo por definir")',
+          'Rel(dataPrimary, dataReplica, "Replica", "Mecanismo por definir")');
+      }
+    } else if (needsData) {
+      lines.push('Rel(appInstance, dataInstance, "Lee y escribe", "Protocolo por definir")');
+    }
+    if (monitoringRnf) lines.push(`Rel(monitoringAgent, ${hasHA ? 'appNode1' : 'appNode'}, "Observa", "Canal por definir")`);
+    lines.push('@enduml');
 
     return {
       tipo: DiagramTypes.ARQUITECTURA_SISTEMA,
-      titulo: `Diagrama de Arquitectura de Sistema e Infraestructura - ${safeName}`,
-      descripcion: `Topología de despliegue e infraestructura física/cloud para ${safeName}, integrando dispositivos clientes (móvil y web) con el entorno de servidor. ${descHA}`,
+      titulo: `Diagrama de Arquitectura de Sistema e Infraestructura - ${projectName}`,
+      descripcion: `Vista de despliegue mínima de ${projectName}, derivada de plataformas, tecnologías y restricciones aprobadas.`,
       descripcion_jerarquica: [
-        'Dispositivos Clientes: Nodos de ejecución en smartphones y navegadores web para acceso del usuario.',
-        'Zonas de Red y Seguridad: Segmentación de red, cifrado TLS 1.3 y cortafuegos de acceso perimetral.',
-        tieneHA
-          ? 'Cómputo con Alta Disponibilidad: Nodos primario y réplica con conmutación en caliente.'
-          : 'Cómputo Standalone: Servidor único de aplicación dimensionado a la demanda requerida.',
-        tieneHA
-          ? 'Persistencia Replicada: Base de datos master con nodo de réplica standby para failover.'
-          : 'Persistencia Directa: Instancia única de base de datos transaccional.',
-        'Observabilidad: Agente de monitoreo y telemetría para supervisión continua de recursos.'
+        'Clientes: Solo se muestran plataformas sustentadas por los requisitos.',
+        `Aplicación: ${hasHA ? 'Instancias redundantes exigidas por disponibilidad.' : 'Una instancia sin redundancia no solicitada.'}`,
+        `Datos: ${needsData ? 'Persistencia representada con tecnología aprobada o pendiente.' : 'No se añadió persistencia sin evidencia.'}`,
+        `Operación: ${monitoringRnf ? 'Observabilidad solicitada por un RNF.' : 'No se añadió monitoreo sin un RNF.'}`
       ],
-      trazabilidad_rnf: trazabilidad,
-      codigo_plantuml: puml
+      requisitos_relacionados: requerimientos.map((item) => item.identificador || item.id).filter(Boolean),
+      trazabilidad_rnf: trace,
+      codigo_plantuml: lines.join('\n')
     };
   }
 }

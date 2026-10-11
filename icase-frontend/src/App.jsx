@@ -235,6 +235,7 @@ export default function App() {
       },
       diagrams: mappedDiagrams,
       diagramFlow: p.flujoDiagramas || null,
+      finalAudit: p.auditoriaFinal || null,
       mockups: (p.diseno?.mockups || []).map(m => ({
         pantalla_id: m.pantalla_id,
         nombre_pantalla: m.nombre_pantalla,

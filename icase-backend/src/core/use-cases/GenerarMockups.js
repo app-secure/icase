@@ -1,4 +1,5 @@
 const MockupValidatorService = require('../../infrastructure/services/MockupValidatorService');
+const MockupTraceabilityService = require('../../infrastructure/services/MockupTraceabilityService');
 
 class GenerarMockups {
   constructor({
@@ -14,6 +15,7 @@ class GenerarMockups {
     this.disenoRepository = disenoRepository;
     this.mockupIaService = mockupIaService;
     this.validator = new MockupValidatorService();
+    this.traceabilityService = new MockupTraceabilityService();
   }
 
   async ejecutar({ proyectoId, pantallas = [], insumoAdicional = '', requerimientosLocales = null, onProgress = null }) {
@@ -60,7 +62,10 @@ class GenerarMockups {
         : [];
 
     const pantallasDerivadas = this._pantallasDelProyecto(diagramas).pantallas;
-    const pantallasArbol = this._enriquecerPlataformas(pantallasDerivadas, requerimientos);
+    const pantallasArbol = this.traceabilityService.buildManifest(
+      this._enriquecerPlataformas(pantallasDerivadas, requerimientos),
+      requerimientos
+    );
     const disenoExistente = await this.disenoRepository.obtenerPorProyecto(proyectoId);
     const sistemaDiseno = this._normalizarSistemaDiseno(disenoExistente?.sistema_diseno);
     const contextoProyecto = this._construirContexto(requerimientos, diagramas, proyecto, pantallasArbol, sistemaDiseno);
@@ -159,6 +164,15 @@ class GenerarMockups {
       const htmlConSistemaDiseno = this.validator.aplicarSistemaDiseno(sanitizado.html, sistemaDiseno);
       const validacion = this.validator.validar(htmlConSistemaDiseno);
       const pantalla = manifiestoPorSlug.get(mockup.nombre_pantalla);
+      const rfTrazabilidad = this.traceabilityService.enrichMockup(mockup, pantalla, requerimientos);
+      const erroresTrazabilidad = pantalla
+        ? []
+        : [`El mockup ${mockup.nombre_pantalla} no pertenece al árbol de navegación aprobado.`];
+      const advertenciasTrazabilidad = rfTrazabilidad.length
+        ? []
+        : ['No se pudo asociar esta pantalla con un requisito funcional aprobado.'];
+      const erroresValidacion = [...validacion.errores, ...erroresTrazabilidad];
+      const advertenciasValidacion = [...sanitizado.advertencias, ...validacion.advertencias, ...advertenciasTrazabilidad];
       return {
         ...mockup,
         pantalla_id: pantalla?.pantalla_id || mockup.nombre_pantalla,
@@ -169,10 +183,11 @@ class GenerarMockups {
         plataforma: pantalla?.plataforma || 'web',
         roles: pantalla?.roles || ['Usuario'],
         shell: pantalla?.shell || 'web-general',
+        rf_trazabilidad: rfTrazabilidad,
         preview_code: htmlConSistemaDiseno,
-        advertencias_validacion: [...sanitizado.advertencias, ...validacion.advertencias],
-        errores_validacion: validacion.errores,
-        estado_calidad: validacion.estado,
+        advertencias_validacion: advertenciasValidacion,
+        errores_validacion: erroresValidacion,
+        estado_calidad: erroresValidacion.length ? 'invalido' : (advertenciasValidacion.length ? 'advertencia' : 'valido'),
         estado: 'generado',
         version: 1
       };
@@ -180,10 +195,17 @@ class GenerarMockups {
     const mockupsExistentes = disenoExistente?.mockups || [];
 
     const mockupsFinales = this._mergeMockups(mockupsExistentes, mockupsSanitizados, pantallas);
+    const auditoriaTrazabilidad = this.traceabilityService.validate({
+      manifest: pantallasArbol,
+      mockups: mockupsFinales,
+      requirements: requerimientos
+    });
+    advertencias.push(...auditoriaTrazabilidad.advertencias);
 
     await this.disenoRepository.guardarOActualizar(proyectoId, {
       mockups: mockupsFinales,
       manifiesto_navegacion: pantallasArbol,
+      trazabilidad_mockups: auditoriaTrazabilidad,
       sistema_diseno: sistemaDiseno
     });
     if (onProgress) await onProgress({ progreso: 95, mensaje: 'Mockups validados y almacenados' });
@@ -192,6 +214,7 @@ class GenerarMockups {
       mockups: mockupsFinales,
       totalProcesados: mockupsSanitizados.length,
       manifiesto: pantallasArbol,
+      trazabilidad: auditoriaTrazabilidad,
       sistemaDiseno,
       proveedorUsado: proveedorUsado,
       advertencias: advertencias
@@ -289,7 +312,10 @@ ${seccionesDiagramas}`;
         const componentes = p.componentes && p.componentes.length > 0
           ? ` | componentes que DEBEN aparecer dentro de esta misma pantalla: ${p.componentes.join(', ')}`
           : '';
-        return `${i + 1}. ${p.nombre} | tipo: ${p.tipo} | flujo: ${p.flujo} | módulo: ${p.modulo} | plataforma: ${p.plataforma} | roles: ${p.roles.join(', ')} | shell: ${p.shell} | ruta: ${p.ruta}${componentes} | slug sugerido: ${p.slug}`;
+        const trazabilidad = p.rf_trazabilidad?.length
+          ? ` | RF asociados que debe evidenciar: ${p.rf_trazabilidad.join(', ')}`
+          : ' | RF asociados: ninguno inferido; no inventes identificadores';
+        return `${i + 1}. ${p.nombre} | tipo: ${p.tipo} | flujo: ${p.flujo} | módulo: ${p.modulo} | plataforma: ${p.plataforma} | roles: ${p.roles.join(', ')} | shell: ${p.shell} | ruta: ${p.ruta}${componentes}${trazabilidad} | slug sugerido: ${p.slug}`;
       })
       .join('\n');
 
@@ -302,6 +328,7 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
 - Un mockup por cada pantalla listada, empezando por las de acceso y el panel principal, y respetando el orden numérico.
 - El nombre_pantalla de cada mockup debe ser el slug sugerido.
 - Cada mockup debe incluir en su primera viñeta de descripcion_jerarquica la ruta completa de la pantalla con el formato "Ruta: <ruta> | Módulo: <módulo>".
+- rf_trazabilidad debe contener exclusivamente los RF asociados indicados para esa pantalla y visibles mediante campos, acciones, datos o estados del mockup. No inventes RF ni declares cobertura sin evidencia en la interfaz.
 - Respeta la plataforma indicada. mobile usa viewport de 390px y navegación móvil; tablet usa 768-1024px y controles táctiles; web usa escritorio.
 - Todas las pantallas con el mismo shell deben repetir exactamente logo/nombre, navegación, colores, usuario y texto de estado. No agregues opciones diferentes entre pantallas hermanas.
 - Los campos, tablas y filtros de cada pantalla se toman del Diagrama de Clases y de los Requerimientos Funcionales asociados a esa pantalla concreta.
@@ -530,11 +557,21 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     const requerimientos = typeof this.requerimientoRepository.listarPorProyecto === 'function'
       ? await this.requerimientoRepository.listarPorProyecto(proyectoId)
       : await this.requerimientoRepository.obtenerPorProyecto(proyectoId);
-    const derivadas = this._enriquecerPlataformas(this._pantallasDelProyecto(diagramas || []).pantallas, requerimientos || []);
+    const derivadas = this.traceabilityService.buildManifest(
+      this._enriquecerPlataformas(this._pantallasDelProyecto(diagramas || []).pantallas, requerimientos || []),
+      requerimientos || []
+    );
     const manifiesto = derivadas.length ? derivadas : (diseno?.manifiesto_navegacion || []);
+    const mockups = this.traceabilityService.enrichAll(diseno?.mockups || [], manifiesto, requerimientos || []);
+    const trazabilidad = this.traceabilityService.validate({
+      manifest: manifiesto,
+      mockups,
+      requirements: requerimientos || []
+    });
     return {
-      mockups: diseno?.mockups || [],
+      mockups,
       manifiesto,
+      trazabilidad,
       sistemaDiseno: this._normalizarSistemaDiseno(diseno?.sistema_diseno)
     };
   }

@@ -59,9 +59,14 @@ const DisenoSchema = new mongoose.Schema({
     roles: [String],
     shell: String,
     componentes: [String],
+    rf_trazabilidad: [String],
     orden: Number,
     obligatoria: { type: Boolean, default: true }
   }],
+  trazabilidad_mockups: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
   sistema_diseno: {
     nombre: { type: String, default: 'Predeterminado I-CASE' },
     origen: { type: String, enum: ['predeterminado', 'manual', 'ia'], default: 'predeterminado' },

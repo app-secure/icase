@@ -796,4 +796,40 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(casosUsoCreado.codigo_plantuml).toMatch(/ActorReq_\d+_cajero --> UC1/);
   });
 
+  test('ProcesarConIA repara de forma controlada un diagrama inválido sin regenerar otros', async () => {
+    const invalid = '@startuml\nactor "Cliente" as Cliente\nusecase "Consultar" as UC1\nCliente --> UC1\n@enduml';
+    const repaired = '@startuml\nactor "Cliente" as Cliente\nrectangle "Sistema" {\nusecase "Consultar" as UC1\nusecase "Ver detalle" as UC2\n}\nCliente --> UC1\nCliente --> UC2\n@enduml';
+    const aiOrchestratorService = {
+      procesar: jest.fn()
+        .mockResolvedValueOnce({ diagramas: [{ tipo: 'casos_de_uso', codigo_plantuml: invalid }] })
+        .mockResolvedValueOnce({ diagramas: [{ tipo: 'casos_de_uso', codigo_plantuml: repaired }] })
+    };
+    const plantumlValidatorService = {
+      validar: jest.fn((code) => code === repaired
+        ? { valido: true, errores: [], advertencias: [] }
+        : { valido: false, error: 'Falta el límite del sistema', errores: ['Falta el límite del sistema'] })
+    };
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockResolvedValue([]), actualizar: jest.fn(),
+      crearMuchos: jest.fn().mockResolvedValue(true), eliminarPorProyecto: jest.fn()
+    };
+    const useCase = new ProcesarConIA({
+      proyectoRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Consulta', estado_fase: 'analisis_aprobado' }),
+        actualizar: jest.fn().mockResolvedValue(true)
+      },
+      requerimientoRepository: { listarPorProyecto: jest.fn().mockResolvedValue([{ tipo: 'RF', identificador: 'RF-01', nombre: 'Consultar', actores: ['Cliente'], aprobado: true }]) },
+      diagramaRepository,
+      estandarRepository: { obtenerEstandares: jest.fn().mockResolvedValue([]) },
+      plantumlValidatorService,
+      aiOrchestratorService
+    });
+
+    const result = await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas', tipoDiagrama: 'casos_de_uso' });
+    expect(aiOrchestratorService.procesar).toHaveBeenCalledTimes(2);
+    expect(aiOrchestratorService.procesar.mock.calls[1][0].insumo_adicional).toContain('REPARACIÓN CONTROLADA');
+    expect(aiOrchestratorService.procesar.mock.calls[1][0].insumo_adicional).toContain('Falta el límite del sistema');
+    expect(result.reparaciones_controladas).toBe(1);
+  });
+
 });

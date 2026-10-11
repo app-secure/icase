@@ -36,9 +36,20 @@ class PlantUMLSynthesizer {
         titulo: 'Diagrama de Arquitectura de Sistema e Infraestructura (C4 Deployment)'
       },
       {
-        tipo: DiagramTypes.CLASES,
-        matcher: d => (d.tipo || '').toLowerCase().includes('clase') || (d.tipo || '').toLowerCase().includes('class'),
+        tipo: DiagramTypes.CLASES_DOMINIO,
+        matcher: d => {
+          const type = (d.tipo || '').toLowerCase();
+          return type === 'clases' || type.includes('dominio') || (type.includes('clase') && !type.includes('dise'));
+        },
         titulo: 'Diagrama de Clases del Dominio'
+      },
+      {
+        tipo: DiagramTypes.CLASES_DISENO,
+        matcher: d => {
+          const type = (d.tipo || '').toLowerCase();
+          return type.includes('clases_diseno') || type.includes('clases_diseño') || (type.includes('clase') && type.includes('dise'));
+        },
+        titulo: 'Diagrama de Clases de Diseño'
       },
       {
         tipo: DiagramTypes.ARBOL_NAVEGACION,
@@ -139,7 +150,7 @@ class PlantUMLSynthesizer {
 
       let fallbackMensaje = '@startuml\nrectangle "No hay diagrama disponible"\n@enduml';
       if (cfg.tipo === DiagramTypes.ARBOL_NAVEGACION) {
-        fallbackMensaje = '@startwbs\n* Sistema\n** Portal de Acceso\n*** Inicio de Sesión\n** Panel Principal\n*** No hay diagrama de navegación disponible\n@endwbs';
+        fallbackMensaje = '@startwbs\n* No hay diagrama de navegación disponible\n@endwbs';
       }
 
       return {
@@ -149,6 +160,9 @@ class PlantUMLSynthesizer {
         descripcion_jerarquica: Array.isArray(existing?.descripcion_jerarquica) && existing.descripcion_jerarquica.length > 0
           ? existing.descripcion_jerarquica
           : (existing?.descripcion ? [existing.descripcion] : []),
+        requisitos_relacionados: Array.isArray(existing?.requisitos_relacionados)
+          ? existing.requisitos_relacionados
+          : [],
         trazabilidad_rnf: trazabilidadRnf,
         codigo_plantuml: esValido ? code : fallbackMensaje
       };

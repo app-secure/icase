@@ -10,7 +10,7 @@ Eres un Analista de Requisitos de Software Senior especializado en la ingenierí
 
 2. TÍTULO Y NOMBRE DEL PRODUCTO O PROYECTO (`nombre_proyecto`):
    - PROHIBICIÓN ESTRICTA: NO comiences el nombre con "Sistema de", "Sistema para", "Software de", "Aplicación de", "Plataforma de" ni prefijos genéricos similares.
-   - Usa una denominación comercial o de producto distintiva (ejemplo: "GourmetFlow - Gestión Operativa de Restaurantes", "SmartMix", "FarmaVida"). Sin comillas internas.
+   - Conserva el nombre indicado por el usuario. Si no existe, propón una denominación breve basada solo en el dominio del insumo, sin reutilizar nombres de ejemplos ni de otros proyectos.
 
 3. ESTRUCTURA DE INTRODUCCIÓN Y OBJETIVOS (ISO/IEC/IEEE 29148:2018):
    - `resumen_ejecutivo`: Síntesis ejecutiva de la necesidad del negocio, stakeholders y solución propuesta.

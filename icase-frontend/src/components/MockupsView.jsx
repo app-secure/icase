@@ -64,7 +64,8 @@ const platformIcon = (platform, size = 13) => platform === "mobile"
   : platform === "tablet" ? <Tablet size={size} /> : <Monitor size={size} />;
 
 export default function MockupsView({
-  mockups = [], onUpdateMockup, projectId, selectedScreen = 0, onSelectScreen, requirements = null
+  mockups = [], onUpdateMockup, projectId, selectedScreen = 0, onSelectScreen, requirements = null,
+  onTraceabilityChange
 }) {
   const [viewMode, setViewMode] = useState("visual");
   const [activeId, setActiveId] = useState(mockups[selectedScreen]?.nombre_pantalla || "");
@@ -79,6 +80,7 @@ export default function MockupsView({
   const [feedback, setFeedback] = useState(null);
   const [savingPalette, setSavingPalette] = useState(false);
   const [suggestingPalette, setSuggestingPalette] = useState(false);
+  const [traceability, setTraceability] = useState(null);
   const handledJobRef = useRef(null);
   const initializedSelection = useRef(false);
 
@@ -92,6 +94,8 @@ export default function MockupsView({
       plataforma: m.plataforma || "web", roles: m.roles || ["Usuario"], shell: m.shell || "web-general", orden: index + 1
     }));
     setManifest(catalog);
+    setTraceability(data.trazabilidad || null);
+    onTraceabilityChange?.(data.trazabilidad || null);
     setDesignSystem(data.sistemaDiseno || DEFAULT_DESIGN_SYSTEM);
     if (!initializedSelection.current) {
       setSelectedIds(new Set(catalog.map(p => p.slug)));
@@ -207,6 +211,16 @@ export default function MockupsView({
     <div className="relative flex min-h-0 flex-1 flex-col gap-3">
       {feedback && <div className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${feedback.type === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}><span>{feedback.message}</span><button onClick={() => setFeedback(null)}>×</button></div>}
       {busy && <div className="rounded-xl border border-[#DDD2F5] bg-[#F2EDFF] px-3 py-2"><div className="mb-1.5 flex justify-between text-xs text-[#5B21B6]"><span className="flex items-center gap-2"><Loader2 size={13} className="animate-spin" />{activeJob.mensaje}</span><span>{activeJob.progreso || 0}%</span></div><div className="h-1.5 rounded bg-[#E4D8FA]"><div className="h-full rounded bg-[#7C3AED] transition-all" style={{ width: `${activeJob.progreso || 0}%` }} /></div></div>}
+
+      {traceability && (
+        <div className={`rounded-xl border px-3 py-2 text-xs ${traceability.valido ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 font-semibold">{traceability.valido ? <Check size={13} /> : <AlertTriangle size={13} />}Trazabilidad árbol → mockups → RF</span>
+            <span>{traceability.metricas?.mockups_generados || 0}/{traceability.metricas?.pantallas_arbol || 0} pantallas · {traceability.metricas?.cobertura_rf_altos_porcentaje ?? 100}% RF altos</span>
+          </div>
+          {[...(traceability.errores || []), ...(traceability.advertencias || [])].map((message, index) => <p key={index} className="mt-1">• {message}</p>)}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">

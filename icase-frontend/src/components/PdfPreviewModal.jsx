@@ -464,7 +464,7 @@ export default function PdfPreviewModal({ project, onClose }) {
 
         drawSubSectionHeader("2.1 Objetivo General:");
         const objGenText = project.objetivos?.general ||
-          `Desarrollar y formalizar la arquitectura y especificación técnica del sistema ${project.name || "institucional"}, asegurando integridad transaccional, alta disponibilidad y cumplimiento estricto de las necesidades del negocio.`;
+          `Definir y documentar la arquitectura y especificación técnica del sistema ${project.name || "institucional"} a partir de los requisitos y decisiones aprobadas.`;
         drawParagraph(objGenText);
 
         drawSubSectionHeader("2.2 Objetivos Específicos:");
@@ -500,7 +500,7 @@ export default function PdfPreviewModal({ project, onClose }) {
 
         domainKeywords = domainKeywords.filter((k) => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
         if (domainKeywords.length === 0) {
-          domainKeywords = ["Control Operacional", "Gestión de Procesos", "Trazabilidad de Datos", "Seguridad Transaccional"];
+          domainKeywords = ["Especificación", "Requisitos", "Diseño", "Trazabilidad"];
         }
 
         domainKeywords.forEach((kw) => {
@@ -512,7 +512,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         drawSectionHeader("5. Introducción");
         const introText =
           project.introduccion ||
-          "En el desarrollo formal de software de misión crítica, una adecuada especificación formal previene desviaciones presupuestarias, fallos de integración y cuellos de botella. El presente documento técnico estructura los requerimientos a partir de los insumos provistos por los expertos del dominio, asegurando consistencia, trazabilidad y conformidad.";
+          "Una especificación formal permite detectar inconsistencias antes de la implementación. El presente documento estructura los requisitos a partir de los insumos provistos y conserva su trazabilidad hacia los modelos de arquitectura, diseño e interfaz.";
         drawParagraph(introText);
 
         // --- 6. FUENTES E INSUMOS ANALIZADOS ---
@@ -543,10 +543,10 @@ export default function PdfPreviewModal({ project, onClose }) {
               ["Nombre del requerimiento", rf.name],
               ["Descripción", rf.description || "Sin descripción"],
               ["Dependencias", rf.dependencies || "Ninguna"],
-              ["Prioridad", rf.priority || "Alta"],
-              ["Actores", Array.isArray(rf.actors) ? rf.actors.join(", ") : rf.actors || "Operador Principal"],
-              ["Precondiciones", rf.precondition || "Usuario autenticado en el sistema"],
-              ["Postcondiciones", rf.postcondition || "Registro confirmado y almacenado en la base de datos"]
+              ["Prioridad", rf.priority || "No especificada"],
+              ["Actores", Array.isArray(rf.actors) ? rf.actors.join(", ") : rf.actors || "No especificados"],
+              ["Precondiciones", rf.precondition || "No especificadas en los insumos"],
+              ["Postcondiciones", rf.postcondition || "No especificadas en los insumos"]
             ];
 
             drawSpecificationTable(tableTitle, rows);
@@ -573,8 +573,8 @@ export default function PdfPreviewModal({ project, onClose }) {
               ["Nombre del requerimiento", rnfName],
               ["Categoría", rnf.category || "Atributo de Calidad"],
               ["Descripción", rnf.description || "N/A"],
-              ["Criterio / Métrica", rnf.metric || rnf.metrica_medible || "Cumplimiento normativo"],
-              ["Prioridad", rnf.priority || "Alta"]
+              ["Criterio / Métrica", rnf.metric || rnf.metrica_medible || "Por confirmar con el usuario"],
+              ["Prioridad", rnf.priority || "No especificada"]
             ];
 
             drawSpecificationTable(tableTitle, rows);
@@ -669,13 +669,20 @@ export default function PdfPreviewModal({ project, onClose }) {
             // Renderizar mockup HTML en iframe (para que Tailwind CDN y CSS ejecuten correctamente)
             let mockupImgData = null;
             try {
+              const platform = String(mockup.plataforma || mockup.platform || "web").toLowerCase();
+              const isMobile = /mobile|móvil|movil/.test(platform);
+              const isTablet = /tablet/.test(platform);
+              // Debe coincidir con ScaledMockupPreview. Cambiar el viewport al
+              // exportar activa otros breakpoints y deforma botones y textos.
+              const captureWidth = isMobile ? 390 : isTablet ? 820 : 1440;
+              const captureHeight = isMobile ? 844 : isTablet ? 900 : 820;
               mockupImgData = await new Promise((resolve) => {
                 const iframe = document.createElement("iframe");
                 iframe.style.position = "fixed";
                 iframe.style.left = "-9999px";
                 iframe.style.top = "0";
-                iframe.style.width = "1280px";
-                iframe.style.height = "900px";
+                iframe.style.width = `${captureWidth}px`;
+                iframe.style.height = `${captureHeight}px`;
                 iframe.style.border = "none";
                 iframe.style.visibility = "hidden";
                 iframe.style.pointerEvents = "none";
@@ -687,7 +694,7 @@ export default function PdfPreviewModal({ project, onClose }) {
                   resolve(null);
                 }, 12000);
 
-                const tryCapture = (attempts) => {
+                const tryCapture = async (attempts) => {
                   if (attempts <= 0) {
                     clearTimeout(timeout);
                     try { document.body.removeChild(iframe); } catch {}
@@ -708,15 +715,34 @@ export default function PdfPreviewModal({ project, onClose }) {
                      (iDoc.querySelector('[class]') ? window.getComputedStyle(iDoc.querySelector('[class]')).padding !== undefined : true));
 
                   if (tailwindReady) {
+                    try {
+                      await iDoc.fonts?.ready;
+                      await Promise.all([...iDoc.images].map((img) => img.complete
+                        ? Promise.resolve()
+                        : new Promise((done) => {
+                            img.addEventListener("load", done, { once: true });
+                            img.addEventListener("error", done, { once: true });
+                          })));
+                    } catch {
+                      // La captura sigue con las fuentes del sistema si un recurso opcional falla.
+                    }
+                    iDoc.documentElement.style.width = `${captureWidth}px`;
+                    iDoc.documentElement.style.height = `${captureHeight}px`;
+                    iDoc.documentElement.style.overflow = "hidden";
+                    iDoc.body.style.width = `${captureWidth}px`;
+                    iDoc.body.style.minHeight = `${captureHeight}px`;
+                    iDoc.body.style.overflow = "hidden";
                     html2canvas(iDoc.body || iDoc.documentElement, {
-                      scale: 1.8,
+                      scale: 1.5,
                       useCORS: true,
                       logging: false,
                       backgroundColor: "#ffffff",
-                      width: 1280,
-                      height: 900,
-                      windowWidth: 1280,
-                      windowHeight: 900,
+                      width: captureWidth,
+                      height: captureHeight,
+                      windowWidth: captureWidth,
+                      windowHeight: captureHeight,
+                      scrollX: 0,
+                      scrollY: 0,
                       allowTaint: false
                     }).then(canvas => {
                       clearTimeout(timeout);

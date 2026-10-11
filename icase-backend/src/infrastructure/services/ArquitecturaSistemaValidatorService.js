@@ -85,14 +85,28 @@ class ArquitecturaSistemaValidatorService {
       );
     }
 
-    // 4. Monitoreo y Observabilidad
+    // 4. Monitoreo y observabilidad solo son obligatorios cuando existe un RNF
+    // aprobado que los solicite.
     const tieneMonitoreo = /monitor|prometheus|grafana|cloudwatch|health|telemetr/i.test(lowerCode);
-    if (!tieneMonitoreo) {
-      advertencias.push('Se recomienda incluir un componente o agente de monitoreo/salud en la infraestructura.');
+    const monitoreoSolicitado = Array.isArray(rnfList) && rnfList.some((rnf) =>
+      /monitor|observabilidad|telemetr|m[eé]trica operativa|health check/i.test(`${rnf.nombre || ''} ${rnf.descripcion || ''} ${rnf.metrica_medible || ''}`)
+    );
+    if (monitoreoSolicitado && !tieneMonitoreo) {
+      advertencias.push('Existe un RNF de monitoreo u observabilidad sin un elemento responsable en la arquitectura del sistema.');
     }
 
     // 5. Trazabilidad RNF -> elemento arquitectónico de infraestructura
     const trazabilidadProcesada = this.normalizarTrazabilidad(trazabilidad_rnf, lowerCode);
+    const idsAprobados = new Set((Array.isArray(rnfList) ? rnfList : [])
+      .map((rnf) => String(rnf.identificador || rnf.id || '').toLowerCase())
+      .filter(Boolean));
+    for (const mapeo of trazabilidadProcesada) {
+      if (idsAprobados.size > 0 && !idsAprobados.has(String(mapeo.rnf_id || '').toLowerCase())) {
+        advertencias.push(`La trazabilidad referencia ${mapeo.rnf_id}, que no corresponde a un RNF aprobado.`);
+      } else if (!mapeo.presente_en_codigo) {
+        advertencias.push(`La trazabilidad de ${mapeo.rnf_id} apunta a "${mapeo.elemento}", pero ese elemento no aparece en el diagrama.`);
+      }
+    }
 
     return {
       valido: errores.length === 0,
