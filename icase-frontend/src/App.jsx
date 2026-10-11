@@ -61,58 +61,6 @@ export default function App() {
       (rfList.slice(0, 4).map((_, i) => `Act${(i % uniqueActors.length) + 1} --> UC${i + 1}`).join("\n") || `Act1 --> UC1`) +
       `\n@enduml`;
 
-    const actorLines = uniqueActors.map((act, i) => `Person(actor_${i + 1}, "${act}", "Interacción y operación")`).join("\n");
-    const actorRelLines = uniqueActors.map((_, i) => `Rel(actor_${i + 1}, webApp, "Opera vía navegador", "HTTPS")`).join("\n");
-    const srvContainers =
-      rfList
-        .slice(0, 4)
-        .map((rf, i) => {
-          const cleanName = (rf.nombre || `Operación ${i + 1}`).replace(/["“”]/g, "'");
-          return `  Container(srv_${i + 1}, "Servicio de ${cleanName}", "Node.js / Express", "Lógica de ${cleanName}")`;
-        })
-        .join("\n") || '  Container(srv_1, "Servicio de Operaciones", "Node.js / Express", "Lógica nodal")';
-    const srvRelations =
-      rfList
-        .slice(0, 4)
-        .map((_, i) => {
-          return `Rel(seguridadFilter, srv_${i + 1}, "Delega solicitud")\nRel(srv_${i + 1}, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")\nRel(srv_${i + 1}, auditStorage, "Registra trazabilidad", "REST")`;
-        })
-        .join("\n") ||
-      'Rel(seguridadFilter, srv_1, "Delega solicitud")\nRel(srv_1, dbRelacional, "Lectura/Escritura", "TCP/SQL")\nRel(srv_1, auditStorage, "Trazabilidad", "REST")';
-
-    const defArchPlant = `@startuml
-!include <C4/C4_Container>
-title Arquitectura Técnica Integral - ${safePName}
-
-${actorLines}
-
-System_Ext(ext_auth, "Servidor de Identidad / SSO", "OAuth2 / JWT")
-System_Ext(ext_notif, "Servidor de Notificaciones", "SMTP / WebPush")
-System_Ext(ext_ext, "Servicios Externos / APIs", "Integración externa")
-
-System_Boundary(sys, "${safePName}") {
-  Container(webApp, "Portal Web y Móvil PWA", "React.js / TypeScript", "Frontend interactivo")
-  Container(reverseProxy, "Proxy Inverso y Gateway", "Nginx", "Terminación TLS/HTTPS y Rate Limiting")
-  Container(seguridadFilter, "Control de Acceso y Sesión", "Node.js Middleware", "Tokens JWT y RBAC")
-${srvContainers}
-  Container(adp_ext, "Adaptador de Servicios Externos", "Node.js Client", "Conexión con APIs externas")
-  ContainerDb(dbRelacional, "Base de Datos del Sistema", "PostgreSQL", "Almacén relacional con ACID")
-  ContainerDb(cacheMem, "Memoria Caché", "Redis", "Caché de latencia < 0.8s")
-  Container(auditStorage, "Almacén de Auditoría", "Elasticsearch / Audit Log", "Trazabilidad inmutable")
-  Container(pipelineDevOps, "Automatización CI/CD", "GitHub Actions + Docker", "Pipeline de pruebas y despliegue")
-}
-
-${actorRelLines}
-Rel(webApp, reverseProxy, "Transacciones API", "JSON / HTTPS")
-Rel(reverseProxy, seguridadFilter, "Inspección de peticiones")
-${srvRelations}
-Rel(srv_1, cacheMem, "Caché de alto rendimiento", "TCP")
-Rel(seguridadFilter, ext_auth, "Verifica token", "HTTPS")
-Rel(adp_ext, ext_ext, "Consume API externa", "REST")
-Rel(pipelineDevOps, webApp, "Despliega SPA")
-Rel(pipelineDevOps, reverseProxy, "Configura proxy")
-@enduml`;
-
     const defClassPlant =
       `@startuml\nskinparam classAttributeIconSize 0\nclass Usuario {\n  +int idUsuario\n  +String nombre\n  +String rol\n  +autenticar(): boolean\n}\n` +
       dynamicClasses.map((c) => `class ${c} {\n  +String id${c}\n  +DateTime fecha\n  +String estado\n  +procesar(): boolean\n}`).join("\n") +
@@ -167,14 +115,16 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
       ? (cleanRawName.charAt(0).toUpperCase() + cleanRawName.slice(1))
       : (p.nombre || "Proyecto de Software");
 
-    const mapStoredDiagram = (item, { title, type, fallbackCode, description }) => {
+    const mapStoredDiagram = (item, { title, type, description }) => {
       if (!item) return null;
+      const storedPlantUml = sanitizePlantUML(item.codigo_plantuml);
+      const unavailableCode = `@startuml\ntitle ${title}\nnote "El código generado no está disponible. Regenera este diagrama." as N1\n@enduml`;
       return {
         id: item.id || item._id,
         title: item.titulo || title,
         type,
-        code: item.codigo_mermaid && !item.codigo_mermaid.includes("@start") ? item.codigo_mermaid : fallbackCode,
-        plantumlCode: sanitizePlantUML(item.codigo_plantuml) || fallbackCode,
+        code: item.codigo_mermaid && !item.codigo_mermaid.includes("@start") ? item.codigo_mermaid : (storedPlantUml || unavailableCode),
+        plantumlCode: storedPlantUml || unavailableCode,
         description: item.descripcion || description,
         descripcion_jerarquica: item.descripcion_jerarquica || [],
         trazabilidad_rnf: item.trazabilidad_rnf || [],
@@ -205,7 +155,7 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
         description: "Entidades y relaciones propias del negocio."
       }),
       architecture: mapStoredDiagram(archItem, {
-        title: "Arquitectura de Software", type: "arquitectura_software", fallbackCode: defArchPlant,
+        title: "Arquitectura de Software", type: "arquitectura_software", fallbackCode: `@startuml\ntitle Arquitectura no disponible - ${safePName}\nnote "Regenera este diagrama: no se muestran componentes de contingencia sin evidencia." as N1\n@enduml`,
         description: "Aplicaciones, contenedores y comunicaciones del software."
       }),
       systemArchitecture: mapStoredDiagram(systemArchItem, {
@@ -257,6 +207,10 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
             priority: r.prioridad,
             precondition: r.precondiciones,
             postcondition: r.poscondiciones,
+            origin: r.origen || "inferido",
+            evidence: r.evidencia || "",
+            sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+            requiresConfirmation: Boolean(r.requiere_confirmacion),
             approved: r.aprobado
           })),
         nonFunctional: reqs
@@ -271,7 +225,11 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
             category: r.nombre,
             description: r.descripcion,
             metric: r.metrica_medible,
-            compliance: "Validado por Auditor QA/QC",
+            compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
+            origin: r.origen || "inferido",
+            evidence: r.evidencia || "",
+            sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+            requiresConfirmation: Boolean(r.requiere_confirmacion),
             approved: r.aprobado
           }))
       },
@@ -497,6 +455,7 @@ Rel(pipelineDevOps, reverseProxy, "Configura proxy")
           />
         ) : (
           <ProjectWorkspace
+            key={activeProject?.backendId || activeProject?.id}
             project={activeProject}
             allProjects={projects}
             user={user}

@@ -72,6 +72,8 @@ const extractInsumoBruto = async (sources) => {
 const generateDefaultPuml = (type, name = "Sistema I-CASE") => {
   const safeName = (name || "Sistema I-CASE").replace(/["“”]/g, "'");
   switch (type) {
+    case "unavailable":
+      return `@startuml\ntitle Diagrama no disponible - ${safeName}\nnote "El código generado no está disponible. Regenera este diagrama." as N1\n@enduml`;
     case "useCase":
       return `@startuml
 left to right direction
@@ -99,48 +101,8 @@ UC3 .> UC1 : <<include>>
 
     case "architecture":
       return `@startuml
-!include <C4/C4_Container>
-title Arquitectura Técnica Integral - ${safeName}
-
-Person(operador, "Operador Principal", "Personal autorizado del sistema")
-Person(supervisor, "Supervisor / Administrador", "Gestión y auditoría")
-
-System_Ext(ext_auth, "Servidor de Identidad / SSO", "OAuth2 / JWT")
-System_Ext(ext_notif, "Servidor de Notificaciones", "SMTP / WebPush")
-System_Ext(ext_ext, "Servicios Externos / APIs", "Integración y telemetría")
-
-System_Boundary(sys, "${safeName}") {
-  Container(webApp, "Portal Web y Móvil PWA", "React.js / TypeScript", "Frontend interactivo")
-  Container(reverseProxy, "Proxy Inverso y Gateway", "Nginx", "Terminación TLS/HTTPS y Rate Limiting")
-  Container(seguridadFilter, "Control de Acceso y Sesión", "Node.js Middleware", "Tokens JWT y RBAC")
-  Container(srv_1, "Servicio de Operaciones y Procesamiento", "Node.js / Express", "Lógica operativa del negocio")
-  Container(srv_2, "Servicio de Verificación y Control", "Node.js / Express", "Validaciones de calidad y reglas")
-  Container(srv_3, "Motor de Reportes y Liquidación", "Node.js / Express", "Métricas consolidadas y facturación")
-  Container(adp_ext, "Adaptador de Servicios Externos", "Node.js Client", "Conexión con APIs externas")
-  ContainerDb(dbRelacional, "Base de Datos del Sistema", "PostgreSQL", "Persistencia transaccional ACID")
-  ContainerDb(cacheMem, "Memoria Caché", "Redis", "Caché de latencia < 0.8s")
-  Container(auditStorage, "Almacén de Auditoría", "Elasticsearch / Audit Log", "Trazabilidad inmutable")
-  Container(pipelineDevOps, "Automatización CI/CD", "GitHub Actions + Docker", "Pipeline de despliegue continuo")
-}
-
-Rel(operador, webApp, "Opera vía navegador", "HTTPS")
-Rel(supervisor, webApp, "Supervisa y consulta", "HTTPS")
-Rel(webApp, reverseProxy, "Transacciones API", "JSON / HTTPS")
-Rel(reverseProxy, seguridadFilter, "Inspección de peticiones")
-Rel(seguridadFilter, srv_1, "Delega solicitud autorizada")
-Rel(seguridadFilter, srv_2, "Delega solicitud autorizada")
-Rel(seguridadFilter, srv_3, "Delega solicitud autorizada")
-Rel(srv_1, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")
-Rel(srv_2, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")
-Rel(srv_3, dbRelacional, "Lectura / Escritura ACID", "TCP/SQL")
-Rel(srv_1, cacheMem, "Caché de alto rendimiento", "TCP")
-Rel(srv_1, auditStorage, "Registra trazabilidad", "REST")
-Rel(srv_2, auditStorage, "Registra trazabilidad", "REST")
-Rel(seguridadFilter, ext_auth, "Verifica token", "HTTPS")
-Rel(adp_ext, ext_ext, "Consume API externa", "REST")
-Rel(srv_3, ext_notif, "Emite avisos y reportes", "SMTP")
-Rel(pipelineDevOps, webApp, "Despliega SPA")
-Rel(pipelineDevOps, reverseProxy, "Aplica configuración")
+title Arquitectura no disponible - ${safeName}
+note "El código generado no está disponible. Regenera este diagrama para evitar componentes no sustentados." as N1
 @enduml`;
 
     case "classDiagram":
@@ -227,10 +189,14 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
         name: r.nombre || "Requerimiento Funcional",
         description: r.descripcion || "",
         dependencies: r.dependencias || "Ninguna",
-        actors: Array.isArray(r.actores) && r.actores.length ? r.actores : ["Operador Principal"],
+        actors: Array.isArray(r.actores) ? r.actores : [],
         priority: r.prioridad || "Alta",
-        precondition: r.precondiciones || "El usuario debe autenticarse en el sistema.",
-        postcondition: r.poscondiciones || "Transacción registrada en base de datos.",
+        precondition: r.precondiciones || "",
+        postcondition: r.poscondiciones || "",
+        origin: r.origen || "inferido",
+        evidence: r.evidencia || "",
+        sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+        requiresConfirmation: Boolean(r.requiere_confirmacion),
         approved: Boolean(r.aprobado)
       }));
 
@@ -242,8 +208,12 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
         description: r.descripcion || "",
         dependencies: r.dependencias || "Ninguna",
         priority: r.prioridad || "Alta",
-        metric: r.metrica_medible || "Métrica cuantitativa verificable según especificación formal",
-        compliance: "Validado por Auditor QA/QC",
+        metric: r.metrica_medible || "Por confirmar con el usuario",
+        compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
+        origin: r.origen || "inferido",
+        evidence: r.evidencia || "",
+        sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+        requiresConfirmation: Boolean(r.requiere_confirmacion),
         approved: Boolean(r.aprobado)
       }));
 
@@ -271,7 +241,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
       if (existingDiagrams?.[typeKey]?.plantumlCode && existingDiagrams[typeKey].plantumlCode.trim().length > 15) {
         return sanitizePlantUML(existingDiagrams[typeKey].plantumlCode);
       }
-      return sanitizePlantUML(generateDefaultPuml(typeKey, fallbackName));
+      return generateDefaultPuml("unavailable", fallbackName);
     };
 
     const mapDiagram = (diag, key, fallbackTitle, type) => {
@@ -666,169 +636,9 @@ export default function ProjectWorkspace({
       }
 
       let { reqs } = transformAiOutput(aiResult, updatedName, project.diagrams);
-      let diags = {};
 
       if (!reqs?.functional?.length) {
-        reqs = {
-          functional: [
-            {
-              id: "RF-01",
-              name: "Control y Registro Operativo Central",
-              description: `Permite a los operadores registrar las transacciones y órdenes principales de ${updatedName} con validación en tiempo real y asignación de identificador único.`,
-              actors: ["Operador Principal", "Supervisor"],
-              priority: "Alta",
-              precondition: "El usuario debe contar con turno operativo abierto.",
-              postcondition: "Transacción confirmada en base de datos y visible en panel de control."
-            },
-            {
-              id: "RF-02",
-              name: "Módulo de Despacho y Actualización de Estados",
-              description: "Sincroniza en tiempo real los estados de atención entre estaciones de trabajo conectadas, notificando alertas de retraso o prioridad.",
-              actors: ["Personal Operativo", "Jefe de Área"],
-              priority: "Alta",
-              precondition: "Existen registros en estado pendiente de despacho.",
-              postcondition: "El estado del pedido pasa a 'Completado' y se genera aviso acústico/visual."
-            },
-            {
-              id: "RF-03",
-              name: "Liquidación de Cuenta y Emisión de Comprobantes",
-              description: "Efectúa el cálculo de subtotales, recargos, impuestos legales y emite la factura o comprobante con soporte para múltiples métodos de cobro.",
-              actors: ["Cajero", "Administrador"],
-              priority: "Alta",
-              precondition: "Todos los ítems de la orden han sido verificados.",
-              postcondition: "Se cierra la transacción financiera y se actualizan los saldos de caja."
-            },
-            {
-              id: "RF-04",
-              name: "Auditoría Diaria y Reporte de Métricas",
-              description: "Genera el consolidado diario de operaciones por turnos, productos más demandados y tiempos medios de atención para evaluación de calidad.",
-              actors: ["Administrador"],
-              priority: "Media",
-              precondition: "Cierre de jornada fiscal.",
-              postcondition: "Archivo exportado en formato estándar para contabilidad."
-            }
-          ],
-          nonFunctional: [
-            {
-              id: "RNF-01",
-              category: "Rendimiento y Latencia",
-              description: "El tiempo de respuesta al consultar órdenes y registros no debe superar los 0.65 segundos bajo concurrencia de hasta 120 peticiones simultáneas.",
-              metric: "Latencia <= 0.65s (Percentil 95)",
-              compliance: "Verificable con pruebas de carga K6 / JMeter"
-            },
-            {
-              id: "RNF-02",
-              category: "Alta Disponibilidad y Tolerancia a Fallos",
-              description: "Disponibilidad del 99.95% con conmutación automática (failover) a servidor réplica esclavo en un tiempo menor a 3.0 segundos ante fallas del nodo primario.",
-              metric: "Uptime 99.95% y Conmutación Failover <= 3.0s",
-              compliance: "Simulación de caída de nodo primario bajo monitor continuo"
-            },
-            {
-              id: "RNF-03",
-              category: "Usabilidad y Ergonomía Visual",
-              description: "La interfaz gráfica debe ser legible a una distancia de 60 cm con contraste tipográfico adecuado para estaciones táctiles.",
-              metric: "Lectura contrastada a distancia >= 60 cm (Fuente >= 16px)",
-              compliance: "Test ergonómico de interfaz con operario a 60 cm"
-            },
-            {
-              id: "RNF-04",
-              category: "Persistencia Transaccional ACID",
-              description: "Persistencia estricta en base de datos relacional con respaldos incrementales automáticos cada 120 minutos sin caída del servicio.",
-              metric: "RPO <= 120 minutos, integridad transaccional ACID",
-              compliance: "Auditoría de consistencia de transacciones y réplica WAL"
-            }
-          ]
-        };
-      }
-
-      if (aiResult?.objetivo !== "requisitos" && !diags?.useCase) {
-        diags = {
-          useCase: {
-            id: "diag-uc",
-            title: "Diagrama de Casos de Uso (UML Estándar)",
-            type: "casos_uso",
-            plantumlCode: generateDefaultPuml("useCase", updatedName),
-            code: `graph LR
-    subgraph "${updatedName}"
-        UC1(["Control y Registro Operativo"])
-        UC2(["Despacho y Coordinación"])
-        UC3(["Liquidación y Facturación"])
-        UC4(["Auditoría y Reportes Diarios"])
-    end
-
-    ActorOp[Operador] --> UC1
-    ActorOp --> UC2
-    ActorCaja[Cajero] --> UC3
-    ActorAdmin[Administrador] --> UC4
-
-    UC1 -.->|include| UC2
-    UC3 -.->|include| UC1
-`,
-            description: "Actores con silueta humana (muñequito), módulo delimitado y casos de uso en elipse."
-          },
-          architecture: {
-            id: "diag-arch",
-            title: "Diagrama de Arquitectura (Structurizr C4)",
-            type: "arquitectura",
-            plantumlCode: generateDefaultPuml("architecture", updatedName),
-            code: `graph TD
-    Client["Terminales Cliente (Web / Táctil)"] --> LB["Balanceador de Carga NGINX (Failover)"]
-    LB -->|Peticiones Primarias| Master["Servidor de Aplicación Maestro"]
-    LB -.->|Conmutación <= 3s| Slave["Servidor Réplica Esclavo (Hot Standby)"]
-    Master --> DB[("PostgreSQL Maestro")]
-    Slave --> DBReplica[("PostgreSQL Replica Standby")]
-    DB -.->|Replicación WAL| DBReplica
-`,
-            description: "Modelo de contenedores C4 con balanceador y réplica failover."
-          },
-          classDiagram: {
-            id: "diag-class",
-            title: "Diagrama de Clases del Dominio (PlantUML)",
-            type: "clases",
-            plantumlCode: generateDefaultPuml("classDiagram", updatedName),
-            code: `classDiagram
-    class OrdenOperativa {
-        +int idOrden
-        +DateTime fechaHora
-        +String estado
-        +float total
-        +procesar()
-    }
-    class DetalleItem {
-        +int idDetalle
-        +int cantidad
-        +float precioUnitario
-    }
-    class Usuario {
-        +int idUsuario
-        +String nombre
-        +String rol
-    }
-    Usuario "1" -- "*" OrdenOperativa : registra
-    OrdenOperativa "1" *-- "1..*" DetalleItem : contiene
-`,
-            description: "Entidades del modelo de datos con tipado y relaciones."
-          },
-          navigationTree: {
-            id: "diag-nav",
-            title: "Árbol de Navegación del Sistema",
-            type: "navegacion",
-            plantumlCode: generateDefaultPuml("navigationTree", updatedName),
-            code: `graph TD
-    Inicio["Inicio de Sesión"] --> Recuperacion["Recuperación de Contraseña"]
-    Inicio --> Dashboard["Panel Principal"]
-    Dashboard --> ModPedidos["Módulo de Pedidos"]
-    ModPedidos --> ListadoPedidos["Listado de Pedidos"]
-    ModPedidos --> DetallePedido["Detalle de Pedido"]
-    Dashboard --> ModDespacho["Módulo de Despacho"]
-    ModDespacho --> ListadoDespachos["Listado de Despachos"]
-    Dashboard --> Administracion["Administración"]
-    Administracion --> Usuarios["Gestión de Usuarios"]
-    Administracion --> Configuracion["Configuración del Sistema"]
-`,
-            description: "Mapa jerárquico de pantallas y rutas de navegación del sistema."
-          }
-        };
+        throw new Error("La IA no devolvió requisitos funcionales trazables. No se generaron requisitos de contingencia; vuelve a intentarlo o revisa el insumo.");
       }
 
       // Deduplicar las fuentes por nombre para garantizar que nunca se repita la tarjeta
@@ -857,6 +667,7 @@ export default function ProjectWorkspace({
       });
     } catch (err) {
       console.error("[Workspace] Error procesando con IA:", err);
+      alert(`No se pudo generar una especificación trazable.\n\n${err.message}`);
     } finally {
       setIsProcessing(false);
     }

@@ -34,6 +34,56 @@ function normalizarCodigoPlantUML(value) {
   }, []).join('\n').trim();
 }
 
+function textoComparable(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function numerosDe(value) {
+  return String(value || '').match(/\d+(?:[.,]\d+)?/g)?.map((numero) => numero.replace(',', '.')) || [];
+}
+
+function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
+  const insumoComparable = textoComparable(insumo);
+
+  return (requerimientos || []).map((requisito) => {
+    const evidencia = String(requisito.evidencia || requisito.evidencia_fuente || '').trim();
+    const evidenciaComparable = textoComparable(evidencia);
+    const evidenciaValida = evidenciaComparable.length >= 8 && insumoComparable.includes(evidenciaComparable);
+    const numerosEvidencia = new Set(evidenciaValida ? numerosDe(evidencia) : []);
+    const tipo = String(requisito.tipo || 'RF').toUpperCase();
+    let metricaMedible = String(requisito.metrica_medible || '').trim();
+    const numerosNoSustentados = numerosDe(metricaMedible).filter((numero) => !numerosEvidencia.has(numero));
+    const metricaNoSustentada = tipo === 'RNF' && numerosNoSustentados.length > 0;
+    const origenSolicitado = String(requisito.origen || '').toLowerCase();
+    const origen = evidenciaValida && !metricaNoSustentada && origenSolicitado !== 'inferido'
+      ? 'explicito'
+      : 'inferido';
+    const requiereConfirmacion = Boolean(requisito.requiere_confirmacion) || origen === 'inferido' ||
+      (tipo === 'RNF' && !metricaMedible);
+
+    if (tipo === 'RNF' && (!metricaMedible || metricaNoSustentada)) {
+      metricaMedible = 'Por confirmar con el usuario';
+    }
+
+    return {
+      ...requisito,
+      tipo,
+      metrica_medible: metricaMedible,
+      origen,
+      evidencia: evidenciaValida ? evidencia : '',
+      fuentes_origen: Array.isArray(requisito.fuentes_origen)
+        ? requisito.fuentes_origen.map(String).filter(Boolean)
+        : [],
+      requiere_confirmacion: requiereConfirmacion
+    };
+  });
+}
+
 class ModelosIaService {
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
@@ -70,16 +120,23 @@ class ModelosIaService {
       arquitectura_sistema: 'disenador_arquitectura_sistema.md',
       clases_diseno: 'disenador_clases_diseno.md'
     };
-    const directivas = [
-      this.leerPrompt('analista_ieee830.md'),
-      this.leerPrompt('disenador_arquitectura.md'),
-      tipoDiagrama && promptsEspecializados[tipoDiagrama]
-        ? this.leerPrompt(promptsEspecializados[tipoDiagrama])
-        : '',
-      this.leerPrompt('auditor_qa.md')
-    ].filter(Boolean).join('\n\n');
+    const directivas = (objetivo === 'requisitos'
+      ? [
+        this.leerPrompt('analista_ieee830.md'),
+        this.leerPrompt('auditor_requisitos.md')
+      ]
+      : [
+        this.leerPrompt('analista_ieee830.md'),
+        this.leerPrompt('disenador_arquitectura.md'),
+        tipoDiagrama && promptsEspecializados[tipoDiagrama]
+          ? this.leerPrompt(promptsEspecializados[tipoDiagrama])
+          : '',
+        this.leerPrompt('auditor_qa.md')
+      ]).filter(Boolean).join('\n\n');
 
-    const estructuraSalida = this.leerPrompt('estructura_salida.md');
+    const estructuraSalida = this.leerPrompt(
+      objetivo === 'requisitos' ? 'estructura_salida_requisitos.md' : 'estructura_salida.md'
+    );
 
     const directivaFase = objetivo === 'requisitos'
       ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nGenera y devuelve únicamente el análisis y los requerimientos RF/RNF. El arreglo "diagramas" DEBE ser []. No diseñes, sintetices ni anticipes diagramas todavía.`
@@ -190,7 +247,10 @@ class ModelosIaService {
 
     // Durante el modelado, solo los requisitos aprobados constituyen restricciones.
     // Esto evita que sugerencias o borradores de la IA contaminen los diagramas.
-    const reqsContexto = objetivo === 'diagramas' ? reqsAprobados : reqsActuales;
+    const esRefinamientoExplicito = Boolean(insumoAdicional && insumoAdicional.trim());
+    const reqsContexto = objetivo === 'diagramas'
+      ? reqsAprobados
+      : (esRefinamientoExplicito ? reqsActuales : []);
 
     let contextoActualTexto = '';
     if (reqsContexto.length > 0) {
@@ -203,7 +263,9 @@ class ModelosIaService {
             `  Actores: ${actores}`,
             `  Prioridad: ${r.prioridad || 'Media'}`,
             `  Precondición: ${r.precondiciones || r.precondicion || 'No especificada'}`,
-            `  Poscondición: ${r.poscondiciones || r.poscondicion || 'No especificada'}`
+            `  Poscondición: ${r.poscondiciones || r.poscondicion || 'No especificada'}`,
+            `  Métrica: ${r.metrica_medible || 'No especificada'}`,
+            `  Origen: ${r.origen || 'No especificado'}`
           ].join('\n');
         }).join('\n');
     }
@@ -259,17 +321,21 @@ class ModelosIaService {
     }
 
     if (!respuestaData) {
-      console.warn('[ModelosIaService] Ningún modelo de IA devolvió respuesta parseable. Usando estructuración de contingencia.');
+      if (objetivo === 'requisitos') {
+        throw new Error('Ningún modelo de IA devolvió requisitos válidos. Los requisitos existentes se conservaron sin cambios.');
+      }
+      console.warn('[ModelosIaService] Ningún modelo de IA devolvió respuesta parseable. Usando contexto aprobado únicamente para validación.');
       respuestaData = {
         nombre_proyecto: this.limpiarNombreProyecto(payload.nombre_proyecto) || 'Gestión y Control Operativo',
-        requerimientos: reqsActuales
+        requerimientos: []
       };
     }
 
     return this.normalizarResultado(respuestaData, objetivo, tipoDiagrama, {
       nombreProyecto: payload.nombre_proyecto,
       requerimientos: reqsContexto,
-      diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || []
+      diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || [],
+      insumo: [insumo, insumoAdicional].filter(Boolean).join('\n\n')
     });
   }
 
@@ -587,7 +653,12 @@ class ModelosIaService {
   normalizarResultado(data, objetivo = 'completo', tipoDiagrama = null, contexto = {}) {
     const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
     const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
-    const requerimientos = objetivo === 'diagramas' ? [] : (Array.isArray(data?.requerimientos) ? data.requerimientos : []);
+    const requerimientos = objetivo === 'diagramas'
+      ? []
+      : normalizarTrazabilidadRequerimientos(
+        Array.isArray(data?.requerimientos) ? data.requerimientos : [],
+        contexto.insumo || ''
+      );
 
     let palabrasClave = Array.isArray(data?.palabras_clave)
       ? data.palabras_clave.filter(k => typeof k === 'string' && k.trim())

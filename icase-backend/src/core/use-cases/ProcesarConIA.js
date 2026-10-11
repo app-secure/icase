@@ -253,7 +253,8 @@ class ProcesarConIA {
     const payload = {
       proyecto_id: proyectoId,
       nombre_proyecto: proyecto.nombre,
-      insumo_bruto: insumoBruto,
+      // Las instrucciones adicionales tienen su bloque propio en el prompt; no deben duplicarse en el insumo principal.
+      insumo_bruto: textoBase,
       insumo_adicional: insumoAdicional,
       provider,
       specificModel,
@@ -376,6 +377,10 @@ class ProcesarConIA {
           precondiciones: reqData.precondiciones || '',
           poscondiciones: reqData.poscondiciones || '',
           metrica_medible: reqData.metrica_medible || '',
+          origen: reqData.origen || 'inferido',
+          evidencia: reqData.evidencia || '',
+          fuentes_origen: Array.isArray(reqData.fuentes_origen) ? reqData.fuentes_origen : [],
+          requiere_confirmacion: Boolean(reqData.requiere_confirmacion),
           aprobado: false
         });
         requerimientosGenerados.push(reqEntity);

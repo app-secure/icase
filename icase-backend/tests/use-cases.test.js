@@ -10,6 +10,83 @@ const PlantUMLSynthesizer = require('../src/infrastructure/services/PlantUMLSynt
 const RequirementChangeService = require('../src/core/services/RequirementChangeService');
 
 describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
+  test('la generación de requisitos no arrastra borradores y neutraliza métricas sin evidencia', async () => {
+    const service = new ModelosIaService();
+    service.geminiApiKey = 'test-key';
+    let promptEnviado = '';
+    service.generarConGemini = jest.fn().mockImplementation(async (prompt) => {
+      promptEnviado = prompt;
+      return {
+        nombre_proyecto: 'Demo',
+        requerimientos: [{
+          tipo: 'RNF',
+          identificador: 'RNF-01',
+          nombre: 'Tiempo real',
+          descripcion: 'El sistema DEBE sincronizar pedidos en tiempo real.',
+          metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
+          origen: 'explicito',
+          evidencia: 'pedidos en tiempo real'
+        }],
+        diagramas: []
+      };
+    });
+
+    const resultado = await service.procesar({
+      nombre_proyecto: 'Demo',
+      insumo_bruto: 'La cocina necesita ver los pedidos en tiempo real.',
+      provider: 'gemini',
+      objetivo: 'requisitos',
+      contexto_proyecto: {
+        requerimientos_actuales: [{
+          identificador: 'RNF-99',
+          tipo: 'RNF',
+          nombre: 'MARCADOR_DE_OTRA_EJECUCION'
+        }]
+      }
+    });
+
+    expect(promptEnviado).not.toContain('MARCADOR_DE_OTRA_EJECUCION');
+    expect(promptEnviado).not.toContain('Redis Cache');
+    expect(resultado.requerimientos[0]).toEqual(expect.objectContaining({
+      metrica_medible: 'Por confirmar con el usuario',
+      origen: 'inferido',
+      requiere_confirmacion: true,
+      evidencia: 'pedidos en tiempo real'
+    }));
+  });
+
+  test('la generación conserva una métrica cuando aparece literalmente en el insumo', async () => {
+    const service = new ModelosIaService();
+    service.geminiApiKey = 'test-key';
+    service.generarConGemini = jest.fn().mockResolvedValue({
+      nombre_proyecto: 'Demo',
+      requerimientos: [{
+        tipo: 'RNF',
+        identificador: 'RNF-01',
+        nombre: 'Latencia',
+        descripcion: 'El sistema DEBE propagar eventos con la latencia indicada.',
+        metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
+        origen: 'explicito',
+        evidencia: 'latencia <= 0.8 segundos para 150 conexiones'
+      }],
+      diagramas: []
+    });
+
+    const resultado = await service.procesar({
+      nombre_proyecto: 'Demo',
+      insumo_bruto: 'Se requiere latencia <= 0.8 segundos para 150 conexiones.',
+      provider: 'gemini',
+      objetivo: 'requisitos',
+      contexto_proyecto: {}
+    });
+
+    expect(resultado.requerimientos[0]).toEqual(expect.objectContaining({
+      metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
+      origen: 'explicito',
+      requiere_confirmacion: false
+    }));
+  });
+
   test('ModelosIaService debe usar catálogos configurables sin fallbacks obsoletos', async () => {
     const anteriores = {
       groq: process.env.GROQ_ANALYSIS_MODELS,

@@ -42,8 +42,8 @@ const ProyectoSchema = new mongoose.Schema({
     default: ''
   },
   parametros: {
-    highAvailability: { type: Boolean, default: true },
-    dataPersistence: { type: Boolean, default: true }
+    highAvailability: { type: Boolean, default: null },
+    dataPersistence: { type: Boolean, default: null }
   },
   estado_fase: {
     type: String,

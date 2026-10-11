@@ -14,6 +14,10 @@ class MongoRequerimientoRepository extends IRequerimientoRepository {
       precondiciones: req.precondiciones,
       poscondiciones: req.poscondiciones,
       metrica_medible: req.metrica_medible,
+      origen: req.origen,
+      evidencia: req.evidencia,
+      fuentes_origen: req.fuentes_origen,
+      requiere_confirmacion: req.requiere_confirmacion,
       aprobado: req.aprobado
     });
     const guardado = await nuevo.save();
@@ -32,6 +36,10 @@ class MongoRequerimientoRepository extends IRequerimientoRepository {
       precondiciones: req.precondiciones,
       poscondiciones: req.poscondiciones,
       metrica_medible: req.metrica_medible,
+      origen: req.origen,
+      evidencia: req.evidencia,
+      fuentes_origen: req.fuentes_origen,
+      requiere_confirmacion: req.requiere_confirmacion,
       aprobado: req.aprobado
     }));
     const guardados = await RequerimientoModel.insertMany(docs);

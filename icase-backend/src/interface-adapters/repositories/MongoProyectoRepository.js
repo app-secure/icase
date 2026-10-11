@@ -14,7 +14,7 @@ class MongoProyectoRepository extends IProyectoRepository {
       resumen: proyecto.resumen || '',
       palabras_clave: proyecto.palabras_clave || [],
       introduccion: proyecto.introduccion || '',
-      parametros: proyecto.parametros || { highAvailability: true, dataPersistence: true }
+      parametros: proyecto.parametros || { highAvailability: null, dataPersistence: null }
     });
     const guardado = await nuevo.save();
     return guardado.toJSON();

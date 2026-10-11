@@ -35,16 +35,24 @@ Tu respuesta debe ser EXCLUSIVAMENTE un objeto JSON válido, sin texto introduct
       "prioridad": "Alta",
       "actores": ["Mesero", "Administrador"],
       "precondiciones": "Usuario autenticado y mesa con estado Disponible",
-      "poscondiciones": "Mesa registrada con estado Ocupada y comanda inicial creada en base de datos"
+      "poscondiciones": "Mesa registrada con estado Ocupada y comanda inicial creada en base de datos",
+      "origen": "explicito",
+      "evidencia": "Fragmento literal del insumo que solicita seleccionar y asignar una mesa",
+      "fuentes_origen": [],
+      "requiere_confirmacion": false
     },
     {
       "tipo": "RNF",
       "identificador": "RNF-01",
       "nombre": "Rendimiento y Tiempo de Respuesta",
       "descripcion": "El sistema DEBE procesar las transacciones y consultas de datos garantizando una latencia inferior a los umbrales máximos establecidos.",
-      "metrica_medible": "Tiempo de respuesta <= 0.8s en el 98% de transacciones concurrentes bajo carga de 100 usuarios activos",
+      "metrica_medible": "Por confirmar con el usuario",
       "dependencias": "Ninguna",
-      "prioridad": "Alta"
+      "prioridad": "Alta",
+      "origen": "inferido",
+      "evidencia": "Fragmento literal del insumo que expresa la expectativa no funcional",
+      "fuentes_origen": [],
+      "requiere_confirmacion": true
     }
   ],
   "diagramas": [

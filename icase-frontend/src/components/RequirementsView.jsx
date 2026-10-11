@@ -4,10 +4,11 @@ import BrainGearsIcon from "./BrainGearsIcon";
 
 const emptyRequirement = (type) => type === "rf" ? {
   name: "", description: "", actors: ["Usuario"], priority: "Alta",
-  precondition: "", postcondition: "", approved: false
+  precondition: "", postcondition: "", origin: "manual", evidence: "",
+  requiresConfirmation: false, approved: false
 } : {
   category: "", description: "", metric: "", compliance: "Pendiente de validación",
-  approved: false
+  origin: "manual", evidence: "", requiresConfirmation: false, approved: false
 };
 
 const nextId = (items, prefix) => {
@@ -75,7 +76,10 @@ export default function RequirementsView({
           .map(actor => actor.trim()).filter(Boolean),
         priority: draft.priority || "Alta",
         precondition: String(draft.precondition || "").trim(),
-        postcondition: String(draft.postcondition || "").trim()
+        postcondition: String(draft.postcondition || "").trim(),
+        origin: "manual",
+        evidence: "",
+        requiresConfirmation: false
       };
       if (isNew) updatedFunctional.push(normalized); else updatedFunctional[index] = normalized;
     } else {
@@ -85,7 +89,10 @@ export default function RequirementsView({
         category: draft.category.trim(),
         description: draft.description.trim(),
         metric: draft.metric.trim(),
-        compliance: String(draft.compliance || "Pendiente de validación").trim()
+        compliance: String(draft.compliance || "Pendiente de validación").trim(),
+        origin: "manual",
+        evidence: "",
+        requiresConfirmation: false
       };
       if (isNew) updatedNonFunctional.push(normalized); else updatedNonFunctional[index] = normalized;
     }
@@ -254,11 +261,16 @@ function RequirementSection({
 }
 
 function FunctionalDisplay({ item }) {
-  return <><p><strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}</p><p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {Array.isArray(item.actors) ? item.actors.join(", ") : item.actors} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>{item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}{item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}</>;
+  return <><p><strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}</p><p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {Array.isArray(item.actors) ? item.actors.join(", ") : item.actors} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>{item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}{item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}<RequirementProvenance item={item} /></>;
 }
 
 function NonFunctionalDisplay({ item }) {
-  return <><p><strong className="font-semibold text-slate-900">{item.category}</strong>: {item.description}</p><p className="text-xs text-slate-600"><strong className="text-[#6D28D9]">Métrica cuantitativa:</strong> {item.metric}{item.compliance && <> <span>•</span> <span className="text-slate-500">{item.compliance}</span></>}</p></>;
+  return <><p><strong className="font-semibold text-slate-900">{item.category}</strong>: {item.description}</p><p className="text-xs text-slate-600"><strong className="text-[#6D28D9]">Métrica verificable:</strong> {item.metric}{item.compliance && <> <span>•</span> <span className="text-slate-500">{item.compliance}</span></>}</p><RequirementProvenance item={item} /></>;
+}
+
+function RequirementProvenance({ item }) {
+  const label = item.origin === "manual" ? "Manual" : item.origin === "explicito" ? "Explícito" : "Inferido";
+  return <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]"><span className={`rounded-full px-2 py-0.5 font-medium ${item.requiresConfirmation ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{label}{item.requiresConfirmation ? " · confirmar" : ""}</span>{item.evidence && <span className="max-w-full truncate text-slate-400" title={item.evidence}>Evidencia: “{item.evidence}”</span>}</div>;
 }
 
 function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isNew = false }) {

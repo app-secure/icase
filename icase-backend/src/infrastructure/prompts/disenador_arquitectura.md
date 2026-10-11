@@ -28,8 +28,7 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - Sistema delimitado: `System_Boundary(sys, "Nombre del Sistema") {`
   * Aplicaciones y Clientes: Contenedores `Container(...)` (Web, Móvil, SPA).
   * Capas lógicas: Presentación, Gateway/Seguridad, Servicios de Dominio/API, Persistencia y Mensajería.
-  * Base de datos y caché: `ContainerDb(...)` (PostgreSQL, MongoDB, Redis).
-  * Mensajería y eventos: RabbitMQ, Kafka, Event Bus para comunicación asíncrona.
+  * Datos, caché y mensajería: incluye solamente los mecanismos sustentados por los requisitos o decisiones aprobadas. Si solo se conoce la responsabilidad, usa un nombre genérico y `Tecnología por definir`.
   `}`
 - Relaciones explícitas con protocolos reales (HTTPS, gRPC, WebSocket, TCP/SQL, REST, AMQP):
   `Rel(origen, destino, "Descripción de la interacción", "Protocolo")`
@@ -37,7 +36,7 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - LEGIBILIDAD OBLIGATORIA: máximo 4 personas representativas, 8 contenedores dentro del sistema y 3 sistemas externos. Agrupa roles equivalentes; no dupliques un contenedor por cada módulo funcional.
 - Los nombres deben tener máximo 32 caracteres, la tecnología máximo 28 y las descripciones máximo 80. Las etiquetas de `Rel` deben tener máximo 5 palabras y el protocolo debe ir únicamente en el cuarto parámetro.
 - Evita relaciones cruzadas innecesarias: cada cliente se conecta a una interfaz; las interfaces al gateway; el gateway a servicios; los servicios a datos e integraciones.
-- Reflexión de RNF: Refleja los RNF en componentes concretos (Redis para latencia, Gateway JWT para seguridad).
+- Reflexión de RNF: refleja cada RNF aprobado en la responsabilidad que lo satisface, sin asumir productos o patrones concretos que no hayan sido seleccionados.
 - Trazabilidad RNF: Incluye trazabilidad explícita `RNF -> elemento arquitectónico` en notas y en `trazabilidad_rnf`.
 
 ### 3. Arquitectura de Sistema (`arquitectura_sistema` - C4 Deployment / Infraestructura):
@@ -52,16 +51,14 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - **REGLA ESTRICTA DE ALTA DISPONIBILIDAD**:
   * **Si los requisitos NO solicitan alta disponibilidad**: NO agregar balanceadores redundantes, ni nodos réplicas, ni failover en caliente. Modelar despliegue mononodo/servidor standalone y BD única.
   * **Si los requisitos SÍ solicitan alta disponibilidad**: Modelar balanceador de carga, múltiples nodos réplica de aplicación, cluster/réplica de base de datos y failover.
-- Monitoreo: Incluir agentes de monitoreo (Prometheus, Grafana, CloudWatch, Health Checks).
+- Monitoreo: incluye herramientas concretas únicamente cuando estén solicitadas; de lo contrario, usa una capacidad genérica de observabilidad solo si un RNF aprobado la requiere.
 - Trazabilidad RNF: Documentar explícitamente `RNF -> elemento arquitectónico` de infraestructura en `trazabilidad_rnf`.
 
-### REGLA OBLIGATORIA: SELECCIÓN AUTÓNOMA DEL STACK TECNOLÓGICO (SIN STACK POR DEFECTO):
-PROHIBIDO asignar un stack tecnológico genérico o por defecto (como Node.js, Express, React o PostgreSQL para cualquier proyecto).
-La IA DEBE analizar el insumo del usuario, el tipo de negocio, volumen de datos y requerimientos del sistema para seleccionar el stack tecnológico que mejor se adapte:
-- **Frontend / Clientes**: Si el insumo involucra operaciones móviles de campo, elige Flutter, React Native, Kotlin o Swift. Si es portal administrativo o corporativo, elige Next.js, React, Vue, Angular o Svelte.
-- **Backend / Servicios**: Si es analítica, IA o procesamiento de datos, selecciona FastAPI / Python; si es arquitectura empresarial de alta transaccionalidad o banca, evalúa Spring Boot / Java o .NET Core / C#; si son microservicios ágiles en tiempo real, evalúa NestJS / Node.js o Go.
-- **Persistencia**: Si requiere transacciones ACID relacionales estrictas, selecciona PostgreSQL, MariaDB, Oracle o SQL Server; si son catálogos flexibles o documentos no estructurados, selecciona MongoDB; si requiere series de tiempo o IoT, selecciona TimescaleDB o InfluxDB; si requiere alta velocidad en memoria, añade Redis.
-- **Gateway y Comunicación**: Selecciona Nginx, Kong, Traefik, Apache Kafka, RabbitMQ o gRPC según la naturaleza del flujo y la carga.
+### REGLA OBLIGATORIA: STACK TECNOLÓGICO TRAZABLE
+- Conserva literalmente las tecnologías seleccionadas en los insumos y artefactos aprobados.
+- No reemplaces ni complementes ese stack con productos no solicitados.
+- Cuando una capa necesaria no tenga tecnología decidida, usa `Tecnología por definir`; no elijas autónomamente un producto basándote solo en el tipo de negocio.
+- Una decisión arquitectónica inferida debe identificarse como pendiente y nunca convertirse retroactivamente en un requisito del cliente.
 
 ### 4. Clases de Dominio (`clases` / `clases_dominio`):
 - Código PlantUML con `@startuml` y `@enduml`.
