@@ -1,4 +1,5 @@
 const { DiagramTypes } = require('../../core/constants/DiagramTypes');
+const RequirementSemanticsService = require('./RequirementSemanticsService');
 
 function textOf(requirements = []) {
   return requirements.map((item) => [item.nombre, item.descripcion, item.metrica_medible, item.actores]
@@ -14,8 +15,12 @@ function selected(text, candidates, fallback = 'Por definir') {
 }
 
 class ArquitecturaSistemaGeneratorService {
+  constructor() {
+    this.requirementSemantics = new RequirementSemanticsService();
+  }
+
   solicitaAltaDisponibilidad(rnfs = []) {
-    return /alta disponibilidad|high availability|tolerancia a fallos|failover|conmutaci[oó]n|99\.9%|99\.99%|redundancia activa|activo-pasivo|cl[uú]ster redundante/i.test(textOf(rnfs));
+    return rnfs.some((item) => this.requirementSemantics.requestsHighAvailability(item));
   }
 
   detectaComponenteMovil(requerimientos = []) {
@@ -32,6 +37,8 @@ class ArquitecturaSistemaGeneratorService {
     const needsData = /base de datos|persist|almacen|guardar|registr|historial|conservar|transacci/i.test(text);
     const monitoringRnf = rnfs.find((item) => /monitor|observabilidad|telemetr|m[eé]tricas de salud|health check/i.test(textOf([item])));
     const haRnf = rnfs.find((item) => this.solicitaAltaDisponibilidad([item]));
+    const backupRnf = rnfs.find((item) => /respaldo|backup|recuperaci[oó]n|restauraci[oó]n|rpo|rto/i.test(textOf([item]))
+      && !this.requirementSemantics.hasExcluded(item, /respaldo|backup|recuperaci[oó]n|restauraci[oó]n/i));
 
     const mobileTech = selected(text, [[/react native/i, 'React Native'], [/flutter/i, 'Flutter']]);
     const webTech = selected(text, [[/\breact\b/i, 'React'], [/\bvue\b/i, 'Vue'], [/angular/i, 'Angular']]);
@@ -44,6 +51,7 @@ class ArquitecturaSistemaGeneratorService {
     if (hasHA && haRnf) {
       trace.push({
         rnf_id: haRnf.identificador || haRnf.id || 'RNF',
+        elemento_id: 'trafficManager',
         elemento: 'Mecanismo de Distribución y Failover',
         justificacion: `Realiza la disponibilidad aprobada: ${safe(haRnf.metrica_medible || haRnf.descripcion)}`
       });
@@ -51,8 +59,17 @@ class ArquitecturaSistemaGeneratorService {
     if (monitoringRnf) {
       trace.push({
         rnf_id: monitoringRnf.identificador || monitoringRnf.id || 'RNF',
+        elemento_id: 'monitoringAgent',
         elemento: 'Observabilidad',
         justificacion: `Realiza el monitoreo aprobado: ${safe(monitoringRnf.metrica_medible || monitoringRnf.descripcion)}`
+      });
+    }
+    if (backupRnf) {
+      trace.push({
+        rnf_id: backupRnf.identificador || backupRnf.id || 'RNF',
+        elemento_id: 'backupStore',
+        elemento: 'Almacén de Respaldos',
+        justificacion: `Realiza la recuperación aprobada: ${safe(backupRnf.metrica_medible || backupRnf.descripcion)}`
       });
     }
 
@@ -102,6 +119,10 @@ class ArquitecturaSistemaGeneratorService {
       lines.push('Deployment_Node(monitoringNode, "Observabilidad", "Entorno por definir") {',
         `  Container(monitoringAgent, "Monitoreo", "${monitoringTech}", "Telemetría solicitada")`, '}');
     }
+    if (backupRnf && needsData) {
+      lines.push('Deployment_Node(backupNode, "Infraestructura de Respaldo", "Ubicación por definir") {',
+        `  ContainerDb(backupStore, "Almacén de Respaldos", "${dataTech}", "Copias y recuperación solicitadas")`, '}');
+    }
     lines.push('');
 
     const clients = hasMobile || hasWeb
@@ -120,7 +141,8 @@ class ArquitecturaSistemaGeneratorService {
     } else if (needsData) {
       lines.push('Rel(appInstance, dataInstance, "Lee y escribe", "Protocolo por definir")');
     }
-    if (monitoringRnf) lines.push(`Rel(monitoringAgent, ${hasHA ? 'appNode1' : 'appNode'}, "Observa", "Canal por definir")`);
+    if (monitoringRnf) lines.push(`Rel(monitoringAgent, ${hasHA ? 'appInstance1' : 'appInstance'}, "Observa", "Canal por definir")`);
+    if (backupRnf && needsData) lines.push(`Rel(${hasHA ? 'dataPrimary' : 'dataInstance'}, backupStore, "Genera respaldos", "Frecuencia y retención aprobadas o pendientes")`);
     lines.push('@enduml');
 
     return {
@@ -131,7 +153,8 @@ class ArquitecturaSistemaGeneratorService {
         'Clientes: Solo se muestran plataformas sustentadas por los requisitos.',
         `Aplicación: ${hasHA ? 'Instancias redundantes exigidas por disponibilidad.' : 'Una instancia sin redundancia no solicitada.'}`,
         `Datos: ${needsData ? 'Persistencia representada con tecnología aprobada o pendiente.' : 'No se añadió persistencia sin evidencia.'}`,
-        `Operación: ${monitoringRnf ? 'Observabilidad solicitada por un RNF.' : 'No se añadió monitoreo sin un RNF.'}`
+        `Operación: ${monitoringRnf ? 'Observabilidad solicitada por un RNF.' : 'No se añadió monitoreo sin un RNF.'}`,
+        `Recuperación: ${backupRnf ? 'Respaldo representado; sus parámetros no se inventan.' : 'No se añadió respaldo sin evidencia.'}`
       ],
       requisitos_relacionados: requerimientos.map((item) => item.identificador || item.id).filter(Boolean),
       trazabilidad_rnf: trace,

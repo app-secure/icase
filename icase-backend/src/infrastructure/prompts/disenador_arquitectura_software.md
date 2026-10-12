@@ -31,6 +31,9 @@ No agregues información de otros proyectos ni componentes por costumbre arquite
 - Mantén un máximo de 4 personas representativas, 8 contenedores internos y 3 sistemas externos.
 - Los nombres deben ser breves, las relaciones deben describir una interacción real y el protocolo solo se indica si fue aprobado.
 - Evita relaciones cruzadas y no mezcles nodos físicos de despliegue en esta vista.
+- La descripción o los componentes internos del backend deben nombrar todos los módulos funcionales principales derivados de los casos de uso; no los ocultes detrás de un único contenedor genérico.
+- Si los RF exigen sincronización en tiempo real, representa el canal y sus relaciones con todos los clientes que publican o reciben esos eventos, no solamente con una pantalla.
+- Solo agrega caché cuando el insumo o un RNF confirmado la solicite explícitamente; una meta de latencia por sí sola no autoriza Redis.
 
 ## Requisitos no funcionales
 
@@ -42,7 +45,7 @@ No agregues información de otros proyectos ni componentes por costumbre arquite
 ## Trazabilidad
 
 - `requisitos_relacionados` enumera los RF/RNF efectivamente representados.
-- `trazabilidad_rnf` contiene objetos con `rnf_id`, `elemento` y `justificacion` únicamente para RNF aplicables.
+- `trazabilidad_rnf` contiene objetos con `rnf_id`, `elemento_id`, `elemento` y `justificacion` únicamente para RNF aplicables. `elemento_id` debe ser el alias exacto usado en PlantUML.
 - Incluye en PlantUML una nota breve junto al elemento responsable con el identificador y la métrica aprobada.
 - Si no existe un RNF aplicable, devuelve `trazabilidad_rnf: []`.
 

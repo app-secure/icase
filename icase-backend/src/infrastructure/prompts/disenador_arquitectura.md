@@ -97,6 +97,8 @@ ROLES Y PLATAFORMAS (OBLIGATORIO):
 - Separa los recorridos cuando cambien el rol, el dispositivo o la navegación. Nombra cada módulo de nivel 2 con el formato `Flujo de <Rol> (<Plataforma>)`, sustituyendo ambos marcadores por valores presentes en los requisitos.
 - Todo actor con interacción de interfaz en los RF debe tener un flujo explícito en la plataforma indicada por el insumo. No asumas una plataforma cuando no fue definida.
 - Cada pantalla debe aparecer bajo el flujo del actor que realmente la utiliza. Si dos roles usan una función con navegación distinta, crea vistas diferenciadas con nombres inequívocos.
+- Las pantallas compartidas de acceso se declaran una sola vez bajo un módulo común. No dupliques "Inicio de sesión" por cada rol.
+- No inventes registro, recuperación de contraseña ni administración de usuarios si ningún RF aprobado los exige.
 
 COBERTURA MÍNIMA:
 - El árbol debe iniciar con el nombre del producto. Incluye acceso, recuperación, registro o panel principal únicamente si una necesidad aprobada exige esas pantallas.

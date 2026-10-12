@@ -43,7 +43,9 @@ No uses conocimiento de otros proyectos ni conviertas una recomendación, ejempl
 ## Trazabilidad RNF
 
 - `trazabilidad_rnf` contiene únicamente RNF aprobados que afecten realmente el despliegue.
-- Cada entrada usa `rnf_id`, `elemento` y `justificacion`.
+- Cada entrada usa `rnf_id`, `elemento_id`, `elemento` y `justificacion`; `elemento_id` es el alias exacto usado en PlantUML.
+- Una decisión rechazada o incluida en `restricciones_excluidas` no es un RNF a realizar. No dibujes balanceadores, réplicas ni failover cuando alta disponibilidad fue descartada.
+- Respaldo/recuperación y alta disponibilidad son decisiones diferentes: un respaldo solicitado no autoriza redundancia activa.
 - Copia literalmente identificadores y métricas; no inventes umbrales.
 - Si no hay RNF de infraestructura aplicables, devuelve `trazabilidad_rnf: []`.
 

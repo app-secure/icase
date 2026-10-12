@@ -351,7 +351,7 @@ export default function DiagramsView({
   return (
     <div className="w-full h-full flex flex-col min-h-0 bg-white">
       {/* Contenedor scrolleable que abarca todo el ancho hasta el extremo derecho */}
-      <div className={`w-full flex-1 overflow-y-auto min-h-0 pt-6 pb-4 flex flex-col ${selectedKey === "mockups" ? "px-4" : "px-6 md:px-12"}`}>
+      <div className={`w-full flex-1 overflow-y-auto min-h-0 pt-6 pb-10 flex flex-col ${selectedKey === "mockups" ? "px-4" : "px-6 md:px-12"}`}>
         <div className={`${selectedKey === "mockups" ? "max-w-none" : "max-w-6xl"} mx-auto w-full flex-1 flex flex-col min-h-0`}>
           {/* Cabecera superior unificada de Fase 2 */}
           <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
@@ -594,6 +594,8 @@ export default function DiagramsView({
                 />
               </div>
             )}
+              <div className="h-6 shrink-0 bg-white" aria-hidden="true" />
+
           </div>
         </div>
       </div>

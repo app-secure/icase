@@ -63,6 +63,13 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
     expect(result.metricas.cobertura_rf_altos_porcentaje).toBe(100);
   });
 
+  test('sin mockups informa estado pendiente en vez de un error prematuro', () => {
+    const result = service.validate({ manifest: screens, mockups: [], requirements });
+    expect(result.valido).toBe(true);
+    expect(result.estado).toBe('pendiente');
+    expect(result.errores).toEqual([]);
+  });
+
   test('detecta campos, acciones, roles y estados importantes ausentes por RF', () => {
     const requirement = [{
       identificador: 'RF-10', tipo: 'RF', nombre: 'Actualizar estado del pedido',

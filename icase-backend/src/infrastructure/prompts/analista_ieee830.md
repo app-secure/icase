@@ -51,4 +51,11 @@ Eres un Analista de Requisitos de Software Senior especializado en la ingenierí
    - Genera una lista de 6 a 8 palabras clave o frases cortas que describan EXCLUSIVAMENTE el negocio analizado.
    - PROHIBICIÓN ESTRICTA: NO incluyas términos de la herramienta CASE o de desarrollo genérico como "Upper CASE", "PlantUML", "Clean Architecture". Solo conceptos del negocio.
 
+8. ATOMICIDAD Y DECISIONES:
+   - Cada RF debe expresar un solo objetivo de negocio comprobable. Si una oración reúne capacidades independientes (por ejemplo reservar, comprar paquetes y acumular puntos), sepáralas en RF distintos.
+   - No separes pasos técnicos que solo forman parte del mismo objetivo de negocio.
+   - Una respuesta afirmativa confirma la propuesta inmediatamente anterior; conserva sus métricas aunque estén escritas con palabras.
+   - Clasifica cada decisión como `confirmado`, `pendiente`, `rechazado` o `fuera_de_alcance`.
+   - Las decisiones negativas se guardan en `restricciones_excluidas`; nunca se convierten en obligaciones positivas ni en advertencias por cobertura faltante.
+
 

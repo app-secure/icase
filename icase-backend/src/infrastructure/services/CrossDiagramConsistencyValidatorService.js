@@ -117,16 +117,35 @@ class CrossDiagramConsistencyValidatorService {
   }
 
   validarClasesDiseno(codigo, diagramas) {
-    const origen = latest(diagramas, DIAGRAM_TYPES.DOMAIN_CLASSES);
-    if (!origen?.codigo_plantuml) return this.sinOrigen('clases_dominio');
+    const dominio = latest(diagramas, DIAGRAM_TYPES.DOMAIN_CLASSES);
+    if (!dominio?.codigo_plantuml) return this.sinOrigen('clases_dominio');
 
-    return this.resultadoCobertura({
-      elementos: extractClasses(origen.codigo_plantuml),
+    const coberturaDominio = this.resultadoCobertura({
+      elementos: extractClasses(dominio.codigo_plantuml),
       candidatos: extractClasses(codigo),
       metrica: 'clases_dominio_realizadas',
       etiqueta: 'clases del dominio aprobado',
       umbralError: 0.6
     });
+    const casosUso = latest(diagramas, DIAGRAM_TYPES.USE_CASES);
+    if (!casosUso?.codigo_plantuml) return coberturaDominio;
+    const candidatos = [
+      ...extractClasses(codigo),
+      ...[...String(codigo || '').matchAll(/package\s+"([^"]+)"/gim)].map((match) => match[1])
+    ];
+    const coberturaFuncional = this.resultadoCobertura({
+      elementos: extractUseCases(casosUso.codigo_plantuml),
+      candidatos,
+      metrica: 'casos_uso_realizados_diseno',
+      etiqueta: 'los casos de uso aprobados',
+      umbralError: 0.5
+    });
+    return {
+      valido: coberturaDominio.valido && coberturaFuncional.valido,
+      errores: [...coberturaDominio.errores, ...coberturaFuncional.errores],
+      advertencias: [...coberturaDominio.advertencias, ...coberturaFuncional.advertencias],
+      metricas: { ...coberturaDominio.metricas, ...coberturaFuncional.metricas }
+    };
   }
 
   validarNavegacion(codigo, diagramas) {

@@ -1,8 +1,14 @@
+const RequirementSemanticsService = require('./RequirementSemanticsService');
+const { normalizeTraceability } = require('./ArchitectureTraceabilityService');
+
 /**
  * Validador especializado para Diagramas de Arquitectura de Sistema e Infraestructura
  * Tipo: arquitectura_sistema (C4 Deployment / Nodos de Infraestructura)
  */
 class ArquitecturaSistemaValidatorService {
+  constructor() {
+    this.requirementSemantics = new RequirementSemanticsService();
+  }
   /**
    * Determina si la lista de requerimientos o texto solicita explícitamente Alta Disponibilidad
    * @param {Array|string} rnfList
@@ -10,12 +16,12 @@ class ArquitecturaSistemaValidatorService {
    */
   requiereAltaDisponibilidad(rnfList = []) {
     if (!rnfList) return false;
-    const textToCheck = typeof rnfList === 'string'
-      ? rnfList
-      : rnfList.map(r => `${r.nombre || ''} ${r.descripcion || ''} ${r.metrica_medible || ''}`).join(' ');
-
-    const patronHA = /alta disponibilidad|high availability|tolerancia a fallos|failover|conmutaci[oó]n|99\.9%|99\.99%|redundancia activa|activo-pasivo|cl[uú]ster redundante|balanceo de carga con r[eé]plica/i;
-    return patronHA.test(textToCheck);
+    if (typeof rnfList === 'string') {
+      return this.requirementSemantics.requestsHighAvailability({ descripcion: rnfList });
+    }
+    return (Array.isArray(rnfList) ? rnfList : []).some((requirement) =>
+      this.requirementSemantics.requestsHighAvailability(requirement)
+    );
   }
 
   /**
@@ -96,7 +102,7 @@ class ArquitecturaSistemaValidatorService {
     }
 
     // 5. Trazabilidad RNF -> elemento arquitectónico de infraestructura
-    const trazabilidadProcesada = this.normalizarTrazabilidad(trazabilidad_rnf, lowerCode);
+    const trazabilidadProcesada = normalizeTraceability(trazabilidad_rnf, trimmed);
     const idsAprobados = new Set((Array.isArray(rnfList) ? rnfList : [])
       .map((rnf) => String(rnf.identificador || rnf.id || '').toLowerCase())
       .filter(Boolean));
@@ -119,31 +125,7 @@ class ArquitecturaSistemaValidatorService {
   }
 
   normalizarTrazabilidad(trazabilidadInput, codigoLower) {
-    if (!trazabilidadInput) return [];
-    const list = Array.isArray(trazabilidadInput) ? trazabilidadInput : [trazabilidadInput];
-
-    return list.map(item => {
-      if (typeof item === 'string') {
-        const parts = item.split(/->|:|,/).map(s => s.trim());
-        const rnfId = parts[0] || 'RNF';
-        const elemento = parts[1] || parts[0];
-        return {
-          rnf_id: rnfId,
-          elemento: elemento,
-          presente_en_codigo: codigoLower.includes(elemento.toLowerCase())
-        };
-      }
-      if (typeof item === 'object' && item !== null) {
-        const elemento = item.elemento || item.componente || '';
-        return {
-          rnf_id: item.rnf_id || item.rnf || item.id || 'RNF',
-          elemento: elemento,
-          justificacion: item.justificacion || item.motivo || '',
-          presente_en_codigo: elemento ? codigoLower.includes(elemento.toLowerCase()) : true
-        };
-      }
-      return { rnf_id: 'RNF', elemento: String(item), presente_en_codigo: true };
-    });
+    return normalizeTraceability(trazabilidadInput, codigoLower);
   }
 }
 

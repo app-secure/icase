@@ -35,7 +35,8 @@ class ActualizarMockupManual {
       preview_code: validacion.html,
       estado: 'editado',
       version: (mockupActual.version || 0) + 1,
-      advertencias_validacion: [...validacion.advertencias, ...calidad.advertencias],
+      ajustes_sanitizacion: [...new Set(validacion.advertencias)],
+      advertencias_validacion: [...new Set(calidad.advertencias)],
       errores_validacion: [],
       estado_calidad: calidad.estado
     };

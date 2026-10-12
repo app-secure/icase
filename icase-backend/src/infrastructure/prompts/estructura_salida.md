@@ -52,6 +52,7 @@ No uses los alias legados `clases` ni `arquitectura`.
       "trazabilidad_rnf": [
         {
           "rnf_id": "<RNF aprobado aplicable>",
+          "elemento_id": "<alias PlantUML exacto del elemento>",
           "elemento": "<elemento del diagrama que lo realiza>",
           "justificacion": "<cómo lo realiza sin inventar productos ni métricas>"
         }

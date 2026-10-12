@@ -454,6 +454,8 @@ class ProcesarConIA {
           evidencia: reqData.evidencia || '',
           fuentes_origen: Array.isArray(reqData.fuentes_origen) ? reqData.fuentes_origen : [],
           requiere_confirmacion: Boolean(reqData.requiere_confirmacion),
+          estado_decision: reqData.estado_decision || (reqData.requiere_confirmacion ? 'pendiente' : 'confirmado'),
+          restricciones_excluidas: Array.isArray(reqData.restricciones_excluidas) ? reqData.restricciones_excluidas : [],
           aprobado: false
         });
         requerimientosGenerados.push(reqEntity);

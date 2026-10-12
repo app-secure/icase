@@ -1,3 +1,5 @@
+const { normalizeTraceability } = require('./ArchitectureTraceabilityService');
+
 /**
  * Validador especializado para Diagramas de Arquitectura de Software
  * Tipo: arquitectura_software (C4 Container)
@@ -71,7 +73,7 @@ class ArquitecturaSoftwareValidatorService {
 
     // 3. Trazabilidad de RNF sin prescribir productos. Un atributo de calidad
     // define una responsabilidad y una métrica, no una tecnología concreta.
-    const trazabilidadProcesada = this.normalizarTrazabilidad(trazabilidad_rnf, lowerCode);
+    const trazabilidadProcesada = normalizeTraceability(trazabilidad_rnf, trimmed);
     if (Array.isArray(rnfList) && rnfList.length > 0) {
       for (const rnf of rnfList) {
         const desc = `${rnf.nombre || ''} ${rnf.descripcion || ''} ${rnf.metrica_medible || ''}`.toLowerCase();
@@ -106,31 +108,7 @@ class ArquitecturaSoftwareValidatorService {
   }
 
   normalizarTrazabilidad(trazabilidadInput, codigoLower) {
-    if (!trazabilidadInput) return [];
-    const list = Array.isArray(trazabilidadInput) ? trazabilidadInput : [trazabilidadInput];
-
-    return list.map(item => {
-      if (typeof item === 'string') {
-        const parts = item.split(/->|:|,/).map(s => s.trim());
-        const rnfId = parts[0] || 'RNF';
-        const elemento = parts[1] || parts[0];
-        return {
-          rnf_id: rnfId,
-          elemento: elemento,
-          presente_en_codigo: codigoLower.includes(elemento.toLowerCase())
-        };
-      }
-      if (typeof item === 'object' && item !== null) {
-        const elemento = item.elemento || item.componente || '';
-        return {
-          rnf_id: item.rnf_id || item.rnf || item.id || 'RNF',
-          elemento: elemento,
-          justificacion: item.justificacion || item.motivo || '',
-          presente_en_codigo: elemento ? codigoLower.includes(elemento.toLowerCase()) : true
-        };
-      }
-      return { rnf_id: 'RNF', elemento: String(item), presente_en_codigo: true };
-    });
+    return normalizeTraceability(trazabilidadInput, codigoLower);
   }
 }
 

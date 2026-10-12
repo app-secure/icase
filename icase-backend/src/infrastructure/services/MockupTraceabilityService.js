@@ -146,12 +146,24 @@ class MockupTraceabilityService {
     });
   }
 
-  validate({ manifest = [], mockups = [], requirements = [] } = {}) {
+  validate({ manifest = [], mockups = [], requirements = [], requireComplete = false } = {}) {
     const errors = [];
     const warnings = [];
     const screens = Array.isArray(manifest) ? manifest : [];
     const generated = Array.isArray(mockups) ? mockups : [];
     const functional = this.functionalRequirements(requirements);
+
+    if (screens.length && generated.length === 0 && !requireComplete) {
+      return {
+        valido: true,
+        estado: 'pendiente',
+        completo: false,
+        errores: [],
+        advertencias: ['Los mockups aún no se han generado; la cobertura se validará al aprobarlos o exportar el documento.'],
+        metricas: { pantallas_arbol: screens.length, mockups_generados: 0, pantallas_pendientes: screens.length },
+        validado_en: new Date()
+      };
+    }
 
     if (!screens.length) {
       return {
@@ -171,7 +183,10 @@ class MockupTraceabilityService {
       .filter((mockup) => ![mockup.pantalla_id, mockup.nombre_pantalla].some((id) => screenIds.has(id)))
       .map((mockup) => mockup.nombre_visible || mockup.nombre_pantalla || mockup.pantalla_id);
 
-    if (missingScreens.length) errors.push(`Faltan mockups para pantallas obligatorias del árbol: ${missingScreens.join(', ')}.`);
+    if (missingScreens.length) {
+      const message = `Faltan mockups para pantallas obligatorias del árbol: ${missingScreens.join(', ')}.`;
+      errors.push(message);
+    }
     if (orphanMockups.length) errors.push(`Existen mockups que no pertenecen al árbol aprobado: ${orphanMockups.join(', ')}.`);
 
     const traceIds = new Set(generated.flatMap((mockup) => Array.isArray(mockup.rf_trazabilidad) ? mockup.rf_trazabilidad : [])
@@ -190,7 +205,10 @@ class MockupTraceabilityService {
         });
       })
       .map((requirement) => requirementId(requirement) || requirement.nombre);
-    if (uncoveredHigh.length) errors.push(`No existe evidencia visible en mockups para RF de prioridad alta: ${uncoveredHigh.join(', ')}.`);
+    if (uncoveredHigh.length) {
+      const message = `No existe evidencia visible en mockups para RF de prioridad alta: ${uncoveredHigh.join(', ')}.`;
+      errors.push(message);
+    }
 
     const requirementDetails = functional.map((requirement) => {
       const id = requirementId(requirement);
@@ -223,6 +241,8 @@ class MockupTraceabilityService {
 
     return {
       valido: errors.length === 0,
+      estado: missingScreens.length ? 'pendiente' : 'completo',
+      completo: missingScreens.length === 0,
       errores: errors,
       advertencias: warnings,
       metricas: {

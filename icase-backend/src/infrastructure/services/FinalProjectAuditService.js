@@ -36,7 +36,7 @@ class FinalProjectAuditService {
     if (this.mockupTraceabilityService && diseno) {
       const manifest = this.mockupTraceabilityService.buildManifest(diseno.manifiesto_navegacion || [], aprobados);
       const mockups = this.mockupTraceabilityService.enrichAll(diseno.mockups || [], manifest, aprobados);
-      trazabilidadMockups = this.mockupTraceabilityService.validate({ manifest, mockups, requirements: aprobados });
+      trazabilidadMockups = this.mockupTraceabilityService.validate({ manifest, mockups, requirements: aprobados, requireComplete: true });
     }
     if (!diseno?.mockups?.length) erroresCriticos.push('No existen mockups generados para el documento final.');
     if (trazabilidadMockups && !trazabilidadMockups.valido) {

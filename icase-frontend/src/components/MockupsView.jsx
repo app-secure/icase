@@ -8,55 +8,22 @@ import {
   fetchLatestMockupJobApi, fetchMockupJobApi, fetchMockupsApi,
   startMockupJobApi, suggestMockupDesignSystemApi, updateMockupDesignSystemApi
 } from "../services/api";
-
-const DEFAULT_DESIGN_SYSTEM = {
-  nombre: "Predeterminado I-CASE",
-  origen: "predeterminado",
-  version: 1,
-  colores: {
-    primario: "#0b57d0", primario_oscuro: "#073d8c", secundario: "#64748b",
-    fondo: "#f8fafc", superficie: "#ffffff", texto: "#0f172a",
-    exito: "#059669", alerta: "#d97706", error: "#dc2626"
-  }
-};
+import { DEFAULT_DESIGN_SYSTEM, prepareMockupHtml } from "../utils/mockupHtml";
 
 const formatName = (value = "") => value.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-const quality = (mockup) => mockup?.estado_calidad || (mockup?.advertencias_validacion?.length ? "advertencia" : "valido");
-
-const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM) => {
-  if (!rawHtml) return "";
-  let html = rawHtml
-    .replace(/<base\b[^>]*>/gi, "")
-    .replace(/<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, "")
-    .replace(/\s(href|action)\s*=\s*(["'])(.*?)\2/gi, (_m, attr, quote, value) => {
-      if (attr.toLowerCase() === "href" && /^https:\/\/fonts\.(googleapis|gstatic)\.com/i.test(value)) return ` ${attr}=${quote}${value}${quote}`;
-      return ` data-icase-${attr}=${quote}${value}${quote} ${attr}=${quote}#${quote}`;
-    });
-
-  if (!html.includes("cdn.tailwindcss.com")) {
-    html = html.replace(/<head>/i, '<head><script src="https://cdn.tailwindcss.com"></script>');
-  }
-  const colors = designSystem?.colores || DEFAULT_DESIGN_SYSTEM.colores;
-  html = html
-    .replace(/#0b57d0/gi, colors.primario)
-    .replace(/#0947a8/gi, colors.primario_oscuro)
-    .replace(/#073d8c/gi, colors.primario_oscuro)
-    .replace(/#64748b/gi, colors.secundario);
-  const paletteStyles = `<style id="icase-preview-palette">
-    :root{--icase-primary:${colors.primario};--icase-primary-dark:${colors.primario_oscuro};--icase-secondary:${colors.secundario};--icase-bg:${colors.fondo};--icase-surface:${colors.superficie};--icase-text:${colors.texto};--icase-success:${colors.exito};--icase-warning:${colors.alerta};--icase-error:${colors.error}}
-    html,body{background-color:var(--icase-bg)!important;color:var(--icase-text)!important}
-    .bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-primary-500,.bg-primary-600,.bg-primary-700{background-color:var(--icase-primary)!important}
-    .hover\\:bg-blue-700:hover,.hover\\:bg-primary-700:hover{background-color:var(--icase-primary-dark)!important}
-    .text-blue-500,.text-blue-600,.text-blue-700,.text-primary-500,.text-primary-600,.text-primary-700{color:var(--icase-primary)!important}
-    .border-blue-500,.border-blue-600,.border-primary-500,.border-primary-600{border-color:var(--icase-primary)!important}
-    .bg-emerald-500,.bg-green-500,.bg-green-600{background-color:var(--icase-success)!important}
-    .text-emerald-600,.text-green-600,.text-green-700{color:var(--icase-success)!important}
-    .text-amber-600,.text-yellow-600{color:var(--icase-warning)!important}
-    .text-red-600,.text-red-700{color:var(--icase-error)!important}
-  </style>`;
-  html = html.includes("</head>") ? html.replace(/<\/head>/i, `${paletteStyles}</head>`) : `${paletteStyles}${html}`;
-  const guard = `<script id="icase-preview-guard">document.addEventListener('click',function(e){var t=e.target.closest('a,button');if(t){e.preventDefault();}} ,true);document.addEventListener('submit',function(e){e.preventDefault();},true);</script>`;
-  return html.includes("</body>") ? html.replace(/<\/body>/i, `${guard}</body>`) : `${html}${guard}`;
+const SANITIZATION_NOTICES = /script peligroso|script no autorizado|manejadores inline|enlaces javascript|etiqueta potencialmente insegura|referencia a archivo local/i;
+const validationIssues = (mockup) => [
+  ...(mockup?.errores_validacion || []),
+  ...(mockup?.advertencias_validacion || []).filter(message => !SANITIZATION_NOTICES.test(message))
+];
+const sanitizationNotices = (mockup) => [
+  ...(mockup?.ajustes_sanitizacion || []),
+  ...(mockup?.advertencias_validacion || []).filter(message => SANITIZATION_NOTICES.test(message))
+];
+const quality = (mockup) => {
+  if ((mockup?.errores_validacion || []).length || mockup?.estado_calidad === "invalido") return "invalido";
+  if (validationIssues(mockup).length) return "advertencia";
+  return "valido";
 };
 
 const platformIcon = (platform, size = 13) => platform === "mobile"
@@ -160,6 +127,7 @@ export default function MockupsView({
     setActiveId(entry.slug);
     const generated = mockupMap.get(entry.slug);
     if (generated && onSelectScreen) onSelectScreen(generated.index);
+    if (generated && quality(generated) !== "valido") setShowDetails(true);
   };
   const toggleScreen = (slug) => setSelectedIds(prev => {
     const next = new Set(prev);
@@ -246,12 +214,18 @@ export default function MockupsView({
 
         <main className="flex min-w-0 flex-1 flex-col bg-slate-100/70">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-900">{currentEntry?.nombre || "Selecciona una pantalla"}</p><p className="truncate text-[10px] text-slate-500">{currentEntry?.ruta || `${currentEntry?.flujo || ''} / ${currentEntry?.modulo || ''}`}</p></div><div className="flex items-center gap-1"><button disabled={currentPosition <= 0} onClick={() => selectScreen(screens[currentPosition - 1])} className="rounded p-1.5 disabled:opacity-30"><ChevronLeft size={15} /></button><span className="text-[10px] text-slate-500">{currentPosition + 1}/{screens.length}</span><button disabled={currentPosition < 0 || currentPosition >= screens.length - 1} onClick={() => selectScreen(screens[currentPosition + 1])} className="rounded p-1.5 disabled:opacity-30"><ChevronRight size={15} /></button><div className="ml-2 flex rounded-lg bg-slate-100 p-0.5"><button onClick={() => setViewMode('visual')} className={`rounded-md px-2 py-1 text-[11px] ${viewMode === 'visual' ? 'bg-white shadow-sm' : ''}`}>Diseño</button><button onClick={() => setViewMode('code')} className={`rounded-md px-2 py-1 text-[11px] ${viewMode === 'code' ? 'bg-white shadow-sm' : ''}`}>Código</button></div></div></div>
+          {currentMockup && quality(currentMockup) !== "valido" && (
+            <div className={`border-b px-3 py-2 text-xs ${quality(currentMockup) === "invalido" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+              <p className="flex items-center gap-1.5 font-semibold"><AlertTriangle size={13} />{quality(currentMockup) === "invalido" ? "Problemas que impiden validar esta pantalla" : "Aspectos que conviene revisar"}</p>
+              {validationIssues(currentMockup).map((message, index) => <p key={index} className="mt-1 pl-5">• {message}</p>)}
+            </div>
+          )}
           <div className="flex min-w-0 flex-1 items-start justify-center overflow-auto p-3">
             {currentMockup ? viewMode === "visual" ? <ScaledMockupPreview html={prepareMockupHtml(currentMockup.preview_code, designSystem)} platform={currentEntry?.plataforma} title={`Mockup ${currentMockup.nombre_pantalla}`} /> : <textarea value={currentMockup.preview_code} onChange={e => onUpdateMockup?.(currentMockup.nombre_pantalla, e.target.value)} className="h-full min-h-[540px] w-full resize-none rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs" spellCheck="false" /> : <div className="m-auto max-w-sm text-center"><Layout className="mx-auto mb-3 text-slate-300" size={36} /><p className="text-sm font-semibold text-slate-700">Mockup pendiente</p><p className="mt-1 text-xs text-slate-500">Marca esta pantalla y usa “Generar seleccionadas”.</p></div>}
           </div>
         </main>
 
-        {showDetails && <aside className="w-60 shrink-0 overflow-y-auto border-l border-slate-200 p-3"><div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-slate-800">Detalles de pantalla</p><button onClick={() => setShowDetails(false)} className="text-lg leading-none text-slate-400">×</button></div>{currentEntry && <div className="space-y-3 text-[11px]"><Info label="Plataforma" value={currentEntry.plataforma} icon={platformIcon(currentEntry.plataforma, 12)} /><Info label="Flujo" value={currentEntry.flujo} /><Info label="Módulo" value={currentEntry.modulo} /><Info label="Tipo" value={currentEntry.tipo} /><Info label="Roles" value={(currentEntry.roles || []).join(', ')} /><Info label="Shell compartido" value={currentEntry.shell} />{currentMockup && <><Info label="Estado" value={`${currentMockup.estado || 'generado'} · v${currentMockup.version || 1}`} /><div className={`rounded-lg border p-2 ${quality(currentMockup) === 'invalido' ? 'border-red-200 bg-red-50 text-red-700' : quality(currentMockup) === 'advertencia' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><p className="font-semibold">Calidad: {quality(currentMockup)}</p>{[...(currentMockup.errores_validacion || []), ...(currentMockup.advertencias_validacion || [])].map((warning, i) => <p key={i} className="mt-1">• {warning}</p>)}</div><div className="flex flex-wrap gap-1"><button disabled={busy} onClick={() => startGeneration([currentEntry.slug], 'Regeneración')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5"><RotateCcw size={11} />Regenerar</button><button onClick={() => navigator.clipboard.writeText(currentMockup.preview_code)} className="rounded-lg border border-slate-200 p-1.5" title="Copiar HTML"><Copy size={12} /></button><button onClick={() => { const url = URL.createObjectURL(new Blob([currentMockup.preview_code], { type: 'text/html' })); const a = document.createElement('a'); a.href = url; a.download = `${currentEntry.slug}.html`; a.click(); URL.revokeObjectURL(url); }} className="rounded-lg border border-slate-200 p-1.5" title="Descargar HTML"><Download size={12} /></button></div></>}</div>}</aside>}
+        {showDetails && <aside className="w-60 shrink-0 overflow-y-auto border-l border-slate-200 p-3"><div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-slate-800">Detalles de pantalla</p><button onClick={() => setShowDetails(false)} className="text-lg leading-none text-slate-400">×</button></div>{currentEntry && <div className="space-y-3 text-[11px]"><Info label="Plataforma" value={currentEntry.plataforma} icon={platformIcon(currentEntry.plataforma, 12)} /><Info label="Flujo" value={currentEntry.flujo} /><Info label="Módulo" value={currentEntry.modulo} /><Info label="Tipo" value={currentEntry.tipo} /><Info label="Roles" value={(currentEntry.roles || []).join(', ')} /><Info label="Shell compartido" value={currentEntry.shell} />{currentMockup && <><Info label="Estado" value={`${currentMockup.estado || 'generado'} · v${currentMockup.version || 1}`} /><div className={`rounded-lg border p-2 ${quality(currentMockup) === 'invalido' ? 'border-red-200 bg-red-50 text-red-700' : quality(currentMockup) === 'advertencia' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><p className="font-semibold">Calidad: {quality(currentMockup)}</p>{validationIssues(currentMockup).map((warning, i) => <p key={i} className="mt-1">• {warning}</p>)}</div>{sanitizationNotices(currentMockup).length > 0 && <div className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-sky-700"><p className="font-semibold">Ajustes de seguridad aplicados</p>{sanitizationNotices(currentMockup).map((notice, i) => <p key={i} className="mt-1">• {notice}</p>)}</div>}<div className="flex flex-wrap gap-1"><button disabled={busy} onClick={() => startGeneration([currentEntry.slug], 'Regeneración')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5"><RotateCcw size={11} />Regenerar</button><button onClick={() => navigator.clipboard.writeText(currentMockup.preview_code)} className="rounded-lg border border-slate-200 p-1.5" title="Copiar HTML"><Copy size={12} /></button><button onClick={() => { const url = URL.createObjectURL(new Blob([currentMockup.preview_code], { type: 'text/html' })); const a = document.createElement('a'); a.href = url; a.download = `${currentEntry.slug}.html`; a.click(); URL.revokeObjectURL(url); }} className="rounded-lg border border-slate-200 p-1.5" title="Descargar HTML"><Download size={12} /></button></div></>}</div>}</aside>}
       </div>
     </div>
   );

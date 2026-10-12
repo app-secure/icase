@@ -319,7 +319,8 @@ export default function ProjectWorkspace({
   const diagramPollingFailures = React.useRef(0);
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
-  const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(project.currentPhase >= 2);
+  const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(false);
+  const [isReviewingRequirements, setIsReviewingRequirements] = useState(false);
 
   const applyDiagramJobResponse = React.useCallback((response) => {
     const job = response?.trabajo;
@@ -1065,6 +1066,8 @@ export default function ProjectWorkspace({
       {/* SECCIÓN IZQUIERDA: Fuentes y Chat de Ajustes a la IA */}
       <SourcesPanel
         sources={project.sources || []}
+        requirements={project.requirements}
+        referenceMode={project.currentPhase >= 2}
         onAddSource={handleAddSource}
         onUpdateSource={handleUpdateSource}
         onSuggestSourceMetadata={handleSuggestSourceMetadata}
@@ -1122,6 +1125,13 @@ export default function ProjectWorkspace({
               </p>
             </div>
           </div>
+        ) : isReviewingRequirements ? (
+          <RequirementsView
+            requirements={project.requirements}
+            isApproved={project.isAnalysisApproved}
+            readOnly
+            onBackToDesign={() => setIsReviewingRequirements(false)}
+          />
         ) : project.currentPhase === 1 ? (
           /* FASE 1: Análisis (Requerimientos en texto estructurado limpio) */
           <RequirementsView
@@ -1205,8 +1215,7 @@ export default function ProjectWorkspace({
             isGeneratingDiagram={isGeneratingDiagrams}
             diagramJob={diagramJob}
             onBackToAnalysis={() => {
-              setIsSourcesCollapsed(false);
-              onUpdateProject({ ...project, currentPhase: 1 });
+              setIsReviewingRequirements(true);
             }}
             onApplyAiCorrection={(prompt, diagKey) => handleApplyAiCorrection("diagrams", prompt, diagKey)}
             projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}

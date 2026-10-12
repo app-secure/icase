@@ -43,6 +43,7 @@ const DisenoSchema = new mongoose.Schema({
     imagen_url: String,
     estado: { type: String, enum: ['generado', 'editado', 'aprobado'], default: 'generado' },
     version: { type: Number, default: 1 },
+    ajustes_sanitizacion: [String],
     advertencias_validacion: [String],
     errores_validacion: [String],
     estado_calidad: { type: String, enum: ['valido', 'advertencia', 'invalido'], default: 'advertencia' }

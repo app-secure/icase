@@ -172,7 +172,10 @@ class GenerarMockups {
         ? []
         : ['No se pudo asociar esta pantalla con un requisito funcional aprobado.'];
       const erroresValidacion = [...validacion.errores, ...erroresTrazabilidad];
-      const advertenciasValidacion = [...sanitizado.advertencias, ...validacion.advertencias, ...advertenciasTrazabilidad];
+      // Los elementos que el sanitizador ya eliminó son ajustes informativos,
+      // no problemas que sigan presentes en el mockup final.
+      const ajustesSanitizacion = [...new Set(sanitizado.advertencias)];
+      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad])];
       return {
         ...mockup,
         pantalla_id: pantalla?.pantalla_id || mockup.nombre_pantalla,
@@ -185,6 +188,7 @@ class GenerarMockups {
         shell: pantalla?.shell || 'web-general',
         rf_trazabilidad: rfTrazabilidad,
         preview_code: htmlConSistemaDiseno,
+        ajustes_sanitizacion: ajustesSanitizacion,
         advertencias_validacion: advertenciasValidacion,
         errores_validacion: erroresValidacion,
         estado_calidad: erroresValidacion.length ? 'invalido' : (advertenciasValidacion.length ? 'advertencia' : 'valido'),
@@ -443,6 +447,17 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
       .filter((valor, i, arr) => arr.indexOf(valor) === i);
 
     const modulo = modulos.length > 0 ? modulos[modulos.length - 1] : (nombreSistema || nombre);
+    const rolesInferidos = this._inferirRoles(ruta);
+    const textoNombre = this._textoRuta(nombre);
+    const esAccesoCompartido = /inicio de sesion|iniciar sesion|login|portal de acceso/.test(textoNombre);
+    if (esAccesoCompartido) {
+      const existente = pantallas.find((pantalla) => pantalla.es_acceso_compartido);
+      if (existente) {
+        existente.roles = [...new Set([...(existente.roles || []), ...rolesInferidos])];
+        existente.rutas_origen = [...new Set([...(existente.rutas_origen || [existente.ruta]), ruta.join(' / ')])];
+        return;
+      }
+    }
     let slug = this._generarSlugPantalla(nombre) || `pantalla-${pantallas.length + 1}`;
 
     if (slugsUsados.has(slug)) {
@@ -459,12 +474,13 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
       flujo: this._inferirFlujo(ruta, modulo),
       tipo: this._inferirTipoPantalla(nombre),
       plataforma: this._inferirPlataforma(ruta),
-      roles: this._inferirRoles(ruta),
+      roles: rolesInferidos,
       shell: this._inferirShell(ruta),
       componentes,
       slug,
       orden: pantallas.length + 1,
-      obligatoria: true
+      obligatoria: true,
+      es_acceso_compartido: esAccesoCompartido
     });
   }
 

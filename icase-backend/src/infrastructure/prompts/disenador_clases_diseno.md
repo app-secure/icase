@@ -85,3 +85,8 @@ MongoUsuarioRepository ..|> IUsuarioRepository : implementa
 note top of UsuarioController : Trazabilidad: RF-01 | Origen: casos_de_uso, clases_dominio
 @enduml
 ```
+
+COBERTURA OBLIGATORIA:
+- No diseñes solamente un módulo representativo. Cada módulo funcional de prioridad alta presente en los casos de uso debe tener al menos un punto de entrada (Controller/Gateway), un caso de uso y sus dependencias técnicas relevantes.
+- Conserva las entidades aprobadas en clases de dominio y muestra las interfaces e implementaciones de repositorio que realmente correspondan.
+- Si el alcance es amplio, agrupa por paquetes de negocio, pero no ocultes Reservas/QR, Comandas/KDS, Caja/Prepagos ni Administración/Reportes cuando estén aprobados.

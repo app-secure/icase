@@ -211,6 +211,8 @@ export default function App() {
             evidence: r.evidencia || "",
             sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
             requiresConfirmation: Boolean(r.requiere_confirmacion),
+            decisionStatus: r.estado_decision || (r.requiere_confirmacion ? "pendiente" : "confirmado"),
+            excludedConstraints: r.restricciones_excluidas || [],
             approved: r.aprobado
           })),
         nonFunctional: reqs
@@ -230,6 +232,8 @@ export default function App() {
             evidence: r.evidencia || "",
             sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
             requiresConfirmation: Boolean(r.requiere_confirmacion),
+            decisionStatus: r.estado_decision || (r.requiere_confirmacion ? "pendiente" : "confirmado"),
+            excludedConstraints: r.restricciones_excluidas || [],
             approved: r.aprobado
           }))
       },
@@ -258,6 +262,7 @@ export default function App() {
         estado: m.estado,
         version: m.version,
         estado_calidad: m.estado_calidad,
+        ajustes_sanitizacion: m.ajustes_sanitizacion || [],
         errores_validacion: m.errores_validacion || [],
         advertencias_validacion: m.advertencias_validacion || []
       }))

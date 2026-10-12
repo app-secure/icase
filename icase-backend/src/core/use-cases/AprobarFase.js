@@ -201,7 +201,8 @@ class AprobarFase {
         const trazabilidad = this.mockupTraceabilityService.validate({
           manifest: diseno.manifiesto_navegacion,
           mockups: mockupsTrazados,
-          requirements: requerimientosProyecto
+          requirements: requerimientosProyecto,
+          requireComplete: true
         });
         if (typeof this.disenoRepository.guardarOActualizar === 'function') {
           await this.disenoRepository.guardarOActualizar(proyectoId, {

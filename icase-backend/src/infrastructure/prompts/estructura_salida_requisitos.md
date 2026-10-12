@@ -30,7 +30,9 @@ La forma requerida es:
       "origen": "explicito o inferido",
       "evidencia": "Fragmento literal del insumo",
       "fuentes_origen": [],
-      "requiere_confirmacion": false
+      "requiere_confirmacion": false,
+      "estado_decision": "confirmado, pendiente, rechazado o fuera_de_alcance",
+      "restricciones_excluidas": []
     }
   ],
   "diagramas": []

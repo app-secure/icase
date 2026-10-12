@@ -5,6 +5,7 @@ const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
 const ClasesDisenoSynthesizer = require('./ClasesDisenoSynthesizer');
 const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const AiModelConfig = require('./AiModelConfig');
+const RequirementSemanticsService = require('./RequirementSemanticsService');
 const { normalizeDiagramType, DIAGRAM_DEFINITIONS } = require('../../core/constants/DiagramTypes');
 
 function normalizarCodigoPlantUML(value) {
@@ -49,6 +50,7 @@ function numerosDe(value) {
 
 function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
   const insumoComparable = textoComparable(insumo);
+  const semantics = new RequirementSemanticsService();
 
   return (requerimientos || []).map((requisito) => {
     const evidencia = String(requisito.evidencia || requisito.evidencia_fuente || '').trim();
@@ -70,7 +72,7 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
       metricaMedible = 'Por confirmar con el usuario';
     }
 
-    return {
+    return semantics.enrich({
       ...requisito,
       tipo,
       metrica_medible: metricaMedible,
@@ -80,7 +82,7 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
         ? requisito.fuentes_origen.map(String).filter(Boolean)
         : [],
       requiere_confirmacion: requiereConfirmacion
-    };
+    }, insumo);
   });
 }
 
@@ -773,7 +775,7 @@ class ModelosIaService {
             const entidades = [...codigoDominio.matchAll(/^\s*(?:abstract\s+)?class\s+(?:"[^"]+"\s+as\s+)?([A-Za-z_][\w]*)/gim)]
               .map((match) => match[1])
               .filter((nombre) => !/(?:Controller|Service|UseCase|Repository|DTO)$/i.test(nombre))
-              .slice(0, 4)
+              .slice(0, 10)
               .map((nombre) => ({ nombre }));
             const codigoArquitectura = String(arquitectura?.codigo_plantuml || '');
             const database = /postgres/i.test(codigoArquitectura)
