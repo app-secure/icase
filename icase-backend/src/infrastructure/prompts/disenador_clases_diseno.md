@@ -7,7 +7,7 @@ El diagrama se sintetiza obligatoriamente a partir de:
 1. **Casos de Uso Aprobados:** Lista de RFs y flujos principales.
 2. **Clases del Dominio:** Entidades base del negocio.
 3. **Arquitectura de Software:** Capas y distribución C4.
-4. **Tecnologías Seleccionadas:** Lenguaje, framework backend, ORM/ODM y base de datos (ej. Node.js/Express/MongoDB, Spring Boot/JPA/PostgreSQL, NestJS/TypeORM, etc.).
+4. **Tecnologías Seleccionadas:** Lenguaje, framework backend, mecanismo de persistencia y base de datos únicamente cuando hayan sido aprobados. Para decisiones ausentes usa `Por definir`.
 
 ## COMPONENTES TÉCNICOS OBLIGATORIOS EN CADA MÓDULO:
 
@@ -38,6 +38,8 @@ Para cada módulo o grupo funcional del sistema, debes incluir:
 
 ## TRAZABILIDAD Y COBERTURA:
 - Cada módulo o caso de uso debe incluir notas de trazabilidad (`note top of ...` o `note bottom of ...`) indicando el requisito de origen (`RF-01`, etc.) y los artefactos de origen (`casos_de_uso`, `clases_dominio`, `arquitectura_software`).
+- Conserva como entidades de diseño todas las clases nucleares del diagrama `clases_dominio` aprobado. Puedes añadir realizaciones técnicas, pero no renombrar ni sustituir silenciosamente las entidades de origen.
+- Cada caso de uso técnico debe corresponder a una interacción del diagrama `casos_de_uso`; no agregues módulos funcionales ajenos a sus dependencias aprobadas.
 - Esteroetipos explícitos: `<<Controller>>`, `<<UseCase>>`, `<<Repository>>`, `<<Entity>>`, `<<DTO>>`.
 
 ## FORMATO PLANTUML OBLIGATORIO:
@@ -83,3 +85,8 @@ MongoUsuarioRepository ..|> IUsuarioRepository : implementa
 note top of UsuarioController : Trazabilidad: RF-01 | Origen: casos_de_uso, clases_dominio
 @enduml
 ```
+
+COBERTURA OBLIGATORIA:
+- No diseñes solamente un módulo representativo. Cada módulo funcional de prioridad alta presente en los casos de uso debe tener al menos un punto de entrada (Controller/Gateway), un caso de uso y sus dependencias técnicas relevantes.
+- Conserva las entidades aprobadas en clases de dominio y muestra las interfaces e implementaciones de repositorio que realmente correspondan.
+- Si el alcance es amplio, agrupa por paquetes de negocio, pero no ocultes Reservas/QR, Comandas/KDS, Caja/Prepagos ni Administración/Reportes cuando estén aprobados.

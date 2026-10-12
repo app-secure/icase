@@ -10,6 +10,83 @@ const PlantUMLSynthesizer = require('../src/infrastructure/services/PlantUMLSynt
 const RequirementChangeService = require('../src/core/services/RequirementChangeService');
 
 describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
+  test('la generación de requisitos no arrastra borradores y neutraliza métricas sin evidencia', async () => {
+    const service = new ModelosIaService();
+    service.geminiApiKey = 'test-key';
+    let promptEnviado = '';
+    service.generarConGemini = jest.fn().mockImplementation(async (prompt) => {
+      promptEnviado = prompt;
+      return {
+        nombre_proyecto: 'Demo',
+        requerimientos: [{
+          tipo: 'RNF',
+          identificador: 'RNF-01',
+          nombre: 'Tiempo real',
+          descripcion: 'El sistema DEBE sincronizar pedidos en tiempo real.',
+          metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
+          origen: 'explicito',
+          evidencia: 'pedidos en tiempo real'
+        }],
+        diagramas: []
+      };
+    });
+
+    const resultado = await service.procesar({
+      nombre_proyecto: 'Demo',
+      insumo_bruto: 'La cocina necesita ver los pedidos en tiempo real.',
+      provider: 'gemini',
+      objetivo: 'requisitos',
+      contexto_proyecto: {
+        requerimientos_actuales: [{
+          identificador: 'RNF-99',
+          tipo: 'RNF',
+          nombre: 'MARCADOR_DE_OTRA_EJECUCION'
+        }]
+      }
+    });
+
+    expect(promptEnviado).not.toContain('MARCADOR_DE_OTRA_EJECUCION');
+    expect(promptEnviado).not.toContain('Redis Cache');
+    expect(resultado.requerimientos[0]).toEqual(expect.objectContaining({
+      metrica_medible: 'Por confirmar con el usuario',
+      origen: 'inferido',
+      requiere_confirmacion: true,
+      evidencia: 'pedidos en tiempo real'
+    }));
+  });
+
+  test('la generación conserva una métrica cuando aparece literalmente en el insumo', async () => {
+    const service = new ModelosIaService();
+    service.geminiApiKey = 'test-key';
+    service.generarConGemini = jest.fn().mockResolvedValue({
+      nombre_proyecto: 'Demo',
+      requerimientos: [{
+        tipo: 'RNF',
+        identificador: 'RNF-01',
+        nombre: 'Latencia',
+        descripcion: 'El sistema DEBE propagar eventos con la latencia indicada.',
+        metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
+        origen: 'explicito',
+        evidencia: 'latencia <= 0.8 segundos para 150 conexiones'
+      }],
+      diagramas: []
+    });
+
+    const resultado = await service.procesar({
+      nombre_proyecto: 'Demo',
+      insumo_bruto: 'Se requiere latencia <= 0.8 segundos para 150 conexiones.',
+      provider: 'gemini',
+      objetivo: 'requisitos',
+      contexto_proyecto: {}
+    });
+
+    expect(resultado.requerimientos[0]).toEqual(expect.objectContaining({
+      metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
+      origen: 'explicito',
+      requiere_confirmacion: false
+    }));
+  });
+
   test('ModelosIaService debe usar catálogos configurables sin fallbacks obsoletos', async () => {
     const anteriores = {
       groq: process.env.GROQ_ANALYSIS_MODELS,
@@ -717,6 +794,42 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     const casosUsoCreado = creados.find((diagrama) => diagrama.tipo === 'casos_de_uso');
     expect(casosUsoCreado.codigo_plantuml).toContain('actor "Cajero"');
     expect(casosUsoCreado.codigo_plantuml).toMatch(/ActorReq_\d+_cajero --> UC1/);
+  });
+
+  test('ProcesarConIA repara de forma controlada un diagrama inválido sin regenerar otros', async () => {
+    const invalid = '@startuml\nactor "Cliente" as Cliente\nusecase "Consultar" as UC1\nCliente --> UC1\n@enduml';
+    const repaired = '@startuml\nactor "Cliente" as Cliente\nrectangle "Sistema" {\nusecase "Consultar" as UC1\nusecase "Ver detalle" as UC2\n}\nCliente --> UC1\nCliente --> UC2\n@enduml';
+    const aiOrchestratorService = {
+      procesar: jest.fn()
+        .mockResolvedValueOnce({ diagramas: [{ tipo: 'casos_de_uso', codigo_plantuml: invalid }] })
+        .mockResolvedValueOnce({ diagramas: [{ tipo: 'casos_de_uso', codigo_plantuml: repaired }] })
+    };
+    const plantumlValidatorService = {
+      validar: jest.fn((code) => code === repaired
+        ? { valido: true, errores: [], advertencias: [] }
+        : { valido: false, error: 'Falta el límite del sistema', errores: ['Falta el límite del sistema'] })
+    };
+    const diagramaRepository = {
+      listarPorProyecto: jest.fn().mockResolvedValue([]), actualizar: jest.fn(),
+      crearMuchos: jest.fn().mockResolvedValue(true), eliminarPorProyecto: jest.fn()
+    };
+    const useCase = new ProcesarConIA({
+      proyectoRepository: {
+        obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Demo', insumo_bruto: 'Consulta', estado_fase: 'analisis_aprobado' }),
+        actualizar: jest.fn().mockResolvedValue(true)
+      },
+      requerimientoRepository: { listarPorProyecto: jest.fn().mockResolvedValue([{ tipo: 'RF', identificador: 'RF-01', nombre: 'Consultar', actores: ['Cliente'], aprobado: true }]) },
+      diagramaRepository,
+      estandarRepository: { obtenerEstandares: jest.fn().mockResolvedValue([]) },
+      plantumlValidatorService,
+      aiOrchestratorService
+    });
+
+    const result = await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas', tipoDiagrama: 'casos_de_uso' });
+    expect(aiOrchestratorService.procesar).toHaveBeenCalledTimes(2);
+    expect(aiOrchestratorService.procesar.mock.calls[1][0].insumo_adicional).toContain('REPARACIÓN CONTROLADA');
+    expect(aiOrchestratorService.procesar.mock.calls[1][0].insumo_adicional).toContain('Falta el límite del sistema');
+    expect(result.reparaciones_controladas).toBe(1);
   });
 
 });

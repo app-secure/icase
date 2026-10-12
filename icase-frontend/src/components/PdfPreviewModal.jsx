@@ -3,6 +3,49 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import { X, Maximize2, Minimize2, Loader2, Download } from "lucide-react";
 import { getPlantUMLPngUrl } from "../utils/plantumlEncoder";
+import { prepareMockupHtml } from "../utils/mockupHtml";
+
+// Los diagramas conservan PNG para mantener líneas y texto nítidos. Los
+// mockups son capturas fotográficas de pantalla y se comprimen mucho mejor en
+// JPEG sin una pérdida visual apreciable dentro de una página A4.
+const MOCKUP_CAPTURE_SCALE = 1;
+const MOCKUP_JPEG_QUALITY = 0.82;
+
+const copyComputedStyles = (source, target, view) => {
+  const computed = view?.getComputedStyle(source);
+  if (!computed) return;
+  for (const property of computed) {
+    target.style.setProperty(property, computed.getPropertyValue(property), computed.getPropertyPriority(property));
+  }
+};
+
+const normalizeFormControlsForCapture = (clonedDocument) => {
+  const view = clonedDocument.defaultView;
+  const textInputTypes = new Set([
+    "text", "search", "email", "tel", "url", "number", "password",
+    "date", "time", "datetime-local", "month", "week"
+  ]);
+
+  clonedDocument.querySelectorAll("input, textarea").forEach((control) => {
+    const isTextarea = control.tagName === "TEXTAREA";
+    const type = String(control.getAttribute("type") || "text").toLowerCase();
+    if (!isTextarea && !textInputTypes.has(type)) return;
+
+    const replacement = clonedDocument.createElement("div");
+    copyComputedStyles(control, replacement, view);
+    const rawValue = control.value || control.getAttribute("value") || control.getAttribute("placeholder") || "";
+    replacement.textContent = type === "password" && rawValue ? "•".repeat(rawValue.length) : rawValue;
+    replacement.style.display = "flex";
+    replacement.style.alignItems = isTextarea ? "flex-start" : "center";
+    replacement.style.whiteSpace = isTextarea ? "pre-wrap" : "nowrap";
+    replacement.style.overflow = "hidden";
+    replacement.style.lineHeight = "normal";
+    if (!control.value && control.getAttribute("placeholder")) {
+      replacement.style.color = "#94a3b8";
+    }
+    control.replaceWith(replacement);
+  });
+};
 
 async function fetchPngDataUrl(plantumlCode) {
   if (!plantumlCode || !plantumlCode.trim() || plantumlCode.includes("No hay diagrama disponible")) return null;
@@ -77,7 +120,9 @@ export default function PdfPreviewModal({ project, onClose }) {
         const doc = new jsPDF({
           orientation: "portrait",
           unit: "mm",
-          format: "a4"
+          format: "a4",
+          compress: true,
+          putOnlyUsedFonts: true
         });        const margin = 18;
         let y = margin;
         const pageWidth = doc.internal.pageSize.getWidth();
@@ -392,7 +437,7 @@ export default function PdfPreviewModal({ project, onClose }) {
 
           const x = margin + (maxLineWidth - w) / 2;
           try {
-            doc.addImage(imgData, "PNG", x, y, w, h);
+            doc.addImage(imgData, "PNG", x, y, w, h, undefined, "FAST");
             y += h + 4;
 
             // Epígrafe formal IEEE / APA (9pt centrado)
@@ -464,7 +509,7 @@ export default function PdfPreviewModal({ project, onClose }) {
 
         drawSubSectionHeader("2.1 Objetivo General:");
         const objGenText = project.objetivos?.general ||
-          `Desarrollar y formalizar la arquitectura y especificación técnica del sistema ${project.name || "institucional"}, asegurando integridad transaccional, alta disponibilidad y cumplimiento estricto de las necesidades del negocio.`;
+          `Definir y documentar la arquitectura y especificación técnica del sistema ${project.name || "institucional"} a partir de los requisitos y decisiones aprobadas.`;
         drawParagraph(objGenText);
 
         drawSubSectionHeader("2.2 Objetivos Específicos:");
@@ -500,7 +545,7 @@ export default function PdfPreviewModal({ project, onClose }) {
 
         domainKeywords = domainKeywords.filter((k) => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
         if (domainKeywords.length === 0) {
-          domainKeywords = ["Control Operacional", "Gestión de Procesos", "Trazabilidad de Datos", "Seguridad Transaccional"];
+          domainKeywords = ["Especificación", "Requisitos", "Diseño", "Trazabilidad"];
         }
 
         domainKeywords.forEach((kw) => {
@@ -512,7 +557,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         drawSectionHeader("5. Introducción");
         const introText =
           project.introduccion ||
-          "En el desarrollo formal de software de misión crítica, una adecuada especificación formal previene desviaciones presupuestarias, fallos de integración y cuellos de botella. El presente documento técnico estructura los requerimientos a partir de los insumos provistos por los expertos del dominio, asegurando consistencia, trazabilidad y conformidad.";
+          "Una especificación formal permite detectar inconsistencias antes de la implementación. El presente documento estructura los requisitos a partir de los insumos provistos y conserva su trazabilidad hacia los modelos de arquitectura, diseño e interfaz.";
         drawParagraph(introText);
 
         // --- 6. FUENTES E INSUMOS ANALIZADOS ---
@@ -543,10 +588,10 @@ export default function PdfPreviewModal({ project, onClose }) {
               ["Nombre del requerimiento", rf.name],
               ["Descripción", rf.description || "Sin descripción"],
               ["Dependencias", rf.dependencies || "Ninguna"],
-              ["Prioridad", rf.priority || "Alta"],
-              ["Actores", Array.isArray(rf.actors) ? rf.actors.join(", ") : rf.actors || "Operador Principal"],
-              ["Precondiciones", rf.precondition || "Usuario autenticado en el sistema"],
-              ["Postcondiciones", rf.postcondition || "Registro confirmado y almacenado en la base de datos"]
+              ["Prioridad", rf.priority || "No especificada"],
+              ["Actores", Array.isArray(rf.actors) ? rf.actors.join(", ") : rf.actors || "No especificados"],
+              ["Precondiciones", rf.precondition || "No especificadas en los insumos"],
+              ["Postcondiciones", rf.postcondition || "No especificadas en los insumos"]
             ];
 
             drawSpecificationTable(tableTitle, rows);
@@ -573,8 +618,8 @@ export default function PdfPreviewModal({ project, onClose }) {
               ["Nombre del requerimiento", rnfName],
               ["Categoría", rnf.category || "Atributo de Calidad"],
               ["Descripción", rnf.description || "N/A"],
-              ["Criterio / Métrica", rnf.metric || rnf.metrica_medible || "Cumplimiento normativo"],
-              ["Prioridad", rnf.priority || "Alta"]
+              ["Criterio / Métrica", rnf.metric || rnf.metrica_medible || "Por confirmar con el usuario"],
+              ["Prioridad", rnf.priority || "No especificada"]
             ];
 
             drawSpecificationTable(tableTitle, rows);
@@ -669,13 +714,20 @@ export default function PdfPreviewModal({ project, onClose }) {
             // Renderizar mockup HTML en iframe (para que Tailwind CDN y CSS ejecuten correctamente)
             let mockupImgData = null;
             try {
+              const platform = String(mockup.plataforma || mockup.platform || "web").toLowerCase();
+              const isMobile = /mobile|móvil|movil/.test(platform);
+              const isTablet = /tablet/.test(platform);
+              // Debe coincidir con ScaledMockupPreview. Cambiar el viewport al
+              // exportar activa otros breakpoints y deforma botones y textos.
+              const captureWidth = isMobile ? 390 : isTablet ? 820 : 1440;
+              const captureHeight = isMobile ? 844 : isTablet ? 900 : 820;
               mockupImgData = await new Promise((resolve) => {
                 const iframe = document.createElement("iframe");
                 iframe.style.position = "fixed";
                 iframe.style.left = "-9999px";
                 iframe.style.top = "0";
-                iframe.style.width = "1280px";
-                iframe.style.height = "900px";
+                iframe.style.width = `${captureWidth}px`;
+                iframe.style.height = `${captureHeight}px`;
                 iframe.style.border = "none";
                 iframe.style.visibility = "hidden";
                 iframe.style.pointerEvents = "none";
@@ -687,7 +739,7 @@ export default function PdfPreviewModal({ project, onClose }) {
                   resolve(null);
                 }, 12000);
 
-                const tryCapture = (attempts) => {
+                const tryCapture = async (attempts) => {
                   if (attempts <= 0) {
                     clearTimeout(timeout);
                     try { document.body.removeChild(iframe); } catch {}
@@ -701,27 +753,57 @@ export default function PdfPreviewModal({ project, onClose }) {
                     return;
                   }
 
-                  // Verificar si Tailwind ya compiló (buscar elementos con estilos aplicados)
-                  const tailwindReady = !iDoc.querySelector('script[src*="tailwindcss"]') ||
-                    (iDoc.body && window.getComputedStyle(iDoc.body).fontFamily !== '' &&
-                     iDoc.body.children.length > 0 &&
-                     (iDoc.querySelector('[class]') ? window.getComputedStyle(iDoc.querySelector('[class]')).padding !== undefined : true));
+                  // El probe solo queda oculto cuando Tailwind ya generó y aplicó
+                  // sus reglas. La comprobación anterior podía aprobar cualquier
+                  // elemento aunque el CDN siguiera procesando las clases.
+                  const tailwindScript = iDoc.querySelector('script[src*="tailwindcss"]');
+                  const tailwindProbe = iDoc.getElementById("icase-tailwind-ready-probe");
+                  const tailwindReady = !tailwindScript || (
+                    tailwindProbe && iframe.contentWindow.getComputedStyle(tailwindProbe).display === "none"
+                  );
 
                   if (tailwindReady) {
+                    try {
+                      await iDoc.fonts?.ready;
+                      await Promise.all([...iDoc.images].map((img) => img.complete
+                        ? Promise.resolve()
+                        : new Promise((done) => {
+                            img.addEventListener("load", done, { once: true });
+                            img.addEventListener("error", done, { once: true });
+                          })));
+                      // Esperar dos ciclos de pintura garantiza que las métricas
+                      // de fuente y el layout final usados por Tailwind ya estén
+                      // aplicados antes de que html2canvas lea las posiciones.
+                      await new Promise((done) => iframe.contentWindow.requestAnimationFrame(
+                        () => iframe.contentWindow.requestAnimationFrame(done)
+                      ));
+                    } catch {
+                      // La captura sigue con las fuentes del sistema si un recurso opcional falla.
+                    }
+                    iDoc.documentElement.style.width = `${captureWidth}px`;
+                    iDoc.documentElement.style.height = `${captureHeight}px`;
+                    iDoc.documentElement.style.overflow = "hidden";
+                    iDoc.body.style.width = `${captureWidth}px`;
+                    iDoc.body.style.minHeight = `${captureHeight}px`;
+                    iDoc.body.style.overflow = "hidden";
                     html2canvas(iDoc.body || iDoc.documentElement, {
-                      scale: 1.8,
+                      scale: MOCKUP_CAPTURE_SCALE,
                       useCORS: true,
                       logging: false,
                       backgroundColor: "#ffffff",
-                      width: 1280,
-                      height: 900,
-                      windowWidth: 1280,
-                      windowHeight: 900,
-                      allowTaint: false
+                      width: captureWidth,
+                      height: captureHeight,
+                      windowWidth: captureWidth,
+                      windowHeight: captureHeight,
+                      scrollX: 0,
+                      scrollY: 0,
+                      allowTaint: false,
+                      foreignObjectRendering: true,
+                      onclone: normalizeFormControlsForCapture
                     }).then(canvas => {
                       clearTimeout(timeout);
                       try { document.body.removeChild(iframe); } catch {}
-                      resolve(canvas.toDataURL("image/png", 0.92));
+                      resolve(canvas.toDataURL("image/jpeg", MOCKUP_JPEG_QUALITY));
                     }).catch(() => {
                       clearTimeout(timeout);
                       try { document.body.removeChild(iframe); } catch {}
@@ -737,121 +819,14 @@ export default function PdfPreviewModal({ project, onClose }) {
                   setTimeout(() => tryCapture(15), 1500);
                 };
 
-                // Escribir el HTML con garantía de Tailwind CDN
-                let html = mockup.preview_code || "";
-                // Si no tiene CDN de Tailwind, agregarlo
-                if (!html.includes("cdn.tailwindcss.com")) {
-                  html = html.replace(/<head>/i, '<head>\n<script src="https://cdn.tailwindcss.com"><\/script>');
-                }
-                // Si no tiene configuración de colores, agregarla
-                if (!html.includes("tailwind.config")) {
-                  html = html.replace(/<\/head>/i, `
-<script>
-tailwind.config = {
-  theme: {
-    extend: {
-      fontFamily: { sans: ['Inter','system-ui','sans-serif'] },
-      colors: {
-        primary: { 50:'#eff6ff',100:'#dbeafe',500:'#0b57d0',600:'#0947a8',700:'#073d8c' },
-        secondary: { 500:'#64748b',600:'#475569' }
-      }
-    }
-  }
-}
-<\/script>
-</head>`);
-                }
-                // Estilos de respaldo (CSS plano) por si Tailwind tarda demasiado
-                const fallbackCss = `
-<style id="icase-fallback">
-*, *::before, *::after { box-sizing: border-box; }
-html, body { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
-.flex { display: flex; } .flex-col { flex-direction: column; } .flex-1 { flex: 1 1 0%; }
-.items-center { align-items: center; } .justify-center { justify-content: center; } .justify-between { justify-content: space-between; }
-.min-h-screen { min-height: 100vh; } .h-full { height: 100%; } .w-full { width: 100%; }
-.p-4 { padding: 1rem; } .p-6 { padding: 1.5rem; } .p-8 { padding: 2rem; }
-.px-4 { padding-left: 1rem; padding-right: 1rem; } .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-.px-5 { padding-left: 1.25rem; padding-right: 1.25rem; } .py-2\\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
-.px-4.py-2\\.5 { padding: 0.625rem 1rem; }
-.mb-1 { margin-bottom: 0.25rem; } .mb-2 { margin-bottom: 0.5rem; } .mb-4 { margin-bottom: 1rem; }
-.mb-6 { margin-bottom: 1.5rem; } .mb-8 { margin-bottom: 2rem; } .mt-1 { margin-top: 0.25rem; }
-.mt-6 { margin-top: 1.5rem; } .mx-auto { margin-left: auto; margin-right: auto; }
-.space-y-5 > * + * { margin-top: 1.25rem; }
-.text-center { text-align: center; } .text-xs { font-size: 0.75rem; } .text-sm { font-size: 0.875rem; }
-.text-2xl { font-size: 1.5rem; } .text-xl { font-size: 1.25rem; } .text-3xl { font-size: 1.875rem; }
-.font-semibold { font-weight: 600; } .font-medium { font-weight: 500; } .font-bold { font-weight: 700; }
-.text-white { color: #ffffff; } .text-slate-900 { color: #0f172a; } .text-slate-800 { color: #1e293b; }
-.text-slate-700 { color: #334155; } .text-slate-600 { color: #475569; } .text-slate-500 { color: #64748b; }
-.text-slate-400 { color: #94a3b8; } .text-primary-600 { color: #0947a8; }
-.bg-white { background-color: #ffffff; } .bg-slate-50 { background-color: #f8fafc; }
-.bg-slate-100 { background-color: #f1f5f9; } .bg-slate-200 { background-color: #e2e8f0; }
-.bg-primary-600 { background-color: #0947a8; } .bg-primary-500 { background-color: #0b57d0; }
-.bg-primary-700 { background-color: #073d8c; }
-.bg-gradient-to-br { background-image: linear-gradient(to bottom right, var(--tw-gradient-stops)); }
-.from-primary-500 { --tw-gradient-from: #0b57d0; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(11,87,208,0)); }
-.to-primary-700 { --tw-gradient-to: #073d8c; }
-.from-blue-500 { --tw-gradient-from: #3b82f6; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(59,130,246,0)); }
-.to-blue-700 { --tw-gradient-to: #1d4ed8; }
-.from-slate-700 { --tw-gradient-from: #334155; } .to-slate-900 { --tw-gradient-to: #0f172a; }
-.border { border-width: 1px; border-style: solid; } .border-slate-200 { border-color: #e2e8f0; }
-.border-slate-300 { border-color: #cbd5e1; } .border-slate-100 { border-color: #f1f5f9; }
-.rounded { border-radius: 0.25rem; } .rounded-lg { border-radius: 0.5rem; }
-.rounded-xl { border-radius: 0.75rem; } .rounded-2xl { border-radius: 1rem; }
-.rounded-full { border-radius: 9999px; }
-.shadow-xl { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1); }
-.shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); }
-.shadow-md { box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1); }
-.shadow-sm { box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
-.w-full { width: 100%; } .max-w-md { max-width: 28rem; } .max-w-lg { max-width: 32rem; }
-.max-w-6xl { max-width: 72rem; } .max-w-7xl { max-width: 80rem; }
-.w-16 { width: 4rem; } .h-16 { height: 4rem; } .w-8 { width: 2rem; } .h-8 { height: 2rem; }
-.w-5 { width: 1.25rem; } .h-5 { height: 1.25rem; } .w-4 { width: 1rem; } .h-4 { height: 1rem; }
-.w-10 { width: 2.5rem; } .h-10 { height: 2.5rem; } .w-12 { width: 3rem; } .h-12 { height: 3rem; }
-.w-20 { width: 5rem; } .h-20 { height: 5rem; } .w-24 { width: 6rem; } .h-24 { height: 6rem; }
-.overflow-hidden { overflow: hidden; } .overflow-x-auto { overflow-x: auto; }
-.relative { position: relative; } .absolute { position: absolute; } .sticky { position: sticky; }
-.top-0 { top: 0; } .right-0 { right: 0; } .inset-0 { inset: 0; }
-.z-10 { z-index: 10; } .z-50 { z-index: 50; }
-.gap-1 { gap: 0.25rem; } .gap-2 { gap: 0.5rem; } .gap-3 { gap: 0.75rem; } .gap-4 { gap: 1rem; }
-.grid { display: grid; } .grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
-.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.col-span-2 { grid-column: span 2 / span 2; }
-.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.uppercase { text-transform: uppercase; } .capitalize { text-transform: capitalize; }
-.tracking-wider { letter-spacing: 0.05em; } .leading-relaxed { line-height: 1.625; }
-.opacity-60 { opacity: 0.6; } .opacity-80 { opacity: 0.8; }
-.aspect-video { aspect-ratio: 16 / 9; }
-.table { display: table; } .table-auto { table-layout: auto; }
-.border-collapse { border-collapse: collapse; }
-input, select, textarea {
-  border: 1px solid #cbd5e1; border-radius: 0.75rem; padding: 0.625rem 1rem;
-  font-size: 0.875rem; color: #0f172a; background: #fff; width: 100%;
-  box-sizing: border-box; font-family: inherit;
-}
-button {
-  border-radius: 0.75rem; padding: 0.625rem 1.25rem; font-weight: 600;
-  font-family: inherit; cursor: pointer; display: inline-flex; align-items: center;
-}
-button.bg-primary-600, button.bg-primary-500 {
-  background-color: #0947a8; color: white; border: none;
-}
-.bg-emerald-100 { background-color: #d1fae5; } .text-emerald-700 { color: #065f46; }
-.bg-amber-100 { background-color: #fef3c7; } .text-amber-700 { color: #92400e; }
-.bg-red-100 { background-color: #fee2e2; } .text-red-700 { color: #b91c1c; }
-.bg-blue-100 { background-color: #dbeafe; } .text-blue-700 { color: #1d4ed8; }
-.ring-2 { box-shadow: 0 0 0 2px; }
-.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-nav, header { background: white; border-bottom: 1px solid #e2e8f0; padding: 0.75rem 1.5rem; }
-table { width: 100%; border-collapse: collapse; }
-th { background: #f8fafc; padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600; color: #64748b; border-bottom: 1px solid #e2e8f0; }
-td { padding: 0.75rem; font-size: 0.875rem; color: #334155; border-bottom: 1px solid #f1f5f9; }
-tr:hover td { background: #f8fafc; }
-sidebar, .sidebar { background: #1e293b; color: white; }
-</style>`;
-                html = html.replace(/<\/head>/i, `${fallbackCss}\n</head>`);
+                // Usar exactamente la misma transformación que la vista previa.
+                // Una segunda hoja de estilos aquí alteraría paddings, alturas y
+                // métricas tipográficas al convertir el mockup en imagen.
+                let html = prepareMockupHtml(mockup.preview_code || "");
+                const readinessProbe = '<div id="icase-tailwind-ready-probe" class="hidden" aria-hidden="true"></div>';
+                html = html.includes("</body>")
+                  ? html.replace(/<\/body>/i, `${readinessProbe}</body>`)
+                  : `${html}${readinessProbe}`;
 
                 const iDocObj = iframe.contentDocument || iframe.contentWindow.document;
                 iDocObj.open();
@@ -879,7 +854,7 @@ sidebar, .sidebar { background: #1e293b; color: white; }
               }
               checkPageBreak(hMm + 15);
               const xMm = margin + (maxLineWidth - wMm) / 2;
-              doc.addImage(mockupImgData, "PNG", xMm, y, wMm, hMm);
+              doc.addImage(mockupImgData, "JPEG", xMm, y, wMm, hMm, undefined, "FAST");
               y += hMm + 4;
 
               // Epígrafe formal IEEE / APA (9pt centrado)

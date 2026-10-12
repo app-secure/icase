@@ -2,12 +2,16 @@ const { DIAGRAM_TYPES, normalizeDiagramType } = require('../../core/constants/Di
 const ArquitecturaSoftwareValidatorService = require('./ArquitecturaSoftwareValidatorService');
 const ArquitecturaSistemaValidatorService = require('./ArquitecturaSistemaValidatorService');
 const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
+const DiagramSemanticValidatorService = require('./DiagramSemanticValidatorService');
+const CrossDiagramConsistencyValidatorService = require('./CrossDiagramConsistencyValidatorService');
 
 class PlantUMLValidatorService {
   constructor() {
     this.softwareValidator = new ArquitecturaSoftwareValidatorService();
     this.sistemaValidator = new ArquitecturaSistemaValidatorService();
     this.disenoValidator = new ClasesDisenoValidatorService();
+    this.semanticValidator = new DiagramSemanticValidatorService();
+    this.crossDiagramValidator = new CrossDiagramConsistencyValidatorService();
   }
 
   validar(codigo, options = '') {
@@ -49,9 +53,18 @@ class PlantUMLValidatorService {
         rnfList: opts.rnfList,
         trazabilidad_rnf: opts.trazabilidad_rnf
       });
+      const consistencia = this.crossDiagramValidator.validar({
+        tipo: tipoNormalizado,
+        codigo: trimmed,
+        diagramasDependencia: opts.diagramasDependencia
+      });
       return {
-        ...this.resultado(detalles.errores || [], detalles.advertencias || [], metricas),
-        detalles
+        ...this.resultado(
+          [...(detalles.errores || []), ...(consistencia.errores || [])],
+          [...(detalles.advertencias || []), ...(consistencia.advertencias || [])],
+          { ...metricas, ...(consistencia.metricas || {}) }
+        ),
+        detalles: { ...detalles, consistencia }
       };
     }
 
@@ -61,17 +74,35 @@ class PlantUMLValidatorService {
         rnfList: opts.rnfList,
         trazabilidad_rnf: opts.trazabilidad_rnf
       });
+      const consistencia = this.crossDiagramValidator.validar({
+        tipo: tipoNormalizado,
+        codigo: trimmed,
+        diagramasDependencia: opts.diagramasDependencia
+      });
       return {
-        ...this.resultado(detalles.errores || [], detalles.advertencias || [], metricas),
-        detalles
+        ...this.resultado(
+          [...(detalles.errores || []), ...(consistencia.errores || [])],
+          [...(detalles.advertencias || []), ...(consistencia.advertencias || [])],
+          { ...metricas, ...(consistencia.metricas || {}) }
+        ),
+        detalles: { ...detalles, consistencia }
       };
     }
 
     if (tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES) {
       detalles = this.disenoValidator.validar(trimmed, tipoNormalizado);
+      const consistencia = this.crossDiagramValidator.validar({
+        tipo: tipoNormalizado,
+        codigo: trimmed,
+        diagramasDependencia: opts.diagramasDependencia
+      });
       return {
-        ...this.resultado(detalles.valido ? [] : [detalles.error].filter(Boolean), [], metricas),
-        detalles
+        ...this.resultado(
+          [...(detalles.valido ? [] : [detalles.error].filter(Boolean)), ...(consistencia.errores || [])],
+          consistencia.advertencias || [],
+          { ...metricas, ...(consistencia.metricas || {}) }
+        ),
+        detalles: { ...detalles, consistencia }
       };
     }
 
@@ -131,6 +162,31 @@ class PlantUMLValidatorService {
       if (!['startwbs', 'startmindmap'].includes(inicio)) errores.push('El árbol de navegación debe usar @startwbs o @startmindmap.');
       if (elementos.length < 4) errores.push('El árbol de navegación debe incluir el sistema, módulos y pantallas.');
       if (metricas.profundidad < 3) errores.push('El árbol de navegación debe tener al menos tres niveles jerárquicos.');
+    }
+
+    if ([DIAGRAM_TYPES.USE_CASES, DIAGRAM_TYPES.DOMAIN_CLASSES].includes(tipoNormalizado)) {
+      const semantica = this.semanticValidator.validar({
+        tipo: tipoNormalizado,
+        codigo: trimmed,
+        requisitos: opts.requisitos,
+        requisitos_relacionados: opts.requisitos_relacionados
+      });
+      errores.push(...(semantica.errores || []));
+      advertencias.push(...(semantica.advertencias || []));
+      Object.assign(metricas, semantica.metricas || {});
+      detalles = { ...(detalles || {}), semantica };
+    }
+
+    if (tipoNormalizado === DIAGRAM_TYPES.NAVIGATION_TREE) {
+      const consistencia = this.crossDiagramValidator.validar({
+        tipo: tipoNormalizado,
+        codigo: trimmed,
+        diagramasDependencia: opts.diagramasDependencia
+      });
+      errores.push(...(consistencia.errores || []));
+      advertencias.push(...(consistencia.advertencias || []));
+      Object.assign(metricas, consistencia.metricas || {});
+      detalles = { ...(detalles || {}), consistencia };
     }
 
     return { ...this.resultado([...new Set(errores)], [...new Set(advertencias)], metricas), detalles };

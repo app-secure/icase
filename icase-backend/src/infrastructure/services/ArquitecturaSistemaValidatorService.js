@@ -1,8 +1,14 @@
+const RequirementSemanticsService = require('./RequirementSemanticsService');
+const { normalizeTraceability } = require('./ArchitectureTraceabilityService');
+
 /**
  * Validador especializado para Diagramas de Arquitectura de Sistema e Infraestructura
  * Tipo: arquitectura_sistema (C4 Deployment / Nodos de Infraestructura)
  */
 class ArquitecturaSistemaValidatorService {
+  constructor() {
+    this.requirementSemantics = new RequirementSemanticsService();
+  }
   /**
    * Determina si la lista de requerimientos o texto solicita explícitamente Alta Disponibilidad
    * @param {Array|string} rnfList
@@ -10,12 +16,12 @@ class ArquitecturaSistemaValidatorService {
    */
   requiereAltaDisponibilidad(rnfList = []) {
     if (!rnfList) return false;
-    const textToCheck = typeof rnfList === 'string'
-      ? rnfList
-      : rnfList.map(r => `${r.nombre || ''} ${r.descripcion || ''} ${r.metrica_medible || ''}`).join(' ');
-
-    const patronHA = /alta disponibilidad|high availability|tolerancia a fallos|failover|conmutaci[oó]n|99\.9%|99\.99%|redundancia activa|activo-pasivo|cl[uú]ster redundante|balanceo de carga con r[eé]plica/i;
-    return patronHA.test(textToCheck);
+    if (typeof rnfList === 'string') {
+      return this.requirementSemantics.requestsHighAvailability({ descripcion: rnfList });
+    }
+    return (Array.isArray(rnfList) ? rnfList : []).some((requirement) =>
+      this.requirementSemantics.requestsHighAvailability(requirement)
+    );
   }
 
   /**
@@ -85,14 +91,28 @@ class ArquitecturaSistemaValidatorService {
       );
     }
 
-    // 4. Monitoreo y Observabilidad
+    // 4. Monitoreo y observabilidad solo son obligatorios cuando existe un RNF
+    // aprobado que los solicite.
     const tieneMonitoreo = /monitor|prometheus|grafana|cloudwatch|health|telemetr/i.test(lowerCode);
-    if (!tieneMonitoreo) {
-      advertencias.push('Se recomienda incluir un componente o agente de monitoreo/salud en la infraestructura.');
+    const monitoreoSolicitado = Array.isArray(rnfList) && rnfList.some((rnf) =>
+      /monitor|observabilidad|telemetr|m[eé]trica operativa|health check/i.test(`${rnf.nombre || ''} ${rnf.descripcion || ''} ${rnf.metrica_medible || ''}`)
+    );
+    if (monitoreoSolicitado && !tieneMonitoreo) {
+      advertencias.push('Existe un RNF de monitoreo u observabilidad sin un elemento responsable en la arquitectura del sistema.');
     }
 
     // 5. Trazabilidad RNF -> elemento arquitectónico de infraestructura
-    const trazabilidadProcesada = this.normalizarTrazabilidad(trazabilidad_rnf, lowerCode);
+    const trazabilidadProcesada = normalizeTraceability(trazabilidad_rnf, trimmed);
+    const idsAprobados = new Set((Array.isArray(rnfList) ? rnfList : [])
+      .map((rnf) => String(rnf.identificador || rnf.id || '').toLowerCase())
+      .filter(Boolean));
+    for (const mapeo of trazabilidadProcesada) {
+      if (idsAprobados.size > 0 && !idsAprobados.has(String(mapeo.rnf_id || '').toLowerCase())) {
+        advertencias.push(`La trazabilidad referencia ${mapeo.rnf_id}, que no corresponde a un RNF aprobado.`);
+      } else if (!mapeo.presente_en_codigo) {
+        advertencias.push(`La trazabilidad de ${mapeo.rnf_id} apunta a "${mapeo.elemento}", pero ese elemento no aparece en el diagrama.`);
+      }
+    }
 
     return {
       valido: errores.length === 0,
@@ -105,31 +125,7 @@ class ArquitecturaSistemaValidatorService {
   }
 
   normalizarTrazabilidad(trazabilidadInput, codigoLower) {
-    if (!trazabilidadInput) return [];
-    const list = Array.isArray(trazabilidadInput) ? trazabilidadInput : [trazabilidadInput];
-
-    return list.map(item => {
-      if (typeof item === 'string') {
-        const parts = item.split(/->|:|,/).map(s => s.trim());
-        const rnfId = parts[0] || 'RNF';
-        const elemento = parts[1] || parts[0];
-        return {
-          rnf_id: rnfId,
-          elemento: elemento,
-          presente_en_codigo: codigoLower.includes(elemento.toLowerCase())
-        };
-      }
-      if (typeof item === 'object' && item !== null) {
-        const elemento = item.elemento || item.componente || '';
-        return {
-          rnf_id: item.rnf_id || item.rnf || item.id || 'RNF',
-          elemento: elemento,
-          justificacion: item.justificacion || item.motivo || '',
-          presente_en_codigo: elemento ? codigoLower.includes(elemento.toLowerCase()) : true
-        };
-      }
-      return { rnf_id: 'RNF', elemento: String(item), presente_en_codigo: true };
-    });
+    return normalizeTraceability(trazabilidadInput, codigoLower);
   }
 }
 

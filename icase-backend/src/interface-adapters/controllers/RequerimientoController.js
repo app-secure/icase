@@ -30,7 +30,11 @@ class RequerimientoController {
   async crearManual(req, res) {
     try {
       const datos = req.body;
-      const nuevo = await this.requerimientoRepository.crear({ ...datos, aprobado: false });
+      const nuevo = await this.requerimientoRepository.crear({
+        ...datos,
+        origen: datos.origen || 'manual',
+        aprobado: false
+      });
       if (nuevo.proyecto_id && this.requirementChangeService) {
         await this.requirementChangeService.invalidate(nuevo.proyecto_id, 'Se agregó un requisito a la especificación.');
       }
@@ -58,7 +62,11 @@ class RequerimientoController {
           actores: Array.isArray(r.actores) ? r.actores : (r.actors ? (Array.isArray(r.actors) ? r.actors : [r.actors]) : ['Usuario']),
           precondiciones: r.precondiciones || r.precondition || '',
           poscondiciones: r.poscondiciones || r.postcondition || '',
-          metrica_medible: r.metrica_medible || r.metric || ''
+          metrica_medible: r.metrica_medible || r.metric || '',
+          origen: r.origen || r.origin || 'manual',
+          evidencia: r.evidencia || r.evidence || '',
+          fuentes_origen: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : (Array.isArray(r.sourceNames) ? r.sourceNames : []),
+          requiere_confirmacion: Boolean(r.requiere_confirmacion ?? r.requiresConfirmation)
         }));
         if (!this.requirementChangeService.changed(existentes, normalizados)) {
           return res.json({ success: true, changed: false, count: existentes.length, requerimientos: existentes });

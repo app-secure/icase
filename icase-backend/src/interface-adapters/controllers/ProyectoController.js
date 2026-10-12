@@ -13,7 +13,8 @@ class ProyectoController {
     casoDeUsoRepository,
     disenoRepository,
     markdownCompilerService,
-    trabajoGeneracionRepository
+    trabajoGeneracionRepository,
+    finalProjectAuditService
   }) {
     this.crearProyectoUseCase = crearProyectoUseCase;
     this.procesarConIAUseCase = procesarConIAUseCase;
@@ -26,6 +27,7 @@ class ProyectoController {
     this.disenoRepository = disenoRepository;
     this.markdownCompilerService = markdownCompilerService;
     this.trabajoGeneracionRepository = trabajoGeneracionRepository;
+    this.finalProjectAuditService = finalProjectAuditService;
     this.diagramWorkflowService = new DiagramWorkflowService();
   }
 
@@ -56,10 +58,11 @@ class ProyectoController {
       // Asociar fuentes, requerimientos y diagramas a cada proyecto para persistencia completa
       const proyectosCompletos = await Promise.all(
         proyectos.map(async (p) => {
-          const [fuentes, requerimientos, diagramas] = await Promise.all([
+          const [fuentes, requerimientos, diagramas, diseno] = await Promise.all([
             this.fuenteRepository ? this.fuenteRepository.listarPorProyecto(p.id) : [],
             this.requerimientoRepository ? this.requerimientoRepository.listarPorProyecto(p.id) : [],
-            this.diagramaRepository ? this.diagramaRepository.listarPorProyecto(p.id) : []
+            this.diagramaRepository ? this.diagramaRepository.listarPorProyecto(p.id) : [],
+            this.disenoRepository ? this.disenoRepository.obtenerPorProyecto(p.id) : null
           ]);
           const requirementsApproved = ['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']
             .includes(p.estado_fase);
@@ -68,6 +71,8 @@ class ProyectoController {
             fuentes,
             requerimientos,
             diagramas,
+            diseno,
+            auditoriaFinal: this._auditarProyecto({ proyecto: p, requerimientos, diagramas, diseno }),
             flujoDiagramas: this.diagramWorkflowService.build({ requirementsApproved, diagrams: diagramas })
           };
         })
@@ -115,6 +120,7 @@ class ProyectoController {
         fuentes,
         casosDeUso,
         diseno,
+        auditoriaFinal: this._auditarProyecto({ proyecto, requerimientos, diagramas, diseno }),
         flujoDiagramas: this.diagramWorkflowService.build({
           requirementsApproved: ['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']
             .includes(proyecto.estado_fase),
@@ -328,6 +334,14 @@ class ProyectoController {
         this.disenoRepository ? this.disenoRepository.obtenerPorProyecto(id) : null
       ]);
 
+      const auditoriaFinal = this._auditarProyecto({ proyecto, requerimientos, diagramas, diseno });
+      if (auditoriaFinal && !auditoriaFinal.exportable) {
+        return res.status(409).json({
+          error: 'La auditoría final detectó errores críticos que impiden exportar el documento.',
+          auditoriaFinal
+        });
+      }
+
       const markdown = this.markdownCompilerService.compilar({
         proyecto,
         fuentes,
@@ -373,6 +387,29 @@ class ProyectoController {
         this.disenoRepository ? this.disenoRepository.obtenerPorProyecto(id) : null
       ]);
 
+      const auditoriaFinal = this._auditarProyecto({ proyecto, requerimientos, diagramas, diseno });
+      if (auditoriaFinal && !auditoriaFinal.exportable) {
+        return res.status(409).json({
+          error: 'La auditoría final detectó errores críticos que impiden generar el documento.',
+          auditoriaFinal
+        });
+      }
+
+      const flujoDiagramas = this.diagramWorkflowService.build({
+        requirementsApproved: true,
+        diagrams: diagramas
+      });
+      if (!flujoDiagramas.todos_aprobados) {
+        const inconsistentes = flujoDiagramas.items
+          .filter((item) => item.estado !== 'aprobado')
+          .map((item) => `${item.label}: ${item.estado}`);
+        return res.status(409).json({
+          error: 'El documento consolidado requiere los seis diagramas vigentes y aprobados.',
+          diagramas_pendientes: inconsistentes,
+          flujoDiagramas
+        });
+      }
+
       const markdown = this.markdownCompilerService.compilar({
         proyecto,
         fuentes,
@@ -389,11 +426,16 @@ class ProyectoController {
         casosDeUso,
         diseno,
         diagramas,
+        auditoriaFinal,
         markdown
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  }
+
+  _auditarProyecto(data) {
+    return this.finalProjectAuditService?.auditar(data) || null;
   }
 }
 

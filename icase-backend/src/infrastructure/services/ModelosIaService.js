@@ -5,6 +5,7 @@ const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
 const ClasesDisenoSynthesizer = require('./ClasesDisenoSynthesizer');
 const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const AiModelConfig = require('./AiModelConfig');
+const RequirementSemanticsService = require('./RequirementSemanticsService');
 const { normalizeDiagramType, DIAGRAM_DEFINITIONS } = require('../../core/constants/DiagramTypes');
 
 function normalizarCodigoPlantUML(value) {
@@ -34,18 +35,71 @@ function normalizarCodigoPlantUML(value) {
   }, []).join('\n').trim();
 }
 
+function textoComparable(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function numerosDe(value) {
+  return String(value || '').match(/\d+(?:[.,]\d+)?/g)?.map((numero) => numero.replace(',', '.')) || [];
+}
+
+function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
+  const insumoComparable = textoComparable(insumo);
+  const semantics = new RequirementSemanticsService();
+
+  return (requerimientos || []).map((requisito) => {
+    const evidencia = String(requisito.evidencia || requisito.evidencia_fuente || '').trim();
+    const evidenciaComparable = textoComparable(evidencia);
+    const evidenciaValida = evidenciaComparable.length >= 8 && insumoComparable.includes(evidenciaComparable);
+    const numerosEvidencia = new Set(evidenciaValida ? numerosDe(evidencia) : []);
+    const tipo = String(requisito.tipo || 'RF').toUpperCase();
+    let metricaMedible = String(requisito.metrica_medible || '').trim();
+    const numerosNoSustentados = numerosDe(metricaMedible).filter((numero) => !numerosEvidencia.has(numero));
+    const metricaNoSustentada = tipo === 'RNF' && numerosNoSustentados.length > 0;
+    const origenSolicitado = String(requisito.origen || '').toLowerCase();
+    const origen = evidenciaValida && !metricaNoSustentada && origenSolicitado !== 'inferido'
+      ? 'explicito'
+      : 'inferido';
+    const requiereConfirmacion = Boolean(requisito.requiere_confirmacion) || origen === 'inferido' ||
+      (tipo === 'RNF' && !metricaMedible);
+
+    if (tipo === 'RNF' && (!metricaMedible || metricaNoSustentada)) {
+      metricaMedible = 'Por confirmar con el usuario';
+    }
+
+    return semantics.enrich({
+      ...requisito,
+      tipo,
+      metrica_medible: metricaMedible,
+      origen,
+      evidencia: evidenciaValida ? evidencia : '',
+      fuentes_origen: Array.isArray(requisito.fuentes_origen)
+        ? requisito.fuentes_origen.map(String).filter(Boolean)
+        : [],
+      requiere_confirmacion: requiereConfirmacion
+    }, insumo);
+  });
+}
+
 class ModelosIaService {
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
     this.deepseekApiKey = process.env.DEEPSEEK_API_KEY || '';
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
+    this.openaiApiKey = process.env.OPENAI_API_KEY || '';
     this.provider = (process.env.AI_PROVIDER || 'groq').toLowerCase();
     this.promptsDir = path.join(__dirname, '../prompts');
     this.models = {
       gemini: AiModelConfig.analysis.gemini(),
       groq: AiModelConfig.analysis.groq(),
-      openrouter: AiModelConfig.analysis.openrouter()
+      openrouter: AiModelConfig.analysis.openrouter(),
+      openai: AiModelConfig.analysis.openai()
     };
     this.providerOrder = AiModelConfig.analysis.providerOrder();
     this.modelosDeshabilitados = new Set();
@@ -70,16 +124,23 @@ class ModelosIaService {
       arquitectura_sistema: 'disenador_arquitectura_sistema.md',
       clases_diseno: 'disenador_clases_diseno.md'
     };
-    const directivas = [
-      this.leerPrompt('analista_ieee830.md'),
-      this.leerPrompt('disenador_arquitectura.md'),
-      tipoDiagrama && promptsEspecializados[tipoDiagrama]
-        ? this.leerPrompt(promptsEspecializados[tipoDiagrama])
-        : '',
-      this.leerPrompt('auditor_qa.md')
-    ].filter(Boolean).join('\n\n');
+    const directivas = (objetivo === 'requisitos'
+      ? [
+        this.leerPrompt('analista_ieee830.md'),
+        this.leerPrompt('auditor_requisitos.md')
+      ]
+      : [
+        this.leerPrompt('analista_ieee830.md'),
+        this.leerPrompt('disenador_arquitectura.md'),
+        tipoDiagrama && promptsEspecializados[tipoDiagrama]
+          ? this.leerPrompt(promptsEspecializados[tipoDiagrama])
+          : '',
+        this.leerPrompt('auditor_qa.md')
+      ]).filter(Boolean).join('\n\n');
 
-    const estructuraSalida = this.leerPrompt('estructura_salida.md');
+    const estructuraSalida = this.leerPrompt(
+      objetivo === 'requisitos' ? 'estructura_salida_requisitos.md' : 'estructura_salida.md'
+    );
 
     const directivaFase = objetivo === 'requisitos'
       ? `\n\n# OBJETIVO EXCLUSIVO DE ESTA EJECUCIÓN\nGenera y devuelve únicamente el análisis y los requerimientos RF/RNF. El arreglo "diagramas" DEBE ser []. No diseñes, sintetices ni anticipes diagramas todavía.`
@@ -168,6 +229,13 @@ class ModelosIaService {
           disponible: deepseekDisponible
         },
         {
+          id: 'openai',
+          nombre: 'OpenAI',
+          proveedor: 'OpenAI',
+          descripcion: 'Modelos de OpenAI con salida JSON para análisis y diagramas',
+          disponible: Boolean(this.openaiApiKey)
+        },
+        {
           id: 'openrouter',
           nombre: 'OpenRouter Fast',
           proveedor: 'OpenRouter',
@@ -190,7 +258,10 @@ class ModelosIaService {
 
     // Durante el modelado, solo los requisitos aprobados constituyen restricciones.
     // Esto evita que sugerencias o borradores de la IA contaminen los diagramas.
-    const reqsContexto = objetivo === 'diagramas' ? reqsAprobados : reqsActuales;
+    const esRefinamientoExplicito = Boolean(insumoAdicional && insumoAdicional.trim());
+    const reqsContexto = objetivo === 'diagramas'
+      ? reqsAprobados
+      : (esRefinamientoExplicito ? reqsActuales : []);
 
     let contextoActualTexto = '';
     if (reqsContexto.length > 0) {
@@ -203,7 +274,9 @@ class ModelosIaService {
             `  Actores: ${actores}`,
             `  Prioridad: ${r.prioridad || 'Media'}`,
             `  Precondición: ${r.precondiciones || r.precondicion || 'No especificada'}`,
-            `  Poscondición: ${r.poscondiciones || r.poscondicion || 'No especificada'}`
+            `  Poscondición: ${r.poscondiciones || r.poscondicion || 'No especificada'}`,
+            `  Métrica: ${r.metrica_medible || 'No especificada'}`,
+            `  Origen: ${r.origen || 'No especificado'}`
           ].join('\n');
         }).join('\n');
     }
@@ -248,6 +321,8 @@ class ModelosIaService {
       respuestaData = await this.generarConDeepSeek(promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider === 'openrouter') {
       respuestaData = await this.generarConOpenRouter(promptCompleto, specificModel, { allowFallback: false });
+    } else if (requestedProvider === 'openai') {
+      respuestaData = await this.generarConOpenAI(promptCompleto, specificModel, { allowFallback: false });
     } else {
       const orden = promptCompleto.length > 22000
         ? ['gemini', ...this.providerOrder.filter(p => p !== 'gemini')]
@@ -259,17 +334,21 @@ class ModelosIaService {
     }
 
     if (!respuestaData) {
-      console.warn('[ModelosIaService] Ningún modelo de IA devolvió respuesta parseable. Usando estructuración de contingencia.');
+      if (objetivo === 'requisitos') {
+        throw new Error('Ningún modelo de IA devolvió requisitos válidos. Los requisitos existentes se conservaron sin cambios.');
+      }
+      console.warn('[ModelosIaService] Ningún modelo de IA devolvió respuesta parseable. Usando contexto aprobado únicamente para validación.');
       respuestaData = {
         nombre_proyecto: this.limpiarNombreProyecto(payload.nombre_proyecto) || 'Gestión y Control Operativo',
-        requerimientos: reqsActuales
+        requerimientos: []
       };
     }
 
     return this.normalizarResultado(respuestaData, objetivo, tipoDiagrama, {
       nombreProyecto: payload.nombre_proyecto,
       requerimientos: reqsContexto,
-      diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || []
+      diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || [],
+      insumo: [insumo, insumoAdicional].filter(Boolean).join('\n\n')
     });
   }
 
@@ -278,6 +357,7 @@ class ModelosIaService {
     if (proveedor === 'groq') return this.generarConGroq(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'deepseek') return this.generarConDeepSeek(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'openrouter') return this.generarConOpenRouter(prompt, specificModel, { allowFallback: true });
+    if (proveedor === 'openai') return this.generarConOpenAI(prompt, specificModel, { allowFallback: true });
     console.warn(`[ModelosIaService] Proveedor desconocido omitido: ${proveedor}`);
     return null;
   }
@@ -528,6 +608,42 @@ class ModelosIaService {
     return null;
   }
 
+  async generarConOpenAI(prompt, specificModel = null, options = { allowFallback: true }) {
+    if (!this.openaiApiKey) {
+      if (!options.allowFallback) throw new Error('OPENAI_API_KEY no está configurada en el servidor backend.');
+      return null;
+    }
+    const modelos = AiModelConfig.modelosConPreferencia(specificModel, this.models.openai);
+    for (const modelName of modelos) {
+      if (!this._modeloDisponible(`openai:${modelName}`)) continue;
+      try {
+        console.log(`[ModelosIaService] Procesando con OpenAI (${modelName})...`);
+        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+          model: modelName,
+          messages: [
+            { role: 'system', content: 'Responde exclusivamente con un objeto JSON válido según la plantilla solicitada.' },
+            { role: 'user', content: prompt }
+          ],
+          response_format: { type: 'json_object' }
+        }, {
+          headers: { Authorization: `Bearer ${this.openaiApiKey}`, 'Content-Type': 'application/json' },
+          timeout: Number(process.env.OPENAI_TIMEOUT_MS || 90000)
+        });
+        const rawText = response.data?.choices?.[0]?.message?.content;
+        if (rawText) return this.limpiarYParsearJson(rawText);
+      } catch (error) {
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        console.warn(`[ModelosIaService] OpenAI (${modelName}) falló:`, errorMessage);
+        this._registrarErrorModelo(`openai:${modelName}`, error);
+        if (!options.allowFallback && modelName === modelos.at(-1)) {
+          throw new Error(`El proveedor OpenAI no pudo completar la solicitud: ${errorMessage}`);
+        }
+      }
+    }
+    if (!options.allowFallback) throw new Error('El proveedor OpenAI no devolvió una respuesta válida.');
+    return null;
+  }
+
   _esModeloNoDisponible(error) {
     const status = error.response?.status;
     const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
@@ -587,7 +703,12 @@ class ModelosIaService {
   normalizarResultado(data, objetivo = 'completo', tipoDiagrama = null, contexto = {}) {
     const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
     const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
-    const requerimientos = objetivo === 'diagramas' ? [] : (Array.isArray(data?.requerimientos) ? data.requerimientos : []);
+    const requerimientos = objetivo === 'diagramas'
+      ? []
+      : normalizarTrazabilidadRequerimientos(
+        Array.isArray(data?.requerimientos) ? data.requerimientos : [],
+        contexto.insumo || ''
+      );
 
     let palabrasClave = Array.isArray(data?.palabras_clave)
       ? data.palabras_clave.filter(k => typeof k === 'string' && k.trim())
@@ -654,7 +775,7 @@ class ModelosIaService {
             const entidades = [...codigoDominio.matchAll(/^\s*(?:abstract\s+)?class\s+(?:"[^"]+"\s+as\s+)?([A-Za-z_][\w]*)/gim)]
               .map((match) => match[1])
               .filter((nombre) => !/(?:Controller|Service|UseCase|Repository|DTO)$/i.test(nombre))
-              .slice(0, 4)
+              .slice(0, 10)
               .map((nombre) => ({ nombre }));
             const codigoArquitectura = String(arquitectura?.codigo_plantuml || '');
             const database = /postgres/i.test(codigoArquitectura)

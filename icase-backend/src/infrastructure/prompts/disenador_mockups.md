@@ -87,7 +87,7 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
 
 4. **DATOS REALES DEL DOMINIO**:
    - **PROHIBIDO** texto de relleno como "Lorem ipsum", "Dato 1", "Texto de prueba".
-   - Utiliza datos 100% realistas y coherentes con el negocio (nombres de platos, órdenes, números de mesa, montos en moneda real, clientes con nombres hispanos reales, etc.).
+   - Utiliza datos de ejemplo realistas derivados del dominio y vocabulario del proyecto. No reutilices datos, entidades ni nombres pertenecientes a otros sectores.
 
 5. **HTML AUTOCONTENIDO Y LISTO PARA IFRAME**:
    - Código HTML5 completo (`<!DOCTYPE html><html>...</html>`) sin librerías externas pesadas más allá de Tailwind CDN.
@@ -104,14 +104,14 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
          "tipo": "dashboard | list | form | detail | chart | otro",
          "descripcion": "Descripción concisa del objetivo de la pantalla y el rol que la opera.",
 "descripcion_jerarquica": [
-            "Ruta: SmartMix / Módulo de Pedidos | Módulo: Pedidos",
+            "Ruta: <Producto> / <Módulo aprobado> / <Pantalla> | Módulo: <Módulo aprobado>",
             "Componentes: Estructura de layout (KPIs superiores, grilla interactiva, panel de captura).",
             "Entidades y Atributos: Clases del dominio reflejadas (campos visibles con tipos y estados).",
             "Acciones y Reglas: Transacciones operativas que el usuario desencadena desde esta interfaz."
           ],
-         "elementos_visibles": ["Header con breadcrumbs", "KPIs de ocupación", "Grilla de mesas", "Drawer de comanda rápida"],
+         "elementos_visibles": ["<elemento derivado del contrato de pantalla>", "<estado o dato derivado de RF>"],
          "campos_formulario": [{"nombre": "numeroMesa", "tipo": "number", "requerido": true, "validacion": "1..50"}],
-         "acciones_principales": ["Abrir mesa", "Asignar comanda", "Liberar mesa", "Filtrar por zona"],
+         "acciones_principales": ["<acción permitida por un RF aprobado>"],
          "rf_trazabilidad": ["RF-01", "RF-02"],
          "preview_code": "<!DOCTYPE html><html lang=\"es\"><head>...</head><body class=\"bg-slate-50\">...</body></html>",
          "imagen_url": null

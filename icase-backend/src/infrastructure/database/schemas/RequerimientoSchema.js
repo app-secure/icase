@@ -49,6 +49,32 @@ const RequerimientoSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  origen: {
+    type: String,
+    enum: ['explicito', 'inferido', 'manual'],
+    default: 'explicito'
+  },
+  evidencia: {
+    type: String,
+    default: ''
+  },
+  fuentes_origen: {
+    type: [String],
+    default: []
+  },
+  requiere_confirmacion: {
+    type: Boolean,
+    default: false
+  },
+  estado_decision: {
+    type: String,
+    enum: ['confirmado', 'pendiente', 'rechazado', 'fuera_de_alcance'],
+    default: 'confirmado'
+  },
+  restricciones_excluidas: {
+    type: [String],
+    default: []
+  },
   aprobado: {
     type: Boolean,
     default: false

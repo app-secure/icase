@@ -11,6 +11,12 @@ class Requerimiento {
     precondiciones = '',
     poscondiciones = '',
     metrica_medible = '', // Mandatorio para RNF según IEEE 830 y docente
+    origen = 'explicito',
+    evidencia = '',
+    fuentes_origen = [],
+    requiere_confirmacion = false,
+    estado_decision = 'confirmado',
+    restricciones_excluidas = [],
     aprobado = false,
     createdAt,
     updatedAt
@@ -26,6 +32,16 @@ class Requerimiento {
     this.precondiciones = precondiciones;
     this.poscondiciones = poscondiciones;
     this.metrica_medible = metrica_medible;
+    this.origen = ['explicito', 'inferido', 'manual'].includes(origen) ? origen : 'inferido';
+    this.evidencia = evidencia;
+    this.fuentes_origen = Array.isArray(fuentes_origen) ? fuentes_origen : [fuentes_origen].filter(Boolean);
+    this.requiere_confirmacion = Boolean(requiere_confirmacion);
+    this.estado_decision = ['confirmado', 'pendiente', 'rechazado', 'fuera_de_alcance'].includes(estado_decision)
+      ? estado_decision
+      : (this.requiere_confirmacion ? 'pendiente' : 'confirmado');
+    this.restricciones_excluidas = Array.isArray(restricciones_excluidas)
+      ? restricciones_excluidas
+      : [restricciones_excluidas].filter(Boolean);
     this.aprobado = aprobado;
     this.createdAt = createdAt || new Date();
     this.updatedAt = updatedAt || new Date();

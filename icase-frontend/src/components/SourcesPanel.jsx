@@ -56,6 +56,8 @@ function NotebookAudioIcon({ size = 22, className = "" }) {
 
 export default function SourcesPanel({
   sources,
+  requirements = { functional: [], nonFunctional: [] },
+  referenceMode = false,
   onAddSource,
   onUpdateSource,
   onSuggestSourceMetadata,
@@ -77,6 +79,7 @@ export default function SourcesPanel({
   const [editedName, setEditedName] = useState("");
   const [localProvider, setLocalProvider] = useState("auto");
   const [activeSourceId, setActiveSourceId] = useState(null);
+  const [activeRequirementId, setActiveRequirementId] = useState(null);
   const fileInputRef = useRef(null);
 
   const currentProvider = selectedProvider !== undefined ? selectedProvider : localProvider;
@@ -129,6 +132,9 @@ export default function SourcesPanel({
   const totalSourcesCount = uniqueSources.length + (uploadingItem && !uniqueSources.some((s) => s.name === uploadingItem.name) ? 1 : 0);
   const isAnySourceLoading = Boolean(uploadingItem) || uniqueSources.some((s) => s.isUploading);
   const activeSource = uniqueSources.find((source) => source.id === activeSourceId) || null;
+  const functionalRequirements = Array.isArray(requirements?.functional) ? requirements.functional : [];
+  const nonFunctionalRequirements = Array.isArray(requirements?.nonFunctional) ? requirements.nonFunctional : [];
+  const totalRequirements = functionalRequirements.length + nonFunctionalRequirements.length;
 
   const sourceGroups = React.useMemo(() => {
     const labels = {
@@ -238,9 +244,13 @@ export default function SourcesPanel({
       <aside className="w-14 bg-[#171425] border-r border-[#29243B] flex h-full shrink-0 flex-col items-center py-3 text-white shadow-sm">
         <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".txt,.pdf,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.opus,.docx" className="hidden" />
         <button type="button" onClick={onBackToDashboard} className="mb-3 rounded-lg p-2 text-slate-300 hover:bg-white/10 hover:text-white" title="Volver a proyectos"><ArrowLeft size={17} /></button>
-        <button type="button" onClick={onToggleCollapsed} className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20" title="Mostrar fuentes"><PanelLeftOpen size={18} /></button>
+        <button type="button" onClick={onToggleCollapsed} className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20" title={referenceMode ? "Mostrar requisitos" : "Mostrar fuentes"}><PanelLeftOpen size={18} /></button>
         <div className="my-3 h-px w-7 bg-white/15" />
-        <button type="button" disabled={isAnySourceLoading} onClick={() => fileInputRef.current?.click()} className="relative rounded-lg p-2 text-slate-200 hover:bg-white/10 disabled:opacity-40" title={`Fuentes (${totalSourcesCount})`}><Files size={18} />{totalSourcesCount > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[#A3FF12] px-1 text-[9px] font-bold leading-4 text-[#171425]">{totalSourcesCount}</span>}</button>
+        {referenceMode ? (
+          <button type="button" onClick={onToggleCollapsed} className="relative rounded-lg p-2 text-slate-200 hover:bg-white/10" title={`Requisitos aprobados (${totalRequirements})`}><CheckCircle2 size={18} />{totalRequirements > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[#A3FF12] px-1 text-[9px] font-bold leading-4 text-[#171425]">{totalRequirements}</span>}</button>
+        ) : (
+          <button type="button" disabled={isAnySourceLoading} onClick={() => fileInputRef.current?.click()} className="relative rounded-lg p-2 text-slate-200 hover:bg-white/10 disabled:opacity-40" title={`Fuentes (${totalSourcesCount})`}><Files size={18} />{totalSourcesCount > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[#A3FF12] px-1 text-[9px] font-bold leading-4 text-[#171425]">{totalSourcesCount}</span>}</button>
+        )}
         <div className="mt-auto flex w-full items-center justify-center">
           <RbixLogo size="sm" showText={false} isDark={true} />
         </div>
@@ -252,13 +262,13 @@ export default function SourcesPanel({
     <aside className="w-64 md:w-72 bg-white border-r border-[#E7E3EE] flex flex-col h-full shrink-0 select-none overflow-hidden font-inter relative shadow-xs">
 
       {/* Hidden File Input */}
-      <input
+      {!referenceMode && <input
         type="file"
         ref={fileInputRef}
         onChange={handleFileUpload}
         accept=".txt,.pdf,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.opus,.docx"
         className="hidden"
-      />
+      />}
 
       {/* 1. PROJECT TITLE HEADER: Título blanco grande con fondo #1F1D30 */}
       <div className="p-4 border-b border-[#29243B] bg-[#171425] text-white shrink-0 z-10 relative shadow-sm">
@@ -303,15 +313,21 @@ export default function SourcesPanel({
       {/* 2. SOURCES HEADER */}
       <div className="p-4 border-b border-[#E7E3EE] bg-white z-10 relative">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-slate-800 font-inter">Fuentes</h3>
+          <h3 className="text-sm font-bold text-slate-800 font-inter">{referenceMode ? "Requisitos aprobados" : "Fuentes"}</h3>
           {/* Texto neutral sin pintar como solicitó el usuario */}
           <span className="text-xs font-normal text-slate-500 font-inter">
-            {totalSourcesCount} {totalSourcesCount === 1 ? "cargada" : "cargadas"}
+            {referenceMode
+              ? `${totalRequirements} ${totalRequirements === 1 ? "requisito" : "requisitos"}`
+              : `${totalSourcesCount} ${totalSourcesCount === 1 ? "cargada" : "cargadas"}`}
           </span>
         </div>
 
         {/* Action Button: Cargar Insumos con altura reducida e icono de adjuntar */}
-        <button
+        {referenceMode ? (
+          <p className="rounded-xl border border-[#DDD2F5] bg-[#F8F5FF] px-3 py-2 text-[11px] leading-relaxed text-[#5B21B6]">
+            Referencia de solo lectura para mantener la trazabilidad durante el diseño.
+          </p>
+        ) : <button
           type="button"
           disabled={isAnySourceLoading}
           onClick={() => fileInputRef.current?.click()}
@@ -319,11 +335,19 @@ export default function SourcesPanel({
         >
           <Upload size={17} className="text-[#7C3AED] group-hover:-translate-y-0.5 transition-transform duration-200 shrink-0" />
           <span className="text-[15px] font-bold tracking-tight">Subir Insumos</span>
-        </button>
+        </button>}
       </div>
 
       {/* 3. UPLOADED DOCUMENTS LIST: Diseño limpio y sin bordes estilo NotebookLM */}
       <div className="flex-1 overflow-y-auto p-3 space-y-1 z-10 relative bg-white">
+        {referenceMode ? (
+          <RequirementsReferenceList
+            functional={functionalRequirements}
+            nonFunctional={nonFunctionalRequirements}
+            activeId={activeRequirementId}
+            onToggle={setActiveRequirementId}
+          />
+        ) : <>
         {/* Efecto de Carga del Archivo en Proceso idéntico a NotebookLM */}
         {uploadingItem && (
           <div className="px-3 py-2.5 rounded-xl bg-[#F2EDFF] border border-[#DDD2F5] flex items-center justify-between gap-3 font-inter transition-all">
@@ -400,6 +424,7 @@ export default function SourcesPanel({
             ))}
           </div>
         )}
+        </>}
       </div>
 
       {/* 4. ACTION BAR: Selector de IA / Modelo + Botón de Procesar / Reprocesar */}
@@ -448,7 +473,7 @@ export default function SourcesPanel({
           </div>
         </div>
 
-        <button
+        {!referenceMode && <button
           type="button"
           onClick={() => onProcess(currentProvider)}
           disabled={sources.length === 0 || isProcessing || isAnySourceLoading}
@@ -470,7 +495,7 @@ export default function SourcesPanel({
               <span>Procesar</span>
             </>
           )}
-        </button>
+        </button>}
       </div>
 
       {/* 5. BRAND FOOTER DOCK: Solo en la parte inferior donde está el logo */}
@@ -481,7 +506,7 @@ export default function SourcesPanel({
       >
         <RbixLogo size="sm" isDark={true} />
       </div>
-      {activeSource && (
+      {!referenceMode && activeSource && (
         <SourceDetailsModal
           source={activeSource}
           onClose={() => setActiveSourceId(null)}
@@ -490,6 +515,75 @@ export default function SourcesPanel({
         />
       )}
     </aside>
+  );
+}
+
+function RequirementsReferenceList({ functional, nonFunctional, activeId, onToggle }) {
+  const sections = [
+    { key: "functional", label: "Requisitos funcionales", prefix: "RF", items: functional },
+    { key: "non-functional", label: "Requisitos no funcionales", prefix: "RNF", items: nonFunctional }
+  ];
+
+  if (!functional.length && !nonFunctional.length) {
+    return (
+      <div className="px-3 py-12 text-center">
+        <p className="text-xs font-semibold text-slate-700">No hay requisitos disponibles</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Regresa a la fase de requisitos para revisar el estado del proyecto.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {sections.map((section) => section.items.length > 0 && (
+        <section key={section.key}>
+          <div className="mb-2 flex items-center justify-between px-1">
+            <h4 className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{section.label}</h4>
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">{section.items.length}</span>
+          </div>
+          <div className="space-y-2">
+            {section.items.map((requirement, index) => {
+              const id = requirement.id || requirement.identificador || `${section.prefix}-${String(index + 1).padStart(2, "0")}`;
+              const title = requirement.name || requirement.nombre || requirement.category || "Requisito";
+              const description = requirement.description || requirement.descripcion || "";
+              const priority = requirement.priority || requirement.prioridad || "Media";
+              const actors = requirement.actors || requirement.actores || [];
+              const metric = requirement.metric || requirement.metrica_medible || "";
+              const expanded = activeId === id;
+
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onToggle(expanded ? null : id)}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${expanded ? "border-[#CFC0F1] bg-[#F8F5FF]" : "border-slate-200 bg-white hover:border-[#D8D1E3] hover:bg-[#FCFBFE]"}`}
+                  aria-expanded={expanded}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className={`mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold ${section.prefix === "RF" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"}`}>{id}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[11px] font-semibold leading-snug text-slate-800 ${expanded ? "" : "line-clamp-2"}`}>{title}</p>
+                      <div className="mt-1 flex items-center gap-1.5 text-[9px] text-slate-500">
+                        <span>{priority}</span>
+                        {requirement.approved !== false && <span className="text-emerald-600">Aprobado</span>}
+                      </div>
+                    </div>
+                  </div>
+                  {expanded && (
+                    <div className="mt-2.5 space-y-2 border-t border-violet-100 pt-2.5 text-[10px] leading-relaxed text-slate-600">
+                      {description && <p>{description}</p>}
+                      {Array.isArray(actors) && actors.length > 0 && <p><strong className="text-slate-700">Actores:</strong> {actors.join(", ")}</p>}
+                      {metric && <p><strong className="text-slate-700">Métrica:</strong> {metric}</p>}
+                      {requirement.requiresConfirmation && <p className="font-medium text-amber-700">Pendiente de confirmación</p>}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 

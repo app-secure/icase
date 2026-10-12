@@ -4,10 +4,11 @@ import BrainGearsIcon from "./BrainGearsIcon";
 
 const emptyRequirement = (type) => type === "rf" ? {
   name: "", description: "", actors: ["Usuario"], priority: "Alta",
-  precondition: "", postcondition: "", approved: false
+  precondition: "", postcondition: "", origin: "manual", evidence: "",
+  requiresConfirmation: false, approved: false
 } : {
   category: "", description: "", metric: "", compliance: "Pendiente de validación",
-  approved: false
+  origin: "manual", evidence: "", requiresConfirmation: false, approved: false
 };
 
 const nextId = (items, prefix) => {
@@ -19,7 +20,8 @@ const nextId = (items, prefix) => {
 };
 
 export default function RequirementsView({
-  requirements, onApprovePhase, isApproved, onApplyAiCorrection, onUpdateRequirements
+  requirements, onApprovePhase, isApproved, onApplyAiCorrection, onUpdateRequirements,
+  readOnly = false, onBackToDesign
 }) {
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
@@ -75,7 +77,10 @@ export default function RequirementsView({
           .map(actor => actor.trim()).filter(Boolean),
         priority: draft.priority || "Alta",
         precondition: String(draft.precondition || "").trim(),
-        postcondition: String(draft.postcondition || "").trim()
+        postcondition: String(draft.postcondition || "").trim(),
+        origin: "manual",
+        evidence: "",
+        requiresConfirmation: false
       };
       if (isNew) updatedFunctional.push(normalized); else updatedFunctional[index] = normalized;
     } else {
@@ -85,7 +90,10 @@ export default function RequirementsView({
         category: draft.category.trim(),
         description: draft.description.trim(),
         metric: draft.metric.trim(),
-        compliance: String(draft.compliance || "Pendiente de validación").trim()
+        compliance: String(draft.compliance || "Pendiente de validación").trim(),
+        origin: "manual",
+        evidence: "",
+        requiresConfirmation: false
       };
       if (isNew) updatedNonFunctional.push(normalized); else updatedNonFunctional[index] = normalized;
     }
@@ -167,6 +175,7 @@ export default function RequirementsView({
               onSave={saveRequirement}
               onCancelEdit={cancelEdit}
               onAdd={() => startAdd("rf")}
+              readOnly={readOnly}
             />
             <RequirementSection
               title="Requerimientos No Funcionales (Criterios de Calidad ISO 25010)"
@@ -184,13 +193,22 @@ export default function RequirementsView({
               onSave={saveRequirement}
               onCancelEdit={cancelEdit}
               onAdd={() => startAdd("rnf")}
+              readOnly={readOnly}
             />
             {!functional.length && !nonFunctional.length && !editing && <div className="py-8 text-center text-slate-400">No hay requisitos. Puedes añadirlos manualmente desde cada sección.</div>}
           </div>
         </div>
       </div>
 
-      <div className="z-10 w-full shrink-0 border-t border-slate-200 bg-white px-6 py-3.5 md:px-12">
+      {readOnly ? (
+        <div className="z-10 w-full shrink-0 border-t border-slate-200 bg-white px-6 py-3.5 md:px-12">
+          <div className="mx-auto flex w-full max-w-5xl justify-end">
+            <button type="button" onClick={onBackToDesign} className="rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-[#6D28D9]">
+              Volver a diagramas
+            </button>
+          </div>
+        </div>
+      ) : <div className="z-10 w-full shrink-0 border-t border-slate-200 bg-white px-6 py-3.5 md:px-12">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-2">
           {correctionFeedback && <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs ${correctionFeedback.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}><span className="truncate">{correctionFeedback.message}</span><button type="button" onClick={() => setCorrectionFeedback(null)} className="ml-2 font-bold text-slate-400 hover:text-slate-600">×</button></div>}
           <div className="flex items-center gap-3">
@@ -203,14 +221,14 @@ export default function RequirementsView({
             <button type="button" onClick={onApprovePhase} disabled={Boolean(editing)} className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#6D28D9] disabled:opacity-40"><Check size={14} /><span>{isApproved ? "Reintentar diagramas" : "Aprobar y generar diagramas"}</span></button>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
 
 function RequirementSection({
   title, type, items, numberOffset, editing, pendingDelete, formError,
-  onEdit, onDeleteRequest, onDelete, onCancelDelete, onDraftChange, onSave, onCancelEdit, onAdd
+  onEdit, onDeleteRequest, onDelete, onCancelDelete, onDraftChange, onSave, onCancelEdit, onAdd, readOnly = false
 }) {
   const newHere = editing?.type === type && editing.isNew;
   return (
@@ -219,7 +237,7 @@ function RequirementSection({
         <h3 className="text-base font-semibold tracking-tight text-slate-900">{title}</h3>
         <div className="flex shrink-0 items-center gap-3">
           <span className="text-xs text-slate-400">{items.length} {items.length === 1 ? "requisito" : "requisitos"}</span>
-          <button
+          {!readOnly && <button
             type="button"
             onClick={onAdd}
             disabled={Boolean(editing)}
@@ -227,7 +245,7 @@ function RequirementSection({
           >
             <Plus size={13} />
             {type === "rf" ? "Añadir RF" : "Añadir RNF"}
-          </button>
+          </button>}
         </div>
       </div>
       {items.map((item, index) => {
@@ -241,9 +259,9 @@ function RequirementSection({
             <div className="min-w-0 flex-1 space-y-1">
               {type === "rf" ? <FunctionalDisplay item={item} /> : <NonFunctionalDisplay item={item} />}
             </div>
-            <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+            {!readOnly && <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
               {deletingThis ? <><span className="mr-1 text-[11px] text-red-600">¿Eliminar?</span><button type="button" onClick={() => onDelete(type, index)} className="rounded-lg bg-red-600 px-2 py-1 text-[11px] font-semibold text-white">Sí</button><button type="button" onClick={onCancelDelete} className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-600">No</button></> : <><button type="button" disabled={Boolean(editing)} onClick={() => onEdit(type, index, item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-[#F2EDFF] hover:text-[#7C3AED] disabled:opacity-30" title="Editar este requisito"><Pencil size={14} /></button><button type="button" disabled={Boolean(editing)} onClick={() => onDeleteRequest(key)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30" title="Eliminar este requisito"><Trash2 size={14} /></button></>}
-            </div>
+            </div>}
           </article>
         );
       })}
@@ -254,11 +272,16 @@ function RequirementSection({
 }
 
 function FunctionalDisplay({ item }) {
-  return <><p><strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}</p><p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {Array.isArray(item.actors) ? item.actors.join(", ") : item.actors} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>{item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}{item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}</>;
+  return <><p><strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}</p><p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {Array.isArray(item.actors) ? item.actors.join(", ") : item.actors} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>{item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}{item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}<RequirementProvenance item={item} /></>;
 }
 
 function NonFunctionalDisplay({ item }) {
-  return <><p><strong className="font-semibold text-slate-900">{item.category}</strong>: {item.description}</p><p className="text-xs text-slate-600"><strong className="text-[#6D28D9]">Métrica cuantitativa:</strong> {item.metric}{item.compliance && <> <span>•</span> <span className="text-slate-500">{item.compliance}</span></>}</p></>;
+  return <><p><strong className="font-semibold text-slate-900">{item.category}</strong>: {item.description}</p><p className="text-xs text-slate-600"><strong className="text-[#6D28D9]">Métrica verificable:</strong> {item.metric}{item.compliance && <> <span>•</span> <span className="text-slate-500">{item.compliance}</span></>}</p><RequirementProvenance item={item} /></>;
+}
+
+function RequirementProvenance({ item }) {
+  const label = item.origin === "manual" ? "Manual" : item.origin === "explicito" ? "Explícito" : "Inferido";
+  return <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]"><span className={`rounded-full px-2 py-0.5 font-medium ${item.requiresConfirmation ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{label}{item.requiresConfirmation ? " · confirmar" : ""}</span>{item.evidence && <span className="max-w-full truncate text-slate-400" title={item.evidence}>Evidencia: “{item.evidence}”</span>}</div>;
 }
 
 function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isNew = false }) {

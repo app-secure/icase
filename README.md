@@ -133,10 +133,20 @@ Al ejecutar `npm install` se descargan las siguientes librerías:
 2. Haz clic en **"Nuevo Proyecto"** o selecciona uno existente.
 3. En la sección **Fuentes e Insumos**, arrastra tu audio, PDF o escribe el problema de software.
 4. Presiona **"Analizar Insumos con IA"**.
-5. Aprueba los requerimientos y revisa los cuatro **Diagramas PlantUML**. Los mockups se habilitan únicamente después de aprobar los diagramas.
+5. Aprueba los requerimientos y revisa los seis **Diagramas PlantUML** secuenciales. Los mockups se habilitan únicamente después de aprobarlos.
 6. En **Mockups**, usa el explorador por flujo, módulo y plataforma para marcar solo las pantallas que deseas generar. Los trabajos continúan en el servidor aunque cambies de pestaña.
 7. Revisa los indicadores de calidad y cobertura Web/Tablet/Móvil. Una pantalla con HTML truncado, sin estilos, con imágenes rotas o rutas locales se marca como inválida y no puede aprobarse.
 8. Configura una paleta manual o solicita una sugerencia puntual a la IA. La paleta queda versionada y se incorpora al contrato visual de las regeneraciones posteriores.
 9. Aprueba los mockups válidos y abre **"Previsualizar documento en PDF"** para ver y descargar el informe formal entregable.
 
 La generación utiliza un manifiesto de navegación estructurado (`pantalla`, `flujo`, `módulo`, `rol`, `plataforma`, `shell` y `ruta`). Esto permite preservar recorridos móviles de cliente y tablet de mesero, y mantener un contrato visual común entre pantallas relacionadas.
+
+### Pruebas con proveedores reales
+
+La suite normal no consume cuota. Para ejecutar dos proyectos completos con los proveedores configurados, define `GEMINI_API_KEY` y/o `OPENAI_API_KEY` y ejecuta desde `icase-backend`:
+
+```powershell
+npm run test:e2e:real
+```
+
+La reparación controlada de diagramas realiza un intento adicional por defecto. Puede configurarse entre 0 y 2 con `AI_DIAGRAM_REPAIR_RETRIES`.
