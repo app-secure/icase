@@ -3,6 +3,7 @@ import SourcesPanel from "./SourcesPanel";
 import RequirementsView from "./RequirementsView";
 import DiagramsView from "./DiagramsView";
 import DocumentViewer from "./DocumentViewer";
+import CodePlanningView from "./CodePlanningView";
 import {
   createProjectApi,
   updateProjectApi,
@@ -1221,11 +1222,19 @@ export default function ProjectWorkspace({
             projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}
             requirements={project.requirements}
           />
+        ) : project.currentPhase === 3 ? (
+          /* FASE 3: decisiones previas a la generación de código */
+          <CodePlanningView
+            projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}
+            projectName={project.name}
+            onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 2 })}
+            onOpenDocument={() => onUpdateProject({ ...project, currentPhase: 4 })}
+          />
         ) : (
-          /* FASE 3: Documento Consolidado */
+          /* FASE 4: Documento Consolidado */
           <DocumentViewer
             project={project}
-            onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 2 })}
+            onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 3 })}
           />
         )}
       </main>

@@ -525,4 +525,194 @@ export async function syncProjectRequirementsApi(projectId, requerimientosList) 
   }
 }
 
+async function fetchCodeApi(url, options) {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    window.dispatchEvent(new Event('icase:session-expired'));
+  }
+  return res;
+}
+
+export async function fetchCodePlanApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo cargar el plan de codificación.');
+  return data;
+}
+
+export async function proposeCodePhaseApi(projectId, phase, propuesta, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}`, {
+    method: 'PUT',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ propuesta, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo guardar la propuesta.');
+  return data;
+}
+
+export async function suggestCodePhaseApi(projectId, phase) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}/sugerencia`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo generar la propuesta.');
+  return data;
+}
+
+export async function reviewCodePhaseApi(projectId, phase, decision, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}/revision`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ decision, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo registrar la revisión.');
+  return data;
+}
+
+export async function generateBackendArtifactApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/backend/generar`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo generar el backend.');
+  return data;
+}
+
+export async function fetchGeneratedArtifactsApi(projectId, type = '') {
+  const query = type ? `?tipo=${encodeURIComponent(type)}` : '';
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos${query}`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ([]));
+  if (!res.ok) throw new Error(data.error || 'No se pudieron cargar los artefactos generados.');
+  return data;
+}
+
+export async function verifyGeneratedArtifactApi(projectId, artifactId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/verificar`, {
+    method: 'POST', headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo verificar el artefacto.');
+  return data;
+}
+
+export async function updateGeneratedArtifactFileApi(projectId, artifactId, ruta, contenido) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/archivos`, {
+    method: 'PUT', headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ ruta, contenido })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo guardar el archivo.');
+  return data;
+}
+
+export async function reviewBackendArtifactApi(projectId, artifactId, decision, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/backend/${artifactId}/revision`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ decision, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo revisar el backend.');
+  return data;
+}
+
+export async function generateFrontendArtifactApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/frontend/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo generar el frontend.');
+  return data;
+}
+
+export async function reviewFrontendArtifactApi(projectId, artifactId, decision, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/frontend/${artifactId}/revision`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo revisar el frontend.');
+  return data;
+}
+
+export async function generateTestArtifactApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/pruebas/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudieron generar las pruebas.');
+  return data;
+}
+
+export async function reviewTestArtifactApi(projectId, artifactId, decision, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/pruebas/${artifactId}/revision`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo revisar la suite de pruebas.');
+  return data;
+}
+
+export async function generateInfrastructureArtifactApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/infraestructura/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo generar la infraestructura.');
+  return data;
+}
+
+export async function reviewInfrastructureArtifactApi(projectId, artifactId, decision, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/infraestructura/${artifactId}/revision`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo revisar la infraestructura.');
+  return data;
+}
+
+export async function generatePipelineArtifactApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/ci-cd/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo generar el pipeline CI/CD.');
+  return data;
+}
+
+export async function reviewPipelineArtifactApi(projectId, artifactId, decision, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/ci-cd/${artifactId}/revision`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo revisar el pipeline CI/CD.');
+  return data;
+}
+
+export async function generateDeliveryArtifactApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo generar el paquete final.');
+  return data;
+}
+
+export async function reviewDeliveryArtifactApi(projectId, artifactId, decision, observaciones = '') {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/${artifactId}/revision`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo revisar el paquete final.');
+  return data;
+}
+
+export async function downloadDeliveryArtifactApi(projectId, artifactId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/${artifactId}/descargar`, { headers: getAuthHeaders() });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'No se pudo descargar el paquete final.');
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const name = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'icase-entrega.zip';
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
+  URL.revokeObjectURL(url);
+}
+
 

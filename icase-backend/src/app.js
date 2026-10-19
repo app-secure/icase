@@ -11,6 +11,8 @@ const MongoFuenteRepository = require('./interface-adapters/repositories/MongoFu
 const MongoCasoDeUsoRepository = require('./interface-adapters/repositories/MongoCasoDeUsoRepository');
 const MongoDisenoRepository = require('./interface-adapters/repositories/MongoDisenoRepository');
 const MongoTrabajoGeneracionRepository = require('./interface-adapters/repositories/MongoTrabajoGeneracionRepository');
+const MongoPlanCodificacionRepository = require('./interface-adapters/repositories/MongoPlanCodificacionRepository');
+const MongoArtefactoGeneradoRepository = require('./interface-adapters/repositories/MongoArtefactoGeneradoRepository');
 
 // Servicios
 const ModelosIaService = require('./infrastructure/services/ModelosIaService');
@@ -21,6 +23,14 @@ const MockupIaService = require('./infrastructure/services/MockupIaService');
 const MockupTraceabilityService = require('./infrastructure/services/MockupTraceabilityService');
 const FinalProjectAuditService = require('./infrastructure/services/FinalProjectAuditService');
 const RequirementChangeService = require('./core/services/RequirementChangeService');
+const CodePlanningProposalService = require('./core/services/CodePlanningProposalService');
+const BackendScaffoldGenerator = require('./infrastructure/services/BackendScaffoldGenerator');
+const FrontendScaffoldGenerator = require('./infrastructure/services/FrontendScaffoldGenerator');
+const TestSuiteGenerator = require('./infrastructure/services/TestSuiteGenerator');
+const InfrastructureGenerator = require('./infrastructure/services/InfrastructureGenerator');
+const CiCdPipelineGenerator = require('./infrastructure/services/CiCdPipelineGenerator');
+const DeliveryPackageGenerator = require('./infrastructure/services/DeliveryPackageGenerator');
+const ZipArchiveService = require('./infrastructure/services/ZipArchiveService');
 
 // Casos de Uso
 const CrearProyecto = require('./core/use-cases/CrearProyecto');
@@ -31,6 +41,8 @@ const RestaurarVersionDiagrama = require('./core/use-cases/RestaurarVersionDiagr
 const AprobarFase = require('./core/use-cases/AprobarFase');
 const GenerarMockups = require('./core/use-cases/GenerarMockups');
 const ActualizarMockupManual = require('./core/use-cases/ActualizarMockupManual');
+const GestionarPlanCodificacion = require('./core/use-cases/GestionarPlanCodificacion');
+const GestionarArtefactosCodigo = require('./core/use-cases/GestionarArtefactosCodigo');
 
 // Controladores
 const ProyectoController = require('./interface-adapters/controllers/ProyectoController');
@@ -39,6 +51,7 @@ const DiagramaController = require('./interface-adapters/controllers/DiagramaCon
 const FuenteController = require('./interface-adapters/controllers/FuenteController');
 const AuthController = require('./interface-adapters/controllers/AuthController');
 const MockupController = require('./interface-adapters/controllers/MockupController');
+const CodificacionController = require('./interface-adapters/controllers/CodificacionController');
 
 // Rutas
 const buildProyectoRoutes = require('./routes/proyectoRoutes');
@@ -47,6 +60,7 @@ const buildDiagramaRoutes = require('./routes/diagramaRoutes');
 const buildFuenteRoutes = require('./routes/fuenteRoutes');
 const buildAuthRoutes = require('./routes/authRoutes');
 const buildMockupRoutes = require('./routes/mockupRoutes');
+const buildCodificacionRoutes = require('./routes/codificacionRoutes');
 
 function createApp() {
   const app = express();
@@ -65,6 +79,8 @@ function createApp() {
   const casoDeUsoRepo = new MongoCasoDeUsoRepository();
   const disenoRepo = new MongoDisenoRepository();
   const trabajoGeneracionRepo = new MongoTrabajoGeneracionRepository();
+  const planCodificacionRepo = new MongoPlanCodificacionRepository();
+  const artefactoGeneradoRepo = new MongoArtefactoGeneradoRepository();
 
   const modelosIaService = new ModelosIaService();
   const plantumlValidator = new PlantUMLValidatorService();
@@ -73,6 +89,14 @@ function createApp() {
   const mockupIaService = new MockupIaService();
   const mockupTraceabilityService = new MockupTraceabilityService();
   const finalProjectAuditService = new FinalProjectAuditService({ mockupTraceabilityService });
+  const codePlanningProposalService = new CodePlanningProposalService();
+  const backendScaffoldGenerator = new BackendScaffoldGenerator();
+  const frontendScaffoldGenerator = new FrontendScaffoldGenerator();
+  const testSuiteGenerator = new TestSuiteGenerator();
+  const infrastructureGenerator = new InfrastructureGenerator();
+  const ciCdPipelineGenerator = new CiCdPipelineGenerator();
+  const deliveryPackageGenerator = new DeliveryPackageGenerator();
+  const zipArchiveService = new ZipArchiveService();
   const requirementChangeService = new RequirementChangeService({
     proyectoRepository: proyectoRepo,
     diagramaRepository: diagramaRepo,
@@ -84,9 +108,9 @@ function createApp() {
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo,
     estandarRepository: estandarRepo,
     fuenteRepository: fuenteRepo,
-    disenoRepository: disenoRepo,
     plantumlValidatorService: plantumlValidator,
     aiOrchestratorService: modelosIaService
   });
@@ -119,6 +143,27 @@ function createApp() {
   });
   const actualizarMockupManualUseCase = new ActualizarMockupManual({
     disenoRepository: disenoRepo
+  });
+  const gestionarPlanCodificacion = new GestionarPlanCodificacion({
+    proyectoRepository: proyectoRepo,
+    planCodificacionRepository: planCodificacionRepo,
+    requerimientoRepository: requerimientoRepo,
+    diagramaRepository: diagramaRepo,
+    proposalService: codePlanningProposalService
+  });
+  const gestionarArtefactosCodigo = new GestionarArtefactosCodigo({
+    proyectoRepository: proyectoRepo,
+    requerimientoRepository: requerimientoRepo,
+    diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo,
+    planCodificacionRepository: planCodificacionRepo,
+    artefactoRepository: artefactoGeneradoRepo,
+    backendGenerator: backendScaffoldGenerator,
+    frontendGenerator: frontendScaffoldGenerator,
+    testGenerator: testSuiteGenerator,
+    infrastructureGenerator,
+    pipelineGenerator: ciCdPipelineGenerator,
+    deliveryGenerator: deliveryPackageGenerator
   });
 
   const proyectoController = new ProyectoController({
@@ -166,6 +211,12 @@ function createApp() {
     disenoRepository: disenoRepo,
     trabajoGeneracionRepository: trabajoGeneracionRepo
   });
+  const codificacionController = new CodificacionController({
+    gestionarPlanCodificacion,
+    gestionarArtefactosCodigo,
+    artefactoRepository: artefactoGeneradoRepo,
+    zipArchiveService
+  });
 
   // Health check
   app.get('/health', (req, res) => {
@@ -179,6 +230,7 @@ function createApp() {
   // Montaje de rutas
   app.use('/auth', buildAuthRoutes(authController));
   app.use('/proyectos', buildProyectoRoutes(proyectoController));
+  app.use('/proyectos', buildCodificacionRoutes(codificacionController));
   app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController));
   app.use('/diagramas', buildDiagramaRoutes(diagramaController));
   app.use('/', buildFuenteRoutes(fuenteController));
