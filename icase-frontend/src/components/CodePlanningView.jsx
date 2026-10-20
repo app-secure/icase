@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, Check, ChevronRight, Code2, Download, FolderTree, Layers3,
-  Loader2, LockKeyhole, RotateCcw, Save, Settings2, WandSparkles
+  Loader2, LockKeyhole, RotateCcw, Save, Scale, Settings2, ShieldCheck, WandSparkles, X
 } from 'lucide-react';
 import {
   fetchCodePlanApi, fetchGeneratedArtifactsApi, generateBackendArtifactApi,
@@ -12,7 +12,7 @@ import {
   reviewTestArtifactApi, suggestCodePhaseApi, verifyGeneratedArtifactApi, updateGeneratedArtifactFileApi
 } from '../services/api';
 
-const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas'];
+const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'];
 
 const DEFAULTS = {
   alcance_plataforma: {
@@ -41,14 +41,18 @@ frontend/
   src/{components,pages,services,hooks,utils}
 tests/{unit,integration,e2e}`,
     convenciones: 'Un módulo por capacidad funcional; nombres de archivos consistentes y sin código generado fuera de estas raíces.'
-  }
+  },
+  reglas_negocio: { reglas: [], notas: '' },
+  control_acceso: { autenticacion: { metodo: 'jwt', expiracion: '8h' }, roles: [], permisos: [], operaciones: [], notas: '' }
 };
 
 const ICONS = {
   alcance_plataforma: Settings2,
   stack_tecnologico: Code2,
   arquitectura_codigo: Layers3,
-  estructura_carpetas: FolderTree
+  estructura_carpetas: FolderTree,
+  reglas_negocio: Scale,
+  control_acceso: ShieldCheck
 };
 
 const STATUS_STYLE = {
@@ -314,8 +318,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
             <button onClick={onOpenDocument} className="rounded-lg border border-violet-200 px-3 py-2 text-xs font-medium text-violet-700">Ver documento actual</button>
           </div>
         </div>
-        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-600 transition-all" style={{ width: `${approvedCount * 25}%` }} /></div>
-        <p className="mt-1 text-right text-[11px] text-slate-500">{approvedCount}/4 decisiones aprobadas</p>
+        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-600 transition-all" style={{ width: `${(approvedCount / DECISION_PHASES.length) * 100}%` }} /></div>
+        <p className="mt-1 text-right text-[11px] text-slate-500">{approvedCount}/{DECISION_PHASES.length} decisiones aprobadas</p>
       </header>
 
       {visibleFeedback && <div className={`mx-6 mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${visibleFeedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><AlertCircle size={14} />{visibleFeedback.message}</div>}
@@ -356,7 +360,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                 <button disabled={busy || current.estado === 'bloqueada'} onClick={saveProposal} className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50"><Save size={14} />{current.estado === 'aprobada' ? 'Guardar nueva versión' : 'Guardar propuesta'}</button>
                 {current.estado === 'en_revision' && <button disabled={busy} onClick={() => review('aprobar')} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={14} />Aprobar decisión</button>}
               </div>
-              {approvedCount === 4 && <section className="mt-8 border-t border-slate-200 pt-6">
+              {approvedCount === DECISION_PHASES.length && <section className="mt-8 border-t border-slate-200 pt-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div><h3 className="font-semibold text-slate-900">Generación del backend</h3><p className="mt-1 text-xs text-slate-500">Código propuesto desde las decisiones y RF aprobados. La verificación detecta módulos pendientes antes de aprobar.</p></div>
                   <button disabled={busy} onClick={generateBackend} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Code2 size={15} />{backendArtifact ? 'Regenerar backend' : 'Generar backend'}</button>
@@ -481,7 +485,158 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
   </div>;
 }
 
+const RULE_DECISIONS = [
+  { value: 'confirmado', label: 'Confirmar', style: 'border-emerald-300 bg-emerald-50 text-emerald-700', icon: Check },
+  { value: 'rechazado', label: 'Rechazar', style: 'border-red-300 bg-red-50 text-red-700', icon: X },
+  { value: 'pendiente', label: 'Pendiente', style: 'border-slate-300 bg-white text-slate-600', icon: null }
+];
+
+function describeRule(rule) {
+  const limits = (min, max, unit) => (min !== undefined && max !== undefined ? `entre ${min} y ${max}${unit}` : min !== undefined ? `al menos ${min}${unit}` : `como máximo ${max}${unit}`);
+  switch (rule.tipo) {
+    case 'requerido': return `«${rule.campo}» es obligatorio`;
+    case 'unico': return `${(rule.campos || [rule.campo]).map((item) => `«${item}»`).join(' + ')} no se repite entre registros`;
+    case 'rango': return `«${rule.campo}» ${limits(rule.min, rule.max, '')}`;
+    case 'longitud': return `«${rule.campo}» ${limits(rule.min, rule.max, ' caracteres')}`;
+    case 'formato': return `«${rule.campo}» debe ser un ${rule.formato === 'email' ? 'correo electrónico' : 'URL'} válido`;
+    case 'comparacion': return `«${rule.campo}» ${rule.operador} ${rule.con_campo !== undefined ? `«${rule.con_campo}»` : JSON.stringify(rule.con_valor)}`;
+    case 'maquina_estados': return `«${rule.campo}» empieza en ${rule.inicial}. Transiciones: ${(rule.transiciones || []).map((item) => `${item.de} → ${item.a}`).join(', ')}`;
+    case 'inmutable': return `«${rule.campo}» no puede cambiar una vez creado`;
+    case 'valor_por_defecto': return `«${rule.campo}» vale ${JSON.stringify(rule.valor)} si no se envía`;
+    default: return rule.tipo;
+  }
+}
+
+function RulesEditor({ value, onChange, disabled }) {
+  const rules = Array.isArray(value.reglas) ? value.reglas : [];
+  const count = (decision) => rules.filter((item) => item.estado_decision === decision).length;
+  const patch = (id, changes) => onChange({ ...value, reglas: rules.map((item) => (item.id === id ? { ...item, ...changes } : item)) });
+  if (!rules.length) {
+    return <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+      No hay reglas propuestas. Usa «Generar propuesta desde el proyecto» o aprueba la etapa vacía si el sistema no necesita reglas específicas.
+    </div>;
+  }
+  return <div className="space-y-3">
+    {value.notas && <p className="text-xs text-slate-500">{value.notas}</p>}
+    <div className="flex flex-wrap gap-2 text-xs" aria-live="polite">
+      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">{count('confirmado')} confirmadas</span>
+      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">{count('pendiente')} pendientes</span>
+      <span className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-red-700">{count('rechazado')} rechazadas</span>
+    </div>
+    {rules.map((rule) => <article key={rule.id} className={`rounded-xl border p-4 ${rule.estado_decision === 'rechazado' ? 'border-red-100 bg-red-50/40' : 'border-slate-200 bg-white'}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="font-mono font-semibold text-slate-700">{rule.id}</span>
+            <span className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-700">{rule.tipo.replace('_', ' ')}</span>
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{rule.entidad}</span>
+            <span className={`rounded px-1.5 py-0.5 ${rule.origen === 'explicito' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{rule.origen === 'explicito' ? 'explícita en el RF' : 'inferida'}</span>
+            {(rule.rf || []).map((id) => <span key={id} className="rounded border border-slate-200 px-1.5 py-0.5 text-slate-500">{id}</span>)}
+          </div>
+          <p className="mt-2 text-sm font-medium text-slate-900">{describeRule(rule)}</p>
+          <label className="mt-2 block"><span className="mb-1 block text-[11px] font-semibold text-slate-600">Mensaje que verá el usuario</span>
+            <input disabled={disabled} value={rule.mensaje || ''} maxLength={240} onChange={(event) => patch(rule.id, { mensaje: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
+          </label>
+          {rule.evidencia && <blockquote className="mt-2 border-l-2 border-slate-300 pl-3 text-xs italic text-slate-600">«{rule.evidencia}»{rule.evidencia_literal ? '' : ' (no consta literalmente en el RF)'}</blockquote>}
+          {rule.justificacion && <p className="mt-1 text-xs text-slate-500">Por qué se propone: {rule.justificacion}</p>}
+        </div>
+        <div className="flex gap-1" role="group" aria-label={`Decisión sobre ${rule.id}`}>
+          {RULE_DECISIONS.map(({ value: decision, label, style, icon: Icon }) => <button key={decision} type="button" disabled={disabled} aria-pressed={rule.estado_decision === decision}
+            onClick={() => patch(rule.id, { estado_decision: decision })}
+            className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${rule.estado_decision === decision ? style : 'border-slate-200 bg-white text-slate-400 hover:text-slate-600'}`}>
+            {Icon && <Icon size={12} />}{label}
+          </button>)}
+        </div>
+      </div>
+    </article>)}
+  </div>;
+}
+
+const ACCESS_METHODS = [
+  { method: 'GET', label: 'Ver' },
+  { method: 'POST', label: 'Crear' },
+  { method: 'PATCH', label: 'Editar' },
+  { method: 'DELETE', label: 'Eliminar' }
+];
+
+function AccessEditor({ value, onChange, disabled }) {
+  const auth = value.autenticacion || { metodo: 'jwt', expiracion: '8h' };
+  const roles = Array.isArray(value.roles) ? value.roles : [];
+  const permisos = Array.isArray(value.permisos) ? value.permisos : [];
+  const operaciones = Array.isArray(value.operaciones) ? value.operaciones : [];
+  const active = roles.filter((role) => role.incluir !== false);
+  const [newRole, setNewRole] = useState('');
+  const setAuth = (changes) => onChange({ ...value, autenticacion: { ...auth, ...changes } });
+  const setRole = (id, changes) => onChange({ ...value, roles: roles.map((role) => (role.id === id ? { ...role, ...changes } : role)) });
+  const has = (operation, role, method) => permisos.some((item) => item.operacion === operation && item.rol === role && item.metodos.includes(method));
+  const toggle = (operation, role, method) => {
+    const current = permisos.find((item) => item.operacion === operation && item.rol === role);
+    const methods = current ? (current.metodos.includes(method) ? current.metodos.filter((item) => item !== method) : [...current.metodos, method]) : [method];
+    const others = permisos.filter((item) => item !== current);
+    onChange({ ...value, permisos: methods.length ? [...others, { operacion: operation, rol: role, metodos: methods }] : others });
+  };
+  const addRole = () => {
+    const name = newRole.trim();
+    if (!name) return;
+    onChange({ ...value, roles: [...roles, { id: name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), nombre: name, incluir: true, autoregistro: false }] });
+    setNewRole('');
+  };
+  const open = active.filter((role) => role.autoregistro);
+
+  return <div className="space-y-5">
+    {value.notas && <p className="text-xs text-slate-500">{value.notas}</p>}
+    <section className="grid gap-4 md:grid-cols-2">
+      <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">Autenticación</span>
+        <select disabled={disabled} value={auth.metodo} onChange={(event) => setAuth({ metodo: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50">
+          <option value="jwt">Inicio de sesión con correo y contraseña (JWT)</option>
+          <option value="ninguna">Ninguna: la API será pública</option>
+        </select></label>
+      <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">Duración de la sesión</span>
+        <select disabled={disabled || auth.metodo === 'ninguna'} value={auth.expiracion} onChange={(event) => setAuth({ expiracion: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50">
+          {['1h', '8h', '24h', '7d'].map((item) => <option key={item} value={item}>{item}</option>)}
+        </select></label>
+    </section>
+    {auth.metodo === 'ninguna' && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">Sin autenticación, cualquier persona con acceso a la red podrá leer, crear, modificar y eliminar datos.</p>}
+    {auth.metodo === 'jwt' && <>
+      <section>
+        <h3 className="mb-2 text-sm font-semibold text-slate-800">Roles</h3>
+        <p className="mb-3 text-xs text-slate-500">El rol <strong>administrador</strong> siempre existe: gestiona usuarios y puede operar todo. Sus credenciales iniciales se definen con ADMIN_EMAIL y ADMIN_PASSWORD al desplegar.</p>
+        <div className="space-y-2">
+          {roles.map((role) => <div key={role.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 p-3 text-sm">
+            <span className="min-w-[8rem] font-medium text-slate-800">{role.nombre}</span>
+            <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" disabled={disabled} checked={role.incluir !== false} onChange={(event) => setRole(role.id, { incluir: event.target.checked, ...(event.target.checked ? {} : { autoregistro: false }) })} />Incluir</label>
+            <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" disabled={disabled || role.incluir === false} checked={role.autoregistro === true} onChange={(event) => setRole(role.id, { autoregistro: event.target.checked })} />Permitir crear cuenta sin administrador</label>
+          </div>)}
+          {!roles.length && <p className="text-xs text-slate-500">Ningún RF declara actores: solo el administrador podrá operar el sistema, a menos que agregues roles.</p>}
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input disabled={disabled} value={newRole} onChange={(event) => setNewRole(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addRole(); } }} placeholder="Nuevo rol" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
+          <button type="button" disabled={disabled || !newRole.trim()} onClick={addRole} className="rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700 disabled:opacity-50">Agregar rol</button>
+        </div>
+        {open.length > 0 && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Cualquier persona podrá crear una cuenta con los roles: {open.map((role) => role.nombre).join(', ')}. Revisa sus permisos de escritura.</p>}
+      </section>
+      <section>
+        <h3 className="mb-2 text-sm font-semibold text-slate-800">Qué puede hacer cada rol</h3>
+        {!active.length ? <p className="text-xs text-slate-500">No hay roles incluidos.</p> : <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-slate-600"><tr><th scope="col" className="p-2">Operación</th>{active.map((role) => <th scope="col" key={role.id} className="p-2">{role.nombre}</th>)}</tr></thead>
+            <tbody>{operaciones.map((operation) => <tr key={operation.id} className="border-t border-slate-100 align-top">
+              <td className="p-2"><span className="font-mono font-semibold">{operation.id}</span><br />{operation.nombre}</td>
+              {active.map((role) => <td key={role.id} className="p-2"><div className="flex flex-wrap gap-1" role="group" aria-label={`${operation.id} para ${role.nombre}`}>
+                {ACCESS_METHODS.map(({ method, label }) => <button key={method} type="button" disabled={disabled} aria-pressed={has(operation.id, role.id, method)} onClick={() => toggle(operation.id, role.id, method)}
+                  className={`rounded border px-1.5 py-0.5 ${has(operation.id, role.id, method) ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400 hover:text-slate-600'}`}>{label}</button>)}
+              </div></td>)}
+            </tr>)}</tbody>
+          </table>
+        </div>}
+      </section>
+    </>}
+  </div>;
+}
+
 function PhaseForm({ phase, value, onChange, disabled }) {
+  if (phase === 'control_acceso') return <AccessEditor value={value} onChange={onChange} disabled={disabled} />;
+  if (phase === 'reglas_negocio') return <RulesEditor value={value} onChange={onChange} disabled={disabled} />;
   const field = (key, label, multiline = false) => {
     const displayValue = Array.isArray(value[key]) ? value[key].join(', ') : (value[key] || '');
     const update = (raw) => onChange({
