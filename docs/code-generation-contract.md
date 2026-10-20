@@ -2,7 +2,26 @@
 
 Este contrato es la base común de los módulos de código, pruebas, infraestructura y entrega. Ningún generador modifica el flujo ni aprueba su propio resultado.
 
-## Stack objetivo inicial
+## Stacks soportados
+
+`StackCatalog` es la única fuente de qué sabe generar la herramienta. Un stack no soportado **nunca se sustituye en silencio**: se avisa en la propuesta, se rechaza al proponerlo en la etapa de stack y falla la generación con un mensaje que nombra las alternativas.
+
+| Eje | Opciones |
+|---|---|
+| Backend | Node.js + Express · Node.js + NestJS · Java + Spring Boot |
+| Base de datos | PostgreSQL · MySQL · MongoDB (Java + Spring Boot solo con PostgreSQL o MySQL) |
+| Frontend | React + Vite |
+| Móvil (opcional) | Expo (React Native) |
+
+El contrato, la documentación OpenAPI, las migraciones SQL y las pruebas por HTTP son comunes a todos los backends. **Un stack se considera soportado solo si pasa esas mismas pruebas de verificación** (CRUD tipado, reglas, matriz de permisos, autenticación y OpenAPI); por eso añadir otro es una tarea acotada. Valores por defecto sin indicación: Express con MongoDB; con Spring Boot, PostgreSQL.
+
+### Java + Spring Boot
+
+El código Java es **fijo** (`templates/spring`) y se guía por los mismos datos que el backend Node, escritos como JSON en `src/main/resources/icase/` (`contract`, `model`, `rules`, `policy`, `openapi`); no se genera código Java por entidad. Spring Boot 3 + JdbcTemplate, migraciones con Flyway (los SQL de `0001_init` y `0002_auth`, aplicados al arrancar), JWT con java-jwt y contraseñas con BCrypt. Se conecta con `DATABASE_URL` (misma variable que Node) y reintenta mientras la base de datos arranca. En producción se declara `APP_ENV=production`, que rechaza un `JWT_SECRET` débil.
+
+Límites: no admite MongoDB; las contraseñas con más de 72 bytes se truncan (límite de BCrypt; el máximo admitido es 128 caracteres); no hay CORS abierto como en Node (el frontend usa el mismo origen mediante el proxy).
+
+## Plantilla Node (propuesta inicial)
 
 - Plataforma generada: web.
 - Backend: Node.js + Express.
@@ -10,7 +29,7 @@ Este contrato es la base común de los módulos de código, pruebas, infraestruc
 - Base de datos: MongoDB.
 - Gestor de paquetes: npm.
 - El andamiaje, las configuraciones y los pipelines salen de plantillas deterministas.
-- La IA se reserva para lógica de dominio y adaptaciones justificadas por requisitos aprobados.
+- El código no lo escribe una IA: la IA interviene antes (insumos, requisitos, diagramas, mockups y la propuesta de reglas de negocio) y toda decisión que llega al código la aprueba una persona.
 
 El stack se propone por proyecto y requiere aprobación antes de avanzar. Estos valores son la propuesta predeterminada, no una aprobación automática.
 
