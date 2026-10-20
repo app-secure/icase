@@ -7,7 +7,15 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
     required: true,
     index: true
   },
-  tipo: { type: String, enum: ['mockups', 'diagrama'], default: 'mockups', index: true },
+  tipo: {
+    type: String,
+    enum: [
+      'mockups', 'diagrama', 'codigo_backend', 'codigo_frontend', 'pruebas',
+      'infraestructura', 'pipeline_ci_cd', 'paquete_entrega'
+    ],
+    default: 'mockups',
+    index: true
+  },
   tipo_diagrama: { type: String, default: null, index: true },
   estado: {
     type: String,

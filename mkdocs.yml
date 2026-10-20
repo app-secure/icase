@@ -1,0 +1,40 @@
+site_name: I-CASE · Documentación
+site_description: Manual de usuario, API, IA y guía técnica de I-CASE.
+site_author: Equipo I-CASE
+docs_dir: docs
+site_dir: site
+theme:
+  name: mkdocs
+  locale: es
+plugins:
+  - search:
+      lang: es
+markdown_extensions:
+  - admonition
+  - tables
+  - fenced_code
+  - toc:
+      permalink: true
+nav:
+  - Inicio: index.md
+  - Manual de usuario:
+      - Primeros pasos: usuario/primeros-pasos.md
+      - Requisitos y diagramas: usuario/requisitos-y-diagramas.md
+      - Mockups y exportación: usuario/mockups-y-exportacion.md
+      - Codificación: usuario/codificacion.md
+      - Caso de estudio: usuario/caso-de-estudio.md
+  - API:
+      - Guía e integraciones: api/guia.md
+      - Explorador Swagger: api/explorador.html
+  - Inteligencia artificial:
+      - Funcionamiento: ia/funcionamiento.md
+      - Prompts por fase: ia/prompts.md
+  - Desarrollo:
+      - Instalación: desarrollo/instalacion.md
+      - Arquitectura: desarrollo/arquitectura.md
+      - Contrato de diagramas: desarrollo/contratos/diagram-generation-contract.md
+      - Contrato de codificación: desarrollo/contratos/code-generation-contract.md
+  - Pruebas:
+      - Plan y ejecución: pruebas/plan-y-ejecucion.md
+      - Resultados y pendientes: pruebas/resultados.md
+  - Despliegue: despliegue/guia.md
