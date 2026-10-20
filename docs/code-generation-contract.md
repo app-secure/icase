@@ -174,6 +174,22 @@ Verificación: el documento se valida con un validador de OpenAPI 3.1, y una pru
 
 Limitaciones actuales: no se incluyen ejemplos de valores, ni se sirve una interfaz gráfica (Swagger UI, Redoc); el documento se puede abrir en cualquiera de ellas.
 
+### Informe de generación
+
+Cada backend generado incluye `backend/GENERATION-REPORT.json` y `backend/GENERATION-REPORT.md` (también viajan en el paquete de entrega) con lo que se produjo de **cada RF**. Lo calcula `GenerationReportService`, sin IA, desde el contrato y el texto de los requisitos.
+
+| Nivel | Cuándo | Qué se genera |
+| --- | --- | --- |
+| Completo | El RF se asoció a una entidad del modelo de dominio y no se detectó nada que el generador no produzca. | Alta, consulta, edición y baja con validación de tipos, reglas confirmadas y permisos. |
+| Solo datos | Sin entidad (esquema libre), o con entidad pero el RF pide además algo no soportado. | Solo guardar y consultar registros. |
+| No soportado | El RF pide algo no soportado y no hay entidad que lo sostenga. | Un almacén de registros libre, sin más. |
+
+Capacidades que se detectan y no se generan (`core/constants/GenerationCapabilities.js`): tiempo real, archivos e imágenes, reportes y exportación, cálculos y procesos, correo/SMS/notificaciones, pagos en línea, mapas, integraciones y acceso externo, cámara/QR/biometría, y recuperación de contraseña o segundo factor. Cada una indica qué ocurre en su lugar. El tiempo real también se detecta en la decisión de stack (Socket.IO/WebSocket), aunque ningún RF lo mencione.
+
+El informe añade las entidades del modelo sin RF (tienen tabla, pero no API ni pantalla), notas del proyecto (app móvil sin firmar, requisitos no funcionales sin medir) y los límites que valen para toda aplicación generada (interfaz genérica con JSON, listas sin paginación ni filtros, sin datos iniciales, sin propiedad de registros, regenerar pierde ediciones). Esa lista (`GENERAL_LIMITS`) debe actualizarse cuando alguno deje de ser cierto.
+
+La detección es por palabras clave sobre nombre, descripción y métrica: avisa, pero no demuestra que un RF «completo» no pida algo con otras palabras. Antes de generar, `GET /proyectos/:id/codificacion/informe-generacion` calcula el informe con las decisiones actuales sin guardar nada; la interfaz lo muestra en la sección del backend (vista previa antes de generar y el de la versión generada después).
+
 ## Evidencia de ejecución
 
 La verificación estructural no habilita la aprobación por sí sola. Para backend, frontend, pruebas y paquete final se exige una evidencia asociada a la huella exacta de sus archivos. La verificación:
@@ -201,6 +217,7 @@ Tipos válidos:
 - `GET /proyectos/:id/codificacion`: obtiene o inicializa el plan.
 - `PUT /proyectos/:id/codificacion/etapas/:etapa`: registra una propuesta estructurada.
 - `POST /proyectos/:id/codificacion/etapas/:etapa/revision`: aprueba o rechaza una propuesta.
+- `GET /proyectos/:id/codificacion/informe-generacion`: qué se generaría de cada RF con las decisiones aprobadas (no guarda nada).
 - `GET /proyectos/:id/artefactos?tipo=...`: lista artefactos y versiones.
 
 Ejemplo de propuesta de stack:
