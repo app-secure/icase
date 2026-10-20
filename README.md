@@ -100,6 +100,25 @@ Los catálogos de análisis, ingesta y mockups se configuran desde el entorno. L
 
 ---
 
+### 🔐 Seguridad del backend
+
+- **Sesión obligatoria** en todas las rutas salvo `/health`, `/auth/registro` y `/auth/login`.
+- **Cada proyecto es de su dueño:** un proyecto, requisito, diagrama, fuente, mockup o artefacto ajeno responde `404` (sin revelar que existe). El dueño es siempre el usuario de la sesión; el cuerpo de la petición nunca lo fija.
+- **`JWT_SECRET` es obligatorio en producción** (`NODE_ENV=production`): mínimo 32 caracteres aleatorios y sin parecerse a un valor de ejemplo; si no, el servidor no arranca. En desarrollo, sin él se usa un secreto aleatorio por proceso (las sesiones se pierden al reiniciar). Genera uno con `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
+- **Acceso:** la sesión dura `JWT_EXPIRES_IN` (12 h por defecto); tras 5 intentos fallidos de inicio de sesión se bloquea 15 minutos (`429`); contraseñas de 8 a 72 bytes; los campos de acceso deben ser texto.
+- **CORS** solo admite los orígenes de `CORS_ORIGINS` (en desarrollo, `http://localhost:5173`; en producción, ninguno). Detrás de un proxy inverso define `TRUST_PROXY` para que el límite de intentos vea la IP real.
+- **Entrada:** el JSON admite hasta `JSON_LIMIT` (10 MB) y las subidas solo admiten audio, PDF y texto plano (50 MB).
+- **Proyectos creados antes de exigir sesión** no tienen dueño y dejan de ser accesibles. Asígnalos a una cuenta con:
+
+```bash
+npm run proyectos:asignar -- correo@ejemplo.com             # muestra qué se asignaría
+npm run proyectos:asignar -- correo@ejemplo.com --confirmar # los asigna
+```
+
+Las pruebas `tests/platform-security.test.js` recorren **todas** las rutas de la aplicación y comprueban que ninguna responde sin sesión ni con la sesión de otro usuario; añade una ruta nueva y la prueba la cubre sola.
+
+---
+
 ### Paso 2: Levantar el Frontend (`icase-frontend`)
 
 Abre **otra terminal diferente** y ejecuta:
