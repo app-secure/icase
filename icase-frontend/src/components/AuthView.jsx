@@ -3,7 +3,7 @@ import { Eye, EyeOff, Lock, Mail, User, Phone, AlertCircle, ArrowRight } from "l
 import RbixLogo from "./RbixLogo";
 import { loginApi, registroApi, setAuthToken, setStoredUser } from "../services/api";
 
-export default function AuthView({ onAuthSuccess, onLoadingChange }) {
+export default function AuthView({ onAuthSuccess, onLoadingChange, sessionExpired = false }) {
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -111,6 +111,11 @@ export default function AuthView({ onAuthSuccess, onLoadingChange }) {
           </p>
         </div>
 
+        {sessionExpired && !error && (
+          <div role="alert" className="mb-4 rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+            Tu sesión expiró o dejó de ser válida. Inicia sesión nuevamente para continuar; tu proyecto permanece guardado.
+          </div>
+        )}
         {/* Alerta de error si existe */}
         {error && (
           <div className="mb-5 flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs animate-shake">

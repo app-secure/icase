@@ -1,0 +1,5597 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "I-CASE · API del backend",
+    "version": "1.0.0-docs",
+    "description": "Backend Express revisado el 20/10/2026. Ejemplos ficticios. Las rutas de codificación exigen JWT; otras rutas aplican seguridad según el router. Los esquemas admiten campos adicionales. El PDF se genera en el navegador."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000",
+      "description": "Desarrollo local"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Salud"
+    },
+    {
+      "name": "Autenticación"
+    },
+    {
+      "name": "Proyectos"
+    },
+    {
+      "name": "Requisitos"
+    },
+    {
+      "name": "Diagramas"
+    },
+    {
+      "name": "Fuentes"
+    },
+    {
+      "name": "Mockups"
+    },
+    {
+      "name": "Codificación"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Salud"
+        ],
+        "summary": "Consultar salud del proceso",
+        "description": "No acredita por sí mismo conectividad de base de datos o proveedores.",
+        "operationId": "get_health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/registro": {
+      "post": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Registrar cuenta",
+        "description": "Registrar cuenta",
+        "operationId": "post_auth_registro",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sesion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto, fase pendiente o auditoría crítica.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Registro"
+              },
+              "example": {
+                "nombre": "Ana",
+                "apellido": "Prueba",
+                "correo": "ana@example.test",
+                "celular": "0990000000",
+                "password": "ejemplo-seguro"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Iniciar sesión",
+        "description": "Iniciar sesión",
+        "operationId": "post_auth_login",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sesion"
+                },
+                "example": {
+                  "success": true,
+                  "message": "Sesión iniciada con éxito",
+                  "usuario": {
+                    "id": "507f1f77bcf86cd799439011",
+                    "nombre": "Ana",
+                    "apellido": "Prueba",
+                    "correo": "ana@example.test",
+                    "celular": "0990000000"
+                  },
+                  "token": "<jwt>"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Login"
+              },
+              "example": {
+                "correo": "ana@example.test",
+                "password": "ejemplo-seguro"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/perfil": {
+      "get": {
+        "tags": [
+          "Autenticación"
+        ],
+        "summary": "Consultar perfil",
+        "description": "Consultar perfil",
+        "operationId": "get_auth_perfil",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usuario"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos": {
+      "post": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Crear proyecto",
+        "description": "Crear proyecto",
+        "operationId": "post_proyectos",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Proyecto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProyectoEntrada"
+              },
+              "example": {
+                "nombre": "Biblioteca",
+                "descripcion": "Préstamos del barrio",
+                "insumo_bruto": "El bibliotecario registra préstamos y devoluciones."
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Listar proyectos",
+        "description": "Aplica usuario si el token es válido; la autenticación es opcional en este router.",
+        "operationId": "get_proyectos",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Proyecto"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/modelos-ia": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Consultar catálogo IA",
+        "description": "Consultar catálogo IA",
+        "operationId": "get_proyectos_modelos_ia",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider_defecto": {
+                      "type": "string"
+                    },
+                    "proveedores": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": true
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/trabajos-diagramas/{trabajoId}": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Consultar trabajo de diagrama",
+        "description": "Consultar trabajo de diagrama",
+        "operationId": "get_proyectos_trabajos_diagramas_trabajoId",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "trabajoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Consultar proyecto y artefactos",
+        "description": "Consultar proyecto y artefactos",
+        "operationId": "get_proyectos_id",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Proyecto"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "fuentes": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Fuente"
+                          }
+                        },
+                        "requerimientos": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Requisito"
+                          }
+                        },
+                        "diagramas": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Diagrama"
+                          }
+                        },
+                        "casosDeUso": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "diseno": {
+                          "type": "object",
+                          "nullable": true
+                        },
+                        "auditoriaFinal": {
+                          "type": "object"
+                        },
+                        "flujoDiagramas": {
+                          "$ref": "#/components/schemas/Flujo"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Actualizar proyecto",
+        "description": "Actualizar proyecto",
+        "operationId": "put_proyectos_id",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Proyecto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProyectoEntrada"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Eliminar proyecto",
+        "description": "Eliminar proyecto",
+        "operationId": "delete_proyectos_id",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/procesar-ia": {
+      "post": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Procesar análisis o generación sincrónica",
+        "description": "Consume cuota si llama al proveedor. Para diagramas se recomienda la ruta de trabajos.",
+        "operationId": "post_proyectos_id_procesar_ia",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultadoIA"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalisisEntrada"
+              },
+              "example": {
+                "objetivo": "requisitos",
+                "provider": "auto"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/trabajos-diagramas": {
+      "post": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Iniciar trabajo de diagrama",
+        "description": "Iniciar trabajo de diagrama",
+        "operationId": "post_proyectos_id_trabajos_diagramas",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trabajo activo reutilizado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                },
+                "example": {
+                  "trabajo": {
+                    "id": "507f1f77bcf86cd799439012",
+                    "proyecto_id": "507f1f77bcf86cd799439011",
+                    "tipo": "diagrama",
+                    "estado": "encolado",
+                    "progreso": 0,
+                    "mensaje": "Generación en cola"
+                  },
+                  "reutilizado": false,
+                  "reanudado": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrabajoDiagramaEntrada"
+              },
+              "example": {
+                "tipo_diagrama": "casos_de_uso",
+                "provider": "auto"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/trabajos-diagramas/ultimo": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Consultar último trabajo",
+        "description": "Consultar último trabajo",
+        "operationId": "get_proyectos_id_trabajos_diagramas_ultimo",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "tipo_diagrama",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/aprobar-fase": {
+      "post": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Aprobar fase o revisar diagrama",
+        "description": "Aprobar fase o revisar diagrama",
+        "operationId": "post_proyectos_id_aprobar_fase",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "proyecto": {
+                      "$ref": "#/components/schemas/Proyecto"
+                    },
+                    "faseAprobada": {
+                      "type": "string"
+                    },
+                    "nuevoEstado": {
+                      "type": "string"
+                    },
+                    "flujoDiagramas": {
+                      "$ref": "#/components/schemas/Flujo"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionFase"
+              },
+              "example": {
+                "fase": "diagrama",
+                "tipo_diagrama": "casos_de_uso",
+                "decision": "aprobar"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/flujo-diagramas": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Consultar flujo y dependencias",
+        "description": "Consultar flujo y dependencias",
+        "operationId": "get_proyectos_id_flujo_diagramas",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Flujo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/exportar-markdown": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Descargar especificación Markdown",
+        "description": "Descargar especificación Markdown",
+        "operationId": "get_proyectos_id_exportar_markdown",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Descarga del contenido",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto, fase pendiente o auditoría crítica.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/documento-consolidado": {
+      "get": {
+        "tags": [
+          "Proyectos"
+        ],
+        "summary": "Consultar documento y auditoría",
+        "description": "Consultar documento y auditoría",
+        "operationId": "get_proyectos_id_documento_consolidado",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Documento"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflicto, fase pendiente o auditoría crítica.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requerimientos": {
+      "post": {
+        "tags": [
+          "Requisitos"
+        ],
+        "summary": "Crear requisito manual",
+        "description": "Crear requisito manual",
+        "operationId": "post_requerimientos",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Requisito"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Requisito"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requerimientos/{id}": {
+      "put": {
+        "tags": [
+          "Requisitos"
+        ],
+        "summary": "Editar requisito e invalidar dependencias",
+        "description": "Editar requisito e invalidar dependencias",
+        "operationId": "put_requerimientos_id",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Requisito"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Requisito"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requerimientos/proyecto/{proyectoId}": {
+      "put": {
+        "tags": [
+          "Requisitos"
+        ],
+        "summary": "Sincronizar requisitos",
+        "description": "Sincronizar requisitos",
+        "operationId": "put_requerimientos_proyecto_proyectoId",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "requerimientos": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Requisito"
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "requerimientos": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Requisito"
+                    }
+                  }
+                },
+                "required": [
+                  "requerimientos"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/diagramas/{id}": {
+      "put": {
+        "tags": [
+          "Diagramas"
+        ],
+        "summary": "Guardar edición del diagrama",
+        "description": "Guardar edición del diagrama",
+        "operationId": "put_diagramas_id",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Diagrama"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Diagrama"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/diagramas/{id}/versiones": {
+      "get": {
+        "tags": [
+          "Diagramas"
+        ],
+        "summary": "Consultar historial",
+        "description": "Consultar historial",
+        "operationId": "get_diagramas_id_versiones",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "actual": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer"
+                        },
+                        "estado": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": true
+                    },
+                    "historial": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Diagrama"
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/diagramas/{id}/restaurar": {
+      "post": {
+        "tags": [
+          "Diagramas"
+        ],
+        "summary": "Restaurar versión",
+        "description": "Restaurar versión",
+        "operationId": "post_diagramas_id_restaurar",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Diagrama"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "version"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/diagramas/validar-sintaxis": {
+      "post": {
+        "tags": [
+          "Diagramas"
+        ],
+        "summary": "Validar código y reglas aplicables",
+        "description": "Validar código y reglas aplicables",
+        "operationId": "post_diagramas_validar_sintaxis",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Validacion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "codigo_plantuml": {
+                    "type": "string"
+                  },
+                  "codigo_mermaid": {
+                    "type": "string"
+                  },
+                  "tipo": {
+                    "type": "string"
+                  },
+                  "rnfList": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Requisito"
+                    }
+                  },
+                  "trazabilidad_rnf": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{proyectoId}/fuentes": {
+      "post": {
+        "tags": [
+          "Fuentes"
+        ],
+        "summary": "Subir y extraer una fuente",
+        "description": "Campo multipart archivo; máximo 50 MB. El fallo Multer puede no usar el esquema Error.",
+        "operationId": "post_proyectos_proyectoId_fuentes",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fuente"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "archivo": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "archivo"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Fuentes"
+        ],
+        "summary": "Listar fuentes",
+        "description": "Listar fuentes",
+        "operationId": "get_proyectos_proyectoId_fuentes",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Fuente"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fuentes/{id}": {
+      "patch": {
+        "tags": [
+          "Fuentes"
+        ],
+        "summary": "Editar metadatos y transcripción",
+        "description": "Editar metadatos y transcripción",
+        "operationId": "patch_fuentes_id",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fuente"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FuenteEdicion"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Fuentes"
+        ],
+        "summary": "Eliminar fuente",
+        "description": "Eliminar fuente",
+        "operationId": "delete_fuentes_id",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fuentes/{id}/sugerir-metadatos": {
+      "post": {
+        "tags": [
+          "Fuentes"
+        ],
+        "summary": "Sugerir contexto",
+        "description": "Sugerir contexto",
+        "operationId": "post_fuentes_id_sugerir_metadatos",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "descripcion": {
+                      "type": "string"
+                    },
+                    "tipo_contenido": {
+                      "type": "string"
+                    },
+                    "etiquetas": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "generado_por_ia": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{proyectoId}/fuentes/{fuenteIdOrName}": {
+      "delete": {
+        "tags": [
+          "Fuentes"
+        ],
+        "summary": "Eliminar fuente por ID o nombre",
+        "description": "Eliminar fuente por ID o nombre",
+        "operationId": "delete_proyectos_proyectoId_fuentes_fuenteIdOrName",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "fuenteIdOrName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "eliminado": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/proyecto/{proyectoId}/generar": {
+      "post": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Generar mockups sincrónicos",
+        "description": "Generar mockups sincrónicos",
+        "operationId": "post_mockups_proyecto_proyectoId_generar",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mockups": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Mockup"
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MockupEntrada"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/proyecto/{proyectoId}/trabajos": {
+      "post": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Iniciar trabajo de mockups",
+        "description": "Iniciar trabajo de mockups",
+        "operationId": "post_mockups_proyecto_proyectoId_trabajos",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trabajo reutilizado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MockupEntrada"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/proyecto/{proyectoId}/trabajos/ultimo": {
+      "get": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Consultar último trabajo de mockups",
+        "description": "Consultar último trabajo de mockups",
+        "operationId": "get_mockups_proyecto_proyectoId_trabajos_ultimo",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/trabajos/{trabajoId}": {
+      "get": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Consultar trabajo de mockups",
+        "description": "Consultar trabajo de mockups",
+        "operationId": "get_mockups_trabajos_trabajoId",
+        "security": [],
+        "parameters": [
+          {
+            "name": "trabajoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaTrabajo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/proyecto/{proyectoId}": {
+      "get": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Consultar catálogo y cobertura",
+        "description": "Consultar catálogo y cobertura",
+        "operationId": "get_mockups_proyecto_proyectoId",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Catalogo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/proyecto/{proyectoId}/sugerir-paleta": {
+      "post": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Sugerir sistema de diseño",
+        "description": "Sugerir sistema de diseño",
+        "operationId": "post_mockups_proyecto_proyectoId_sugerir_paleta",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sistemaDiseno": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Proveedor no disponible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/proyecto/{proyectoId}/sistema-diseno": {
+      "put": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Guardar y validar paleta",
+        "description": "Guardar y validar paleta",
+        "operationId": "put_mockups_proyecto_proyectoId_sistema_diseno",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sistemaDiseno": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sistemaDiseno": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mockups/proyecto/{proyectoId}/{nombrePantalla}": {
+      "put": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Guardar edición HTML",
+        "description": "Guardar edición HTML",
+        "operationId": "put_mockups_proyecto_proyectoId_nombrePantalla",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "nombrePantalla",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "previewCode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "previewCode"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Mockups"
+        ],
+        "summary": "Eliminar mockup",
+        "description": "Eliminar mockup",
+        "operationId": "delete_mockups_proyecto_proyectoId_nombrePantalla",
+        "security": [],
+        "parameters": [
+          {
+            "name": "proyectoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "nombrePantalla",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error de servidor o servicio.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion": {
+      "get": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Obtener o inicializar plan",
+        "description": "Requiere diseño aprobado; puede crear el plan si no existe.",
+        "operationId": "get_proyectos_id_codificacion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/etapas/{etapa}/sugerencia": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Sugerir decisión técnica",
+        "description": "Sugerir decisión técnica",
+        "operationId": "post_proyectos_id_codificacion_etapas_etapa_sugerencia",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "etapa",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "alcance_plataforma, stack_tecnologico, arquitectura_codigo o estructura_carpetas."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "etapa": {
+                      "type": "string"
+                    },
+                    "propuesta": {
+                      "type": "object",
+                      "properties": {},
+                      "additionalProperties": true
+                    },
+                    "evidencias": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": true
+                      }
+                    },
+                    "advertencias": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/etapas/{etapa}": {
+      "put": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Guardar propuesta estructurada",
+        "description": "Guardar propuesta estructurada",
+        "operationId": "put_proyectos_id_codificacion_etapas_etapa",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "etapa",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "alcance_plataforma, stack_tecnologico, arquitectura_codigo o estructura_carpetas."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PropuestaEntrada"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/etapas/{etapa}/revision": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Revisar decisión técnica",
+        "description": "Revisar decisión técnica",
+        "operationId": "post_proyectos_id_codificacion_etapas_etapa_revision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "etapa",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "alcance_plataforma, stack_tecnologico, arquitectura_codigo o estructura_carpetas."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/backend/generar": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Generar backend",
+        "description": "Generar backend",
+        "operationId": "post_proyectos_id_codificacion_backend_generar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generacion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/backend/{artefactoId}/revision": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Revisar backend",
+        "description": "Revisar backend",
+        "operationId": "post_proyectos_id_codificacion_backend_artefactoId_revision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artefacto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/frontend/generar": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Generar frontend",
+        "description": "Generar frontend",
+        "operationId": "post_proyectos_id_codificacion_frontend_generar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generacion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/frontend/{artefactoId}/revision": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Revisar frontend",
+        "description": "Revisar frontend",
+        "operationId": "post_proyectos_id_codificacion_frontend_artefactoId_revision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artefacto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/pruebas/generar": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Generar pruebas",
+        "description": "Generar pruebas",
+        "operationId": "post_proyectos_id_codificacion_pruebas_generar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generacion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/pruebas/{artefactoId}/revision": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Revisar pruebas",
+        "description": "Revisar pruebas",
+        "operationId": "post_proyectos_id_codificacion_pruebas_artefactoId_revision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artefacto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/infraestructura/generar": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Generar infraestructura",
+        "description": "Generar infraestructura",
+        "operationId": "post_proyectos_id_codificacion_infraestructura_generar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generacion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/infraestructura/{artefactoId}/revision": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Revisar infraestructura",
+        "description": "Revisar infraestructura",
+        "operationId": "post_proyectos_id_codificacion_infraestructura_artefactoId_revision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artefacto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/ci-cd/generar": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Generar pipeline",
+        "description": "Generar pipeline",
+        "operationId": "post_proyectos_id_codificacion_ci_cd_generar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generacion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/ci-cd/{artefactoId}/revision": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Revisar pipeline",
+        "description": "Revisar pipeline",
+        "operationId": "post_proyectos_id_codificacion_ci_cd_artefactoId_revision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artefacto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/paquete/generar": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Generar paquete final",
+        "description": "Generar paquete final",
+        "operationId": "post_proyectos_id_codificacion_paquete_generar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generacion"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/paquete/{artefactoId}/revision": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Revisar paquete final",
+        "description": "Revisar paquete final",
+        "operationId": "post_proyectos_id_codificacion_paquete_artefactoId_revision",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artefacto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Revision"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/paquete/{artefactoId}/descargar": {
+      "get": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Descargar ZIP verificado",
+        "description": "Descargar ZIP verificado",
+        "operationId": "get_proyectos_id_codificacion_paquete_artefactoId_descargar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Descarga del contenido",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/artefactos": {
+      "get": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Listar artefactos y versiones",
+        "description": "Listar artefactos y versiones",
+        "operationId": "get_proyectos_id_artefactos",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "tipo",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Artefacto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/artefactos/{artefactoId}/verificar": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Verificar artefacto",
+        "description": "Petición sincrónica prolongada: puede construir contenedores y ejecutar pruebas.",
+        "operationId": "post_proyectos_id_artefactos_artefactoId_verificar",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Verificacion"
+                },
+                "example": {
+                  "estado": "apta",
+                  "nivel": "ejecucion_aislada",
+                  "huella": "<sha256>",
+                  "pruebas": [
+                    {
+                      "paso": "Prueba CRUD HTTP derivada del contrato",
+                      "resultado": "correcto",
+                      "salida": "<log>"
+                    }
+                  ],
+                  "errores": [],
+                  "nota": "Ejemplo ilustrativo; no es evidencia de una ejecución."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/artefactos/{artefactoId}/archivos": {
+      "put": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Editar archivo e invalidar evidencia",
+        "description": "Editar archivo e invalidar evidencia",
+        "operationId": "put_proyectos_id_artefactos_artefactoId_archivos",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          },
+          {
+            "name": "artefactoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identificador o nombre del recurso."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Respuesta correcta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artefacto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida, dependencia o control no satisfecho.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente, inválido o expirado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Token inválido o expirado"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Recurso no encontrado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Descripción del problema de esta operación"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ruta": {
+                    "type": "string"
+                  },
+                  "contenido": {
+                    "type": "string",
+                    "maxLength": 500000
+                  }
+                },
+                "required": [
+                  "ruta",
+                  "contenido"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "auditoriaFinal": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": true
+      },
+      "Usuario": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "apellido": {
+            "type": "string"
+          },
+          "correo": {
+            "type": "string",
+            "format": "email"
+          },
+          "celular": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Registro": {
+        "type": "object",
+        "properties": {
+          "nombre": {
+            "type": "string"
+          },
+          "apellido": {
+            "type": "string"
+          },
+          "correo": {
+            "type": "string",
+            "format": "email"
+          },
+          "celular": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 6,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "nombre",
+          "apellido",
+          "correo",
+          "celular",
+          "password"
+        ],
+        "additionalProperties": true
+      },
+      "Login": {
+        "type": "object",
+        "properties": {
+          "correo": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "correo",
+          "password"
+        ],
+        "additionalProperties": true
+      },
+      "Sesion": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "usuario": {
+            "$ref": "#/components/schemas/Usuario"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ProyectoEntrada": {
+        "type": "object",
+        "properties": {
+          "nombre": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "insumo_bruto": {
+            "type": "string"
+          },
+          "parametros": {
+            "type": "object",
+            "properties": {
+              "highAvailability": {
+                "type": "boolean",
+                "nullable": true
+              },
+              "dataPersistence": {
+                "type": "boolean",
+                "nullable": true
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "Proyecto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "usuario_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "insumo_bruto": {
+            "type": "string"
+          },
+          "estado_fase": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Requisito": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "proyecto_id": {
+            "type": "string"
+          },
+          "identificador": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "RF",
+              "RNF"
+            ]
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "prioridad": {
+            "type": "string",
+            "enum": [
+              "Alta",
+              "Media",
+              "Baja"
+            ]
+          },
+          "actores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "precondiciones": {
+            "type": "string"
+          },
+          "poscondiciones": {
+            "type": "string"
+          },
+          "metrica_medible": {
+            "type": "string"
+          },
+          "origen": {
+            "type": "string"
+          },
+          "evidencia": {
+            "type": "string"
+          },
+          "fuentes_origen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requiere_confirmacion": {
+            "type": "boolean"
+          },
+          "aprobado": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Diagrama": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "proyecto_id": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "casos_de_uso",
+              "clases_dominio",
+              "arquitectura_software",
+              "arquitectura_sistema",
+              "clases_diseno",
+              "arbol_navegacion"
+            ]
+          },
+          "titulo": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "codigo_plantuml": {
+            "type": "string"
+          },
+          "codigo_mermaid": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "estado": {
+            "type": "string"
+          },
+          "estado_calidad": {
+            "type": "string"
+          },
+          "aprobado": {
+            "type": "boolean"
+          },
+          "trazabilidad_rnf": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "AnalisisEntrada": {
+        "type": "object",
+        "properties": {
+          "insumo_bruto": {
+            "type": "string"
+          },
+          "insumo_adicional": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "specificModel": {
+            "type": "string"
+          },
+          "objetivo": {
+            "type": "string",
+            "enum": [
+              "requisitos",
+              "diagramas",
+              "completo"
+            ]
+          },
+          "tipo_diagrama": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ResultadoIA": {
+        "type": "object",
+        "properties": {
+          "proyecto_id": {
+            "type": "string"
+          },
+          "requerimientos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Requisito"
+            }
+          },
+          "diagramas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Diagrama"
+            }
+          },
+          "flujoDiagramas": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "cache_hit": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "RevisionFase": {
+        "type": "object",
+        "properties": {
+          "fase": {
+            "type": "string",
+            "enum": [
+              "analisis",
+              "diagrama",
+              "diagramas",
+              "diseno",
+              "mockups",
+              "finalizar"
+            ]
+          },
+          "aprobar_todos": {
+            "type": "boolean"
+          },
+          "tipo_diagrama": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "aprobar",
+              "rechazar"
+            ]
+          },
+          "observaciones": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fase"
+        ],
+        "additionalProperties": true
+      },
+      "Revision": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "aprobar",
+              "rechazar"
+            ]
+          },
+          "observaciones": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "additionalProperties": true
+      },
+      "Flujo": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tipo": {
+                  "type": "string"
+                },
+                "estado": {
+                  "type": "string"
+                },
+                "unmet_dependencies": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "Trabajo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "proyecto_id": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string"
+          },
+          "tipo_diagrama": {
+            "type": "string",
+            "nullable": true
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "encolado",
+              "procesando",
+              "completado",
+              "fallido"
+            ]
+          },
+          "progreso": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "mensaje": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "cache_hit": {
+            "type": "boolean"
+          },
+          "proveedor_usado": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "RespuestaTrabajo": {
+        "type": "object",
+        "properties": {
+          "trabajo": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Trabajo"
+              }
+            ],
+            "nullable": true
+          },
+          "reutilizado": {
+            "type": "boolean"
+          },
+          "reanudado": {
+            "type": "boolean"
+          },
+          "resultado": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "TrabajoDiagramaEntrada": {
+        "type": "object",
+        "properties": {
+          "tipo_diagrama": {
+            "type": "string"
+          },
+          "insumo_bruto": {
+            "type": "string"
+          },
+          "insumo_adicional": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "specificModel": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "tipo_diagrama"
+        ],
+        "additionalProperties": true
+      },
+      "Fuente": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "proyecto_id": {
+            "type": "string"
+          },
+          "nombre_archivo": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "audio",
+              "pdf",
+              "texto"
+            ]
+          },
+          "categoria": {
+            "type": "string",
+            "enum": [
+              "textos",
+              "documentos",
+              "audios",
+              "videos",
+              "otros"
+            ]
+          },
+          "tipo_contenido": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "autor_origen": {
+            "type": "string"
+          },
+          "fecha_documento": {
+            "type": "string"
+          },
+          "etiquetas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "texto_transcrito": {
+            "type": "string"
+          },
+          "metadatos_generados_ia": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "FuenteEdicion": {
+        "type": "object",
+        "properties": {
+          "categoria": {
+            "type": "string",
+            "enum": [
+              "textos",
+              "documentos",
+              "audios",
+              "videos",
+              "otros"
+            ]
+          },
+          "tipo_contenido": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "autor_origen": {
+            "type": "string"
+          },
+          "fecha_documento": {
+            "type": "string"
+          },
+          "etiquetas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "texto_transcrito": {
+            "type": "string"
+          },
+          "metadatos_generados_ia": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "MockupEntrada": {
+        "type": "object",
+        "properties": {
+          "pantallas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "insumoAdicional": {
+            "type": "string"
+          },
+          "requerimientos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Requisito"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "Mockup": {
+        "type": "object",
+        "properties": {
+          "nombre_pantalla": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "preview_code": {
+            "type": "string"
+          },
+          "rf_trazabilidad": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "campos_formulario": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": true
+            }
+          },
+          "acciones_principales": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "estado_calidad": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Catalogo": {
+        "type": "object",
+        "properties": {
+          "mockups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Mockup"
+            }
+          },
+          "pantallas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": true
+            }
+          },
+          "manifiesto_navegacion": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": true
+            }
+          },
+          "sistemaDiseno": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "proyecto": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "nombre": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          },
+          "version": {
+            "type": "integer"
+          },
+          "etapas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "etapa": {
+                  "type": "string"
+                },
+                "estado": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "propuesta": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "PropuestaEntrada": {
+        "type": "object",
+        "properties": {
+          "propuesta": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "observaciones": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "propuesta"
+        ],
+        "additionalProperties": true
+      },
+      "Archivo": {
+        "type": "object",
+        "properties": {
+          "ruta": {
+            "type": "string"
+          },
+          "contenido": {
+            "type": "string"
+          },
+          "lenguaje": {
+            "type": "string"
+          },
+          "huella": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Artefacto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "proyecto_id": {
+            "type": "string"
+          },
+          "tipo": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "estado": {
+            "type": "string"
+          },
+          "archivos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Archivo"
+            }
+          },
+          "dependencias": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": true
+            }
+          },
+          "trazabilidad_rf": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "advertencias": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "errores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aprobado": {
+            "type": "boolean"
+          },
+          "verificacion": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Verificacion"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "additionalProperties": true
+      },
+      "Verificacion": {
+        "type": "object",
+        "properties": {
+          "estado": {
+            "type": "string"
+          },
+          "nivel": {
+            "type": "string"
+          },
+          "huella": {
+            "type": "string"
+          },
+          "pruebas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "paso": {
+                  "type": "string"
+                },
+                "resultado": {
+                  "type": "string"
+                },
+                "salida": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "errores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "advertencias": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nota": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Generacion": {
+        "type": "object",
+        "properties": {
+          "artefacto": {
+            "$ref": "#/components/schemas/Artefacto"
+          },
+          "reutilizado": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Documento": {
+        "type": "object",
+        "properties": {
+          "proyecto": {
+            "$ref": "#/components/schemas/Proyecto"
+          },
+          "fuentes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fuente"
+            }
+          },
+          "requerimientos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Requisito"
+            }
+          },
+          "diagramas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Diagrama"
+            }
+          },
+          "casosDeUso": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": true
+            }
+          },
+          "diseno": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "auditoriaFinal": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          },
+          "markdown": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "Validacion": {
+        "type": "object",
+        "properties": {
+          "valido": {
+            "type": "boolean"
+          },
+          "errores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "advertencias": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metricas": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

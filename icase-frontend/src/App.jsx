@@ -10,6 +10,7 @@ import { sanitizePlantUML } from "./utils/plantumlEncoder";
 export default function App() {
   const [user, setUser] = useState(getStoredUser());
   const [token, setToken] = useState(getAuthToken());
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const [projects, setProjects] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState(null);
@@ -292,7 +293,22 @@ export default function App() {
     }
   }, [token, loadBackendProjects]);
 
+  useEffect(() => {
+    const expireSession = () => {
+      clearAuth();
+      setUser(null);
+      setToken(null);
+      setProjects([]);
+      setActiveProjectId(null);
+      setView('dashboard');
+      setSessionExpired(true);
+    };
+    window.addEventListener('icase:session-expired', expireSession);
+    return () => window.removeEventListener('icase:session-expired', expireSession);
+  }, []);
+
   const handleAuthSuccess = (loggedUser, authToken) => {
+    setSessionExpired(false);
     setUser(loggedUser);
     setToken(authToken);
     setView("dashboard");
@@ -321,7 +337,7 @@ export default function App() {
     return (
       <>
         <LoadingOverlay visible={loadingOverlay.visible} message={loadingOverlay.message} />
-        <AuthView onAuthSuccess={handleAuthSuccess} onLoadingChange={handleAuthLoading} />
+        <AuthView onAuthSuccess={handleAuthSuccess} onLoadingChange={handleAuthLoading} sessionExpired={sessionExpired} />
       </>
     );
   }
