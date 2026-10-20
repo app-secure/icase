@@ -116,24 +116,28 @@ class GestionarArtefactosCodigo {
   }
 
   async generarBackend(proyectoId) {
-    const [proyecto, plan, requerimientos] = await Promise.all([
+    const [proyecto, plan, requerimientos, diagramas] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId),
       this.planRepository.obtenerPorProyecto(proyectoId),
-      this.requerimientoRepository.listarPorProyecto(proyectoId)
+      this.requerimientoRepository.listarPorProyecto(proyectoId),
+      this.diagramaRepository ? this.diagramaRepository.listarPorProyecto(proyectoId) : []
     ]);
     if (!proyecto || !plan) throw new Error('Proyecto o plan de codificación no encontrado.');
     this.workflow.validarDependencias(plan, 'generacion_backend');
+    const diagramaDominio = (diagramas || []).find((item) => ['clases_dominio', 'clases'].includes(item.tipo) && item.aprobado && item.estado === 'aprobado' && !item.desactualizado) || null;
     const decisiones = Object.fromEntries(plan.etapas
       .filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta)
       .map((item) => [item.etapa, item.propuesta]));
     const versionesOrigen = Object.fromEntries(plan.etapas
       .filter((item) => item.estado === CODE_PHASE_STATES.APPROVED)
       .map((item) => [item.etapa, item.version || 1]));
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ decisiones, requerimientos: requerimientos.filter((item) => item.aprobado) })).digest('hex');
+    if (diagramaDominio) versionesOrigen.clases_dominio = diagramaDominio.version || 1;
+    const dominio = diagramaDominio ? { version: diagramaDominio.version || 1, codigo: diagramaDominio.codigo_plantuml } : undefined;
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ decisiones, requerimientos: requerimientos.filter((item) => item.aprobado), dominio })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
 
-    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos }, versionesOrigen });
+    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({
       proyecto_id: proyectoId, tipo: 'codigo_backend', version: (ultimo?.version || 0) + 1,
       estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, ...generado

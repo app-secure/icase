@@ -39,7 +39,7 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
     const text = `${selected || ''}\n${evidence}`;
     if (/postgres(?:ql)?/i.test(text)) return { label: 'PostgreSQL', image: 'postgres:16-alpine', env: ['POSTGRES_DB=${DB_NAME}', 'POSTGRES_USER=${DB_USER}', 'POSTGRES_PASSWORD=${DB_PASSWORD}'], url: 'postgresql://${DB_USER}:${DB_PASSWORD}@database:5432/${DB_NAME}', volume: '/var/lib/postgresql/data', health: 'pg_isready -U ${DB_USER} -d ${DB_NAME}' };
     if (/mongodb|mongo\b/i.test(text)) return { label: 'MongoDB', image: 'mongo:7', env: ['MONGO_INITDB_ROOT_USERNAME=${DB_USER}', 'MONGO_INITDB_ROOT_PASSWORD=${DB_PASSWORD}'], url: 'mongodb://${DB_USER}:${DB_PASSWORD}@database:27017/${DB_NAME}?authSource=admin', volume: '/data/db', health: 'mongosh --quiet --eval "db.adminCommand(\'ping\')"' };
-    if (/mysql/i.test(text)) return { label: 'MySQL', image: 'mysql:8', env: ['MYSQL_DATABASE=${DB_NAME}', 'MYSQL_USER=${DB_USER}', 'MYSQL_PASSWORD=${DB_PASSWORD}', 'MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}'], url: 'mysql://${DB_USER}:${DB_PASSWORD}@database:3306/${DB_NAME}', volume: '/var/lib/mysql', health: 'mysqladmin ping -h localhost -u root -p${DB_ROOT_PASSWORD}' };
+    if (/mysql/i.test(text)) return { label: 'MySQL', image: 'mysql:8', env: ['MYSQL_DATABASE=${DB_NAME}', 'MYSQL_USER=${DB_USER}', 'MYSQL_PASSWORD=${DB_PASSWORD}', 'MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}'], url: 'mysql://${DB_USER}:${DB_PASSWORD}@database:3306/${DB_NAME}', volume: '/var/lib/mysql', health: 'mysqladmin ping -h 127.0.0.1 -u root -p${DB_ROOT_PASSWORD}' };
     return null;
   }
 

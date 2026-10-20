@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 const IGeneradorArtefacto = require('../../core/services/IGeneradorArtefacto');
 const GenericBackendGenerator = require('./GenericBackendGenerator');
+const DomainModelExtractor = require('./DomainModelExtractor');
+const BusinessRuleService = require('../../core/services/BusinessRuleService');
+const AccessControlService = require('../../core/services/AccessControlService');
 
 const slug = (value) => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -8,12 +11,15 @@ const slug = (value) => String(value || '')
 
 class BackendScaffoldGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
-    const { decisiones, requerimientos } = insumos;
+    const { decisiones, requerimientos, diagramaDominio } = insumos;
     const stack = decisiones.stack_tecnologico || {};
     const arquitectura = decisiones.arquitectura_codigo || {};
     const rf = requerimientos.filter((item) => item.aprobado && item.tipo === 'RF');
     const modulos = [...new Set(rf.map((item) => slug(item.nombre)))].slice(0, 12);
-    const archivos = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack });
+    const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
+    const { reglas, descartadas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf);
+    const access = this._acceso(decisiones.control_acceso, rf);
+    const archivos = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access });
 
     return {
       archivos: archivos.map((archivo) => ({
@@ -21,10 +27,45 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
         huella: crypto.createHash('sha256').update(archivo.contenido).digest('hex')
       })),
       trazabilidad_rf: rf.map((item) => item.identificador),
-      advertencias: ['Se generó una base CRUD ejecutable para cada RF. Las reglas específicas del dominio deben quedar expresadas en contratos y pruebas antes de considerar completa su semántica.'],
+      advertencias: [
+        'Se generó una base CRUD ejecutable para cada RF. Las reglas específicas del dominio deben quedar expresadas en contratos y pruebas antes de considerar completa su semántica.',
+        ...(domainModel ? this._modelWarnings(archivos) : ['No hay un diagrama de clases de dominio aprobado; los RF usan un esquema genérico sin campos.']),
+        access?.autenticacion?.metodo === 'jwt'
+          ? `Autenticación JWT con ${access.roles.filter((rol) => rol.incluir).length} roles de negocio más el administrador; define JWT_SECRET, ADMIN_EMAIL y ADMIN_PASSWORD antes de producción.`
+          : 'La API se generó SIN autenticación, por decisión aprobada en la etapa de control de acceso.',
+        `Reglas de negocio aplicadas: ${reglas.length}${descartadas ? `; ${descartadas} rechazadas por el usuario no se generaron` : ''}.`
+      ],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_backend_generico_v2'
     };
+  }
+
+  /** La política aprobada debe seguir siendo coherente con los RF; si no, la generación falla. */
+  _acceso(propuesta, rf) {
+    if (!propuesta || !Object.keys(propuesta).length) return null;
+    const { propuesta: normalizada, errores } = new AccessControlService().validar(propuesta, { requerimientos: rf });
+    if (errores.length) throw new Error(`La política de acceso aprobada ya no es coherente con los requisitos: ${errores.join(' ')} Vuelve a revisar la etapa de autenticación y roles.`);
+    return normalizada;
+  }
+
+  /** Solo las reglas confirmadas llegan al código; si no son coherentes con el modelo aprobado, la generación falla. */
+  _reglas(propuestas, domainModel, rf) {
+    if (!Array.isArray(propuestas) || !propuestas.length) return { reglas: [], descartadas: 0 };
+    if (!domainModel) throw new Error('Hay reglas de negocio aprobadas, pero no existe un diagrama de dominio aprobado y vigente que las respalde.');
+    const service = new BusinessRuleService();
+    const { reglas, errores } = service.validar(propuestas, { entidades: domainModel.entities, requerimientos: rf });
+    if (errores.length) throw new Error(`Las reglas de negocio aprobadas ya no son coherentes con el modelo de dominio: ${errores.join(' ')} Vuelve a revisar la etapa de reglas de negocio.`);
+    const pendientes = service.pendientes(reglas);
+    if (pendientes.length) throw new Error(`Hay reglas de negocio pendientes de decisión: ${pendientes.join(', ')}.`);
+    return { reglas: service.confirmadas(reglas), descartadas: reglas.length - service.confirmadas(reglas).length };
+  }
+
+  _modelWarnings(archivos) {
+    const manifest = JSON.parse(archivos.find((item) => item.ruta === 'backend/icase.manifest.json').contenido);
+    return [
+      ...(manifest.model.unmapped.length ? [`Entidades del dominio sin RF asociado: ${manifest.model.unmapped.join(', ')}.`] : []),
+      ...manifest.warnings
+    ];
   }
 
   _packageJson(nombre, dependencies, devDependencies = {}) {
