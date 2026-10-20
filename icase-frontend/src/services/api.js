@@ -581,6 +581,15 @@ export async function reviewCodePhaseApi(projectId, phase, decision, observacion
   return data;
 }
 
+export async function fetchGenerationReportApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/informe-generacion`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo calcular el informe de generación.');
+  return data;
+}
+
 export async function generateBackendArtifactApi(projectId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/backend/generar`, {
     method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' })
