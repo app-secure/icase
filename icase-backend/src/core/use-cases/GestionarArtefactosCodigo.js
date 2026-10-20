@@ -115,7 +115,8 @@ class GestionarArtefactosCodigo {
     return { artefacto, reutilizado: false };
   }
 
-  async generarBackend(proyectoId) {
+  /** Lo que el backend necesita del proyecto: decisiones aprobadas, requisitos y modelo de dominio vigente. */
+  async _insumosBackend(proyectoId) {
     const [proyecto, plan, requerimientos, diagramas] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId),
       this.planRepository.obtenerPorProyecto(proyectoId),
@@ -133,6 +134,20 @@ class GestionarArtefactosCodigo {
       .map((item) => [item.etapa, item.version || 1]));
     if (diagramaDominio) versionesOrigen.clases_dominio = diagramaDominio.version || 1;
     const dominio = diagramaDominio ? { version: diagramaDominio.version || 1, codigo: diagramaDominio.codigo_plantuml } : undefined;
+    return { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio };
+  }
+
+  /** Qué se generaría de cada requisito, sin guardar nada. Falla igual que la generación si algo no es coherente. */
+  async informeGeneracion(proyectoId) {
+    const { proyecto, requerimientos, diagramaDominio, decisiones, versionesOrigen } = await this._insumosBackend(proyectoId);
+    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio }, versionesOrigen });
+    const informe = generado.archivos.find((item) => item.ruta === 'backend/GENERATION-REPORT.json');
+    if (!informe) throw new Error('El generador de backend no produjo un informe de generación.');
+    return JSON.parse(informe.contenido);
+  }
+
+  async generarBackend(proyectoId) {
+    const { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio } = await this._insumosBackend(proyectoId);
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ decisiones, requerimientos: requerimientos.filter((item) => item.aprobado), dominio })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };

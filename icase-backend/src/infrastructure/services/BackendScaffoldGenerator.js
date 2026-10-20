@@ -4,6 +4,7 @@ const GenericBackendGenerator = require('./GenericBackendGenerator');
 const DomainModelExtractor = require('./DomainModelExtractor');
 const BusinessRuleService = require('../../core/services/BusinessRuleService');
 const AccessControlService = require('../../core/services/AccessControlService');
+const GenerationReportService = require('../../core/services/GenerationReportService');
 
 const slug = (value) => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -19,7 +20,13 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
     const { reglas, descartadas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf);
     const access = this._acceso(decisiones.control_acceso, rf);
-    const archivos = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access });
+    const generados = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access });
+    const informe = this._informe({ proyecto, insumos, decisiones, archivos: generados });
+    const archivos = [
+      ...generados,
+      { ruta: 'backend/GENERATION-REPORT.json', lenguaje: 'json', contenido: `${JSON.stringify(informe, null, 2)}\n` },
+      { ruta: 'backend/GENERATION-REPORT.md', lenguaje: 'markdown', contenido: new GenerationReportService().toMarkdown(informe) }
+    ];
 
     return {
       archivos: archivos.map((archivo) => ({
@@ -33,11 +40,22 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
         access?.autenticacion?.metodo === 'jwt'
           ? `Autenticación JWT con ${access.roles.filter((rol) => rol.incluir).length} roles de negocio más el administrador; define JWT_SECRET, ADMIN_EMAIL y ADMIN_PASSWORD antes de producción.`
           : 'La API se generó SIN autenticación, por decisión aprobada en la etapa de control de acceso.',
-        `Reglas de negocio aplicadas: ${reglas.length}${descartadas ? `; ${descartadas} rechazadas por el usuario no se generaron` : ''}.`
+        `Reglas de negocio aplicadas: ${reglas.length}${descartadas ? `; ${descartadas} rechazadas por el usuario no se generaron` : ''}.`,
+        `Informe de generación: ${informe.resumen.completo} requisitos completos, ${informe.resumen.solo_datos} solo con datos y ${informe.resumen.no_soportado} no soportados (ver backend/GENERATION-REPORT.md).`
       ],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_backend_generico_v2'
     };
+  }
+
+  /** Qué se generó de cada RF; sale del contrato que ya viaja en el manifiesto, sin volver a derivarlo. */
+  _informe({ proyecto, insumos, decisiones, archivos }) {
+    const manifest = JSON.parse(archivos.find((item) => item.ruta === 'backend/icase.manifest.json').contenido);
+    const aprobados = insumos.requerimientos.filter((item) => item.aprobado);
+    const plataformas = [...(decisiones.alcance_plataforma?.plataformas || []), ...(decisiones.stack_tecnologico?.plataformas || [])];
+    return new GenerationReportService().build({
+      proyecto, requisitos: aprobados, contrato: manifest, stack: decisiones.stack_tecnologico || {}, plataformas
+    });
   }
 
   /** La política aprobada debe seguir siendo coherente con los RF; si no, la generación falla. */

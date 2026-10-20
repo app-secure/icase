@@ -81,6 +81,14 @@ class CodificacionController {
     }
   }
 
+  async informeGeneracion(req, res) {
+    try {
+      res.json(await this.gestionarArtefactosCodigo.informeGeneracion(req.params.id));
+    } catch (error) {
+      res.status(this._status(error)).json({ error: error.message });
+    }
+  }
+
   async generarBackend(req, res) {
     try {
       res.status(201).json(await this.gestionarArtefactosCodigo.generarBackend(req.params.id));

@@ -12,6 +12,7 @@ function buildCodificacionRoutes(controller, access) {
   router.post('/:id/codificacion/etapas/:etapa/sugerencia', (req, res) => controller.sugerirEtapa(req, res));
   router.put('/:id/codificacion/etapas/:etapa', (req, res) => controller.proponerEtapa(req, res));
   router.post('/:id/codificacion/etapas/:etapa/revision', (req, res) => controller.revisarEtapa(req, res));
+  router.get('/:id/codificacion/informe-generacion', (req, res) => controller.informeGeneracion(req, res));
   router.post('/:id/codificacion/backend/generar', (req, res) => controller.generarBackend(req, res));
   router.post('/:id/codificacion/backend/:artefactoId/revision', (req, res) => controller.revisarBackend(req, res));
   router.post('/:id/codificacion/frontend/generar', (req, res) => controller.generarFrontend(req, res));
