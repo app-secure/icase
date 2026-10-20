@@ -485,6 +485,20 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
   </div>;
 }
 
+// Lo que el generador sabe producir (debe coincidir con StackCatalog del backend, que lo valida de todos modos).
+const STACK_OPTIONS = {
+  backend: ['Node.js + Express', 'Node.js + NestJS', 'Java + Spring Boot'],
+  base_datos: ['PostgreSQL', 'MySQL', 'MongoDB'],
+  frontend: ['React + Vite']
+};
+
+function stackProblem(value) {
+  const backend = String(value.backend || '');
+  const database = String(value.base_datos || '');
+  if (/spring|\bjava\b/i.test(backend) && /mongo/i.test(database)) return 'Java + Spring Boot solo se genera con PostgreSQL o MySQL.';
+  return '';
+}
+
 const RULE_DECISIONS = [
   { value: 'confirmado', label: 'Confirmar', style: 'border-emerald-300 bg-emerald-50 text-emerald-700', icon: Check },
   { value: 'rechazado', label: 'Rechazar', style: 'border-red-300 bg-red-50 text-red-700', icon: X },
@@ -646,7 +660,18 @@ function PhaseForm({ phase, value, onChange, disabled }) {
     return <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">{label}</span>{multiline ? <textarea disabled={disabled} rows={key === 'arbol' ? 12 : 4} value={displayValue} onChange={(e) => update(e.target.value)} className="w-full rounded-lg border border-slate-300 p-3 font-mono text-sm disabled:bg-slate-50" /> : <input disabled={disabled} value={displayValue} onChange={(e) => update(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50" />}</label>;
   };
   if (phase === 'alcance_plataforma') return <div className="space-y-4">{field('alcance', 'Alcance del incremento', true)}{field('exclusiones', 'Exclusiones explícitas', true)}{field('plataformas', 'Plataformas (separadas por coma)')}{field('capacidades_principales', 'Requisitos funcionales incluidos', true)}{field('restricciones_no_funcionales', 'Restricciones no funcionales', true)}</div>;
-  if (phase === 'stack_tecnologico') return <div className="grid gap-4 md:grid-cols-2">{field('backend', 'Backend')}{field('frontend', 'Frontend')}{field('base_datos', 'Base de datos')}{field('gestor_paquetes', 'Gestor de paquetes')}{field('tiempo_real', 'Comunicación en tiempo real')}{field('estilos', 'Sistema de estilos')}<div className="md:col-span-2">{field('observaciones_tecnicas', 'Restricciones y versiones', true)}</div></div>;
+  const choice = (key, label) => {
+    const current = String(value[key] || '');
+    const known = STACK_OPTIONS[key].includes(current);
+    return <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">{label}</span>
+      <select disabled={disabled} value={current} onChange={(event) => onChange({ ...value, [key]: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50">
+        {current && !known && <option value={current}>{current} (no soportado)</option>}
+        {STACK_OPTIONS[key].map((item) => <option key={item} value={item}>{item}</option>)}
+      </select>
+      {current && !known && <span role="alert" className="mt-1 block text-xs text-red-600">«{current}» todavía no está soportado: elige una de las opciones.</span>}
+    </label>;
+  };
+  if (phase === 'stack_tecnologico') return <div className="grid gap-4 md:grid-cols-2">{choice('backend', 'Backend')}{choice('frontend', 'Frontend')}{choice('base_datos', 'Base de datos')}{stackProblem(value) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 md:col-span-2">{stackProblem(value)}</p>}{field('gestor_paquetes', 'Gestor de paquetes')}{field('tiempo_real', 'Comunicación en tiempo real')}{field('estilos', 'Sistema de estilos')}<div className="md:col-span-2">{field('observaciones_tecnicas', 'Restricciones y versiones', true)}</div></div>;
   if (phase === 'arquitectura_codigo') return <div className="space-y-4">{field('estilo', 'Estilo arquitectónico')}{field('capas', 'Capas')}{field('modulos', 'Módulos funcionales', true)}{field('comunicacion', 'Comunicación entre componentes')}{field('autenticacion', 'Autenticación y autorización')}{field('decisiones_adicionales', 'Decisiones adicionales', true)}</div>;
   return <div className="space-y-4">{field('arbol', 'Árbol de carpetas propuesto', true)}{field('convenciones', 'Convenciones', true)}</div>;
 }
