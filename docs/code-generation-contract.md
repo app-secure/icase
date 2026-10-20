@@ -41,10 +41,11 @@ El stack se propone por proyecto y requiere aprobación antes de avanzar. Estos 
 4. `estructura_carpetas`: confirma el árbol que compartirán los generadores.
 5. `reglas_negocio`: revisa y confirma las reglas que el backend aplicará a los datos (ver más abajo). Es requisito de `generacion_backend`.
 6. `control_acceso`: define autenticación, roles y la matriz de permisos (ver más abajo). Es requisito de `generacion_backend` y de `generacion_frontend`.
-7. `generacion_backend` y `generacion_frontend`: pueden ejecutarse en paralelo.
-8. `generacion_pruebas` y `generacion_infraestructura`: consumen ambos códigos aprobados.
-9. `generacion_ci_cd`: consume pruebas e infraestructura aprobadas.
-10. `paquete_entrega`: reúne únicamente artefactos vigentes y aprobados.
+7. `modulos` (opcional): elige los módulos opcionales (ver «Módulos»). No bloquea nada; si no se aprueba rige el modo automático.
+8. `generacion_backend` y `generacion_frontend`: pueden ejecutarse en paralelo.
+9. `generacion_pruebas` y `generacion_infraestructura`: consumen ambos códigos aprobados.
+10. `generacion_ci_cd`: consume pruebas e infraestructura aprobadas.
+11. `paquete_entrega`: reúne únicamente artefactos vigentes y aprobados.
 
 Modificar una decisión aprobada no regenera nada automáticamente. Sus descendientes aprobados pasan a `desactualizada` y deben revisarse de manera explícita.
 
@@ -186,9 +187,38 @@ Cada backend generado incluye `backend/GENERATION-REPORT.json` y `backend/GENERA
 
 Capacidades que se detectan y no se generan (`core/constants/GenerationCapabilities.js`): tiempo real, archivos e imágenes, reportes y exportación, cálculos y procesos, correo/SMS/notificaciones, pagos en línea, mapas, integraciones y acceso externo, cámara/QR/biometría, y recuperación de contraseña o segundo factor. Cada una indica qué ocurre en su lugar. El tiempo real también se detecta en la decisión de stack (Socket.IO/WebSocket), aunque ningún RF lo mencione.
 
-El informe añade las entidades del modelo sin RF (tienen tabla, pero no API ni pantalla), notas del proyecto (app móvil sin firmar, requisitos no funcionales sin medir) y los límites que valen para toda aplicación generada (interfaz genérica con JSON, listas sin paginación ni filtros, sin datos iniciales, sin propiedad de registros, regenerar pierde ediciones). Esa lista (`GENERAL_LIMITS`) debe actualizarse cuando alguno deje de ser cierto.
+El informe añade las entidades del modelo sin RF (tienen tabla, pero no API ni pantalla), notas del proyecto (app móvil sin firmar, requisitos no funcionales sin medir) y los límites que valen para toda aplicación generada (interfaz sin el diseño de los mockups, listas sin paginación ni filtros, sin datos iniciales, sin propiedad de registros, regenerar pierde ediciones). Esa lista (`generalLimits` en `core/constants/GenerationCapabilities.js`; la frase de la interfaz depende del módulo de formularios) debe actualizarse cuando alguno deje de ser cierto.
 
 La detección es por palabras clave sobre nombre, descripción y métrica: avisa, pero no demuestra que un RF «completo» no pida algo con otras palabras. Antes de generar, `GET /proyectos/:id/codificacion/informe-generacion` calcula el informe con las decisiones actuales sin guardar nada; la interfaz lo muestra en la sección del backend (vista previa antes de generar y el de la versión generada después).
+
+### Módulos
+
+Un módulo es una funcionalidad que el generador produce con plantillas deterministas. `ModuleService` (`core/services`) es la única fuente del catálogo y los separa en dos clases:
+
+- **Incluidos**, decididos por otras etapas y solo informativos: datos por entidad, OpenAPI, informe de generación (siempre), reglas de negocio (si hay reglas confirmadas), autenticación y roles (si la etapa de acceso eligió JWT) y app móvil (si el alcance incluye plataforma móvil).
+- **Opcionales**, que se activan en la etapa **Módulos** (`modulos`): hoy `formularios_tipados`.
+
+La etapa es **opcional**: no bloquea la generación del backend ni del frontend. Mientras no se apruebe rige el **modo automático** (los valores recomendados), de modo que los proyectos existentes siguen generándose igual. En **modo personalizado** se respeta la elección; los módulos que se omiten toman su valor recomendado. En modo automático la lista que envíe el usuario se ignora. Si la etapa se aprueba o cambia, el backend y el frontend ya generados quedan desactualizados (`influyen` en la definición de las fases), porque su huella de entrada incluye la decisión.
+
+El plan (`GET /proyectos/:id/codificacion`) devuelve `modulos: { incluidos, opcionales, activos }`, recalculado desde las decisiones aprobadas. El informe de generación indica el modo y el estado de cada módulo.
+
+#### Formularios tipados
+
+Con el módulo activo, la interfaz web no pide JSON: lee el esquema de cada entidad de `GET /api/contract` y muestra un formulario con un control por campo y una tabla de registros.
+
+| Esquema | Control |
+| --- | --- |
+| texto | campo de texto (correo y URL si una regla `formato` lo exige) |
+| entero o decimal | campo numérico |
+| `date`, `date-time`, `time` | selector de fecha, fecha y hora, hora |
+| lista de opciones (enum) | desplegable |
+| booleano | casilla (parte del valor por defecto de la regla `valor_por_defecto`) |
+| lista | texto con valores separados por comas |
+| referencia a otra entidad | desplegable con los registros de esa entidad (texto si el rol no puede leerla) |
+
+Un campo con regla `maquina_estados` empieza en el estado inicial. Los fallos se muestran junto a su campo: el 422 trae el id de la regla (se resuelve a su campo con el contrato) y el 400 nombra el campo entre comillas. Una operación sin campos declarados en el modelo de dominio se edita como JSON. Un campo opcional que se vacía al editar no se envía, así que conserva su valor anterior. La app móvil no cambia.
+
+La prueba de navegador generada (`tests/e2e/typed-forms.spec.js`) usa el formulario, no la API: crea un registro con un payload derivado del esquema y las reglas, comprueba que lo guardado coincide con lo escrito, lo localiza en la tabla, lo edita, lo elimina y comprueba que una regla incumplida se marca junto a su campo. Sin el módulo se genera la prueba anterior (`contract-interaction.spec.js`).
 
 ## Evidencia de ejecución
 
