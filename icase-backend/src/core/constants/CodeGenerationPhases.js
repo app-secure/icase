@@ -28,12 +28,22 @@ const CODE_PHASES = Object.freeze({
     titulo: 'Estructura de carpetas',
     descripcion: 'Aprueba el árbol de archivos antes de producir código fuente.'
   }),
+  rules: Object.freeze({
+    id: 'reglas_negocio', orden: 45, tipo: 'decision', dependencias: ['estructura_carpetas'],
+    titulo: 'Reglas de negocio',
+    descripcion: 'Revisa y confirma las reglas de validación, unicidad, estados y relaciones que el backend aplicará a los datos.'
+  }),
+  access: Object.freeze({
+    id: 'control_acceso', orden: 46, tipo: 'decision', dependencias: ['estructura_carpetas'],
+    titulo: 'Autenticación y roles',
+    descripcion: 'Define cómo se autentican las personas, qué roles existen y qué puede hacer cada rol sobre cada operación.'
+  }),
   backend: Object.freeze({
-    id: 'generacion_backend', orden: 50, tipo: 'generacion', dependencias: ['estructura_carpetas'],
+    id: 'generacion_backend', orden: 50, tipo: 'generacion', dependencias: ['estructura_carpetas', 'reglas_negocio', 'control_acceso'],
     titulo: 'Generación del backend', artefacto: 'codigo_backend'
   }),
   frontend: Object.freeze({
-    id: 'generacion_frontend', orden: 60, tipo: 'generacion', dependencias: ['estructura_carpetas'],
+    id: 'generacion_frontend', orden: 60, tipo: 'generacion', dependencias: ['estructura_carpetas', 'control_acceso'],
     titulo: 'Generación del frontend', artefacto: 'codigo_frontend'
   }),
   tests: Object.freeze({

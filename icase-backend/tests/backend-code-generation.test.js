@@ -5,7 +5,7 @@ const CodeGenerationWorkflowService = require('../src/core/services/CodeGenerati
 const approvedPlan = () => ({
   proyecto_id: 'p1', version: 4,
   etapas: new CodeGenerationWorkflowService().crearEtapasIniciales().map((item) =>
-    ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas'].includes(item.etapa)
+    ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'].includes(item.etapa)
       ? { ...item, estado: 'aprobada', version: 1, propuesta: item.etapa === 'stack_tecnologico'
         ? { backend: 'Node.js + NestJS', base_datos: 'PostgreSQL' }
         : item.etapa === 'arquitectura_codigo' ? { estilo: 'Clean Architecture' } : {} }

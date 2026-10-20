@@ -352,6 +352,26 @@ class ModelosIaService {
     });
   }
 
+  /**
+   * Ejecuta un prompt libre y devuelve el JSON parseado, o null si ningún proveedor respondió.
+   * No altera el flujo de requisitos/diagramas; sirve a servicios que piden una salida estructurada propia.
+   */
+  async generarJson(prompt, { provider = null, specificModel = null } = {}) {
+    const solicitado = String(provider || '').toLowerCase();
+    const orden = solicitado
+      ? [solicitado === 'deepseek' || solicitado.includes('deep') ? 'deepseek' : solicitado]
+      : (prompt.length > 22000 ? ['gemini', ...this.providerOrder.filter((item) => item !== 'gemini')] : this.providerOrder);
+    for (const proveedor of orden) {
+      try {
+        const respuesta = await this._ejecutarProveedor(proveedor, prompt, specificModel);
+        if (respuesta) return respuesta;
+      } catch (error) {
+        console.warn(`[ModelosIaService] ${proveedor} no pudo completar la solicitud estructurada: ${error.message}`);
+      }
+    }
+    return null;
+  }
+
   async _ejecutarProveedor(proveedor, prompt, specificModel) {
     if (proveedor === 'gemini') return this.generarConGemini(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'groq') return this.generarConGroq(prompt, specificModel, { allowFallback: true });

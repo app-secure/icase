@@ -24,6 +24,7 @@ const MockupTraceabilityService = require('./infrastructure/services/MockupTrace
 const FinalProjectAuditService = require('./infrastructure/services/FinalProjectAuditService');
 const RequirementChangeService = require('./core/services/RequirementChangeService');
 const CodePlanningProposalService = require('./core/services/CodePlanningProposalService');
+const BusinessRuleInferenceService = require('./infrastructure/services/BusinessRuleInferenceService');
 const BackendScaffoldGenerator = require('./infrastructure/services/BackendScaffoldGenerator');
 const FrontendScaffoldGenerator = require('./infrastructure/services/FrontendScaffoldGenerator');
 const TestSuiteGenerator = require('./infrastructure/services/TestSuiteGenerator');
@@ -89,7 +90,9 @@ function createApp() {
   const mockupIaService = new MockupIaService();
   const mockupTraceabilityService = new MockupTraceabilityService();
   const finalProjectAuditService = new FinalProjectAuditService({ mockupTraceabilityService });
-  const codePlanningProposalService = new CodePlanningProposalService();
+  const codePlanningProposalService = new CodePlanningProposalService({
+    ruleInferenceService: new BusinessRuleInferenceService({ modelosIa: modelosIaService })
+  });
   const backendScaffoldGenerator = new BackendScaffoldGenerator();
   const frontendScaffoldGenerator = new FrontendScaffoldGenerator();
   const testSuiteGenerator = new TestSuiteGenerator();

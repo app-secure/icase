@@ -1,4 +1,5 @@
 const { CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
+const AccessControlService = require('./AccessControlService');
 
 const CODE_DECISION_PHASES = Object.values(CODE_PHASE_DEFINITIONS)
   .filter((item) => item.tipo === 'decision')
@@ -8,6 +9,10 @@ const clean = (value) => String(value || '').trim();
 const unique = (values) => [...new Set(values.map(clean).filter(Boolean))];
 
 class CodePlanningProposalService {
+  constructor({ ruleInferenceService = null } = {}) {
+    this.ruleInferenceService = ruleInferenceService;
+  }
+
   generar({ etapa, proyecto, requerimientos = [], diagramas = [], plan }) {
     if (!CODE_DECISION_PHASES.includes(etapa)) {
       throw new Error(`La etapa ${etapa} no admite propuestas de planificación.`);
@@ -20,12 +25,37 @@ class CodePlanningProposalService {
     const texto = this._textoDe(requisitosAprobados, diagramasAprobados);
     const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto };
     const propuesta = this[`_${etapa}`](contexto);
-
-    return {
+    const construir = (resultado) => ({
       etapa,
-      propuesta: propuesta.valor,
+      propuesta: resultado.valor,
       evidencias: this._evidencias(requisitosAprobados, diagramasAprobados),
-      advertencias: propuesta.advertencias
+      advertencias: resultado.advertencias
+    });
+    // La etapa de reglas de negocio consulta a la IA, por lo que responde de forma asíncrona.
+    return propuesta && typeof propuesta.then === 'function' ? propuesta.then(construir) : construir(propuesta);
+  }
+
+  _control_acceso({ requisitosAprobados }) {
+    return new AccessControlService().proponer({ requerimientos: requisitosAprobados });
+  }
+
+  async _reglas_negocio({ requisitosAprobados, diagramasAprobados, plan }) {
+    const anterior = plan?.etapas?.find((item) => item.etapa === 'reglas_negocio');
+    if (!this.ruleInferenceService) {
+      return { valor: { reglas: [], notas: 'Sin inferencia automática: redacta las reglas manualmente.' }, advertencias: ['El servicio de inferencia de reglas no está configurado.'] };
+    }
+    const { reglas, advertencias } = await this.ruleInferenceService.inferir({
+      requerimientos: requisitosAprobados,
+      diagramas: diagramasAprobados,
+      retroalimentacion: anterior?.estado === 'rechazada' ? anterior.observaciones : ''
+    });
+    const pendientes = reglas.filter((item) => item.estado_decision === 'pendiente').length;
+    return {
+      valor: {
+        reglas,
+        notas: `Reglas propuestas desde los RF y el modelo de dominio aprobados. ${pendientes} requieren tu decisión (confirmar o rechazar) antes de aprobar la etapa.`
+      },
+      advertencias: [...advertencias, ...(reglas.length ? [] : ['No se propuso ninguna regla: puedes aprobar la etapa vacía o redactarlas manualmente.'])]
     };
   }
 
