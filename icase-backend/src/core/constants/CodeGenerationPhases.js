@@ -38,12 +38,17 @@ const CODE_PHASES = Object.freeze({
     titulo: 'Autenticación y roles',
     descripcion: 'Define cómo se autentican las personas, qué roles existen y qué puede hacer cada rol sobre cada operación.'
   }),
+  modules: Object.freeze({
+    id: 'modulos', orden: 47, tipo: 'decision', dependencias: ['estructura_carpetas'], opcional: true,
+    titulo: 'Módulos',
+    descripcion: 'Elige qué funcionalidades opcionales incluye la aplicación. Si no la apruebas se usan los módulos del modo automático.'
+  }),
   backend: Object.freeze({
-    id: 'generacion_backend', orden: 50, tipo: 'generacion', dependencias: ['estructura_carpetas', 'reglas_negocio', 'control_acceso'],
+    id: 'generacion_backend', orden: 50, tipo: 'generacion', dependencias: ['estructura_carpetas', 'reglas_negocio', 'control_acceso'], influyen: ['modulos'],
     titulo: 'Generación del backend', artefacto: 'codigo_backend'
   }),
   frontend: Object.freeze({
-    id: 'generacion_frontend', orden: 60, tipo: 'generacion', dependencias: ['estructura_carpetas', 'control_acceso'],
+    id: 'generacion_frontend', orden: 60, tipo: 'generacion', dependencias: ['estructura_carpetas', 'control_acceso'], influyen: ['modulos'],
     titulo: 'Generación del frontend', artefacto: 'codigo_frontend'
   }),
   tests: Object.freeze({

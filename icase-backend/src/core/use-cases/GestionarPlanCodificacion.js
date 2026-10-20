@@ -2,6 +2,7 @@ const CodeGenerationWorkflowService = require('../services/CodeGenerationWorkflo
 const { CODE_PHASE_STATES } = require('../constants/CodeGenerationPhases');
 const BusinessRuleService = require('../services/BusinessRuleService');
 const AccessControlService = require('../services/AccessControlService');
+const ModuleService = require('../services/ModuleService');
 const StackCatalog = require('../services/StackCatalog');
 const DomainModelExtractor = require('../../infrastructure/services/DomainModelExtractor');
 
@@ -25,6 +26,7 @@ class GestionarPlanCodificacion {
     this.workflow = new CodeGenerationWorkflowService();
     this.ruleService = new BusinessRuleService();
     this.accessService = new AccessControlService();
+    this.moduleService = new ModuleService();
     this.domainExtractor = new DomainModelExtractor();
   }
 
@@ -56,7 +58,7 @@ class GestionarPlanCodificacion {
         etapas: this.workflow.crearEtapasIniciales()
       });
     }
-    return { proyecto: { id: proyecto.id, nombre: proyecto.nombre }, ...this.workflow.enriquecer(plan) };
+    return { proyecto: { id: proyecto.id, nombre: proyecto.nombre }, ...this._conModulos(this.workflow.enriquecer(plan)) };
   }
 
   async proponer({ proyectoId, etapa, propuesta, observaciones = '' }) {
@@ -74,6 +76,7 @@ class GestionarPlanCodificacion {
     if (etapa === 'stack_tecnologico') StackCatalog.resolve(propuesta); // lanza un error claro si algo no está soportado
     if (etapa === 'reglas_negocio') propuesta = await this._normalizarReglas(proyectoId, propuesta);
     if (etapa === 'control_acceso') propuesta = await this._normalizarAcceso(proyectoId, propuesta);
+    if (etapa === 'modulos') propuesta = this._normalizarModulos(propuesta);
     const actual = plan.etapas.find((item) => item.etapa === etapa);
     const cambioReal = JSON.stringify(actual?.propuesta || null) !== JSON.stringify(propuesta);
     let etapas = plan.etapas.map((item) => item.etapa === etapa ? {
@@ -92,7 +95,7 @@ class GestionarPlanCodificacion {
       etapas,
       version: (plan.version || 0) + 1
     });
-    return this.workflow.enriquecer(guardado);
+    return this._conModulos(this.workflow.enriquecer(guardado));
   }
 
   async revisar({ proyectoId, etapa, decision, observaciones = '', aprobadoPor = null }) {
@@ -133,7 +136,7 @@ class GestionarPlanCodificacion {
       etapas,
       version: (plan.version || 0) + 1
     });
-    return this.workflow.enriquecer(guardado);
+    return this._conModulos(this.workflow.enriquecer(guardado));
   }
 
   /** Valida las reglas contra el modelo de dominio y los RF aprobados; devuelve la propuesta con reglas normalizadas. */
@@ -151,6 +154,18 @@ class GestionarPlanCodificacion {
     const resultado = this.ruleService.validar(reglas, { entidades: modelo.entities, requerimientos: requerimientos.filter((item) => item.aprobado) });
     if (resultado.errores.length) throw new Error(`Reglas de negocio no válidas: ${resultado.errores.join(' ')}`);
     return { ...propuesta, reglas: resultado.reglas };
+  }
+
+  _normalizarModulos(propuesta) {
+    const resultado = this.moduleService.validar(propuesta);
+    if (resultado.errores.length) throw new Error(`Módulos no válidos: ${resultado.errores.join(' ')}`);
+    return resultado.propuesta;
+  }
+
+  /** Añade al plan qué módulos incluye la aplicación según las decisiones aprobadas (se recalcula, no se guarda). */
+  _conModulos(plan) {
+    const decisiones = Object.fromEntries((plan.etapas || []).filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta).map((item) => [item.etapa, item.propuesta]));
+    return { ...plan, modulos: { incluidos: this.moduleService.incluidos(decisiones), opcionales: ModuleService.opcionales(), activos: this.moduleService.activos(decisiones.modulos) } };
   }
 
   /** Valida la política de acceso contra los RF aprobados; devuelve la propuesta normalizada. */

@@ -5,6 +5,7 @@ const DomainModelExtractor = require('./DomainModelExtractor');
 const BusinessRuleService = require('../../core/services/BusinessRuleService');
 const AccessControlService = require('../../core/services/AccessControlService');
 const GenerationReportService = require('../../core/services/GenerationReportService');
+const ModuleService = require('../../core/services/ModuleService');
 
 const slug = (value) => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -53,8 +54,15 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const manifest = JSON.parse(archivos.find((item) => item.ruta === 'backend/icase.manifest.json').contenido);
     const aprobados = insumos.requerimientos.filter((item) => item.aprobado);
     const plataformas = [...(decisiones.alcance_plataforma?.plataformas || []), ...(decisiones.stack_tecnologico?.plataformas || [])];
+    const modules = new ModuleService();
+    const activos = modules.activos(decisiones.modulos);
     return new GenerationReportService().build({
-      proyecto, requisitos: aprobados, contrato: manifest, stack: decisiones.stack_tecnologico || {}, plataformas
+      proyecto, requisitos: aprobados, contrato: manifest, stack: decisiones.stack_tecnologico || {}, plataformas,
+      modulos: {
+        modo: decisiones.modulos ? (decisiones.modulos.modo || 'automatico') : 'automatico',
+        incluidos: modules.incluidos(decisiones).filter((item) => item.activo),
+        opcionales: ModuleService.opcionales().map((item) => ({ id: item.id, etiqueta: item.etiqueta, activo: activos.includes(item.id) }))
+      }
     });
   }
 

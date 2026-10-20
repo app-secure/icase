@@ -1,4 +1,4 @@
-const { CAPABILITIES, GENERAL_LIMITS } = require('../constants/GenerationCapabilities');
+const { CAPABILITIES, generalLimits } = require('../constants/GenerationCapabilities');
 
 const LEVELS = Object.freeze({
   completo: 'Completo',
@@ -24,7 +24,7 @@ class GenerationReportService {
    * @param {{ proyecto?: object, requisitos: Array (aprobados, los mismos con los que se construyó el contrato), contrato: object, stack?: object, plataformas?: string[] }} entrada
    *   `contrato` es el contrato de aplicación del backend (operaciones y entidades).
    */
-  build({ proyecto = {}, requisitos = [], contrato = {}, stack = {}, plataformas = [] }) {
+  build({ proyecto = {}, requisitos = [], contrato = {}, stack = {}, plataformas = [], modulos = null }) {
     const rf = requisitos.filter((item) => item.tipo === 'RF');
     const rnf = requisitos.filter((item) => item.tipo === 'RNF');
     const operations = new Map((contrato.operations || []).map((item) => [item.id, item]));
@@ -85,11 +85,12 @@ class GenerationReportService {
       proyecto: clean(proyecto.nombre) || 'Proyecto',
       deteccion: 'Las capacidades no soportadas se detectan por palabras clave en el nombre, la descripción y la métrica de cada RF. Un RF «completo» puede pedir algo con otras palabras: revísalo.',
       resumen: { total: items.length, completo: count('completo'), solo_datos: count('solo_datos'), no_soportado: count('no_soportado') },
+      ...(modulos ? { modulos } : {}),
       requisitos: items,
       capacidades_no_generadas: [...pending.values()],
       entidades_sin_requisito: (contrato.entities || []).filter((item) => !mapped.has(item.key)).map((item) => item.name),
       notas: notes,
-      limites_generales: [...GENERAL_LIMITS]
+      limites_generales: generalLimits({ formulariosTipados: Boolean(modulos?.opcionales?.some((item) => item.id === 'formularios_tipados' && item.activo)) })
     };
   }
 
@@ -124,6 +125,11 @@ class GenerationReportService {
       ...rows,
       ''
     ];
+    if (report.modulos) {
+      lines.push('## Módulos', '', `Modo: ${report.modulos.modo}.`, '',
+        ...report.modulos.incluidos.map((item) => `- ${item.etiqueta} — incluido (${item.motivo}).`),
+        ...report.modulos.opcionales.map((item) => `- ${item.etiqueta} — ${item.activo ? 'activo' : 'desactivado'}.`), '');
+    }
     const detail = report.requisitos.filter((item) => item.nivel !== 'completo');
     if (detail.length) {
       lines.push('## Qué falta en cada requisito', '');

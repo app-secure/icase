@@ -1,5 +1,6 @@
 const { CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
 const AccessControlService = require('./AccessControlService');
+const ModuleService = require('./ModuleService');
 
 const CODE_DECISION_PHASES = Object.values(CODE_PHASE_DEFINITIONS)
   .filter((item) => item.tipo === 'decision')
@@ -44,6 +45,10 @@ class CodePlanningProposalService {
     });
     // La etapa de reglas de negocio consulta a la IA, por lo que responde de forma asíncrona.
     return propuesta && typeof propuesta.then === 'function' ? propuesta.then(construir) : construir(propuesta);
+  }
+
+  _modulos() {
+    return new ModuleService().proponer();
   }
 
   _control_acceso({ requisitosAprobados }) {
