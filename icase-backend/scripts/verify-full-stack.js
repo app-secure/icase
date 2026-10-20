@@ -7,6 +7,8 @@
 // --no-auth  genera la API sin autenticación
 // --backend-only  verifica solo el backend (sin frontend ni navegador): mucho más rápido
 // --log      guarda la salida completa de Docker (la del verificador se recorta a los últimos caracteres)
+// --sabotage archivo::buscar::reemplazar  altera el código generado para comprobar que la verificación lo detecta
+//            (debe terminar en «fallida»; se puede repetir)
 const fs = require('node:fs');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
@@ -20,7 +22,8 @@ const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
 const logIndex = args.indexOf('--log');
 const logFile = logIndex >= 0 ? args[logIndex + 1] : null;
-const [backendName = 'Express', database = 'PostgreSQL'] = args.filter((item, index) => !item.startsWith('--') && (logIndex < 0 || index !== logIndex + 1));
+const valueOf = new Set(args.flatMap((item, index) => (['--log', '--sabotage'].includes(item) ? [index + 1] : [])));
+const [backendName = 'Express', database = 'PostgreSQL'] = args.filter((item, index) => !item.startsWith('--') && !valueOf.has(index));
 
 const PLANTUML = `@startuml
 enum EstadoReserva {
@@ -39,7 +42,12 @@ class Reserva {
   +String codigo
   +Date fechaInicio
   +Date fechaFin
+  +DateTime creadaEn
+  +Time hora
   +int comensales
+  +float anticipo
+  +UUID referencia
+  +List<String> etiquetas
   +EstadoReserva estado
 }
 Cliente "1" --> "0..*" Reserva
@@ -84,6 +92,14 @@ async function main() {
   const proyecto = { nombre: 'Reservas' };
   const backend = await new BackendScaffoldGenerator().generar({ proyecto, insumos: { decisiones, requerimientos: requirements, diagramaDominio: { codigo_plantuml: PLANTUML } }, versionesOrigen: {} });
   const backendOnly = flag('--backend-only');
+  args.forEach((item, index) => {
+    if (item !== '--sabotage') return;
+    const [file, search, replacement] = String(args[index + 1]).split('::');
+    const target = backend.archivos.find((candidate) => candidate.ruta.endsWith(file));
+    if (!target || !target.contenido.includes(search)) throw new Error(`Sabotaje inaplicable: «${search}» no está en ${file}`);
+    target.contenido = target.contenido.replace(search, replacement);
+    console.log(`Sabotaje aplicado en ${target.ruta}`);
+  });
   const screens = requirements.map((item, index) => ({ pantalla_id: `screen-${index}`, nombre: item.nombre, slug: `screen-${index}`, ruta: `/screen-${index}`, rf_trazabilidad: [item.identificador] }));
   const frontend = backendOnly ? null : await new FrontendScaffoldGenerator().generar({ proyecto, insumos: { decisiones, diseno: { manifiesto_navegacion: screens, mockups: [] } }, versionesOrigen: {} });
   const tests = backendOnly ? null : await new TestSuiteGenerator().generar({ proyecto, insumos: { requerimientos: requirements, backend: { ...backend, version: 1 }, frontend: { ...frontend, version: 1 } }, versionesOrigen: {} });
@@ -92,6 +108,15 @@ async function main() {
     run: async (command, commandArgs, options) => {
       try { return await run(command, commandArgs, { ...options, maxBuffer: 64 * 1024 * 1024 }); } catch (error) {
         if (logFile) fs.appendFileSync(logFile, `\n##### ${command} ${commandArgs.join(' ')}\n${error.stdout || ''}\n${error.stderr || ''}\n`);
+        // Si falla el arranque, el motivo está en los logs de los servicios, que se destruyen justo después.
+        if (commandArgs.includes('up')) {
+          try {
+            const logs = await run(command, [...commandArgs.slice(0, commandArgs.indexOf('up')), 'logs', '--no-color', '--tail', '60', 'backend'], { ...options, maxBuffer: 8 * 1024 * 1024 });
+            const causes = `${logs.stdout}${logs.stderr}`.split('\n').filter((line) => /Caused by|ERROR|Exception:|FAILED|Error:|APPLICATION/.test(line)).slice(-12);
+            console.log(`\n--- logs del backend (causas; el detalle completo va a --log) ---\n${(causes.length ? causes : `${logs.stdout}${logs.stderr}`.split('\n').slice(-15)).join('\n')}`);
+            if (logFile) fs.appendFileSync(logFile, `\n##### logs del backend\n${logs.stdout}${logs.stderr}\n`);
+          } catch { /* sin logs que mostrar */ }
+        }
         throw error;
       }
     }
