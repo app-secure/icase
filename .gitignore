@@ -38,3 +38,8 @@ Thumbs.db
 
 # Reportes de pruebas y cobertura
 coverage/
+
+# Sitio documental y cachés Python
+/site/
+__pycache__/
+*.pyc
