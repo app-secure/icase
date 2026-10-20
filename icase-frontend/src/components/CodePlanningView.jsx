@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, Check, ChevronRight, Code2, Download, FolderTree, Layers3,
-  Loader2, LockKeyhole, RotateCcw, Save, Scale, Settings2, ShieldCheck, WandSparkles, X
+  Loader2, LockKeyhole, Puzzle, RotateCcw, Save, Scale, Settings2, ShieldCheck, WandSparkles, X
 } from 'lucide-react';
 import {
   fetchCodePlanApi, fetchGeneratedArtifactsApi, generateBackendArtifactApi,
@@ -14,6 +14,9 @@ import {
 import GenerationReport from './GenerationReport';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'];
+// Etapas que se pueden editar y aprobar pero no bloquean la generación (si no se aprueban rige el modo automático).
+const OPTIONAL_PHASES = ['modulos'];
+const EDITABLE_PHASES = [...DECISION_PHASES, ...OPTIONAL_PHASES];
 
 const DEFAULTS = {
   alcance_plataforma: {
@@ -44,7 +47,8 @@ tests/{unit,integration,e2e}`,
     convenciones: 'Un módulo por capacidad funcional; nombres de archivos consistentes y sin código generado fuera de estas raíces.'
   },
   reglas_negocio: { reglas: [], notas: '' },
-  control_acceso: { autenticacion: { metodo: 'jwt', expiracion: '8h' }, roles: [], permisos: [], operaciones: [], notas: '' }
+  control_acceso: { autenticacion: { metodo: 'jwt', expiracion: '8h' }, roles: [], permisos: [], operaciones: [], notas: '' },
+  modulos: { modo: 'automatico', modulos: [], notas: '' }
 };
 
 const ICONS = {
@@ -53,7 +57,8 @@ const ICONS = {
   arquitectura_codigo: Layers3,
   estructura_carpetas: FolderTree,
   reglas_negocio: Scale,
-  control_acceso: ShieldCheck
+  control_acceso: ShieldCheck,
+  modulos: Puzzle
 };
 
 const STATUS_STYLE = {
@@ -89,7 +94,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
         setPlan(data);
         const loaded = { ...DEFAULTS };
         for (const item of data.etapas || []) {
-          if (item.propuesta && DECISION_PHASES.includes(item.etapa)) loaded[item.etapa] = item.propuesta;
+          if (item.propuesta && EDITABLE_PHASES.includes(item.etapa)) loaded[item.etapa] = item.propuesta;
         }
         setDrafts(loaded);
       })
@@ -336,8 +341,16 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                 <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLE[item.estado] || STATUS_STYLE.pendiente}`}>{item.estado?.replace('_', ' ')}</span>
               </button>;
             })}
+            <p className="mb-2 mt-5 px-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Opcional</p>
+            {(plan?.etapas || []).filter((item) => OPTIONAL_PHASES.includes(item.etapa)).map((item) => {
+              const Icon = ICONS[item.etapa] || Puzzle;
+              return <button key={item.etapa} onClick={() => { if (item.estado !== 'bloqueada') { setSelected(item.etapa); setSuggestionMeta(null); } }} className={`mb-2 w-full rounded-xl border border-dashed p-3 text-left transition ${selected === item.etapa ? 'border-violet-300 ring-2 ring-violet-100' : 'border-slate-300'} ${item.estado === 'bloqueada' ? 'opacity-60' : ''}`}>
+                <span className="flex items-center justify-between"><span className="flex items-center gap-2 text-xs font-semibold text-slate-800"><Icon size={15} />{item.titulo}</span>{item.estado === 'aprobada' ? <Check size={14} className="text-emerald-600" /> : item.estado === 'bloqueada' ? <LockKeyhole size={13} className="text-slate-400" /> : null}</span>
+                <span className="mt-1 block text-[10px] text-slate-500">{item.estado === 'aprobada' ? 'Personalizado o confirmado' : 'Sin aprobar: se usa el modo automático'}</span>
+              </button>;
+            })}
             <p className="mb-2 mt-5 px-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Generación posterior</p>
-            {(plan?.etapas || []).filter((item) => !DECISION_PHASES.includes(item.etapa)).map((item) => <div key={item.etapa} className="mb-1 flex items-center gap-2 rounded-lg px-2 py-2 text-[11px] text-slate-400"><LockKeyhole size={12} />{item.titulo}</div>)}
+            {(plan?.etapas || []).filter((item) => !EDITABLE_PHASES.includes(item.etapa)).map((item) => <div key={item.etapa} className="mb-1 flex items-center gap-2 rounded-lg px-2 py-2 text-[11px] text-slate-400"><LockKeyhole size={12} />{item.titulo}</div>)}
           </aside>
 
           <main className="min-w-0 flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-6">
@@ -349,7 +362,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
               <div className="mb-4 flex justify-end">
                 <button disabled={busy || current.estado === 'bloqueada'} onClick={generateSuggestion} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50"><WandSparkles size={15} />Generar propuesta desde el proyecto</button>
               </div>
-              <PhaseForm phase={selected} value={drafts[selected] || {}} disabled={busy || current.estado === 'bloqueada'} onChange={(value) => setDrafts((old) => ({ ...old, [selected]: value }))} />
+              <PhaseForm phase={selected} modules={plan?.modulos} value={drafts[selected] || {}} disabled={busy || current.estado === 'bloqueada'} onChange={(value) => setDrafts((old) => ({ ...old, [selected]: value }))} />
               {suggestionMeta && <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                 <p className="font-semibold text-slate-800">Base de la sugerencia: {suggestionMeta.evidencias.length} artefactos aprobados</p>
                 {suggestionMeta.advertencias.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">{suggestionMeta.advertencias.map((item) => <li key={item}>{item}</li>)}</ul>}
@@ -652,7 +665,44 @@ function AccessEditor({ value, onChange, disabled }) {
   </div>;
 }
 
-function PhaseForm({ phase, value, onChange, disabled }) {
+function ModulesEditor({ value, onChange, disabled, modules }) {
+  const optional = modules?.opcionales || [];
+  const included = modules?.incluidos || [];
+  const mode = value.modo === 'personalizado' ? 'personalizado' : 'automatico';
+  const stateOf = (id) => {
+    const recommended = optional.find((item) => item.id === id)?.porDefecto ?? false;
+    const chosen = (value.modulos || []).find((item) => item.id === id);
+    return mode === 'personalizado' && chosen ? chosen.activo : recommended;
+  };
+  const setMode = (next) => onChange({ ...value, modo: next, modulos: optional.map((item) => ({ id: item.id, activo: next === 'automatico' ? item.porDefecto : stateOf(item.id) })) });
+  const toggle = (id, active) => onChange({ ...value, modo: 'personalizado', modulos: optional.map((item) => ({ id: item.id, activo: item.id === id ? active : stateOf(item.id) })) });
+  return <div className="space-y-5">
+    <fieldset className="space-y-2">
+      <legend className="mb-1 text-xs font-semibold text-slate-700">Modo</legend>
+      <label className="flex items-start gap-2 text-sm"><input type="radio" name="modo-modulos" disabled={disabled} checked={mode === 'automatico'} onChange={() => setMode('automatico')} className="mt-1" /><span><span className="font-medium text-slate-800">Automático (recomendado)</span><span className="block text-xs text-slate-500">Usa los módulos recomendados. Es lo que se genera si no apruebas esta etapa.</span></span></label>
+      <label className="flex items-start gap-2 text-sm"><input type="radio" name="modo-modulos" disabled={disabled} checked={mode === 'personalizado'} onChange={() => setMode('personalizado')} className="mt-1" /><span><span className="font-medium text-slate-800">Personalizado</span><span className="block text-xs text-slate-500">Tú decides qué módulos opcionales se incluyen.</span></span></label>
+    </fieldset>
+    <section>
+      <h3 className="mb-2 text-xs font-semibold text-slate-700">Módulos opcionales</h3>
+      {optional.length === 0 ? <p className="text-xs text-slate-500">No hay módulos opcionales disponibles.</p> : <ul className="space-y-2">{optional.map((item) => <li key={item.id} className="rounded-lg border border-slate-200 p-3">
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={disabled || mode === 'automatico'} checked={stateOf(item.id)} onChange={(event) => toggle(item.id, event.target.checked)} className="mt-1" />
+          <span><span className="font-medium text-slate-800">{item.etiqueta}</span><span className="ml-2 text-[10px] text-slate-500">{item.porDefecto ? 'recomendado' : 'no recomendado por defecto'}</span>
+            <span className="block text-xs text-slate-600">{item.descripcion}</span>
+            {item.sinEfecto && <span className="block text-xs text-slate-500">{item.sinEfecto}</span>}</span></label>
+      </li>)}</ul>}
+    </section>
+    <section>
+      <h3 className="mb-2 text-xs font-semibold text-slate-700">Incluido según otras etapas</h3>
+      <ul className="space-y-1">{included.map((item) => <li key={item.id} className="flex items-start gap-2 text-xs">
+        <span aria-hidden="true" className={item.activo ? 'text-emerald-600' : 'text-slate-400'}>{item.activo ? '✓' : '—'}</span>
+        <span className={item.activo ? 'text-slate-700' : 'text-slate-400'}><span className="font-medium">{item.etiqueta}</span> — {item.motivo}</span>
+      </li>)}</ul>
+    </section>
+  </div>;
+}
+
+function PhaseForm({ phase, value, onChange, disabled, modules }) {
+  if (phase === 'modulos') return <ModulesEditor value={value} onChange={onChange} disabled={disabled} modules={modules} />;
   if (phase === 'control_acceso') return <AccessEditor value={value} onChange={onChange} disabled={disabled} />;
   if (phase === 'reglas_negocio') return <RulesEditor value={value} onChange={onChange} disabled={disabled} />;
   const field = (key, label, multiline = false) => {
