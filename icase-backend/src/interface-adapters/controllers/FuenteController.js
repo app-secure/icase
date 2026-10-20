@@ -250,6 +250,8 @@ class FuenteController {
 
     if (mongoose.Types.ObjectId.isValid(identifier)) {
       fuente = await this.fuenteRepo.obtenerPorId(identifier);
+      // Con un proyecto en la ruta, la fuente debe ser de ese proyecto: el identificador por sí solo no basta.
+      if (fuente && proyectoId && String(fuente.proyecto_id) !== String(proyectoId)) fuente = null;
     }
 
     if (!fuente && proyectoId) {
@@ -295,9 +297,9 @@ class FuenteController {
       return res.json({ success: true, eliminado: true, id: fuenteIdEliminar });
     }
 
-    // Si no se encontró el documento, intentar eliminar por si el identifier era directo
-    const ok = await this.fuenteRepo.eliminar(identifier);
-    return res.json({ success: true, eliminado: ok, id: identifier });
+    // No se encontró entre las fuentes autorizadas: la eliminación es idempotente, pero nunca se borra a ciegas por
+    // el identificador (podría ser una fuente de otro proyecto).
+    return res.json({ success: true, eliminado: false, id: identifier });
   }
 }
 

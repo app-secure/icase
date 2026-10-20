@@ -1,7 +1,12 @@
 const express = require('express');
+const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
-function buildMockupRoutes(mockupController) {
+function buildMockupRoutes(mockupController, access) {
   const router = express.Router();
+
+  router.use(authMiddleware);
+  router.param('proyectoId', access.proyecto);
+  router.param('trabajoId', access.trabajo);
 
   router.post('/proyecto/:proyectoId/generar', (req, res) => mockupController.generar(req, res));
   router.post('/proyecto/:proyectoId/trabajos', (req, res) => mockupController.iniciarTrabajo(req, res));

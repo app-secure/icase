@@ -1,11 +1,13 @@
 const express = require('express');
 const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
-function buildCodificacionRoutes(controller) {
+function buildCodificacionRoutes(controller, access) {
   const router = express.Router();
   // Las decisiones de stack, arquitectura y estructura son aprobaciones
   // auditables; este módulo nunca admite acceso anónimo.
   router.use(authMiddleware);
+  router.param('id', access.proyecto);
+  router.param('artefactoId', access.artefacto);
   router.get('/:id/codificacion', (req, res) => controller.obtenerPlan(req, res));
   router.post('/:id/codificacion/etapas/:etapa/sugerencia', (req, res) => controller.sugerirEtapa(req, res));
   router.put('/:id/codificacion/etapas/:etapa', (req, res) => controller.proponerEtapa(req, res));

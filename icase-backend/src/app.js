@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const buildProjectAccess = require('./infrastructure/security/projectAccess');
+const { getJwtSecret } = require('./infrastructure/security/jwtSecret');
 
 // Repositorios
 const MongoProyectoRepository = require('./interface-adapters/repositories/MongoProyectoRepository');
@@ -63,25 +65,41 @@ const buildAuthRoutes = require('./routes/authRoutes');
 const buildMockupRoutes = require('./routes/mockupRoutes');
 const buildCodificacionRoutes = require('./routes/codificacionRoutes');
 
-function createApp() {
+/**
+ * @param {object} [options]
+ * @param {object} [options.repositories] repositorios alternativos (pruebas); los que falten usan MongoDB.
+ * @param {object} [options.env] variables de entorno (por defecto process.env).
+ */
+function createApp({ repositories = {}, env = process.env } = {}) {
   const app = express();
+
+  // Si falta el secreto de sesión en producción, el servidor no debe arrancar.
+  getJwtSecret(env);
 
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Inyección de Dependencias
-  const proyectoRepo = new MongoProyectoRepository();
-  const usuarioRepo = new MongoUsuarioRepository();
-  const requerimientoRepo = new MongoRequerimientoRepository();
-  const diagramaRepo = new MongoDiagramaRepository();
-  const estandarRepo = new MongoEstandarRepository();
-  const fuenteRepo = new MongoFuenteRepository();
-  const casoDeUsoRepo = new MongoCasoDeUsoRepository();
-  const disenoRepo = new MongoDisenoRepository();
-  const trabajoGeneracionRepo = new MongoTrabajoGeneracionRepository();
-  const planCodificacionRepo = new MongoPlanCodificacionRepository();
-  const artefactoGeneradoRepo = new MongoArtefactoGeneradoRepository();
+  const proyectoRepo = repositories.proyecto || new MongoProyectoRepository();
+  const usuarioRepo = repositories.usuario || new MongoUsuarioRepository();
+  const requerimientoRepo = repositories.requerimiento || new MongoRequerimientoRepository();
+  const diagramaRepo = repositories.diagrama || new MongoDiagramaRepository();
+  const estandarRepo = repositories.estandar || new MongoEstandarRepository();
+  const fuenteRepo = repositories.fuente || new MongoFuenteRepository();
+  const casoDeUsoRepo = repositories.casoDeUso || new MongoCasoDeUsoRepository();
+  const disenoRepo = repositories.diseno || new MongoDisenoRepository();
+  const trabajoGeneracionRepo = repositories.trabajoGeneracion || new MongoTrabajoGeneracionRepository();
+  const planCodificacionRepo = repositories.planCodificacion || new MongoPlanCodificacionRepository();
+  const artefactoGeneradoRepo = repositories.artefactoGenerado || new MongoArtefactoGeneradoRepository();
+  const access = buildProjectAccess({
+    proyectoRepository: proyectoRepo,
+    requerimientoRepository: requerimientoRepo,
+    diagramaRepository: diagramaRepo,
+    fuenteRepository: fuenteRepo,
+    trabajoGeneracionRepository: trabajoGeneracionRepo,
+    artefactoRepository: artefactoGeneradoRepo
+  });
 
   const modelosIaService = new ModelosIaService();
   const plantumlValidator = new PlantUMLValidatorService();
@@ -205,7 +223,8 @@ function createApp() {
   });
 
   const authController = new AuthController({
-    usuarioRepository: usuarioRepo
+    usuarioRepository: usuarioRepo,
+    env
   });
 
   const mockupController = new MockupController({
@@ -232,12 +251,12 @@ function createApp() {
 
   // Montaje de rutas
   app.use('/auth', buildAuthRoutes(authController));
-  app.use('/proyectos', buildProyectoRoutes(proyectoController));
-  app.use('/proyectos', buildCodificacionRoutes(codificacionController));
-  app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController));
-  app.use('/diagramas', buildDiagramaRoutes(diagramaController));
-  app.use('/', buildFuenteRoutes(fuenteController));
-  app.use('/mockups', buildMockupRoutes(mockupController));
+  app.use('/proyectos', buildProyectoRoutes(proyectoController, access));
+  app.use('/proyectos', buildCodificacionRoutes(codificacionController, access));
+  app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController, access));
+  app.use('/diagramas', buildDiagramaRoutes(diagramaController, access));
+  app.use('/', buildFuenteRoutes(fuenteController, access));
+  app.use('/mockups', buildMockupRoutes(mockupController, access));
 
   return {
     app,

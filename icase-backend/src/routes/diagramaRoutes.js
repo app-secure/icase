@@ -1,7 +1,11 @@
 const express = require('express');
+const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
-function buildDiagramaRoutes(diagramaController) {
+function buildDiagramaRoutes(diagramaController, access) {
   const router = express.Router();
+
+  router.use(authMiddleware);
+  router.param('id', access.diagrama);
 
   router.put('/:id', (req, res) => diagramaController.actualizar(req, res));
   router.get('/:id/versiones', (req, res) => diagramaController.listarVersiones(req, res));

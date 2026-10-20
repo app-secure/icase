@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -31,8 +32,14 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 } // 50 MB
 });
 
-function buildFuenteRoutes(fuenteController) {
+function buildFuenteRoutes(fuenteController, access) {
   const router = express.Router();
+
+  // Este router cuelga de «/»: la sesión se exige solo en sus propias rutas. Va antes que los parámetros para que
+  // la comprobación de dueño (y la subida de archivos) nunca se ejecute sin usuario autenticado.
+  router.use(['/proyectos', '/fuentes'], authMiddleware);
+  router.param('proyectoId', access.proyecto);
+  router.param('id', access.fuente);
 
   router.post('/proyectos/:proyectoId/fuentes', upload.single('archivo'), (req, res) =>
     fuenteController.subirYTranscribir(req, res)

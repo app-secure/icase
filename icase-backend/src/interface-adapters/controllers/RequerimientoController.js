@@ -1,3 +1,5 @@
+const { omit, REQUIREMENT_FORBIDDEN } = require('../../infrastructure/security/sanitize');
+
 class RequerimientoController {
   constructor({
     actualizarRequerimientoManualUseCase,
@@ -12,7 +14,7 @@ class RequerimientoController {
   async actualizar(req, res) {
     try {
       const { id } = req.params;
-      const datos = req.body;
+      const datos = omit(req.body, REQUIREMENT_FORBIDDEN);
       const existente = await this.requerimientoRepository.obtenerPorId(id);
       const actualizado = await this.actualizarRequerimientoManualUseCase.ejecutar({
         id,
@@ -29,7 +31,7 @@ class RequerimientoController {
 
   async crearManual(req, res) {
     try {
-      const datos = req.body;
+      const datos = omit(req.body, ['id', '_id', 'aprobado', 'createdAt', 'updatedAt', '__v']); // proyecto_id sí viene, y la ruta ya comprobó que es del usuario
       const nuevo = await this.requerimientoRepository.crear({
         ...datos,
         origen: datos.origen || 'manual',
