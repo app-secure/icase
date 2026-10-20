@@ -1,17 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useSession } from './session';
 
-export default function OperationScreen({ title, capabilities, referenceText }) {
+/** Editor de registros como JSON: sirve para cualquier esquema, incluso sin campos declarados. */
+export function JsonRecords({ capability }) {
   const { api, can } = useSession();
-  const readable = capabilities.filter((key) => can(key, 'GET'));
-  const [capability, setCapability] = useState(readable[0] || '');
   const [records, setRecords] = useState([]);
   const [payload, setPayload] = useState('{\n  "valor": ""\n}');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const key = readable.join('|');
-
-  useEffect(() => { if (!readable.includes(capability)) setCapability(readable[0] || ''); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const path = (id) => `/api/operations/${encodeURIComponent(capability)}${id === undefined ? '' : `/${encodeURIComponent(id)}`}`;
 
@@ -34,13 +30,7 @@ export default function OperationScreen({ title, capabilities, referenceText }) 
   const update = (id) => run(() => api(path(id), { method: 'PATCH', body: JSON.stringify(parse()) }), 'Registro actualizado');
   const remove = (id) => run(() => api(path(id), { method: 'DELETE' }), 'Registro eliminado');
 
-  const denied = capabilities.length > 0 && readable.length === 0;
-  return <main className="screen" data-screen={capability || 'sin-operacion'}>
-    <h1>{title}</h1>
-    {referenceText && <p>{referenceText}</p>}
-    {readable.length > 1 && <div className="tabs">{readable.map((value) => <button className="button" key={value} onClick={() => setCapability(value)}>{value}</button>)}</div>}
-    {!capabilities.length && <p className="error">Esta pantalla no tiene RF asociado; corrige la trazabilidad antes de aprobarla.</p>}
-    {denied && <p role="alert" className="error">Tu rol no tiene permiso para ver esta pantalla.</p>}
+  return <>
     {error && <p role="alert" className="error">{error}</p>}
     {message && <p role="status" className="success">{message}</p>}
     {capability && <section className="card">
@@ -57,5 +47,24 @@ export default function OperationScreen({ title, capabilities, referenceText }) 
         </div>
       </article>)}
     </section>
+  </>;
+}
+
+export default function OperationScreen({ title, capabilities, referenceText }) {
+  const { can } = useSession();
+  const readable = capabilities.filter((key) => can(key, 'GET'));
+  const [capability, setCapability] = useState(readable[0] || '');
+  const key = readable.join('|');
+
+  useEffect(() => { if (!readable.includes(capability)) setCapability(readable[0] || ''); }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const denied = capabilities.length > 0 && readable.length === 0;
+  return <main className="screen" data-screen={capability || 'sin-operacion'}>
+    <h1>{title}</h1>
+    {referenceText && <p>{referenceText}</p>}
+    {readable.length > 1 && <div className="tabs">{readable.map((value) => <button className="button" key={value} onClick={() => setCapability(value)}>{value}</button>)}</div>}
+    {!capabilities.length && <p className="error">Esta pantalla no tiene RF asociado; corrige la trazabilidad antes de aprobarla.</p>}
+    {denied && <p role="alert" className="error">Tu rol no tiene permiso para ver esta pantalla.</p>}
+    <JsonRecords key={capability} capability={capability} />
   </main>;
 }

@@ -29,7 +29,7 @@ export function SessionProvider({ children }) {
   const api = useCallback(async (path, options = {}) => {
     const { response, data } = await request(path, options, token);
     if (response.status === 401 && token) logout(); // sesión caducada, revocada o usuario desactivado
-    if (!response.ok) throw new Error(data.message || 'Solicitud fallida');
+    if (!response.ok) throw Object.assign(new Error(data.message || 'Solicitud fallida'), { status: response.status, details: data.details });
     return data;
   }, [token, logout]);
 

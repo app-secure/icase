@@ -11,6 +11,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     const routes = this._frontendRoutes(frontend);
     const contract = this._backendContract(backend);
     const auth = this._frontendAuth(frontend);
+    const typedForms = this._frontendModules(frontend).formularios_tipados === true;
     const functional = Array.isArray(contract.operations) && contract.operations.length > 0;
     const matrix = rf.map((item) => ({
       requisito: item.identificador,
@@ -27,7 +28,8 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       { ruta: 'tests/integration/api-health.test.js', lenguaje: 'javascript', contenido: this._integrationTest() },
       ...(functional ? [{ ruta: 'tests/integration/contract-flow.test.js', lenguaje: 'javascript', contenido: this._contractIntegrationTest(contract) }] : []),
       { ruta: 'tests/e2e/navigation.spec.js', lenguaje: 'javascript', contenido: this._e2eTest(routes, auth) },
-      ...(functional ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth) }] : []),
+      ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth) }] : []),
+      ...(functional && typedForms ? [{ ruta: 'tests/e2e/typed-forms.spec.js', lenguaje: 'javascript', contenido: this._typedFormsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
       { ruta: 'tests/playwright.config.js', lenguaje: 'javascript', contenido: "import { defineConfig } from '@playwright/test';\nexport default defineConfig({ testDir: './e2e', workers: 1, use: { baseURL: process.env.BASE_WEB_URL || 'http://localhost:5173', trace: 'retain-on-failure' } });\n" },
       { ruta: 'tests/README.md', lenguaje: 'markdown', contenido: this._readme(backend.version, frontend.version) }
@@ -52,6 +54,18 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     const manifest = frontend.archivos?.find((file) => file.ruta === 'frontend/icase.manifest.json');
     try { return JSON.parse(manifest?.contenido || '{}').auth || { habilitada: false }; }
     catch { return { habilitada: false }; }
+  }
+
+  _frontendModules(frontend) {
+    const manifest = frontend.archivos?.find((file) => file.ruta === 'frontend/icase.manifest.json');
+    try { return JSON.parse(manifest?.contenido || '{}').modulos || {}; }
+    catch { return {}; }
+  }
+
+  _frontendScreens(frontend) {
+    const manifest = frontend.archivos?.find((file) => file.ruta === 'frontend/icase.manifest.json');
+    try { return JSON.parse(manifest?.contenido || '{}').pantallas || []; }
+    catch { return []; }
   }
 
   /** Cabecera de las pruebas de navegador cuando la aplicación exige sesión: reutiliza la del administrador. */
@@ -162,6 +176,108 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
   }
 });
 `;
+  }
+
+  /**
+   * Prueba de navegador del módulo de formularios por campo: usa el formulario (no la API) para crear, listar, editar
+   * y eliminar un registro de la primera pantalla, y comprueba que una regla incumplida se marca junto a su campo.
+   */
+  _typedFormsE2eTest({ screens, contract, auth }) {
+    const operations = contract.operations || [];
+    const screen = screens.find((item) => (item.operations || []).some((key) => operations.some((operation) => operation.key === key)));
+    const operation = screen && operations.find((item) => item.key === screen.operations.find((key) => operations.some((candidate) => candidate.key === key)));
+    if (!operation) return "import { test } from '@playwright/test';\ntest.skip('el contrato no tiene una pantalla con operación', () => {});\n";
+    const strict = screens.map((item) => ({ route: item.route, operation: operations.find((candidate) => candidate.key === (item.operations || [])[0]) }))
+      .find((item) => item.operation && (item.operation.rules || []).some((rule) => rule.tipo === 'requerido' && (item.operation.schema?.properties || {})[rule.campo]));
+    const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
+    return [
+      "import { test, expect } from '@playwright/test';",
+      session,
+      samplePayload.runtimeSource(),
+      '',
+      'const route = ' + JSON.stringify(screen.route) + ';',
+      'const operation = ' + JSON.stringify(operation) + ';',
+      'const operations = ' + JSON.stringify(operations) + ';',
+      "const properties = operation.schema.properties || {};",
+      '',
+      '// Rellena un control según el tipo del campo, como lo haría una persona.',
+      'async function fillField(page, form, name, value) {',
+      "  const property = properties[name];",
+      "  const control = form.locator('[name=\"' + name + '\"]');",
+      "  if (property.type === 'boolean') { await control.setChecked(Boolean(value)); return; }",
+      "  if (property.enum || property['x-references']) {",
+      "    if ((await control.evaluate((element) => element.tagName)) === 'SELECT') { await control.selectOption(String(value)); return; }",
+      '  }',
+      "  if (property.format === 'date-time') {",
+      "    const local = await page.evaluate((iso) => { const d = new Date(iso); const p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()); }, value);",
+      '    await control.fill(local);',
+      '    return;',
+      '  }',
+      '  await control.fill(String(value));',
+      '}',
+      '',
+      "test('el formulario por campo crea, lista, edita y elimina un registro', async ({ page }) => {",
+      "  const api = makeApi(apiBase, token || null);",
+      '  const cleanups = [];',
+      '  const sample = samplePayload(operation.schema, operation.rules, salted());',
+      '  const body = { ...sample.payload };',
+      '  for (const parent of sample.parents) {',
+      "    const parentOperation = operations.find((item) => item.schema && item.schema.title === parent.entidad);",
+      "    body[parent.campo] = (await createValidRecord(api, operations, parentOperation, cleanups, 1)).id;",
+      '  }',
+      '  try {',
+      '    const before = new Set(((await api(operation.collectionPath)).data || []).map((item) => item.id || item._id));',
+      '    await page.goto(route);',
+      "    const form = page.getByRole('form', { name: 'Formulario de registro' });",
+      '    await expect(form).toBeVisible();',
+      '    for (const [name, value] of Object.entries(body)) {',
+      "      if (Array.isArray(value) && value.length === 0) continue;",
+      '      await fillField(page, form, name, value);',
+      '    }',
+      "    await form.getByRole('button', { name: 'Crear' }).click();",
+      "    await expect(page.getByRole('status')).toContainText('Registro creado');",
+      '',
+      '    const created = ((await api(operation.collectionPath)).data || []).filter((item) => !before.has(item.id || item._id));',
+      "    expect(created, 'el formulario debe crear exactamente un registro').toHaveLength(1);",
+      '    for (const [name, value] of Object.entries(body)) {',
+      "      if (typeof value === 'number' || typeof value === 'boolean') expect(created[0].data[name], 'campo ' + name).toBe(value);",
+      "      if (typeof value === 'string' && !properties[name].format) expect(created[0].data[name], 'campo ' + name).toBe(value);",
+      '    }',
+      '',
+      "    const rows = page.locator('table.records tbody tr');",
+      '    await expect(rows).not.toHaveCount(0);',
+      "    const marker = Object.entries(body).find(([name, value]) => typeof value === 'string' && !properties[name].format && !properties[name].enum && !properties[name]['x-references']);",
+      '    const row = marker ? rows.filter({ hasText: marker[1] }) : rows.last();',
+      '    await expect(row).toHaveCount(1);',
+      '',
+      "    await row.getByRole('button', { name: 'Editar' }).click();",
+      "    await expect(form.getByRole('button', { name: 'Guardar cambios' })).toBeVisible();",
+      "    await form.getByRole('button', { name: 'Guardar cambios' }).click();",
+      "    await expect(page.getByRole('status')).toContainText('Registro actualizado');",
+      '',
+      "    await (marker ? rows.filter({ hasText: marker[1] }) : rows.last()).getByRole('button', { name: 'Eliminar' }).click();",
+      "    await expect(page.getByRole('status')).toContainText('Registro eliminado');",
+      '    const after = ((await api(operation.collectionPath)).data || []).map((item) => item.id || item._id);',
+      "    expect(after).not.toContain(created[0].id || created[0]._id);",
+      '  } finally {',
+      '    for (const cleanup of cleanups) { try { await cleanup(); } catch (error) { /* mejor esfuerzo */ } }',
+      '  }',
+      '});',
+      '',
+      "// La pantalla de error es la primera cuya operación visible por defecto tiene un campo obligatorio.",
+      'const strict = ' + JSON.stringify(strict ? { route: strict.route, operation: strict.operation } : null) + ';',
+      "test('una regla incumplida se marca junto a su campo', async ({ page }) => {",
+      "  test.skip(!strict, 'ninguna pantalla tiene campos obligatorios');",
+      "  const required = strict.operation.rules.find((rule) => rule.tipo === 'requerido' && strict.operation.schema.properties[rule.campo]);",
+      '  await page.goto(strict.route);',
+      "  const form = page.getByRole('form', { name: 'Formulario de registro' });",
+      "  await form.getByRole('button', { name: 'Crear' }).click();",
+      "  await expect(page.getByRole('alert')).toContainText('Revisa los campos marcados');",
+      "  await expect(form.locator('[name=\"' + required.campo + '\"]')).toHaveAttribute('aria-invalid', 'true');",
+      "  await expect(form.locator('.field-error').first()).toBeVisible();",
+      '});',
+      ''
+    ].join('\n');
   }
 
   _authE2eTest(routes) {

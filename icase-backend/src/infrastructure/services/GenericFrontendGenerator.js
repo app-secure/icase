@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const renderTemplate = require('./renderTemplate');
+const ModuleService = require('../../core/services/ModuleService');
 
 const TEMPLATES = path.join(__dirname, '..', 'templates', 'frontend');
 const template = (name) => fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
@@ -9,6 +10,9 @@ const template = (name) => fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
 const slug = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pantalla';
 const component = (value) => slug(value).split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('');
+
+// Estilos del módulo de formularios por campo.
+const TYPED_FORMS_CSS = '.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:.75rem 1rem}.form-row{display:flex;flex-direction:column;gap:.25rem}.input{width:100%;padding:.55rem;font:inherit;border:1px solid #cbd5e1;border-radius:8px;background:white}.input[aria-invalid="true"],input[aria-invalid="true"]{border-color:#b91c1c}.field-error{color:#b91c1c;font-size:.85rem}.secondary{background:#e2e8f0;color:#0f172a}.table-wrap{overflow-x:auto}.records{width:100%;border-collapse:collapse}.records th,.records td{text-align:left;padding:.5rem;border-bottom:1px solid #e2e8f0;vertical-align:top}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}';
 
 class GenericFrontendGenerator {
   generate({ proyecto, screens, decisiones = {}, sistemaDiseno = {} }) {
@@ -18,19 +22,23 @@ class GenericFrontendGenerator {
     const acceso = decisiones.control_acceso || null;
     const auth = acceso?.autenticacion?.metodo === 'jwt';
     const openRoles = auth ? (acceso.roles || []).filter((role) => role.incluir !== false && role.autoregistro === true).map((role) => ({ id: role.id, nombre: role.nombre })) : [];
+    const typedForms = new ModuleService().activos(decisiones.modulos).includes('formularios_tipados');
     const files = [
       { ruta: 'frontend/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${slug(proyecto.nombre)}-frontend`, version: '1.0.0', private: true, type: 'module', scripts: { dev: 'vite --host 0.0.0.0', build: 'vite build', preview: 'vite preview --host 0.0.0.0' }, dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0', 'react-router-dom': '^7.0.0' }, devDependencies: { '@vitejs/plugin-react': '^5.0.0', vite: '^7.0.0' } }, null, 2) },
       { ruta: 'frontend/vite.config.js', lenguaje: 'javascript', contenido: "import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nexport default defineConfig({plugins:[react()],server:{proxy:{'/api':'http://localhost:3000','/health':'http://localhost:3000'}}});\n" },
       { ruta: 'frontend/index.html', lenguaje: 'html', contenido: `<!doctype html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${this._escape(proyecto.nombre)}</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>` },
       { ruta: 'frontend/src/main.jsx', lenguaje: 'javascript', contenido: "import React from 'react';\nimport{createRoot}from'react-dom/client';\nimport{BrowserRouter}from'react-router-dom';\nimport { SessionProvider } from './session';\nimport App from './App';\nimport './styles.css';\ncreateRoot(document.getElementById('root')).render(<SessionProvider><BrowserRouter><App/></BrowserRouter></SessionProvider>);\n" },
-      { ruta: 'frontend/src/OperationScreen.jsx', lenguaje: 'javascript', contenido: template('OperationScreen.jsx') },
+      ...(typedForms ? [
+        { ruta: 'frontend/src/OperationScreen.jsx', lenguaje: 'javascript', contenido: template('OperationScreen.typed.jsx') },
+        { ruta: 'frontend/src/JsonOperationScreen.jsx', lenguaje: 'javascript', contenido: template('OperationScreen.jsx') }
+      ] : [{ ruta: 'frontend/src/OperationScreen.jsx', lenguaje: 'javascript', contenido: template('OperationScreen.jsx') }]),
       { ruta: 'frontend/src/session.jsx', lenguaje: 'javascript', contenido: template(auth ? 'session-auth.jsx' : 'session-open.jsx') },
       ...(auth ? [
         { ruta: 'frontend/src/LoginScreen.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('LoginScreen.jsx'), { REGISTRO: JSON.stringify(openRoles) }) },
         { ruta: 'frontend/src/UsersScreen.jsx', lenguaje: 'javascript', contenido: template('UsersScreen.jsx') }
       ] : []),
-      { ruta: 'frontend/src/styles.css', lenguaje: 'css', contenido: `:root{font-family:Inter,system-ui,sans-serif;color:${colors.texto || '#0f172a'};background:${colors.fondo || '#f8fafc'};--primary:${colors.primario || '#6d28d9'}}*{box-sizing:border-box}body{margin:0}.nav{display:flex;gap:1rem;flex-wrap:wrap;padding:1rem;background:white;border-bottom:1px solid #ddd}.screen{max-width:1050px;margin:auto;padding:2rem}.card{background:white;border:1px solid #dbe1ea;border-radius:12px;padding:1rem;margin:1rem 0}.field{width:100%;min-height:7rem;padding:.75rem;font:inherit}.button{border:0;border-radius:8px;padding:.65rem 1rem;margin:.25rem;background:var(--primary);color:white}.danger{background:#b91c1c}.tabs{display:flex;gap:.5rem;flex-wrap:wrap}.tabs button{background:#ede9fe;color:#4c1d95}.record{white-space:pre-wrap;background:#f8fafc;padding:.75rem;border-radius:8px}.error{color:#b91c1c}.success{color:#047857}` },
-      { ruta: 'frontend/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ project: proyecto.nombre, mode: 'generic_contract_v1', plataformas_solicitadas: platforms, auth: { habilitada: auth, registro: openRoles }, pantallas: views }, null, 2) }
+      { ruta: 'frontend/src/styles.css', lenguaje: 'css', contenido: `:root{font-family:Inter,system-ui,sans-serif;color:${colors.texto || '#0f172a'};background:${colors.fondo || '#f8fafc'};--primary:${colors.primario || '#6d28d9'}}*{box-sizing:border-box}body{margin:0}.nav{display:flex;gap:1rem;flex-wrap:wrap;padding:1rem;background:white;border-bottom:1px solid #ddd}.screen{max-width:1050px;margin:auto;padding:2rem}.card{background:white;border:1px solid #dbe1ea;border-radius:12px;padding:1rem;margin:1rem 0}.field{width:100%;min-height:7rem;padding:.75rem;font:inherit}.button{border:0;border-radius:8px;padding:.65rem 1rem;margin:.25rem;background:var(--primary);color:white}.danger{background:#b91c1c}.tabs{display:flex;gap:.5rem;flex-wrap:wrap}.tabs button{background:#ede9fe;color:#4c1d95}.record{white-space:pre-wrap;background:#f8fafc;padding:.75rem;border-radius:8px}.error{color:#b91c1c}.success{color:#047857}${typedForms ? TYPED_FORMS_CSS : ''}` },
+      { ruta: 'frontend/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ project: proyecto.nombre, mode: 'generic_contract_v1', modulos: { formularios_tipados: typedForms }, plataformas_solicitadas: platforms, auth: { habilitada: auth, registro: openRoles }, pantallas: views }, null, 2) }
     ];
     const imports = [];
     const routes = [];
