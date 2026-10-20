@@ -3,9 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const BackendDataLayerGenerator = require('./BackendDataLayerGenerator');
 const AccessControlService = require('../../core/services/AccessControlService');
+const StackCatalog = require('../../core/services/StackCatalog');
 const OpenApiGenerator = require('./OpenApiGenerator');
 
 const AUTH_TEMPLATES = path.join(__dirname, '..', 'templates', 'auth');
+const SPRING_TEMPLATES = path.join(__dirname, '..', 'templates', 'spring');
+const renderTemplate = require('./renderTemplate');
 
 const slug = (value) => String(value || 'project').normalize('NFD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
@@ -15,16 +18,18 @@ class GenericBackendGenerator {
     const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules });
     const policy = new AccessControlService().politica(access, contract.operations);
     contract.auth = policy;
-    const database = this._database(stack.base_datos);
+    const resolved = StackCatalog.resolve(stack);
+    const database = resolved.database;
     const data = new BackendDataLayerGenerator().build({ contract, database, policy });
     const openapi = new OpenApiGenerator().build({ proyecto, contract, model: data.model, policy });
     data.files.shared.push(
       { ruta: 'backend/openapi.json', lenguaje: 'json', contenido: `${JSON.stringify(openapi, null, 2)}\n` },
       { ruta: 'backend/src/docs/openapi.js', lenguaje: 'javascript', contenido: `module.exports = ${JSON.stringify(openapi)};\n` }
     );
-    return /nestjs/i.test(stack.backend || '')
-      ? this._nest(proyecto, contract, database, data, policy)
-      : this._express(proyecto, contract, database, data, policy);
+    if (resolved.backend === 'spring') return this._spring(proyecto, contract, resolved, data, policy);
+    return resolved.backend === 'nest'
+      ? this._nest(proyecto, contract, database, data, policy, resolved)
+      : this._express(proyecto, contract, database, data, policy, resolved);
   }
 
   _authFiles(policy, adapter) {
@@ -37,17 +42,12 @@ class GenericBackendGenerator {
     ];
   }
 
-  _database(value) {
-    if (/postgres/i.test(value || '')) return 'postgres';
-    if (/mysql/i.test(value || '')) return 'mysql';
-    return 'mongodb';
-  }
-
-  _manifest(project, contract, database, data) {
+  _manifest(project, contract, database, data, resolved = { backend: 'express', language: 'node' }) {
     const tables = Object.entries(data.model.tables).map(([name, table]) => ({ name, entity: table.entity, columns: table.columns.map((column) => column.column), references: table.references }));
     return JSON.stringify({
       ...contract,
       database,
+      stack: { backend: resolved.backend, lenguaje: resolved.language },
       mode: contract.entities.length ? 'entity_crud_v1' : 'generic_crud_v1',
       docs: { openapi: '/api/openapi.json', archivo: 'backend/openapi.json' },
       storage: { layout: 'table_per_entity', operations: data.model.operations, tables, migrations: data.migrations.map((item) => item.id) },
@@ -64,13 +64,13 @@ class GenericBackendGenerator {
     };
   }
 
-  _nest(project, contract, database, data, policy) {
+  _nest(project, contract, database, data, policy, resolved) {
     const packageJson = { name: `${slug(project.nombre)}-backend`, version: '1.0.0', private: true, scripts: { build: 'tsc', start: 'node dist/main.js', dev: 'ts-node src/main.ts', test: 'node --test' }, dependencies: this._dependencies(database, true, policy.habilitada), devDependencies: { '@types/node': '^22.0.0', '@types/pg': '^8.11.0', 'ts-node': '^10.9.0', typescript: '^5.0.0' } };
     return [
       { ruta: 'backend/package.json', lenguaje: 'json', contenido: JSON.stringify(packageJson, null, 2) },
       { ruta: 'backend/tsconfig.json', lenguaje: 'json', contenido: JSON.stringify({ compilerOptions: { module: 'commonjs', target: 'ES2022', experimentalDecorators: true, emitDecoratorMetadata: true, strict: true, esModuleInterop: true, allowJs: true, outDir: './dist' }, include: ['src/**/*.ts', 'src/**/*.js'] }, null, 2) },
       { ruta: 'backend/.env.example', lenguaje: 'dotenv', contenido: this._env(database, policy) },
-      { ruta: 'backend/icase.manifest.json', lenguaje: 'json', contenido: this._manifest(project, contract, database, data) },
+      { ruta: 'backend/icase.manifest.json', lenguaje: 'json', contenido: this._manifest(project, contract, database, data, resolved) },
       { ruta: 'backend/src/main.ts', lenguaje: 'typescript', contenido: "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\nimport { StoreExceptionFilter } from './store-exception.filter';\nasync function bootstrap(){const app=await NestFactory.create(AppModule);app.enableCors();app.useGlobalFilters(new StoreExceptionFilter());await app.listen(Number(process.env.PORT||3000));}\nbootstrap();\n" },
       { ruta: 'backend/src/store-exception.filter.ts', lenguaje: 'typescript', contenido: this._nestFilter() },
       { ruta: 'backend/src/app.module.ts', lenguaje: 'typescript', contenido: this._nestModule(policy) },
@@ -88,12 +88,12 @@ class GenericBackendGenerator {
     ];
   }
 
-  _express(project, contract, database, data, policy) {
+  _express(project, contract, database, data, policy, resolved) {
     const packageJson = { name: `${slug(project.nombre)}-backend`, version: '1.0.0', private: true, scripts: { start: 'node src/main.js', dev: 'node --watch src/main.js', test: 'node --test' }, dependencies: this._dependencies(database, false, policy.habilitada) };
     return [
       { ruta: 'backend/package.json', lenguaje: 'json', contenido: JSON.stringify(packageJson, null, 2) },
       { ruta: 'backend/.env.example', lenguaje: 'dotenv', contenido: this._env(database, policy) },
-      { ruta: 'backend/icase.manifest.json', lenguaje: 'json', contenido: this._manifest(project, contract, database, data) },
+      { ruta: 'backend/icase.manifest.json', lenguaje: 'json', contenido: this._manifest(project, contract, database, data, resolved) },
       { ruta: 'backend/src/main.js', lenguaje: 'javascript', contenido: "require('dotenv').config();\nconst app=require('./app');\nconst port=Number(process.env.PORT||3000);\napp.locals.init().then(()=>app.listen(port,()=>console.log('API listening on '+port))).catch((error)=>{console.error(error);process.exit(1)});\n" },
       { ruta: 'backend/src/app.js', lenguaje: 'javascript', contenido: this._expressApp(contract, policy) },
       { ruta: 'backend/src/record.store.js', lenguaje: 'javascript', contenido: data.files.store },
@@ -186,6 +186,56 @@ export class AuthController {
 `;
   }
 
+  /**
+   * Backend Java + Spring Boot. El código Java es fijo y se guía por los mismos datos del contrato que la variante
+   * Node (modelo, reglas, política y OpenAPI), que se escriben como JSON en src/main/resources/icase.
+   */
+  _spring(project, contract, resolved, data, policy) {
+    const database = resolved.database;
+    const read = (relative) => fs.readFileSync(path.join(SPRING_TEMPLATES, relative), 'utf8');
+    const sources = fs.readdirSync(path.join(SPRING_TEMPLATES, 'src/main/java/app')).filter((name) => name.endsWith('.java')).sort();
+    const driver = database === 'postgres'
+      ? '    <dependency>\n      <groupId>org.postgresql</groupId>\n      <artifactId>postgresql</artifactId>\n      <scope>runtime</scope>\n    </dependency>\n    <dependency>\n      <groupId>org.flywaydb</groupId>\n      <artifactId>flyway-database-postgresql</artifactId>\n    </dependency>'
+      : '    <dependency>\n      <groupId>com.mysql</groupId>\n      <artifactId>mysql-connector-j</artifactId>\n      <scope>runtime</scope>\n    </dependency>\n    <dependency>\n      <groupId>org.flywaydb</groupId>\n      <artifactId>flyway-mysql</artifactId>\n    </dependency>';
+    const openapi = data.files.shared.find((file) => file.ruta === 'backend/openapi.json');
+    const resource = (name, value) => ({ ruta: `backend/src/main/resources/icase/${name}.json`, lenguaje: 'json', contenido: `${JSON.stringify(value, null, 2)}\n` });
+    const migrations = data.migrations.map((migration) => {
+      const [, version, name] = /^(\d+)_(.+)$/.exec(migration.id);
+      return { ruta: `backend/src/main/resources/db/migration/V${Number(version)}__${name}.sql`, lenguaje: 'sql', contenido: `-- Migración ${migration.id}: generada por I-CASE. Flyway la aplica al iniciar.\n\n${migration.statements.map((statement) => `${statement};`).join('\n\n')}\n` };
+    });
+    return [
+      { ruta: 'backend/pom.xml', lenguaje: 'xml', contenido: renderTemplate(read('pom.xml'), { ARTIFACT: `${slug(project.nombre)}-backend`, DATABASE_DEPENDENCIES: driver }) },
+      { ruta: 'backend/README.md', lenguaje: 'markdown', contenido: this._springReadme(project, database, policy) },
+      { ruta: 'backend/.gitignore', lenguaje: 'gitignore', contenido: 'target/\n.env\n' },
+      { ruta: 'backend/.env.example', lenguaje: 'dotenv', contenido: this._env(database, policy, 'spring') },
+      { ruta: 'backend/icase.manifest.json', lenguaje: 'json', contenido: this._manifest(project, contract, database, data, resolved) },
+      { ruta: 'backend/src/main/resources/application.properties', lenguaje: 'properties', contenido: read('src/main/resources/application.properties') },
+      ...sources.map((name) => ({ ruta: `backend/src/main/java/app/${name}`, lenguaje: 'java', contenido: read(`src/main/java/app/${name}`) })),
+      resource('contract', contract), resource('model', data.model), resource('rules', data.rules), resource('policy', policy),
+      { ruta: 'backend/src/main/resources/icase/openapi.json', lenguaje: 'json', contenido: openapi.contenido },
+      ...migrations,
+      openapi
+    ];
+  }
+
+  _springReadme(project, database, policy) {
+    return `# ${project.nombre}: backend (Java + Spring Boot)
+
+API REST generada por I-CASE. El código Java es fijo y se guía por los datos de \`src/main/resources/icase/\`
+(modelo, reglas de negocio y política de acceso aprobados); las migraciones de \`src/main/resources/db/migration/\`
+las aplica Flyway al arrancar.
+
+## Ejecutar
+
+\`\`\`bash
+mvn -B package
+DATABASE_URL=${database === 'postgres' ? 'postgresql://app:clave@localhost:5432/app' : 'mysql://app:clave@localhost:3306/app'} ${policy.habilitada ? 'JWT_SECRET=<secreto> ADMIN_EMAIL=<correo> ADMIN_PASSWORD=<clave> ' : ''}java -jar target/app.jar
+\`\`\`
+
+Requiere Java 21. La documentación de la API está en \`openapi.json\` y en \`GET /api/openapi.json\`.
+${policy.habilitada ? '\nCon \`APP_ENV=production\` se rechaza un \`JWT_SECRET\` débil (menos de 16 caracteres o con valores de ejemplo).\n' : ''}`;
+  }
+
   _nestStore() {
     return `import { Injectable, OnModuleInit } from '@nestjs/common';
 // El almacén es JavaScript compartido con la variante Express; se compila con allowJs.
@@ -255,9 +305,9 @@ app.use((error,_req,res,_next)=>res.status(Number.isInteger(error.status)?error.
 `;
   }
 
-  _env(database, policy = { habilitada: false }) {
+  _env(database, policy = { habilitada: false }, runtime = 'node') {
     const url = database === 'postgres' ? 'postgresql://app:change-me@localhost:5432/app' : database === 'mysql' ? 'mysql://app:change-me@localhost:3306/app' : 'mongodb://localhost:27017/app';
-    const auth = policy.habilitada ? '# Defínelos antes de producción: con NODE_ENV=production se rechaza un JWT_SECRET débil.\nJWT_SECRET=change-me\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=ChangeMe-123\n' : '';
+    const auth = policy.habilitada ? `# Defínelos antes de producción: con ${runtime === 'spring' ? 'APP_ENV' : 'NODE_ENV'}=production se rechaza un JWT_SECRET débil.\nJWT_SECRET=change-me\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=ChangeMe-123\n` : '';
     return `PORT=3000\nDATABASE_URL=${url}\nDB_NAME=app\n${auth}`;
   }
 

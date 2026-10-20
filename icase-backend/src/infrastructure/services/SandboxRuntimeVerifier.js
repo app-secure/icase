@@ -89,7 +89,11 @@ class SandboxRuntimeVerifier {
       : databaseKind === 'mysql'
         ? { image: 'mysql:8', environment: '{ MYSQL_DATABASE: app, MYSQL_USER: app, MYSQL_PASSWORD: test-password, MYSQL_ROOT_PASSWORD: root-test-password }', health: '["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uapp -ptest-password"]', url: 'mysql://app:test-password@database:3306/app' }
         : { image: 'postgres:16-alpine', environment: '{ POSTGRES_DB: app, POSTGRES_USER: app, POSTGRES_PASSWORD: test-password }', health: '["CMD-SHELL", "pg_isready -U app -d app"]', url: 'postgresql://app:test-password@database:5432/app' };
-    const backendDocker = `FROM node:22-alpine\nWORKDIR /app\nCOPY backend/package*.json ./\nRUN npm install --ignore-scripts\nCOPY backend/ ./\nRUN npm run build --if-present\nCOPY smoke.mjs /app/smoke.mjs\nCMD ["npm","start"]\n`;
+    const java = manifest.stack?.lenguaje === 'java';
+    const backendDocker = java
+      ? 'FROM maven:3.9-eclipse-temurin-21 AS build\nWORKDIR /build\nCOPY backend/pom.xml ./\nRUN mvn -B -q -DskipTests dependency:go-offline\nCOPY backend/src ./src\nRUN mvn -B -q -DskipTests package\nFROM eclipse-temurin:21-jre-alpine\nWORKDIR /app\nCOPY --from=build /build/target/app.jar /app/app.jar\nENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -XX:+UseSerialGC"\nCMD ["java","-jar","/app/app.jar"]\n'
+      : `FROM node:22-alpine\nWORKDIR /app\nCOPY backend/package*.json ./\nRUN npm install --ignore-scripts\nCOPY backend/ ./\nRUN npm run build --if-present\nCOPY smoke.mjs /app/smoke.mjs\nCMD ["npm","start"]\n`;
+    const smokeDocker = 'FROM node:22-alpine\nWORKDIR /app\nCOPY smoke.mjs /app/smoke.mjs\n';
     const frontendDocker = `FROM node:22-alpine AS build\nWORKDIR /app\nCOPY frontend/package*.json ./\nRUN npm install --ignore-scripts\nCOPY frontend/ ./\nRUN npm run build\nFROM nginxinc/nginx-unprivileged:1.27-alpine\nCOPY verify.nginx.conf /etc/nginx/conf.d/default.conf\nCOPY --from=build /app/dist /usr/share/nginx/html\n`;
     const mobileDocker = `FROM node:22-alpine\nWORKDIR /app\nCOPY mobile/package*.json ./\nRUN npm install --ignore-scripts\nCOPY mobile/ ./\nENV EXPO_PUBLIC_API_URL=http://backend:3000\nRUN npm run export:android\n`;
     const testDocker = `FROM mcr.microsoft.com/playwright:v1.50.0-noble\nWORKDIR /app/tests\nCOPY tests/package*.json ./\nRUN npm install --ignore-scripts\nCOPY tests/ ./\nCOPY backend/icase.manifest.json /app/backend/icase.manifest.json\nCOPY frontend/icase.manifest.json /app/frontend/icase.manifest.json\nCMD ["sh","-c","npm test && npm run test:e2e"]\n`;
@@ -106,12 +110,12 @@ class SandboxRuntimeVerifier {
     build: { context: ., dockerfile: backend.verify.Dockerfile }
     environment: { PORT: "3000", DATABASE_URL: "${database.url}", DB_NAME: "app", JWT_SECRET: "isolated-test-secret", ADMIN_EMAIL: "admin@example.test", ADMIN_PASSWORD: "test-admin-password" }
     networks: [verification]
-    mem_limit: 512m
-    pids_limit: 128
+    mem_limit: ${java ? '768m' : '512m'}
+    pids_limit: ${java ? 512 : 128}
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     depends_on: { database: { condition: service_healthy } }
-    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 2s, timeout: 3s, retries: 30 }
+    healthcheck: { test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/health >/dev/null"], interval: 2s, timeout: 3s, retries: 60 }
   frontend:
     build: { context: ., dockerfile: frontend.verify.Dockerfile }
     networks: [verification]
@@ -122,7 +126,7 @@ class SandboxRuntimeVerifier {
     depends_on: { backend: { condition: service_healthy } }
     healthcheck: { test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null"], interval: 2s, timeout: 3s, retries: 30 }
   smoke:
-    build: { context: ., dockerfile: backend.verify.Dockerfile }
+    build: { context: ., dockerfile: smoke.verify.Dockerfile }
     environment: { BASE_API_URL: "http://backend:3000", ADMIN_EMAIL: "admin@example.test", ADMIN_PASSWORD: "test-admin-password" }
     networks: [verification]
     mem_limit: 256m
@@ -153,6 +157,7 @@ networks:
     const smoke = renderTemplate(await fs.readFile(path.join(__dirname, '..', 'templates', 'verification', 'smoke.mjs'), 'utf8'), { CONFIG: JSON.stringify(config), SAMPLE: samplePayload.runtimeSource() });
     await Promise.all([
       fs.writeFile(path.join(root, 'backend.verify.Dockerfile'), backendDocker),
+      fs.writeFile(path.join(root, 'smoke.verify.Dockerfile'), smokeDocker),
       fs.writeFile(path.join(root, 'frontend.verify.Dockerfile'), frontendDocker),
       fs.writeFile(path.join(root, 'mobile.verify.Dockerfile'), mobileDocker),
       fs.writeFile(path.join(root, 'tests.verify.Dockerfile'), testDocker),

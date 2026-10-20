@@ -2,6 +2,7 @@ const CodeGenerationWorkflowService = require('../services/CodeGenerationWorkflo
 const { CODE_PHASE_STATES } = require('../constants/CodeGenerationPhases');
 const BusinessRuleService = require('../services/BusinessRuleService');
 const AccessControlService = require('../services/AccessControlService');
+const StackCatalog = require('../services/StackCatalog');
 const DomainModelExtractor = require('../../infrastructure/services/DomainModelExtractor');
 
 const PROJECT_STATES_WITH_APPROVED_DESIGN = new Set([
@@ -70,6 +71,7 @@ class GestionarPlanCodificacion {
 
     const plan = await this._obtenerOCrear(proyectoId);
     this.workflow.validarDependencias(plan, etapa);
+    if (etapa === 'stack_tecnologico') StackCatalog.resolve(propuesta); // lanza un error claro si algo no está soportado
     if (etapa === 'reglas_negocio') propuesta = await this._normalizarReglas(proyectoId, propuesta);
     if (etapa === 'control_acceso') propuesta = await this._normalizarAcceso(proyectoId, propuesta);
     const actual = plan.etapas.find((item) => item.etapa === etapa);

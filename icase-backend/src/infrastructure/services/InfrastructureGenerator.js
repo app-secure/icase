@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const IGeneradorArtefacto = require('../../core/services/IGeneradorArtefacto');
+const StackCatalog = require('../../core/services/StackCatalog');
 
 class InfrastructureGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
@@ -44,8 +45,11 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
   }
 
   _backendDockerfile(stack) {
-    const nest = /nestjs/i.test(stack || '');
-    return nest
+    const resolved = StackCatalog.resolveBackend(stack);
+    if (resolved.backend === 'spring') {
+      return 'FROM maven:3.9-eclipse-temurin-21 AS build\nWORKDIR /build\nCOPY backend/pom.xml ./\nRUN mvn -B -q -DskipTests dependency:go-offline\nCOPY backend/src ./src\nRUN mvn -B -q -DskipTests package\n\nFROM eclipse-temurin:21-jre-alpine\nWORKDIR /app\nENV APP_ENV=production\nENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70"\nRUN addgroup -S app && adduser -S app -G app\nCOPY --from=build /build/target/app.jar /app/app.jar\nUSER app\nEXPOSE 3000\nCMD ["java","-jar","/app/app.jar"]\n';
+    }
+    return resolved.backend === 'nest'
       ? 'FROM node:22-alpine AS build\nWORKDIR /app\nCOPY backend/package*.json ./\nRUN npm install\nCOPY backend/ ./\nRUN npm run build\n\nFROM node:22-alpine\nWORKDIR /app\nENV NODE_ENV=production\nCOPY backend/package*.json ./\nRUN npm install --omit=dev\nCOPY --from=build /app/dist ./dist\nEXPOSE 3000\nCMD ["npm","start"]\n'
       : 'FROM node:22-alpine\nWORKDIR /app\nENV NODE_ENV=production\nCOPY backend/package*.json ./\nRUN npm install --omit=dev\nCOPY backend/ ./\nEXPOSE 3000\nCMD ["npm","start"]\n';
   }

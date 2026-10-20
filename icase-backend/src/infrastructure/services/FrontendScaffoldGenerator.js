@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const IGeneradorArtefacto = require('../../core/services/IGeneradorArtefacto');
 const GenericFrontendGenerator = require('./GenericFrontendGenerator');
+const StackCatalog = require('../../core/services/StackCatalog');
 
 const slug = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pantalla';
@@ -9,6 +10,7 @@ const componentName = (value) => slug(value).split('-').map((part) => part.charA
 class FrontendScaffoldGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
     const { decisiones, diseno } = insumos;
+    StackCatalog.resolve(decisiones.stack_tecnologico || {}); // no se sustituye en silencio un stack no soportado
     const manifest = Array.isArray(diseno.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
     const mockups = Array.isArray(diseno.mockups) ? diseno.mockups : [];
     const mockupMap = new Map(mockups.map((item) => [item.pantalla_id || item.nombre_pantalla, item]));
