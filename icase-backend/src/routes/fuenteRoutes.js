@@ -27,9 +27,26 @@ const storage = multer.diskStorage({
   }
 });
 
+// Solo los formatos que el servicio de ingesta sabe procesar (audio, PDF y texto plano).
+const ALLOWED_EXTENSIONS = new Set([
+  'mp3', 'wav', 'm4a', 'mp4', 'aac', 'ogg', 'opus', 'webm', 'flac', 'wma',
+  'pdf',
+  'txt', 'md', 'markdown', 'csv', 'json', 'log', 'text', 'rtf'
+]);
+
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 } // 50 MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  fileFilter: (req, file, cb) => {
+    let name = file.originalname || '';
+    try { name = Buffer.from(name, 'latin1').toString('utf8'); } catch { /* se usa el nombre tal cual */ }
+    const extension = path.extname(name).toLowerCase().slice(1);
+    if (ALLOWED_EXTENSIONS.has(extension)) return cb(null, true);
+    const error = new Error(`Tipo de archivo no admitido (${extension ? `.${extension}` : 'sin extensión'}). Formatos: audio, PDF y texto plano.`);
+    error.status = 400;
+    error.expose = true;
+    return cb(error);
+  }
 });
 
 function buildFuenteRoutes(fuenteController, access) {

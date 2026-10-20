@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { corsOptions, securityHeaders, jsonLimit } = require('./infrastructure/security/httpSecurity');
 const buildProjectAccess = require('./infrastructure/security/projectAccess');
 const { getJwtSecret } = require('./infrastructure/security/jwtSecret');
 
@@ -76,9 +77,12 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   // Si falta el secreto de sesión en producción, el servidor no debe arrancar.
   getJwtSecret(env);
 
-  app.use(cors());
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  app.disable('x-powered-by');
+  if (env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(env.TRUST_PROXY) ? Number(env.TRUST_PROXY) : env.TRUST_PROXY);
+  app.use(securityHeaders);
+  app.use(cors(corsOptions(env)));
+  app.use(express.json({ limit: jsonLimit(env) }));
+  app.use(express.urlencoded({ extended: true, limit: jsonLimit(env) }));
 
   // Inyección de Dependencias
   const proyectoRepo = repositories.proyecto || new MongoProyectoRepository();
@@ -257,6 +261,18 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   app.use('/diagramas', buildDiagramaRoutes(diagramaController, access));
   app.use('/', buildFuenteRoutes(fuenteController, access));
   app.use('/mockups', buildMockupRoutes(mockupController, access));
+
+  // Rutas inexistentes y errores: siempre JSON y sin detalles internos en los fallos inesperados.
+  app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
+  app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+    if (error.type === 'entity.too.large') return res.status(413).json({ error: 'El contenido enviado es demasiado grande.' });
+    if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'El cuerpo de la petición no es JSON válido.' });
+    if (error.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'El archivo supera el tamaño máximo permitido (50 MB).' });
+    if (error.expose && error.status >= 400 && error.status < 500) return res.status(error.status).json({ error: error.message });
+    console.error(`[Error] ${req.method} ${req.originalUrl}:`, error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  });
 
   return {
     app,
