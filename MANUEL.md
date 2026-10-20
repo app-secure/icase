@@ -1,6 +1,6 @@
 # iCase — Qué hicimos, qué puede hacer la app y qué falta
 
-Documento de traspaso para Manuel. Resume el trabajo de la rama `feature/codificacion` desde el commit `b5613be` («avance en implementacion de generacion de codigo») hasta hoy: **30 commits, 109 archivos, unas 10 000 líneas añadidas**, todos locales (nada se ha subido).
+Documento de traspaso para Manuel. Resume el trabajo de la rama `feature/codificacion` desde el commit `b5613be` («avance en implementacion de generacion de codigo») hasta hoy: **30 commits, 109 archivos, unas 10 000 líneas añadidas**, subidos a `origin/feature/codificacion`.
 
 Los detalles técnicos de cada pieza están en `docs/code-generation-contract.md` y en el `README.md`; aquí está la visión de conjunto, cómo comprobar que funciona y lo que queda pendiente.
 
