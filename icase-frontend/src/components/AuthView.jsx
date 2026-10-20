@@ -31,8 +31,8 @@ export default function AuthView({ onAuthSuccess, onLoadingChange, sessionExpire
         setError("Por favor completa tu nombre, apellido y celular.");
         return;
       }
-      if (password.length < 6) {
-        setError("La contraseña debe tener mínimo 6 caracteres.");
+      if (password.length < 8) {
+        setError("La contraseña debe tener mínimo 8 caracteres.");
         return;
       }
       if (!agreeTerms) {
