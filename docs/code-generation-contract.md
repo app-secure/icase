@@ -20,10 +20,12 @@ El stack se propone por proyecto y requiere aprobación antes de avanzar. Estos 
 2. `stack_tecnologico`: confirma herramientas, versiones y restricciones.
 3. `arquitectura_codigo`: confirma capas, módulos, contratos y decisiones técnicas.
 4. `estructura_carpetas`: confirma el árbol que compartirán los generadores.
-5. `generacion_backend` y `generacion_frontend`: pueden ejecutarse en paralelo.
-6. `generacion_pruebas` y `generacion_infraestructura`: consumen ambos códigos aprobados.
-7. `generacion_ci_cd`: consume pruebas e infraestructura aprobadas.
-8. `paquete_entrega`: reúne únicamente artefactos vigentes y aprobados.
+5. `reglas_negocio`: revisa y confirma las reglas que el backend aplicará a los datos (ver más abajo). Es requisito de `generacion_backend`.
+6. `control_acceso`: define autenticación, roles y la matriz de permisos (ver más abajo). Es requisito de `generacion_backend` y de `generacion_frontend`.
+7. `generacion_backend` y `generacion_frontend`: pueden ejecutarse en paralelo.
+8. `generacion_pruebas` y `generacion_infraestructura`: consumen ambos códigos aprobados.
+9. `generacion_ci_cd`: consume pruebas e infraestructura aprobadas.
+10. `paquete_entrega`: reúne únicamente artefactos vigentes y aprobados.
 
 Modificar una decisión aprobada no regenera nada automáticamente. Sus descendientes aprobados pasan a `desactualizada` y deben revisarse de manera explícita.
 
@@ -63,6 +65,95 @@ Cada requisito funcional aprobado se transforma en una operación estable identi
 ```
 
 El manifiesto del frontend conecta cada pantalla con esas claves mediante su trazabilidad RF. Una pantalla sin RF o un RF sin operación bloquea la aprobación. Este contrato funciona igual para restaurantes, bibliotecas, inventarios u otros dominios; las reglas particulares del negocio deben materializarse después como esquemas, invariantes y pruebas del RF.
+
+### Modelo de dominio en el contrato
+
+Si existe un diagrama de `clases_dominio` aprobado y vigente, `DomainModelExtractor` lo convierte en entidades (atributos tipados, enumeraciones, claves foráneas derivadas de la cardinalidad) y `ApplicationContractBuilder` lo añade al manifiesto:
+
+- `entities[]`: `name`, `key`, `attributes`, `references` y un JSON Schema informativo (`required` siempre vacío: el diagrama no expresa obligatoriedad, y ésta no se inventa).
+- `relations[]`: relaciones con tipo (`asociacion`, `composicion`, `agregacion`, `herencia`), cardinalidades declaradas y `cardinalidad` normalizada.
+- `operations[].entity` / `relatedEntities` / `schema`: cada RF se asocia a la entidad cuyo nombre aparece primero en su nombre (o descripción). Sin coincidencia, la operación conserva el esquema genérico y se registra en `warnings`.
+- `model`: origen (`clases_dominio` o `none`) y entidades sin RF asociado (`unmapped`).
+
+La versión del diagrama usada queda en `versiones_origen.clases_dominio` y forma parte de la huella de entrada. Sin diagrama aprobado el comportamiento es el genérico anterior.
+
+### Capa de datos
+
+`BackendDataLayerGenerator` convierte ese modelo en almacenamiento físico. El manifiesto declara `storage` (`layout: table_per_entity`, operación → tabla, columnas, referencias exigidas y migraciones) y el modo pasa a `entity_crud_v1`.
+
+- Una tabla (PostgreSQL, MySQL) o colección (MongoDB) por entidad, con columnas tipadas, `extra` para campos no declarados y `created_at`/`updated_at`. Las operaciones sin entidad usan `icase_records`.
+- Una entidad puede quedar sin operación asociada; su tabla se crea igualmente. Una clave foránea solo se **exige** si la entidad destino es alcanzable por la API; si no, la columna existe pero sin restricción (no habría forma de crear el registro referenciado).
+- Migraciones versionadas (`0001_init`) embebidas en `src/data/migrations.js` y registradas en `schema_migrations`. Se aplican al arrancar con bloqueo entre instancias (PostgreSQL: transaccional; MySQL: sin transacción por el DDL implícito; MongoDB: colecciones e índices). Para lectura humana se exporta `backend/db/migrations/0001_init.sql` (o `.json`).
+- La forma pública de los registros no cambia: `{ id, capability, data, created_at, updated_at }`.
+- Tipos incorrectos responden `400`; violaciones de integridad referencial `409`. MongoDB reproduce ambas comprobaciones en el almacén.
+- Las plantillas del almacén son JavaScript real en `src/infrastructure/templates/data-layer/`. NestJS reutiliza el mismo almacén mediante `allowJs`.
+
+La verificación aislada ejerce todas las operaciones con cuerpos derivados del esquema y de las reglas (`SamplePayload`), el rechazo de tipos y la integridad referencial. Limitaciones actuales: relaciones muchos-a-muchos sin tabla intermedia; la migración es una sola (`0001_init`), de modo que regenerar con un modelo distinto no altera una base ya migrada.
+
+### Reglas de negocio
+
+La etapa `reglas_negocio` convierte los RF aprobados y el diagrama de clases de dominio en reglas **declarativas**. La IA solo propone datos en un DSL cerrado (`analista_reglas_negocio.md`); un motor determinista (`rules-engine.js`, generado en `backend/src/data/`) las aplica. Ningún código procedente de la IA se ejecuta.
+
+| tipo | parámetros | dónde se garantiza |
+|---|---|---|
+| `requerido` | `campo` (admite referencias) | motor |
+| `unico` | `campos` (1–3) | índice único en la base de datos (409) |
+| `rango` | `campo`, `min`/`max` | motor (422) |
+| `longitud` | `campo`, `min`/`max` | motor (422) |
+| `formato` | `campo`, `email` o `url` | motor (422) |
+| `comparacion` | `campo`, `operador`, `con_campo` o `con_valor` | motor (422) |
+| `maquina_estados` | `campo`, `inicial`, `transiciones` | motor (422), también en la creación |
+| `inmutable` | `campo` | motor (422) |
+| `valor_por_defecto` | `campo`, `valor` | motor, al crear |
+
+Cada regla lleva `entidad`, `mensaje`, `rf` (obligatorio), `evidencia`, `origen` (`explicito`, `inferido`, `manual`) y `estado_decision` (`confirmado`, `pendiente`, `rechazado`).
+
+- `BusinessRuleService` valida cada regla contra el modelo de dominio (entidad y campo existentes, tipo compatible, estados dentro del enum, RF aprobados). Una evidencia que no consta literalmente en los RF citados degrada la regla a `inferido`.
+- `BusinessRuleInferenceService` descarta las propuestas inválidas informando por qué. **La IA no decide**: solo las reglas `explicito` con evidencia literal nacen `confirmado`; las demás quedan `pendiente`.
+- La etapa no puede aprobarse con reglas `pendiente`, y se revalida al aprobar por si el modelo cambió. Puede aprobarse vacía.
+- Al generar el backend solo se incluyen las `confirmado`. Si las reglas aprobadas ya no son coherentes con el modelo, la generación falla en lugar de omitirlas en silencio.
+- Una violación responde `422` con `{ message, details: [{ regla, mensaje, rf }] }`.
+- Datos de prueba y casos negativos se derivan de las reglas: la verificación aislada comprueba, por cada regla, que se cumple con datos válidos y que su violación se rechaza **por esa regla**.
+
+Limitaciones actuales: la comprobación se hace leyendo el registro antes de escribir, de modo que dos modificaciones simultáneas pueden saltarse una transición de estado; las reglas no pueden redactarse desde la interfaz (solo confirmar, rechazar o editar el mensaje); no hay reglas entre entidades distintas ni condicionales.
+
+### Autenticación y roles
+
+La etapa `control_acceso` se propone **sin IA**: cada actor de los RF aprobados es un rol y recibe todos los permisos sobre las operaciones donde participa; los actores que parecen sistemas externos (`Sistema…`, `Pasarela…`) nacen excluidos. La persona revisa autenticación (`jwt` o `ninguna`), duración de sesión, roles, registro abierto y la matriz rol × operación × método (`GET`, `POST`, `PATCH`, `DELETE`). `AccessControlService` valida contra los RF aprobados; se revalida al aprobar y al generar.
+
+El backend generado incluye:
+
+- **Núcleo único** (`src/auth/auth-core.js`) con adaptadores finos para Express y NestJS. Sesión con JWT HS256 (`jsonwebtoken`, algoritmo fijado), contraseñas con `scrypt` y sal propia, tiempo de respuesta igualado cuando el correo no existe, bloqueo tras 5 intentos fallidos (429) y registro abierto limitado por IP.
+- **El usuario se lee de la base en cada petición**: desactivarlo o cambiarle el rol surte efecto de inmediato, sin esperar a que caduque el token.
+- **Todo `/api` exige sesión** salvo `login` y `register`; `/health` es público. La matriz se aplica en `/api/operations/:clave` (403 sin permiso). El rol `administrador` siempre existe, opera todo y es el único que gestiona `/api/users`; no puede quedarse el sistema sin un administrador activo.
+- **Usuarios en la base de datos** (`icase_users`, migración `0002_auth`), independientes del modelo de dominio. El administrador inicial se crea al arrancar con `ADMIN_EMAIL` y `ADMIN_PASSWORD`.
+- **Arranque seguro**: con `NODE_ENV=production` se rechaza un `JWT_SECRET` ausente, de menos de 16 caracteres o con valores de ejemplo (`change-me`, `replace-with…`).
+- **Frontend**: inicio y cierre de sesión, menú limitado a lo que el rol puede consultar, botones según permiso y, para el administrador, gestión de usuarios. La app móvil inicia sesión y guarda el token solo en memoria.
+
+Con `ninguna` no se generan archivos de sesión y la API es pública; la generación lo advierte.
+
+La verificación ejerce, además de lo anterior: 401 sin sesión o con token alterado, 403 por cada combinación rol × operación × método no permitida, revocación inmediata, protección del último administrador, bloqueo por intentos y registro abierto/cerrado.
+
+Limitaciones actuales: la autorización es por rol y operación; no hay propiedad de registros (un cliente no queda limitado a «sus» reservas); el token del navegador se guarda en `localStorage`; no hay recuperación de contraseña ni verificación de correo; el bloqueo por intentos es en memoria (no se comparte entre réplicas).
+
+### Documentación OpenAPI
+
+El backend incluye su documentación OpenAPI 3.1, generada por `OpenApiGenerator` desde el mismo contrato (RF, modelo de dominio, reglas y política de acceso), de modo que no puede desviarse de lo que el backend hace. Se entrega de dos formas, y el manifiesto la declara en `docs`:
+
+- Archivo `backend/openapi.json` (también incluido en el paquete de entrega), útil sin levantar nada.
+- Endpoint `GET /api/openapi.json`. Con autenticación exige sesión, igual que `/api/contract`.
+
+Contenido:
+
+- Una etiqueta por RF, y por operación las cuatro rutas (`GET`/`POST` en la colección; `PATCH`/`DELETE` en el elemento) con `operationId` únicos.
+- Un esquema por entidad (`Entidad`, `EntidadUpdate`, `EntidadRecord`). Las reglas de negocio se traducen a restricciones cuando existe equivalente (`rango` → `minimum`/`maximum`, `longitud` → `minLength`/`maxLength`, `formato`, `valor_por_defecto` → `default`, `requerido` → `required` solo al crear) y el resto va como extensiones: `x-reglas`, `x-transiciones`, `x-inmutable`, `x-unico`, `x-comparacion`, `x-references`. Cada regla cita su mensaje y RF.
+- Solo se documentan las respuestas que el backend puede dar: `409` si la entidad tiene unicidad o referencias (o es referenciada, al eliminar), `422` si tiene reglas, `401`/`403` solo con autenticación.
+- Con autenticación: esquema `bearerAuth`, rutas de sesión y usuarios, y `x-roles` en cada método con los roles autorizados.
+- Un esquema de entidad nunca pisa los del sistema: una entidad llamada `User` o `Error` se publica como `UserEntidad`/`ErrorEntidad`.
+
+Verificación: el documento se valida con un validador de OpenAPI 3.1, y una prueba de **conformidad** levanta el backend generado, ejecuta todos los flujos (CRUD, reglas, matriz de permisos, autenticación) y exige que cada petición y respuesta real esté documentada y cumpla su esquema. El smoke de Docker y las pruebas generadas comprueban además que el documento servido describe todas las operaciones y la seguridad aprobada.
+
+Limitaciones actuales: no se incluyen ejemplos de valores, ni se sirve una interfaz gráfica (Swagger UI, Redoc); el documento se puede abrir en cualquiera de ellas.
 
 ## Evidencia de ejecución
 
