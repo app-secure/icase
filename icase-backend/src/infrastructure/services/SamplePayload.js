@@ -165,7 +165,27 @@ async function exerciseOperation(api, operations, operation) {
       if (!same(item.valor, stored[item.campo])) fail('el valor por defecto de ' + item.campo + ' no se aplicó');
     }
     const listed = expectStatus(await api(operation.collectionPath), 200, 'listar');
-    if (!listed.data.some((item) => String(item.id || item._id) === String(main.id))) fail('el registro no fue persistido');
+    const records = Array.isArray(listed.data) ? listed.data : (listed.data.data || []);
+    if (!records.some((item) => String(item.id || item._id) === String(main.id))) fail('el registro no fue persistido');
+
+    // Ejercitar paginación y búsqueda
+    const paged = await api(operation.collectionPath + '?page=1&limit=1');
+    if (paged.status === 200) {
+      const pagedRecords = Array.isArray(paged.data) ? paged.data : (paged.data.data || []);
+      if (pagedRecords.length > 1) fail('la paginación con limit=1 devolvió más de un registro');
+    }
+    const textField = main.sample.typed.find((field) => ['string', 'date'].includes(field.type) && field.value);
+    if (textField) {
+      const term = String(textField.value).slice(0, 4);
+      if (term) {
+        const searched = await api(operation.collectionPath + '?search=' + encodeURIComponent(term));
+        if (searched.status === 200) {
+          const searchRecords = Array.isArray(searched.data) ? searched.data : (searched.data.data || []);
+          if (!searchRecords.some((item) => String(item.id || item._id) === String(main.id))) fail('la búsqueda por texto no encontró el registro');
+        }
+      }
+    }
+
     const updated = expectStatus(await api(operation.collectionPath + '/' + main.id, 'PATCH', { verification: 'updated' }), 200, 'modificar');
     if (updated.data.data.verification !== 'updated') fail('la modificación no se aplicó');
     if (Object.keys(stored).some((key) => updated.data.data[key] === undefined)) fail('la modificación parcial perdió datos');

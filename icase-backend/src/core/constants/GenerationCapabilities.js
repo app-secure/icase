@@ -69,13 +69,17 @@ const CAPABILITIES = Object.freeze([
 ]);
 
 /** Límites que valen para todo proyecto generado, sin depender de lo que digan los RF. Algunos dependen de los módulos activos. */
-function generalLimits({ formulariosTipados = false } = {}) {
+function generalLimits({ formulariosTipados = false, paginacion = false, seed = false } = {}) {
   return [
     formulariosTipados
       ? 'La interfaz web muestra un formulario por campo y una tabla derivados del esquema de cada entidad, pero no reproduce el diseño de los mockups; una operación sin campos declarados se edita como JSON. La app móvil sigue usando JSON.'
       : 'La interfaz es genérica: cada requisito tiene una pantalla donde el registro se escribe como JSON en un cuadro de texto y las listas muestran el JSON; no hay formularios por campo ni tablas, ni se reproduce el diseño del mockup.',
-    'Las listas devuelven todos los registros: no hay paginación, filtros ni búsqueda.',
-    'No se cargan datos iniciales (seed) salvo el usuario administrador.',
+    paginacion
+      ? 'Las listas en la API y en la interfaz soportan paginación (parámetros page y limit), búsqueda textual (parámetro search) y filtros por campo.'
+      : 'Las listas devuelven todos los registros: no hay paginación, filtros ni búsqueda.',
+    seed
+      ? 'Se generan datos iniciales (seed) deterministas derivados del esquema del modelo de dominio para pruebas de arranque.'
+      : 'No se cargan datos iniciales (seed) salvo el usuario administrador.',
     'Los permisos son por rol y operación; no existe «propiedad» de registros (un usuario no queda limitado a los suyos).',
     'Si se vuelve a generar el código se pierden las ediciones manuales hechas en los archivos.'
   ];

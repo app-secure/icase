@@ -26,8 +26,26 @@ class RecordStore {
     const existing = new Set((await this.db.listCollections().toArray()).map((item) => item.name));
     for (const migration of migrations) {
       if (applied.has(migration.id)) continue;
-      for (const collection of migration.collections) if (!existing.has(collection)) await this.db.createCollection(collection);
-      for (const index of migration.indexes) await this.db.collection(index.collection).createIndex(index.keys, index.options || {});
+      if (migration.collections) {
+        for (const collection of migration.collections) if (!existing.has(collection)) await this.db.createCollection(collection);
+      }
+      if (migration.indexes) {
+        for (const index of migration.indexes) await this.db.collection(index.collection).createIndex(index.keys, index.options || {});
+      }
+      if (migration.seeds) {
+        for (const seed of migration.seeds) {
+          const count = await this.db.collection(seed.collection).countDocuments({});
+          if (count === 0 && seed.documents && seed.documents.length) {
+            const docs = seed.documents.map((d) => ({
+              ...d,
+              _id: new ObjectId(d._id),
+              created_at: new Date(d.created_at),
+              updated_at: new Date(d.updated_at)
+            }));
+            await this.db.collection(seed.collection).insertMany(docs);
+          }
+        }
+      }
       await this.db.collection('schema_migrations').updateOne({ _id: migration.id }, { $setOnInsert: { applied_at: new Date() } }, { upsert: true });
     }
   }
@@ -36,10 +54,47 @@ class RecordStore {
     await this.db.command({ ping: 1 });
   }
 
-  async list(operation) {
+  async list(operation, query = {}) {
     const { name, table } = tableFor(model, operation);
-    const rows = await this.db.collection(name).find(table.generic ? { capability: operation } : {}).sort({ _id: 1 }).toArray();
-    return rows.map((row) => toRecord(table, operation, row));
+    const hasPaging = query && (query.page !== undefined || query.limit !== undefined || query.search !== undefined || query.envelope === 'true');
+    const page = Math.max(1, parseInt(query?.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(query?.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const filter = {};
+    if (table.generic) filter.capability = operation;
+
+    if (query && typeof query === 'object') {
+      for (const column of table.columns) {
+        if (query[column.name] !== undefined && query[column.name] !== '') {
+          filter[column.column] = column.type === 'id' && ObjectId.isValid(query[column.name])
+            ? new ObjectId(query[column.name])
+            : query[column.name];
+        }
+      }
+      if (query.search && typeof query.search === 'string' && query.search.trim()) {
+        const regex = new RegExp(query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        const orClauses = table.columns
+          .filter((col) => ['string', 'date', 'datetime', 'uuid'].includes(col.type))
+          .map((col) => ({ [col.column]: regex }));
+        orClauses.push({ extra: regex });
+        if (filter.$or) filter.$and = [{ $or: filter.$or }, { $or: orClauses }];
+        else filter.$or = orClauses;
+      }
+    }
+
+    if (!hasPaging) {
+      const rows = await this.db.collection(name).find(filter).sort({ _id: 1 }).toArray();
+      return rows.map((row) => toRecord(table, operation, row));
+    }
+
+    const total = await this.db.collection(name).countDocuments(filter);
+    const rows = await this.db.collection(name).find(filter).sort({ _id: 1 }).skip(offset).limit(limit).toArray();
+    const records = rows.map((row) => toRecord(table, operation, row));
+    return {
+      data: records,
+      pagination: { page, limit, total, total_pages: Math.max(1, Math.ceil(total / limit)) }
+    };
   }
 
   async create(operation, body) {

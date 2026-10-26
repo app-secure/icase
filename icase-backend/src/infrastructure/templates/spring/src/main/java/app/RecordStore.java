@@ -95,6 +95,82 @@ public class RecordStore {
         }
     }
 
+    public Object list(String operation, Integer pageParam, Integer limitParam, String search, Map<String, String> params) {
+        boolean hasPaging = pageParam != null || limitParam != null || (search != null && !search.isBlank()) || (params != null && "true".equals(params.get("envelope")));
+        if (!hasPaging && (params == null || params.isEmpty())) {
+            return list(operation);
+        }
+
+        Model.Table table = model.tableFor(operation);
+        int page = (pageParam != null && pageParam > 0) ? pageParam : 1;
+        int limit = (limitParam != null && limitParam > 0 && limitParam <= 100) ? limitParam : 20;
+        int offset = (page - 1) * limit;
+
+        List<String> conditions = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+
+        if (table.generic()) {
+            conditions.add("capability = ?");
+            args.add(operation);
+        }
+
+        if (params != null) {
+            for (Model.Column column : table.columns()) {
+                String val = params.get(column.name());
+                if (val != null && !val.isBlank()) {
+                    conditions.add(quote(column.column()) + " = ?");
+                    args.add("integer".equals(column.type()) || "number".equals(column.type()) ? Long.valueOf(val) : val);
+                }
+            }
+        }
+
+        if (search != null && !search.isBlank()) {
+            String term = "%" + search.trim() + "%";
+            List<String> searchClauses = new ArrayList<>();
+            for (Model.Column column : table.columns()) {
+                if ("string".equals(column.type()) || "date".equals(column.type()) || "uuid".equals(column.type())) {
+                    searchClauses.add(postgres ? quote(column.column()) + "::text ILIKE ?" : quote(column.column()) + " LIKE ?");
+                    args.add(term);
+                }
+            }
+            searchClauses.add(postgres ? "extra::text ILIKE ?" : "extra LIKE ?");
+            args.add(term);
+            conditions.add("(" + String.join(" OR ", searchClauses) + ")");
+        }
+
+        String whereSql = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        String baseSql = "SELECT * FROM " + quote(table.name()) + whereSql + " ORDER BY id";
+
+        try {
+            if (!hasPaging) {
+                List<Map<String, Object>> rows = args.isEmpty() ? jdbc.queryForList(baseSql) : jdbc.queryForList(baseSql, args.toArray());
+                List<Map<String, Object>> records = new ArrayList<>();
+                for (Map<String, Object> row : rows) records.add(Support.toRecord(table, operation, row));
+                return records;
+            }
+
+            String countSql = "SELECT COUNT(*) FROM " + quote(table.name()) + whereSql;
+            int total = jdbc.queryForObject(countSql, Integer.class, args.toArray());
+
+            String pagedSql = baseSql + (postgres ? " LIMIT " + limit + " OFFSET " + offset : " LIMIT " + offset + ", " + limit);
+            List<Map<String, Object>> rows = jdbc.queryForList(pagedSql, args.toArray());
+            List<Map<String, Object>> records = new ArrayList<>();
+            for (Map<String, Object> row : rows) records.add(Support.toRecord(table, operation, row));
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("data", records);
+            Map<String, Object> pagination = new LinkedHashMap<>();
+            pagination.put("page", page);
+            pagination.put("limit", limit);
+            pagination.put("total", total);
+            pagination.put("total_pages", Math.max(1, (int) Math.ceil((double) total / limit)));
+            result.put("pagination", pagination);
+            return result;
+        } catch (DataAccessException error) {
+            throw translate(error);
+        }
+    }
+
     public Map<String, Object> create(String operation, JsonNode body) {
         Model.Table table = model.tableFor(operation);
         Support.Split split = Support.split(table, rules.prepare(table.name(), body));

@@ -75,10 +75,55 @@ class OpenApiGenerator {
     const rulesNote = (operation.rules || []).length ? ` Reglas de negocio aplicadas: ${operation.rules.map((rule) => `${rule.id} (${rule.mensaje})`).join('; ')}.` : '';
     const common = (method, extra) => ({ tags: [operation.id], ...extra, ...(secured ? { 'x-roles': roles(method) } : {}) });
 
+    const queryParams = [
+      { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1, default: 1 }, description: 'Número de página.' },
+      { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 }, description: 'Límite de registros por página.' },
+      { name: 'search', in: 'query', required: false, schema: { type: 'string' }, description: 'Búsqueda por texto en los campos de la entidad.' },
+      ...(entity ? Object.entries(entity.schema?.properties || {}).filter(([k]) => k !== 'id').map(([k, s]) => ({
+        name: k, in: 'query', required: false, schema: { type: s.type || 'string' }, description: `Filtro por ${k}.`
+      })) : [])
+    ];
+
     doc.paths[operation.collectionPath] = {
       get: common('GET', {
         summary: `Listar ${operation.name}`, operationId: `listar_${operation.key.replace(/-/g, '_')}`, description: listDescription,
-        responses: { 200: json({ type: 'array', items: schemaRef(`${name}Record`) }, 'Registros existentes.'), ...access }
+        parameters: queryParams,
+        responses: {
+          200: {
+            description: 'Registros existentes.',
+            headers: {
+              'X-Total-Count': { schema: { type: 'integer' }, description: 'Total de registros coincidentes.' },
+              'X-Page': { schema: { type: 'integer' }, description: 'Página actual.' },
+              'X-Limit': { schema: { type: 'integer' }, description: 'Límite por página.' },
+              'X-Total-Pages': { schema: { type: 'integer' }, description: 'Total de páginas.' }
+            },
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    { type: 'array', items: schemaRef(`${name}Record`) },
+                    {
+                      type: 'object',
+                      properties: {
+                        data: { type: 'array', items: schemaRef(`${name}Record`) },
+                        pagination: {
+                          type: 'object',
+                          properties: {
+                            page: { type: 'integer' },
+                            limit: { type: 'integer' },
+                            total: { type: 'integer' },
+                            total_pages: { type: 'integer' }
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          ...access
+        }
       }),
       post: common('POST', {
         summary: `Crear ${operation.name}`, operationId: `crear_${operation.key.replace(/-/g, '_')}`,

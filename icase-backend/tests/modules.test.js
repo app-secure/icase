@@ -11,7 +11,7 @@ describe('servicio de módulos', () => {
   test('el modo automático activa los módulos recomendados', () => {
     const { valor } = service.proponer();
     expect(valor.modo).toBe('automatico');
-    expect(valor.modulos).toEqual([expect.objectContaining({ id: 'formularios_tipados', activo: true })]);
+    expect(valor.modulos).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'formularios_tipados', activo: true })]));
   });
 
   test('en modo automático ignora lo que el usuario mande', () => {
@@ -23,7 +23,7 @@ describe('servicio de módulos', () => {
   test('en modo personalizado respeta la elección y completa lo omitido con el valor recomendado', () => {
     const off = service.validar({ modo: 'personalizado', modulos: [{ id: 'formularios_tipados', activo: false }] });
     expect(off.errores).toEqual([]);
-    expect(off.propuesta.modulos).toEqual([expect.objectContaining({ id: 'formularios_tipados', activo: false, motivo: 'Desactivado por ti.' })]);
+    expect(off.propuesta.modulos).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'formularios_tipados', activo: false, motivo: 'Desactivado por ti.' })]));
     const omitted = service.validar({ modo: 'personalizado', modulos: [] });
     expect(omitted.propuesta.modulos[0].activo).toBe(true);
     expect(omitted.advertencias.join(' ')).toMatch(/valor recomendado para: formularios_tipados/);
@@ -45,9 +45,9 @@ describe('servicio de módulos', () => {
   });
 
   test('sin etapa aprobada o con una propuesta inválida rige el modo automático', () => {
-    expect(service.activos(undefined)).toEqual(['formularios_tipados']);
-    expect(service.activos({ modo: 'magico' })).toEqual(['formularios_tipados']);
-    expect(service.activos({ modo: 'personalizado', modulos: [{ id: 'formularios_tipados', activo: false }] })).toEqual([]);
+    expect(service.activos(undefined)).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
+    expect(service.activos({ modo: 'magico' })).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
+    expect(service.activos({ modo: 'personalizado', modulos: [{ id: 'formularios_tipados', activo: false }] })).toEqual(['paginacion_busqueda', 'datos_iniciales']);
   });
 
   test('los módulos incluidos salen de las decisiones aprobadas', () => {
@@ -111,9 +111,9 @@ describe('la etapa Módulos es opcional', () => {
     const { useCase } = crearCaso();
     const plan = await useCase.obtener('p1');
     expect(plan.etapas.find((item) => item.etapa === 'modulos')).toMatchObject({ opcional: true, tipo: 'decision' });
-    expect(plan.modulos.opcionales.map((item) => item.id)).toEqual(['formularios_tipados']);
+    expect(plan.modulos.opcionales.map((item) => item.id)).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
     expect(plan.modulos.incluidos.map((item) => item.id)).toEqual(expect.arrayContaining(['datos', 'openapi', 'reglas', 'autenticacion']));
-    expect(plan.modulos.activos).toEqual(['formularios_tipados']);
+    expect(plan.modulos.activos).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
   });
 
   test('guarda la propuesta normalizada, rechaza las inválidas y refleja la elección aprobada', async () => {
@@ -128,9 +128,9 @@ describe('la etapa Módulos es opcional', () => {
 
     await useCase.proponer({ proyectoId: 'p1', etapa: 'modulos', propuesta: { modo: 'personalizado', modulos: [{ id: 'formularios_tipados', activo: false }] } });
     const pending = await useCase.obtener('p1');
-    expect(pending.modulos.activos).toEqual(['formularios_tipados']); // aún sin aprobar: rige el automático
+    expect(pending.modulos.activos).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']); // aún sin aprobar: rige el automático
     const approved = await useCase.revisar({ proyectoId: 'p1', etapa: 'modulos', decision: 'aprobar' });
-    expect(approved.modulos.activos).toEqual([]);
+    expect(approved.modulos.activos).toEqual(['paginacion_busqueda', 'datos_iniciales']);
     expect(repo.guardar).toHaveBeenCalled();
   });
 
@@ -154,7 +154,7 @@ describe('el informe de generación incluye los módulos', () => {
   test('sin etapa aprobada usa el modo automático', async () => {
     const { modulos } = report(await generate({}));
     expect(modulos.modo).toBe('automatico');
-    expect(modulos.opcionales).toEqual([{ id: 'formularios_tipados', etiqueta: 'Formularios y tablas por campo', activo: true }]);
+    expect(modulos.opcionales).toEqual(expect.arrayContaining([{ id: 'formularios_tipados', etiqueta: 'Formularios y tablas por campo', activo: true }]));
     expect(modulos.incluidos.map((item) => item.id)).toEqual(expect.arrayContaining(['datos', 'openapi', 'informe']));
   });
 
@@ -166,7 +166,7 @@ describe('el informe de generación incluye los módulos', () => {
 
   test('con la etapa personalizada refleja lo desactivado', async () => {
     const result = await generate({ modulos: { modo: 'personalizado', modulos: [{ id: 'formularios_tipados', activo: false }] } });
-    expect(report(result).modulos).toMatchObject({ modo: 'personalizado', opcionales: [expect.objectContaining({ activo: false })] });
+    expect(report(result).modulos.opcionales).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'formularios_tipados', activo: false })]));
     expect(result.archivos.find((item) => item.ruta === 'backend/GENERATION-REPORT.md').contenido).toMatch(/Formularios y tablas por campo — desactivado/);
   });
 });

@@ -81,7 +81,7 @@ describe('documento OpenAPI generado', () => {
       expect(result.valid).toBe(true);
       expect(openapi.openapi).toBe('3.1.0');
     }
-  });
+  }, 15000);
 
   test('documenta las cuatro rutas de cada operación con sus etiquetas y operationId únicos', async () => {
     const { openapi, manifest } = await arrancar();

@@ -54,13 +54,60 @@ class RecordStore {
     await this.pool.query('SELECT 1');
   }
 
-  async list(operation) {
+  async list(operation, query = {}) {
     const { name, table } = tableFor(model, operation);
+    const hasPaging = query && (query.page !== undefined || query.limit !== undefined || query.search !== undefined || query.envelope === 'true');
+    const page = Math.max(1, parseInt(query?.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(query?.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const conditions = [];
+    const params = [];
+    if (table.generic) {
+      params.push(operation);
+      conditions.push(`capability = $${params.length}`);
+    }
+
+    if (query && typeof query === 'object') {
+      for (const column of table.columns) {
+        if (query[column.name] !== undefined && query[column.name] !== '') {
+          params.push(this._param(table, column.column, query[column.name]));
+          conditions.push(`${quote(column.column)} = $${params.length}${this._cast(table, column.column)}`);
+        }
+      }
+      if (query.search && typeof query.search === 'string' && query.search.trim()) {
+        const term = `%${query.search.trim()}%`;
+        params.push(term);
+        const termIdx = params.length;
+        const searchClauses = [];
+        for (const column of table.columns) {
+          if (['string', 'date', 'datetime', 'uuid'].includes(column.type)) {
+            searchClauses.push(`${quote(column.column)}::text ILIKE $${termIdx}`);
+          }
+        }
+        searchClauses.push(`extra::text ILIKE $${termIdx}`);
+        conditions.push(`(${searchClauses.join(' OR ')})`);
+      }
+    }
+
+    const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     try {
-      const result = table.generic
-        ? await this.pool.query(`SELECT * FROM ${quote(name)} WHERE capability = $1 ORDER BY id`, [operation])
-        : await this.pool.query(`SELECT * FROM ${quote(name)} ORDER BY id`);
-      return result.rows.map((row) => toRecord(table, operation, row));
+      if (!hasPaging) {
+        const result = await this.pool.query(`SELECT * FROM ${quote(name)} ${whereSql} ORDER BY id`, params);
+        return result.rows.map((row) => toRecord(table, operation, row));
+      }
+      const countRes = await this.pool.query(`SELECT COUNT(*) as total FROM ${quote(name)} ${whereSql}`, params);
+      const total = parseInt(countRes.rows[0].total, 10) || 0;
+      const pagedParams = [...params, limit, offset];
+      const result = await this.pool.query(
+        `SELECT * FROM ${quote(name)} ${whereSql} ORDER BY id LIMIT $${pagedParams.length - 1} OFFSET $${pagedParams.length}`,
+        pagedParams
+      );
+      const records = result.rows.map((row) => toRecord(table, operation, row));
+      return {
+        data: records,
+        pagination: { page, limit, total, total_pages: Math.max(1, Math.ceil(total / limit)) }
+      };
     } catch (error) { throw translate(error); }
   }
 

@@ -21,7 +21,7 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
     const { reglas, descartadas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf);
     const access = this._acceso(decisiones.control_acceso, rf);
-    const generados = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access });
+    const generados = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos });
     const informe = this._informe({ proyecto, insumos, decisiones, archivos: generados });
     const archivos = [
       ...generados,

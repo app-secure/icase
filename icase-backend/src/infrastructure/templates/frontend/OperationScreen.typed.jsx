@@ -54,12 +54,25 @@ function TypedRecords({ capability, contract }) {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, total_pages: 1 });
+
   const path = (id) => `/api/operations/${encodeURIComponent(capability)}${id === undefined ? '' : `/${encodeURIComponent(id)}`}`;
   const targetOf = (entity) => contract.operations.find((item) => item.schema && item.schema.title === entity);
 
   const refresh = useCallback(async () => {
-    try { setRecords(await api(`/api/operations/${encodeURIComponent(capability)}`)); setError(''); } catch (failure) { setError(failure.message); }
-  }, [api, capability]);
+    try {
+      const q = new URLSearchParams({ page: String(page), limit: '10' });
+      if (search.trim()) q.set('search', search.trim());
+      const res = await api(`/api/operations/${encodeURIComponent(capability)}?${q.toString()}`);
+      const items = Array.isArray(res) ? res : (res.data || []);
+      setRecords(items);
+      if (res && res.pagination) setPagination(res.pagination);
+      else setPagination({ page: 1, limit: items.length, total: items.length, total_pages: 1 });
+      setError('');
+    } catch (failure) { setError(failure.message); }
+  }, [api, capability, page, search]);
   useEffect(() => { refresh(); }, [refresh]);
 
   // Los registros de las entidades referenciadas alimentan las listas desplegables y los nombres de la tabla.
@@ -67,8 +80,10 @@ function TypedRecords({ capability, contract }) {
     let active = true;
     const targets = [...new Set(fields.filter((field) => field.kind === 'reference').map((field) => field.property['x-references']))]
       .map(targetOf).filter((target) => target && can(target.key, 'GET'));
-    Promise.all(targets.map(async (target) => [target.schema.title, await api(`/api/operations/${encodeURIComponent(target.key)}`).catch(() => [])]))
-      .then((pairs) => { if (active) setLookups(Object.fromEntries(pairs)); });
+    Promise.all(targets.map(async (target) => [
+      target.schema.title,
+      await api(`/api/operations/${encodeURIComponent(target.key)}`).then((res) => Array.isArray(res) ? res : (res.data || [])).catch(() => [])
+    ])).then((pairs) => { if (active) setLookups(Object.fromEntries(pairs)); });
     return () => { active = false; };
   }, [api, fields]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -181,7 +196,17 @@ function TypedRecords({ capability, contract }) {
       </form>
     </section>}
     <section className="card">
-      <h2>Registros</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <h2>Registros</h2>
+        <input
+          aria-label="Buscar en registros"
+          placeholder="Buscar..."
+          className="field"
+          style={{ maxWidth: '250px' }}
+          value={search}
+          onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+        />
+      </div>
       <button type="button" className="button" onClick={refresh}>Actualizar lista</button>
       {records.length === 0 ? <p>No hay registros todavía.</p> : <div className="table-wrap"><table className="records">
         <caption className="sr-only">Registros de {humanize(capability)}</caption>
@@ -194,6 +219,13 @@ function TypedRecords({ capability, contract }) {
           </td>
         </tr>)}</tbody>
       </table></div>}
+      {pagination && pagination.total_pages > 1 && (
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '1rem' }}>
+          <button type="button" className="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
+          <span>Página {page} de {pagination.total_pages} (Total: {pagination.total})</span>
+          <button type="button" className="button" disabled={page >= pagination.total_pages} onClick={() => setPage((p) => p + 1)}>Siguiente</button>
+        </div>
+      )}
     </section>
   </>;
 }

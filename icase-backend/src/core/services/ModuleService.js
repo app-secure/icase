@@ -44,6 +44,18 @@ const OPTIONAL = Object.freeze([
     descripcion: 'La interfaz web muestra un formulario con un control por campo (texto, número, fecha, lista de opciones, casilla, entidad relacionada) y una tabla de registros, en lugar de pedir JSON a mano.',
     sinEfecto: 'Si una entidad no tiene campos declarados en el diagrama de dominio, esa pantalla sigue usando el editor JSON.',
     requiere: []
+  },
+  {
+    id: 'paginacion_busqueda', etiqueta: 'Paginación, filtros y búsqueda', categoria: 'api', porDefecto: true,
+    descripcion: 'Soporte en la API para paginación (parámetros page y limit), búsqueda textual (parámetro search) y filtros por campo, con metadatos de paginación y controles en la interfaz.',
+    sinEfecto: 'Sin entidades en el modelo de dominio, la búsqueda opera sobre los atributos genéricos del registro.',
+    requiere: []
+  },
+  {
+    id: 'datos_iniciales', etiqueta: 'Datos iniciales (seed deterministas)', categoria: 'datos', porDefecto: true,
+    descripcion: 'Genera y carga registros iniciales reproducibles para cada entidad a partir de sus tipos, restricciones y valores de ejemplo.',
+    sinEfecto: 'Si no hay entidades en el modelo de dominio no se generan registros de prueba.',
+    requiere: []
   }
 ]);
 

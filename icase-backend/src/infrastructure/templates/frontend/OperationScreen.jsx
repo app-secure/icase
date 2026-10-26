@@ -8,13 +8,25 @@ export function JsonRecords({ capability }) {
   const [payload, setPayload] = useState('{\n  "valor": ""\n}');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, total_pages: 1 });
 
   const path = (id) => `/api/operations/${encodeURIComponent(capability)}${id === undefined ? '' : `/${encodeURIComponent(id)}`}`;
 
   const refresh = useCallback(async () => {
     if (!capability) { setRecords([]); return; }
-    try { setRecords(await api(`/api/operations/${encodeURIComponent(capability)}`)); setError(''); } catch (failure) { setError(failure.message); }
-  }, [api, capability]);
+    try {
+      const q = new URLSearchParams({ page: String(page), limit: '10' });
+      if (search.trim()) q.set('search', search.trim());
+      const res = await api(`/api/operations/${encodeURIComponent(capability)}?${q.toString()}`);
+      const items = Array.isArray(res) ? res : (res.data || []);
+      setRecords(items);
+      if (res && res.pagination) setPagination(res.pagination);
+      else setPagination({ page: 1, limit: items.length, total: items.length, total_pages: 1 });
+      setError('');
+    } catch (failure) { setError(failure.message); }
+  }, [api, capability, page, search]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -39,13 +51,30 @@ export function JsonRecords({ capability }) {
       <button className="button" onClick={refresh}>Actualizar lista</button>
     </section>}
     <section className="card">
-      <h2>Registros</h2>
-      {records.map((record) => <article key={record.id || record._id} className="record">{JSON.stringify(record, null, 2)}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <h2>Registros</h2>
+        <input
+          aria-label="Buscar en registros"
+          placeholder="Buscar..."
+          className="field"
+          style={{ maxWidth: '250px' }}
+          value={search}
+          onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+        />
+      </div>
+      {records.length === 0 ? <p>No hay registros.</p> : records.map((record) => <article key={record.id || record._id} className="record">{JSON.stringify(record, null, 2)}
         <div>
           {can(capability, 'PATCH') && <button className="button" onClick={() => update(record.id || record._id)}>Modificar</button>}
           {can(capability, 'DELETE') && <button className="button danger" onClick={() => remove(record.id || record._id)}>Eliminar</button>}
         </div>
       </article>)}
+      {pagination && pagination.total_pages > 1 && (
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '1rem' }}>
+          <button className="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Anterior</button>
+          <span>Página {page} de {pagination.total_pages} (Total: {pagination.total})</span>
+          <button className="button" disabled={page >= pagination.total_pages} onClick={() => setPage((p) => p + 1)}>Siguiente</button>
+        </div>
+      )}
     </section>
   </>;
 }

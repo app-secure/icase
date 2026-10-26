@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const ModuleService = require('../../core/services/ModuleService');
 
 const TEMPLATES = path.join(__dirname, '..', 'templates', 'data-layer');
 const MIGRATION_ID = '0001_init';
@@ -24,12 +25,23 @@ class BackendDataLayerGenerator {
    * Deriva el modelo físico (una tabla o colección por entidad) y sus migraciones desde el contrato.
    * Las operaciones sin entidad usan la tabla genérica `icase_records`.
    */
-  build({ contract, database, policy = null }) {
+  build({ contract, database, policy = null, modules = null }) {
     const model = this._model(contract, database);
     const rules = this._rules(contract.rules || [], model);
     this._applyUniques(model, contract.rules || []);
     const migration = database === 'mongodb' ? this._mongoMigration(model) : this._sqlMigration(model, database);
-    const migrations = [migration, ...(policy && policy.habilitada ? [this._authMigration(database)] : [])];
+    const authActive = Boolean(policy && policy.habilitada);
+    const activeList = Array.isArray(modules)
+      ? modules
+      : (modules ? new ModuleService().activos(modules) : new ModuleService().activos(null));
+    const seedActive = activeList.includes('datos_iniciales') && (contract.entities || []).length > 0;
+    const seedId = authActive ? '0003_seed' : '0002_seed';
+    const seedMigration = seedActive ? this._seedMigration(model, database, contract, seedId) : null;
+    const migrations = [
+      migration,
+      ...(authActive ? [this._authMigration(database)] : []),
+      ...(seedMigration ? [seedMigration] : [])
+    ];
     return { model, rules, migration, migrations, files: this._files(model, rules, migrations, database) };
   }
 
@@ -195,6 +207,187 @@ class BackendDataLayerGenerator {
       }
     }
     return { id: MIGRATION_ID, collections, indexes };
+  }
+
+  _sortTablesTopologically(tables) {
+    const entries = Object.entries(tables).filter(([, t]) => t.entity);
+    const result = [];
+    const visited = new Set();
+    const visiting = new Set();
+
+    const visit = (tableName) => {
+      if (visited.has(tableName)) return;
+      if (visiting.has(tableName)) return;
+      visiting.add(tableName);
+      const table = tables[tableName];
+      if (table) {
+        for (const ref of table.references || []) {
+          if (ref.table && ref.table !== tableName && tables[ref.table]) {
+            visit(ref.table);
+          }
+        }
+      }
+      visiting.delete(tableName);
+      visited.add(tableName);
+      result.push([tableName, tables[tableName]]);
+    };
+
+    for (const [name] of entries) {
+      if (!visited.has(name)) visit(name);
+    }
+    return result;
+  }
+
+  _seedMigration(model, database, contract, migrationId) {
+    const sorted = this._sortTablesTopologically(model.tables);
+    if (database === 'mongodb') {
+      const seeds = [];
+      for (const [tableName, table] of sorted) {
+        const docs = [
+          this._generateSeedDoc(table, 1),
+          this._generateSeedDoc(table, 2)
+        ];
+        seeds.push({ collection: tableName, documents: docs });
+      }
+      return { id: migrationId, seeds };
+    }
+
+    const pg = database === 'postgres';
+    const q = (name) => (pg ? `"${name}"` : `\`${name}\``);
+    const statements = [];
+    for (const [tableName, table] of sorted) {
+      for (let i = 1; i <= 2; i += 1) {
+        const row = this._generateSeedSqlRow(table, i, database);
+        const cols = Object.keys(row);
+        const vals = cols.map((col) => row[col]);
+        if (pg) {
+          statements.push(`INSERT INTO ${q(tableName)} (${cols.map(q).join(', ')}) VALUES (${vals.join(', ')}) ON CONFLICT ("id") DO NOTHING`);
+        } else {
+          statements.push(`INSERT IGNORE INTO ${q(tableName)} (${cols.map(q).join(', ')}) VALUES (${vals.join(', ')})`);
+        }
+      }
+      if (pg) {
+        statements.push(`SELECT setval(pg_get_serial_sequence('${q(tableName)}', 'id'), coalesce((SELECT max("id") FROM ${q(tableName)}), 1))`);
+      } else {
+        statements.push(`ALTER TABLE ${q(tableName)} AUTO_INCREMENT = 3`);
+      }
+    }
+    return { id: migrationId, statements };
+  }
+
+  _generateSeedSqlRow(table, i, database) {
+    const pg = database === 'postgres';
+    const row = { id: i };
+    for (const column of table.columns) {
+      if (column.references) {
+        row[column.column] = i === 1 ? 1 : 2;
+        continue;
+      }
+      switch (column.type) {
+        case 'string':
+          if (column.enum && column.enum.length) {
+            row[column.column] = `'${column.enum[(i - 1) % column.enum.length]}'`;
+          } else if (column.column.includes('email') || column.name.includes('email')) {
+            row[column.column] = `'contacto${i}@ejemplo.com'`;
+          } else if (column.column.includes('tel') || column.name.includes('tel')) {
+            row[column.column] = `'+5199988877${i}'`;
+          } else {
+            row[column.column] = `'${table.entity} ${i}'`;
+          }
+          break;
+        case 'integer':
+          row[column.column] = i * 10;
+          break;
+        case 'number':
+          row[column.column] = i === 1 ? '15.5' : '99.9';
+          break;
+        case 'boolean':
+          row[column.column] = pg ? (i === 1 ? 'true' : 'false') : (i === 1 ? '1' : '0');
+          break;
+        case 'date':
+          row[column.column] = `'2025-01-1${i}'`;
+          break;
+        case 'datetime':
+          row[column.column] = pg ? `'2025-01-1${i}T10:00:00Z'` : `'2025-01-1${i} 10:00:00'`;
+          break;
+        case 'time':
+          row[column.column] = `'10:00:00'`;
+          break;
+        case 'uuid':
+          row[column.column] = `'a0000000-0000-0000-0000-00000000000${i}'`;
+          break;
+        case 'json':
+          row[column.column] = pg ? "'[]'::jsonb" : "'[]'";
+          break;
+        case 'id':
+          row[column.column] = i === 1 ? 1 : 2;
+          break;
+        default:
+          row[column.column] = `'${table.entity} ${i}'`;
+      }
+    }
+    row.extra = pg ? "'{}'::jsonb" : "'{}'";
+    row.created_at = pg ? 'now()' : 'CURRENT_TIMESTAMP(3)';
+    row.updated_at = pg ? 'now()' : 'CURRENT_TIMESTAMP(3)';
+    return row;
+  }
+
+  _generateSeedDoc(table, i) {
+    const doc = {
+      _id: `60000000000000000000000${i}`
+    };
+    for (const column of table.columns) {
+      if (column.references) {
+        doc[column.column] = `60000000000000000000000${i === 1 ? 1 : 2}`;
+        continue;
+      }
+      switch (column.type) {
+        case 'string':
+          if (column.enum && column.enum.length) {
+            doc[column.column] = column.enum[(i - 1) % column.enum.length];
+          } else if (column.column.includes('email') || column.name.includes('email')) {
+            doc[column.column] = `contacto${i}@ejemplo.com`;
+          } else if (column.column.includes('tel') || column.name.includes('tel')) {
+            doc[column.column] = `+5199988877${i}`;
+          } else {
+            doc[column.column] = `${table.entity} ${i}`;
+          }
+          break;
+        case 'integer':
+          doc[column.column] = i * 10;
+          break;
+        case 'number':
+          doc[column.column] = i === 1 ? 15.5 : 99.9;
+          break;
+        case 'boolean':
+          doc[column.column] = i === 1;
+          break;
+        case 'date':
+          doc[column.column] = `2025-01-1${i}`;
+          break;
+        case 'datetime':
+          doc[column.column] = `2025-01-1${i}T10:00:00Z`;
+          break;
+        case 'time':
+          doc[column.column] = '10:00:00';
+          break;
+        case 'uuid':
+          doc[column.column] = `a0000000-0000-0000-0000-00000000000${i}`;
+          break;
+        case 'json':
+          doc[column.column] = [];
+          break;
+        case 'id':
+          doc[column.column] = `60000000000000000000000${i === 1 ? 1 : 2}`;
+          break;
+        default:
+          doc[column.column] = `${table.entity} ${i}`;
+      }
+    }
+    doc.extra = {};
+    doc.created_at = new Date(`2025-01-1${i}T10:00:00Z`).toISOString();
+    doc.updated_at = new Date(`2025-01-1${i}T10:00:00Z`).toISOString();
+    return doc;
   }
 
   _files(model, rules, migrations, database) {

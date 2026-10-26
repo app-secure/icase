@@ -208,10 +208,10 @@ Ordenado por lo que más acerca a «de requisitos a aplicación completa».
 
 ### 6.1 Siguiente en la lista
 
-1. **Más módulos** (el sistema de módulos ya existe; falta llenarlo):
-   - **Paginación, filtros y búsqueda** en la API (hoy las listas devuelven todos los registros). Toca los tres almacenes de Node, Java, OpenAPI, los ejercitadores y la interfaz.
-   - **Datos iniciales (seed).** Ojo: inventar datos no es determinista; hay que decidir de dónde salen.
-   - Módulos de tiempo real, archivos, reportes y pagos (hoy el informe los marca como no soportados).
+1. **Más módulos**:
+   - **Paginación, filtros y búsqueda** en la API *(implementado)*: soporte integral con parámetros `page`, `limit`, `search` y filtros por columna en los tres almacenes de Node (PostgreSQL con `ILIKE`, MySQL con `LIKE`, MongoDB con regex, `countDocuments`, `skip` y `limit`), Java Spring (`OperationsController.java` y `RecordStore.java` con cabeceras `X-Total-Count`, `X-Page`, etc.), especificación OpenAPI 3.1, ejercitador `SamplePayload.js` y controles de interfaz en React (`OperationScreen.jsx` y `OperationScreen.typed.jsx`).
+   - **Datos iniciales (seed deterministas)** *(implementado)*: módulo `datos_iniciales` determinista y ordenado topológicamente según dependencias de clave foránea (`0003_seed_datos_iniciales` / `0002_seed` con `ON CONFLICT DO NOTHING` y `setval` en PostgreSQL, `INSERT IGNORE` en MySQL y auto-inserción en colecciones MongoDB).
+   - Módulos de tiempo real, archivos, reportes y pagos (siguen marcados como no soportados).
 2. **Modo de un clic** *(implementado)*: recorre todas las etapas de planificación con valores seguros (login con JWT y roles, sin autoregistro abierto, solo reglas explícitas con evidencia literal) y genera un informe final con lo dudoso en el plan y en la interfaz. Permite habilitar de inmediato la generación de backend y frontend.
 3. **Verificación como trabajo persistente** *(implementado)*: se desacopló la verificación de la petición HTTP síncrona mediante `TrabajoGeneracion` (`tipo: 'verificacion'`), permitiendo ejecución asíncrona en segundo plano, reconexión por recarga y sondeo de progreso desde la interfaz.
 4. **Regenerar sin perder ediciones** manuales y con **migraciones incrementales** (hoy solo existen `0001_init` y `0002_auth`; regenerar pisa los archivos).

@@ -90,7 +90,11 @@ class GenerationReportService {
       capacidades_no_generadas: [...pending.values()],
       entidades_sin_requisito: (contrato.entities || []).filter((item) => !mapped.has(item.key)).map((item) => item.name),
       notas: notes,
-      limites_generales: generalLimits({ formulariosTipados: Boolean(modulos?.opcionales?.some((item) => item.id === 'formularios_tipados' && item.activo)) })
+      limites_generales: generalLimits({
+        formulariosTipados: Boolean(modulos?.opcionales?.some((item) => item.id === 'formularios_tipados' && item.activo)),
+        paginacion: Boolean(modulos?.opcionales?.some((item) => item.id === 'paginacion_busqueda' && item.activo)),
+        seed: Boolean(modulos?.opcionales?.some((item) => item.id === 'datos_iniciales' && item.activo))
+      })
     };
   }
 

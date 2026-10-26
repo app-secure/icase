@@ -14,13 +14,13 @@ const slug = (value) => String(value || 'project').normalize('NFD').replace(/[̀
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
 
 class GenericBackendGenerator {
-  generate({ proyecto, requirements, stack, domainModel = null, rules = [], access = null }) {
+  generate({ proyecto, requirements, stack, domainModel = null, rules = [], access = null, modules = null }) {
     const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules });
     const policy = new AccessControlService().politica(access, contract.operations);
     contract.auth = policy;
     const resolved = StackCatalog.resolve(stack);
     const database = resolved.database;
-    const data = new BackendDataLayerGenerator().build({ contract, database, policy });
+    const data = new BackendDataLayerGenerator().build({ contract, database, policy, modules });
     const openapi = new OpenApiGenerator().build({ proyecto, contract, model: data.model, policy });
     data.files.shared.push(
       { ruta: 'backend/openapi.json', lenguaje: 'json', contenido: `${JSON.stringify(openapi, null, 2)}\n` },
@@ -268,7 +268,7 @@ export class StoreExceptionFilter implements ExceptionFilter {
   }
 
   _nestController(contract) {
-    return `import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+    return `import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { RecordStore } from './record.store';
 const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
 @Controller() export class AppController {
@@ -277,7 +277,18 @@ const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.ke
  @Get('health') async health(){await this.store.ping();return {status:'ok',database:'connected'};}
  @Get('api/contract') contract(){return ${JSON.stringify(contract)};}
  @Get('api/openapi.json') openapi(){return require('./docs/openapi.js');}
- @Get('api/operations/:capability') list(@Param('capability') capability:string){return this.store.list(this.capability(capability));}
+ @Get('api/operations/:capability') async list(@Param('capability') capability:string,@Query() query:any,@Res({passthrough:true}) res:any){
+   const result=await this.store.list(this.capability(capability),query);
+   if(result&&result.pagination){
+     res.set({
+       'X-Total-Count':String(result.pagination.total),
+       'X-Page':String(result.pagination.page),
+       'X-Limit':String(result.pagination.limit),
+       'X-Total-Pages':String(result.pagination.total_pages)
+     });
+   }
+   return result;
+ }
  @Post('api/operations/:capability') create(@Param('capability') capability:string,@Body() body:any){if(!body||Array.isArray(body)||typeof body!=='object')throw new BadRequestException('El cuerpo debe ser un objeto');return this.store.create(this.capability(capability),body);}
  @Patch('api/operations/:capability/:id') async update(@Param('capability') capability:string,@Param('id') id:string,@Body() body:any){const value=await this.store.update(this.capability(capability),id,body);if(!value)throw new NotFoundException('Registro inexistente');return value;}
  @Delete('api/operations/:capability/:id') async remove(@Param('capability') capability:string,@Param('id') id:string){const removed=await this.store.remove(this.capability(capability),id);if(!removed)throw new NotFoundException('Registro inexistente');return {deleted:true,id};}
@@ -297,7 +308,20 @@ const capability=(req,res,next)=>allowed.has(req.params.capability)?next():res.s
 app.get('/health',async(_req,res,next)=>{try{await store.ping();res.json({status:'ok',database:'connected'})}catch(e){next(e)}});
 app.get('/api/contract',(_req,res)=>res.json(${JSON.stringify(contract)}));
 app.get('/api/openapi.json',(_req,res)=>res.json(require('./docs/openapi')));
-app.get('/api/operations/:capability',capability,async(req,res,next)=>{try{res.json(await store.list(req.params.capability))}catch(e){next(e)}});
+app.get('/api/operations/:capability',capability,async(req,res,next)=>{
+  try{
+    const result=await store.list(req.params.capability,req.query);
+    if(result&&result.pagination){
+      res.set({
+        'X-Total-Count':result.pagination.total,
+        'X-Page':result.pagination.page,
+        'X-Limit':result.pagination.limit,
+        'X-Total-Pages':result.pagination.total_pages
+      });
+    }
+    res.json(result);
+  }catch(e){next(e)}
+});
 app.post('/api/operations/:capability',capability,async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')return res.status(400).json({message:'El cuerpo debe ser un objeto'});res.status(201).json(await store.create(req.params.capability,req.body))}catch(e){next(e)}});
 app.patch('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.update(req.params.capability,req.params.id,req.body);value?res.json(value):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
 app.delete('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.remove(req.params.capability,req.params.id);value?res.json({deleted:true,id:req.params.id}):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
