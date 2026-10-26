@@ -10,7 +10,7 @@ import {
   reviewBackendArtifactApi, reviewCodePhaseApi, reviewFrontendArtifactApi,
   reviewDeliveryArtifactApi, reviewInfrastructureArtifactApi, reviewPipelineArtifactApi,
   reviewTestArtifactApi, suggestCodePhaseApi, verifyGeneratedArtifactApi, updateGeneratedArtifactFileApi,
-  executeOneClickModeApi
+  executeOneClickModeApi, startArtifactVerificationJobApi, fetchArtifactVerificationJobApi, fetchLatestArtifactVerificationJobApi
 } from '../services/api';
 import GenerationReport from './GenerationReport';
 
@@ -571,16 +571,61 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
 
 function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
   const [result, setResult] = useState(artifact.verificacion || null);
+  const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedFile, setSelectedFile] = useState('');
   const [source, setSource] = useState('');
+
+  // Reanudar polling si al montar existe un trabajo activo
+  useEffect(() => {
+    let active = true;
+    fetchLatestArtifactVerificationJobApi(projectId, artifact.id)
+      .then((data) => {
+        if (!active || !data?.trabajo) return;
+        if (['encolado', 'procesando'].includes(data.trabajo.estado)) {
+          setJob(data.trabajo);
+          setLoading(true);
+        }
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [projectId, artifact.id]);
+
+  // Polling del trabajo persistente
+  useEffect(() => {
+    if (!job || !['encolado', 'procesando'].includes(job.estado)) return undefined;
+    const interval = setInterval(async () => {
+      try {
+        const data = await fetchArtifactVerificationJobApi(projectId, artifact.id, job.id);
+        if (!data?.trabajo) return;
+        setJob(data.trabajo);
+        if (data.trabajo.estado === 'completado') {
+          setLoading(false);
+          setResult(data.verificacion);
+          onArtifactChange({ ...artifact, verificacion: data.verificacion });
+        } else if (data.trabajo.estado === 'fallido') {
+          setLoading(false);
+          setError(data.trabajo.error || 'La verificación falló en el contenedor aislado.');
+        }
+      } catch (err) {
+        console.warn('Error en sondeo de verificación:', err);
+      }
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [job, projectId, artifact, onArtifactChange]);
+
   const verify = async () => {
     setLoading(true); setError('');
-    try { setResult(await verifyGeneratedArtifactApi(projectId, artifact.id)); }
-    catch (failure) { setError(failure.message); }
-    finally { setLoading(false); }
+    try {
+      const data = await startArtifactVerificationJobApi(projectId, artifact.id);
+      setJob(data.trabajo);
+    } catch (failure) {
+      setError(failure.message);
+      setLoading(false);
+    }
   };
+
   const saveFile = async () => {
     setLoading(true); setError('');
     try {
@@ -590,11 +635,28 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
     } catch (failure) { setError(failure.message); }
     finally { setLoading(false); }
   };
+
   return <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs">
     <div className="flex items-center justify-between gap-3">
-      <span className="font-semibold text-slate-700">Verificación individual: {result?.estado || 'pendiente'}</span>
-      <button type="button" disabled={loading} onClick={verify} className="rounded-lg border border-violet-200 px-3 py-1.5 font-semibold text-violet-700 disabled:opacity-50">{loading ? 'Verificando…' : 'Verificar artefacto'}</button>
+      <span className="font-semibold text-slate-700">Verificación aislada (Docker): {result?.estado || (job?.estado === 'procesando' ? 'en ejecución…' : 'pendiente')}</span>
+      <button type="button" disabled={loading} onClick={verify} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-1.5 font-semibold text-violet-700 hover:bg-violet-100/60 disabled:opacity-50 transition cursor-pointer">
+        {loading ? <Loader2 size={13} className="animate-spin" /> : null}
+        {loading ? (job?.mensaje || 'Verificando en contenedor…') : 'Verificar artefacto'}
+      </button>
     </div>
+
+    {loading && job && (
+      <div className="mt-2.5 rounded-lg border border-violet-200 bg-violet-50/60 p-2 text-[11px] text-violet-900">
+        <div className="flex justify-between items-center mb-1">
+          <span className="font-medium">{job.mensaje || 'Ejecutando pruebas en Docker…'}</span>
+          <span className="font-semibold text-violet-700">{job.progreso}%</span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-violet-200">
+          <div className="h-full rounded-full bg-violet-600 transition-all duration-300" style={{ width: `${job.progreso}%` }} />
+        </div>
+      </div>
+    )}
+
     {error && <p className="mt-2 text-red-700">{error}</p>}
     {result && <><p className="mt-2 text-slate-500">{result.nota}</p>
       {result.pruebas?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-emerald-700">{result.pruebas.map((check) => <li key={check.paso}>{check.paso}: {check.resultado}</li>)}</ul>}

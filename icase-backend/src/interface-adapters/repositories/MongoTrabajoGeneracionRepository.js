@@ -146,6 +146,54 @@ class MongoTrabajoGeneracionRepository {
     return reclamados;
   }
 
+  async crearORecuperarActivoVerificacion({ proyectoId, artefactoId }) {
+    const claveActiva = `verificacion:${proyectoId}:${artefactoId}`;
+    let existente = await TrabajoGeneracionModel.findOne({ clave_activa: claveActiva });
+    if (existente && existente.lease_expires_at && existente.lease_expires_at > new Date()) {
+      return { trabajo: existente.toJSON(), creado: false };
+    }
+    if (existente) {
+      await TrabajoGeneracionModel.findByIdAndUpdate(existente._id, {
+        $set: {
+          estado: 'fallido',
+          progreso: 100,
+          mensaje: 'Verificación interrumpida',
+          error: 'La verificación fue interrumpida. Inicia un nuevo intento.'
+        },
+        $unset: { clave_activa: 1 }
+      });
+      existente = null;
+    }
+
+    try {
+      const creado = await TrabajoGeneracionModel.create({
+        proyecto_id: proyectoId,
+        tipo: 'verificacion',
+        artefacto_id: artefactoId,
+        ejecutor_id: this.ejecutorId,
+        clave_activa: claveActiva,
+        lease_expires_at: this.leaseUntil(),
+        estado: 'encolado',
+        progreso: 5,
+        mensaje: 'Verificación en cola'
+      });
+      return { trabajo: creado.toJSON(), creado: true };
+    } catch (error) {
+      if (error?.code === 11000) {
+        const concurrente = await TrabajoGeneracionModel.findOne({ clave_activa: claveActiva });
+        if (concurrente) return { trabajo: concurrente.toJSON(), creado: false };
+      }
+      throw error;
+    }
+  }
+
+  async obtenerUltimaVerificacionPorArtefacto(proyectoId, artefactoId) {
+    const trabajo = await TrabajoGeneracionModel
+      .findOne({ proyecto_id: proyectoId, tipo: 'verificacion', artefacto_id: artefactoId })
+      .sort({ createdAt: -1 });
+    return trabajo ? trabajo.toJSON() : null;
+  }
+
   async actualizar(id, cambios, finalizar = false) {
     const update = { $set: { ...cambios, ...(finalizar ? {} : { lease_expires_at: this.leaseUntil() }) } };
     if (finalizar) update.$unset = { clave_activa: 1 };

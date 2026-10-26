@@ -241,7 +241,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     gestionarPlanCodificacion,
     gestionarArtefactosCodigo,
     artefactoRepository: artefactoGeneradoRepo,
-    zipArchiveService
+    zipArchiveService,
+    trabajoGeneracionRepository: trabajoGeneracionRepo
   });
 
   // Health check

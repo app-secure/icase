@@ -11,11 +11,13 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
     type: String,
     enum: [
       'mockups', 'diagrama', 'codigo_backend', 'codigo_frontend', 'pruebas',
-      'infraestructura', 'pipeline_ci_cd', 'paquete_entrega'
+      'infraestructura', 'pipeline_ci_cd', 'paquete_entrega', 'verificacion'
     ],
     default: 'mockups',
     index: true
   },
+  artefacto_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ArtefactoGenerado', default: null, index: true },
+  resultado_verificacion: { type: mongoose.Schema.Types.Mixed, default: null },
   tipo_diagrama: { type: String, default: null, index: true },
   estado: {
     type: String,

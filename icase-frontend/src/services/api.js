@@ -626,6 +626,33 @@ export async function verifyGeneratedArtifactApi(projectId, artifactId) {
   return data;
 }
 
+export async function startArtifactVerificationJobApi(projectId, artifactId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/verificar-async`, {
+    method: 'POST', headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo iniciar el trabajo de verificación.');
+  return data;
+}
+
+export async function fetchArtifactVerificationJobApi(projectId, artifactId, jobId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/verificar-trabajo/${jobId}`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar el trabajo de verificación.');
+  return data;
+}
+
+export async function fetchLatestArtifactVerificationJobApi(projectId, artifactId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/verificar-trabajo/ultimo`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar la última verificación.');
+  return data;
+}
+
 export async function updateGeneratedArtifactFileApi(projectId, artifactId, ruta, contenido) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/archivos`, {
     method: 'PUT', headers: getAuthHeaders({ 'Content-Type': 'application/json' }),

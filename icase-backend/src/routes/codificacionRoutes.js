@@ -8,6 +8,7 @@ function buildCodificacionRoutes(controller, access) {
   router.use(authMiddleware);
   router.param('id', access.proyecto);
   router.param('artefactoId', access.artefacto);
+  router.param('trabajoId', access.trabajo);
   router.get('/:id/codificacion', (req, res) => controller.obtenerPlan(req, res));
   router.post('/:id/codificacion/un-clic', (req, res) => controller.ejecutarModoUnClic(req, res));
   router.post('/:id/codificacion/etapas/:etapa/sugerencia', (req, res) => controller.sugerirEtapa(req, res));
@@ -29,6 +30,9 @@ function buildCodificacionRoutes(controller, access) {
   router.get('/:id/codificacion/paquete/:artefactoId/descargar', (req, res) => controller.descargarPaquete(req, res));
   router.get('/:id/artefactos', (req, res) => controller.listarArtefactos(req, res));
   router.post('/:id/artefactos/:artefactoId/verificar', (req, res) => controller.verificarArtefacto(req, res));
+  router.post('/:id/artefactos/:artefactoId/verificar-async', (req, res) => controller.iniciarVerificacionAsync(req, res));
+  router.get('/:id/artefactos/:artefactoId/verificar-trabajo/ultimo', (req, res) => controller.obtenerUltimoTrabajoVerificacion(req, res));
+  router.get('/:id/artefactos/:artefactoId/verificar-trabajo/:trabajoId', (req, res) => controller.obtenerTrabajoVerificacion(req, res));
   router.put('/:id/artefactos/:artefactoId/archivos', (req, res) => controller.actualizarArchivo(req, res));
   return router;
 }

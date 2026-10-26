@@ -1,9 +1,10 @@
 class CodificacionController {
-  constructor({ gestionarPlanCodificacion, gestionarArtefactosCodigo, artefactoRepository, zipArchiveService }) {
+  constructor({ gestionarPlanCodificacion, gestionarArtefactosCodigo, artefactoRepository, zipArchiveService, trabajoGeneracionRepository = null }) {
     this.gestionarPlanCodificacion = gestionarPlanCodificacion;
     this.artefactoRepository = artefactoRepository;
     this.gestionarArtefactosCodigo = gestionarArtefactosCodigo;
     this.zipArchiveService = zipArchiveService;
+    this.trabajoGeneracionRepository = trabajoGeneracionRepository;
   }
 
   async obtenerPlan(req, res) {
@@ -79,6 +80,84 @@ class CodificacionController {
       res.json(await this.gestionarArtefactosCodigo.verificarArtefacto(req.params.id, req.params.artefactoId));
     } catch (error) {
       res.status(this._status(error)).json({ error: error.message });
+    }
+  }
+
+  async iniciarVerificacionAsync(req, res) {
+    try {
+      if (!this.trabajoGeneracionRepository) {
+        throw new Error('Repositorio de trabajos de generación no configurado.');
+      }
+      const proyectoId = req.params.id;
+      const artefactoId = req.params.artefactoId;
+      const resultado = await this.trabajoGeneracionRepository.crearORecuperarActivoVerificacion({
+        proyectoId,
+        artefactoId
+      });
+
+      if (resultado.creado) {
+        this._ejecutarVerificacion(resultado.trabajo.id, proyectoId, artefactoId);
+      }
+
+      res.status(resultado.creado ? 202 : 200).json({
+        trabajo: resultado.trabajo,
+        reutilizado: !resultado.creado
+      });
+    } catch (error) {
+      res.status(this._status(error)).json({ error: error.message });
+    }
+  }
+
+  async obtenerTrabajoVerificacion(req, res) {
+    try {
+      if (!this.trabajoGeneracionRepository) {
+        throw new Error('Repositorio de trabajos de generación no configurado.');
+      }
+      const trabajo = await this.trabajoGeneracionRepository.obtenerPorId(req.params.trabajoId);
+      if (!trabajo) return res.status(404).json({ error: 'Trabajo de verificación no encontrado.' });
+      res.json({ trabajo, verificacion: trabajo.resultado_verificacion || null });
+    } catch (error) {
+      res.status(this._status(error)).json({ error: error.message });
+    }
+  }
+
+  async obtenerUltimoTrabajoVerificacion(req, res) {
+    try {
+      if (!this.trabajoGeneracionRepository) {
+        throw new Error('Repositorio de trabajos de generación no configurado.');
+      }
+      const trabajo = await this.trabajoGeneracionRepository.obtenerUltimaVerificacionPorArtefacto(
+        req.params.id,
+        req.params.artefactoId
+      );
+      res.json({ trabajo, verificacion: trabajo?.resultado_verificacion || null });
+    } catch (error) {
+      res.status(this._status(error)).json({ error: error.message });
+    }
+  }
+
+  async _ejecutarVerificacion(trabajoId, proyectoId, artefactoId) {
+    try {
+      await this.trabajoGeneracionRepository.actualizar(trabajoId, {
+        estado: 'procesando',
+        progreso: 20,
+        mensaje: 'Iniciando verificación en contenedor Docker aislado'
+      });
+      const verificacion = await this.gestionarArtefactosCodigo.verificarArtefacto(proyectoId, artefactoId);
+      await this.trabajoGeneracionRepository.actualizar(trabajoId, {
+        estado: 'completado',
+        progreso: 100,
+        mensaje: verificacion.estado === 'apta' ? 'Verificación completada exitosamente' : 'Verificación completada con observaciones',
+        resultado_verificacion: verificacion,
+        error: null
+      }, true);
+    } catch (err) {
+      await this.trabajoGeneracionRepository.actualizar(trabajoId, {
+        estado: 'fallido',
+        progreso: 100,
+        mensaje: 'La verificación falló',
+        error: err.message
+      }, true);
     }
   }
 
