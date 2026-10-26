@@ -128,6 +128,7 @@ Cada bloque se hizo en commits divididos por área (mensajes cortos, sin trailer
 | 8 | **Seguridad de iCase** | Ver 2.6 | `ab4f5ad`…`520627e` |
 | 9 | **Informe de generación** | Servicio, archivos en el paquete, vista previa y panel en la UI | `c4d1588`…`a1fd46e` |
 | 10 | **Módulos** | Etapa opcional, `ModuleService`, formularios por campo, editor en la UI | `a067455`…`a62ccef` |
+| 11 | **Modo de un clic** | Ejecución automática de las 7 etapas con valores seguros (JWT, sin registro abierto, reglas solo literales) e informe de lo dudoso | Este commit |
 
 Commits completos: `git log --oneline b5613be..HEAD`.
 
@@ -167,7 +168,7 @@ Rutas relativas a `icase-backend/` salvo que se indique.
 ## 5. Cómo comprobar que funciona
 
 ```bash
-# Pruebas unitarias y de integración (sin Docker): 391 pasan, 1 omitida
+# Pruebas unitarias y de integración (sin Docker): 394 pasan, 1 omitida
 cd icase-backend && npx jest
 
 # Verificación real en contenedores aislados (necesita Docker)
@@ -210,7 +211,7 @@ Ordenado por lo que más acerca a «de requisitos a aplicación completa».
    - **Paginación, filtros y búsqueda** en la API (hoy las listas devuelven todos los registros). Toca los tres almacenes de Node, Java, OpenAPI, los ejercitadores y la interfaz.
    - **Datos iniciales (seed).** Ojo: inventar datos no es determinista; hay que decidir de dónde salen.
    - Módulos de tiempo real, archivos, reportes y pagos (hoy el informe los marca como no soportados).
-2. **Modo de un clic:** recorre todas las etapas con valores seguros (login con roles, sin registro abierto, solo reglas explícitas con evidencia literal) y deja un informe final con lo dudoso.
+2. **Modo de un clic** *(implementado)*: recorre todas las etapas de planificación con valores seguros (login con JWT y roles, sin autoregistro abierto, solo reglas explícitas con evidencia literal) y genera un informe final con lo dudoso en el plan y en la interfaz. Permite habilitar de inmediato la generación de backend y frontend.
 3. **Verificación como trabajo persistente.** Hoy es una petición HTTP que espera hasta 15 minutos con Docker; debería ser un trabajo asíncrono (`TrabajoGeneracion` solo se usa en diagramas y mockups).
 4. **Regenerar sin perder ediciones** manuales y con **migraciones incrementales** (hoy solo existen `0001_init` y `0002_auth`; regenerar pisa los archivos).
 5. **Calidad del proyecto generado:** auditoría de dependencias, cobertura, pruebas unitarias del dominio, endurecimiento del servidor generado (CORS, cabeceras, límite de peticiones, logs).

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AlertCircle, Check, ChevronRight, Code2, Download, FolderTree, Layers3,
+  AlertCircle, AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Code2, Download, FolderTree, Layers3,
   Loader2, LockKeyhole, Puzzle, RotateCcw, Save, Scale, Settings2, ShieldCheck, WandSparkles, X
 } from 'lucide-react';
 import {
@@ -9,7 +9,8 @@ import {
   generateInfrastructureArtifactApi, generatePipelineArtifactApi, generateTestArtifactApi, proposeCodePhaseApi,
   reviewBackendArtifactApi, reviewCodePhaseApi, reviewFrontendArtifactApi,
   reviewDeliveryArtifactApi, reviewInfrastructureArtifactApi, reviewPipelineArtifactApi,
-  reviewTestArtifactApi, suggestCodePhaseApi, verifyGeneratedArtifactApi, updateGeneratedArtifactFileApi
+  reviewTestArtifactApi, suggestCodePhaseApi, verifyGeneratedArtifactApi, updateGeneratedArtifactFileApi,
+  executeOneClickModeApi
 } from '../services/api';
 import GenerationReport from './GenerationReport';
 
@@ -127,6 +128,35 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
   const infrastructureEnabled = plan?.etapas?.find((item) => item.etapa === 'generacion_infraestructura')?.habilitada;
   const pipelineEnabled = plan?.etapas?.find((item) => item.etapa === 'generacion_ci_cd')?.habilitada;
   const deliveryEnabled = plan?.etapas?.find((item) => item.etapa === 'paquete_entrega')?.habilitada;
+  const [showOneClickReport, setShowOneClickReport] = useState(true);
+
+  const handleOneClickMode = async () => {
+    if (!window.confirm('¿Deseas ejecutar el Modo de un clic?\n\nRecorrerá todas las etapas de planificación aplicando valores seguros:\n• Autenticación JWT con roles derivados de los RF\n• Registro cerrado (sin autoregistro de usuarios)\n• Solo reglas explícitas con evidencia literal confirmadas\n• Módulos recomendados por defecto\n\nAl terminar tendrás un informe detallado con los aspectos dudosos o descartados.')) {
+      return;
+    }
+    try {
+      setBusy(true); setFeedback(null);
+      const result = await executeOneClickModeApi(projectId);
+      setPlan(result.plan);
+      const loaded = { ...drafts };
+      for (const item of result.plan.etapas || []) {
+        if (item.propuesta && EDITABLE_PHASES.includes(item.etapa)) {
+          loaded[item.etapa] = item.propuesta;
+        }
+      }
+      setDrafts(loaded);
+      setShowOneClickReport(true);
+      setFeedback({
+        type: 'success',
+        message: '¡Modo de un clic completado! Todas las etapas han sido configuradas y aprobadas con valores seguros.'
+      });
+    } catch (error) {
+      setFeedback({ type: 'error', message: error.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const visibleFeedback = feedback || (!projectId
     ? { type: 'error', message: 'El proyecto debe estar guardado antes de planificar la codificación.' }
     : null);
@@ -319,7 +349,16 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
             <h1 className="mt-1 text-xl font-semibold text-slate-950">Decisiones técnicas de {projectName || 'proyecto'}</h1>
             <p className="mt-1 text-sm text-slate-500">Aprueba cada decisión antes de habilitar la generación del código.</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleOneClickMode}
+              disabled={busy}
+              title="Configura y aprueba todas las etapas con valores seguros (JWT, sin autoregistro, solo reglas con evidencia literal)"
+              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 transition cursor-pointer"
+            >
+              <WandSparkles size={14} className={busy ? 'animate-spin' : ''} />
+              Modo de un clic
+            </button>
             <button onClick={onBackToDiagrams} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600">← Diagramas y mockups</button>
             <button onClick={onOpenDocument} className="rounded-lg border border-violet-200 px-3 py-2 text-xs font-medium text-violet-700">Ver documento actual</button>
           </div>
@@ -329,6 +368,82 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
       </header>
 
       {visibleFeedback && <div className={`mx-6 mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${visibleFeedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><AlertCircle size={14} />{visibleFeedback.message}</div>}
+
+      {plan?.modo_un_clic && (
+        <div className="mx-6 mt-4 rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50/70 to-indigo-50/50 p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white shadow-sm">
+                <CheckCircle2 size={18} />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                  Planificación completada en Modo de un clic
+                  <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-800">
+                    Valores seguros aplicados
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {plan.modo_un_clic.resumen} {plan.modo_un_clic.ejecutado_en ? `· ${new Date(plan.modo_un_clic.ejecutado_en).toLocaleTimeString()}` : ''}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowOneClickReport((prev) => !prev)}
+              className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 transition shadow-xs"
+            >
+              {showOneClickReport ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {showOneClickReport ? 'Ocultar informe' : 'Ver informe de lo dudoso'}
+            </button>
+          </div>
+
+          {showOneClickReport && (
+            <div className="mt-3.5 space-y-3 border-t border-violet-200/70 pt-3 text-xs">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                  <span className="text-[10px] font-semibold uppercase text-slate-400">Autenticación</span>
+                  <p className="mt-0.5 font-medium text-slate-800">{String(plan.modo_un_clic.valores_seguros?.autenticacion || 'jwt').toUpperCase()}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                  <span className="text-[10px] font-semibold uppercase text-slate-400">Autoregistro</span>
+                  <p className="mt-0.5 font-medium text-slate-800">Cerrado (sin registro libre)</p>
+                </div>
+                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                  <span className="text-[10px] font-semibold uppercase text-slate-400">Reglas con evidencia</span>
+                  <p className="mt-0.5 font-medium text-emerald-700">{plan.modo_un_clic.valores_seguros?.reglas_confirmadas || 0} confirmadas</p>
+                </div>
+                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                  <span className="text-[10px] font-semibold uppercase text-slate-400">Reglas descartadas</span>
+                  <p className="mt-0.5 font-medium text-amber-700">{plan.modo_un_clic.valores_seguros?.reglas_descartadas || 0} sin evidencia literal</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[11px] font-bold text-slate-700 mb-1">
+                  Aspectos dudosos y advertencias detectadas ({plan.modo_un_clic.dudas?.length || 0}):
+                </p>
+                {(!plan.modo_un_clic.dudas || plan.modo_un_clic.dudas.length === 0) ? (
+                  <p className="text-[11px] text-emerald-700 bg-emerald-50/70 border border-emerald-200 rounded-lg p-2.5">
+                    ✓ No se detectaron aspectos dudosos; todas las decisiones se basaron en evidencia explícita de los requisitos.
+                  </p>
+                ) : (
+                  <ul className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-[11px] text-amber-950">
+                    {plan.modo_un_clic.dudas.map((duda, idx) => (
+                      <li key={idx} className="flex items-start gap-1.5">
+                        <AlertTriangle size={13} className="shrink-0 text-amber-600 mt-0.5" />
+                        <span>
+                          <strong className="font-semibold capitalize">[{duda.etapa?.replace('_', ' ')}]:</strong>{' '}
+                          {duda.detalle || duda.descripcion}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {busy && !plan ? <div className="flex flex-1 items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="animate-spin" size={18} />Cargando plan de codificación…</div> : (
         <div className="flex min-h-0 flex-1 gap-4 overflow-hidden p-6">

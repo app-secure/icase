@@ -581,6 +581,16 @@ export async function reviewCodePhaseApi(projectId, phase, decision, observacion
   return data;
 }
 
+export async function executeOneClickModeApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/un-clic`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo ejecutar el modo un clic.');
+  return data;
+}
+
 export async function fetchGenerationReportApi(projectId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/informe-generacion`, {
     headers: getAuthHeaders()

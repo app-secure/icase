@@ -54,6 +54,18 @@ class CodificacionController {
     }
   }
 
+  async ejecutarModoUnClic(req, res) {
+    try {
+      const resultado = await this.gestionarPlanCodificacion.ejecutarModoUnClic({
+        proyectoId: req.params.id,
+        aprobadoPor: req.usuario?.id || null
+      });
+      res.json(resultado);
+    } catch (error) {
+      res.status(this._status(error)).json({ error: error.message });
+    }
+  }
+
   async listarArtefactos(req, res) {
     try {
       res.json(await this.artefactoRepository.listarPorProyecto(req.params.id, req.query.tipo || null));
