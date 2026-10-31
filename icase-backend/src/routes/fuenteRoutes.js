@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -26,13 +27,36 @@ const storage = multer.diskStorage({
   }
 });
 
+// Solo los formatos que el servicio de ingesta sabe procesar (audio, PDF y texto plano).
+const ALLOWED_EXTENSIONS = new Set([
+  'mp3', 'wav', 'm4a', 'mp4', 'aac', 'ogg', 'opus', 'webm', 'flac', 'wma',
+  'pdf',
+  'txt', 'md', 'markdown', 'csv', 'json', 'log', 'text', 'rtf'
+]);
+
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 } // 50 MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  fileFilter: (req, file, cb) => {
+    let name = file.originalname || '';
+    try { name = Buffer.from(name, 'latin1').toString('utf8'); } catch { /* se usa el nombre tal cual */ }
+    const extension = path.extname(name).toLowerCase().slice(1);
+    if (ALLOWED_EXTENSIONS.has(extension)) return cb(null, true);
+    const error = new Error(`Tipo de archivo no admitido (${extension ? `.${extension}` : 'sin extensión'}). Formatos: audio, PDF y texto plano.`);
+    error.status = 400;
+    error.expose = true;
+    return cb(error);
+  }
 });
 
-function buildFuenteRoutes(fuenteController) {
+function buildFuenteRoutes(fuenteController, access) {
   const router = express.Router();
+
+  // Este router cuelga de «/»: la sesión se exige solo en sus propias rutas. Va antes que los parámetros para que
+  // la comprobación de dueño (y la subida de archivos) nunca se ejecute sin usuario autenticado.
+  router.use(['/proyectos', '/fuentes'], authMiddleware);
+  router.param('proyectoId', access.proyecto);
+  router.param('id', access.fuente);
 
   router.post('/proyectos/:proyectoId/fuentes', upload.single('archivo'), (req, res) =>
     fuenteController.subirYTranscribir(req, res)

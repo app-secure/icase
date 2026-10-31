@@ -1,5 +1,6 @@
 const { DiagramWorkflowService } = require('../../core/services/DiagramWorkflowService');
 const { normalizeDiagramType, isValidDiagramType } = require('../../core/constants/DiagramTypes');
+const { pick, PROJECT_EDITABLE } = require('../../infrastructure/security/sanitize');
 
 class ProyectoController {
   constructor({
@@ -34,7 +35,7 @@ class ProyectoController {
   async crear(req, res) {
     try {
       const { nombre, descripcion, insumo_bruto, parametros } = req.body;
-      const usuario_id = req.usuario?.id || req.body.usuario_id || null;
+      const usuario_id = req.usuario.id; // el dueño es siempre quien tiene la sesión, nunca lo que diga el cuerpo
       const proyecto = await this.crearProyectoUseCase.ejecutar({
         usuario_id,
         nombre: nombre || 'Proyecto sin nombre',
@@ -50,10 +51,7 @@ class ProyectoController {
 
   async listar(req, res) {
     try {
-      const filtro = {};
-      if (req.usuario?.id) {
-        filtro.usuario_id = req.usuario.id;
-      }
+      const filtro = { usuario_id: req.usuario.id };
       const proyectos = await this.proyectoRepository.listar(filtro);
       // Asociar fuentes, requerimientos y diagramas a cada proyecto para persistencia completa
       const proyectosCompletos = await Promise.all(
@@ -86,7 +84,8 @@ class ProyectoController {
   async actualizar(req, res) {
     try {
       const { id } = req.params;
-      const data = req.body;
+      // Solo datos editables: el dueño y el estado de las fases no se cambian desde aquí.
+      const data = pick(req.body, PROJECT_EDITABLE);
       const actualizado = await this.proyectoRepository.actualizar(id, data);
       if (!actualizado) {
         return res.status(404).json({ error: 'Proyecto no encontrado para actualizar' });

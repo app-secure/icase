@@ -1,4 +1,5 @@
 const { normalizeDiagramType } = require('../../core/constants/DiagramTypes');
+const { pick, DIAGRAM_EDITABLE } = require('../../infrastructure/security/sanitize');
 
 class DiagramaController {
   constructor({
@@ -103,7 +104,8 @@ class DiagramaController {
   async actualizar(req, res) {
     try {
       const { id } = req.params;
-      const datos = req.body;
+      // Solo contenido: la aprobación, la versión y el proyecto los gestiona el flujo, no el cliente.
+      const datos = pick(req.body, DIAGRAM_EDITABLE);
       const actualizado = await this.actualizarDiagramaManualUseCase.ejecutar({
         id,
         datos

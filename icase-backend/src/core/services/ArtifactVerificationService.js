@@ -19,10 +19,13 @@ class ArtifactVerificationService {
 
     switch (artefacto.tipo) {
       case 'codigo_backend': {
-        requireJson('backend/package.json');
+        const declared = (() => { try { return JSON.parse(files.get('backend/icase.manifest.json') || '{}').stack?.lenguaje; } catch { return null; } })();
+        // El lenguaje lo declara el manifiesto; sin él (artefactos antiguos) se deduce de qué archivo de proyecto existe.
+        const java = declared ? declared === 'java' : files.has('backend/pom.xml') && !files.has('backend/package.json');
+        if (java) requireFile('backend/pom.xml'); else requireJson('backend/package.json');
         requireJson('backend/icase.manifest.json');
         const sources = [...files].filter(([path]) => /^backend\/src\//.test(path));
-        if (!sources.some(([path, content]) => !/health/i.test(path) && /(?:@Controller\(|(?:router|app)\.(?:get|post|put|patch|delete)\()/i.test(content) && !/^\s*(?:\/\/\s*)?@Controller\(['"]health['"]\)/im.test(content))) {
+        if (!sources.some(([path, content]) => !/health/i.test(path) && /(?:@Controller\(|@RestController\b|@(?:Get|Post|Patch|Delete)Mapping\(|(?:router|app)\.(?:get|post|put|patch|delete)\()/i.test(content) && !/^\s*(?:\/\/\s*)?@Controller\(['"]health['"]\)/im.test(content))) {
           errores.push('El backend no expone operaciones de negocio; solo health no basta.');
         }
         if (/TODO:\s*implementar|status:\s*['"]pending['"]|\.status\(501\)/i.test(text)) {
@@ -31,7 +34,13 @@ class ArtifactVerificationService {
         if (sources.some(([path, content]) => /\.module\.ts$/.test(path) && /@Module\(\{\s*\}\)/.test(content))) {
           errores.push('Hay módulos NestJS vacíos sin controladores ni proveedores.');
         }
-        if (/postgres/i.test(text) && !/(?:\bpg\b|prisma|typeorm|sequelize|knex)/i.test(files.get('backend/package.json') || '')) {
+        if (java) {
+          // En Java el controlador de base de datos se comprueba en el pom contra el motor declarado en el manifiesto.
+          const engine = (() => { try { return JSON.parse(files.get('backend/icase.manifest.json') || '{}').database; } catch { return null; } })();
+          const driver = { postgres: 'org.postgresql', mysql: 'mysql-connector-j' }[engine];
+          if (!driver) errores.push('El backend Java solo admite PostgreSQL o MySQL.');
+          else if (!(files.get('backend/pom.xml') || '').includes(driver)) errores.push(`Se declara ${engine}, pero el pom.xml no incluye su controlador (${driver}).`);
+        } else if (/postgres/i.test(text) && !/(?:\bpg\b|prisma|typeorm|sequelize|knex)/i.test(files.get('backend/package.json') || '')) {
           errores.push('Se declara PostgreSQL, pero el backend no incluye un controlador de base de datos.');
         }
         try {
@@ -100,7 +109,7 @@ class ArtifactVerificationService {
         break;
       }
       case 'paquete_entrega': {
-        for (const path of ['backend/package.json', 'frontend/package.json', 'tests/package.json', 'ops/docker-compose.yml', 'delivery-manifest.json']) requireFile(path);
+        for (const path of [files.has('backend/pom.xml') ? 'backend/pom.xml' : 'backend/package.json', 'frontend/package.json', 'tests/package.json', 'ops/docker-compose.yml', 'delivery-manifest.json']) requireFile(path);
         requireJson('delivery-manifest.json');
         break;
       }

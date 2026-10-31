@@ -38,6 +38,19 @@ function getAuthHeaders(extraHeaders = {}) {
   return headers;
 }
 
+/**
+ * Todas las llamadas al backend pasan por aquí. Un 401 con una sesión guardada significa que caducó, fue
+ * revocada o dejó de ser válida: se avisa a la aplicación para volver a la pantalla de acceso.
+ * El inicio de sesión y el registro devuelven 401/409 por motivos propios y quedan fuera.
+ */
+async function apiFetch(url, options) {
+  const res = await fetch(url, options);
+  if (res.status === 401 && getAuthToken() && !/\/auth\/(login|registro)$/.test(String(url))) {
+    window.dispatchEvent(new Event('icase:session-expired'));
+  }
+  return res;
+}
+
 // === AUTENTICACIÓN ===
 export async function registroApi({ nombre, apellido, correo, celular, password }) {
   const res = await fetch(`${API_URL}/auth/registro`, {
@@ -67,7 +80,7 @@ export async function loginApi(correo, password) {
 
 export async function fetchPerfilApi() {
   try {
-    const res = await fetch(`${API_URL}/auth/perfil`, {
+    const res = await apiFetch(`${API_URL}/auth/perfil`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) return null;
@@ -81,7 +94,7 @@ export async function fetchPerfilApi() {
 // === PROYECTOS ===
 export async function fetchProjects() {
   try {
-    const res = await fetch(`${API_URL}/proyectos`, {
+    const res = await apiFetch(`${API_URL}/proyectos`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al listar proyectos');
@@ -94,7 +107,7 @@ export async function fetchProjects() {
 
 export async function fetchProjectById(id) {
   try {
-    const res = await fetch(`${API_URL}/proyectos/${id}`, {
+    const res = await apiFetch(`${API_URL}/proyectos/${id}`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al obtener proyecto');
@@ -107,7 +120,7 @@ export async function fetchProjectById(id) {
 
 export async function createProjectApi(data) {
   try {
-    const res = await fetch(`${API_URL}/proyectos`, {
+    const res = await apiFetch(`${API_URL}/proyectos`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data)
@@ -122,7 +135,7 @@ export async function createProjectApi(data) {
 
 export async function updateProjectApi(projectId, data) {
   try {
-    const res = await fetch(`${API_URL}/proyectos/${projectId}`, {
+    const res = await apiFetch(`${API_URL}/proyectos/${projectId}`, {
       method: 'PUT',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data)
@@ -137,7 +150,7 @@ export async function updateProjectApi(projectId, data) {
 
 export async function deleteProjectApi(projectId) {
   try {
-    const res = await fetch(`${API_URL}/proyectos/${projectId}`, {
+    const res = await apiFetch(`${API_URL}/proyectos/${projectId}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
     });
@@ -155,7 +168,7 @@ export async function uploadFuenteApi(projectId, file) {
     const formData = new FormData();
     formData.append('archivo', file);
 
-    const res = await fetch(`${API_URL}/proyectos/${projectId}/fuentes`, {
+    const res = await apiFetch(`${API_URL}/proyectos/${projectId}/fuentes`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: formData
@@ -173,7 +186,7 @@ export async function uploadFuenteApi(projectId, file) {
 
 export async function fetchFuentesApi(projectId) {
   try {
-    const res = await fetch(`${API_URL}/proyectos/${projectId}/fuentes`, {
+    const res = await apiFetch(`${API_URL}/proyectos/${projectId}/fuentes`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al listar fuentes');
@@ -185,7 +198,7 @@ export async function fetchFuentesApi(projectId) {
 }
 
 export async function updateFuenteApi(fuenteId, changes) {
-  const res = await fetch(`${API_URL}/fuentes/${fuenteId}`, {
+  const res = await apiFetch(`${API_URL}/fuentes/${fuenteId}`, {
     method: 'PATCH',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(changes)
@@ -198,7 +211,7 @@ export async function updateFuenteApi(fuenteId, changes) {
 }
 
 export async function suggestFuenteMetadataApi(fuenteId, provider = 'auto') {
-  const res = await fetch(`${API_URL}/fuentes/${fuenteId}/sugerir-metadatos`, {
+  const res = await apiFetch(`${API_URL}/fuentes/${fuenteId}/sugerir-metadatos`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ provider })
@@ -219,7 +232,7 @@ export async function deleteFuenteApi(fuenteId, proyectoId = null, nombreArchivo
       url = `${API_URL}/proyectos/${proyectoId}/fuentes/${fuenteId}`;
     }
 
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       method: 'DELETE',
       headers: getAuthHeaders()
     });
@@ -237,7 +250,7 @@ export async function deleteFuenteApi(fuenteId, proyectoId = null, nombreArchivo
 // === PROCESAMIENTO CON IA ===
 export async function fetchAiModelsApi() {
   try {
-    const res = await fetch(`${API_URL}/proyectos/modelos-ia`, {
+    const res = await apiFetch(`${API_URL}/proyectos/modelos-ia`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al obtener modelos de IA');
@@ -250,7 +263,7 @@ export async function fetchAiModelsApi() {
 
 export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null) {
   try {
-    const res = await fetch(`${API_URL}/proyectos/${projectId}/procesar-ia`, {
+    const res = await apiFetch(`${API_URL}/proyectos/${projectId}/procesar-ia`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
@@ -275,7 +288,7 @@ export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicio
 
 // === FASES Y DOCUMENTO ===
 export async function approvePhaseApi(projectId, fase) {
-  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ fase, aprobar_todos: true })
@@ -288,7 +301,7 @@ export async function approvePhaseApi(projectId, fase) {
 }
 
 export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null) {
-  const res = await fetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ tipo_diagrama: diagramType, insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional, provider, specificModel })
@@ -299,21 +312,21 @@ export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '
 }
 
 export async function fetchDiagramJobApi(jobId) {
-  const res = await fetch(`${API_URL}/proyectos/trabajos-diagramas/${jobId}`, { headers: getAuthHeaders() });
+  const res = await apiFetch(`${API_URL}/proyectos/trabajos-diagramas/${jobId}`, { headers: getAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo consultar la generación del diagrama.');
   return data;
 }
 
 export async function fetchLatestDiagramJobApi(projectId) {
-  const res = await fetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo`, { headers: getAuthHeaders() });
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo`, { headers: getAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo recuperar la generación del diagrama.');
   return data;
 }
 
 export async function approveDiagramApi(projectId, diagramType, observaciones = '') {
-  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ fase: 'diagrama', tipo_diagrama: diagramType, decision: 'aprobar', observaciones })
@@ -324,7 +337,7 @@ export async function approveDiagramApi(projectId, diagramType, observaciones = 
 }
 
 export async function rejectDiagramApi(projectId, diagramType, observaciones) {
-  const res = await fetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ fase: 'diagrama', tipo_diagrama: diagramType, decision: 'rechazar', observaciones })
@@ -335,7 +348,7 @@ export async function rejectDiagramApi(projectId, diagramType, observaciones) {
 }
 
 export async function fetchDiagramWorkflowApi(projectId) {
-  const res = await fetch(`${API_URL}/proyectos/${projectId}/flujo-diagramas`, {
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/flujo-diagramas`, {
     headers: getAuthHeaders()
   });
   const data = await res.json().catch(() => ({}));
@@ -345,7 +358,7 @@ export async function fetchDiagramWorkflowApi(projectId) {
 
 export async function fetchDocumentoConsolidado(projectId) {
   try {
-    const res = await fetch(`${API_URL}/proyectos/${projectId}/documento-consolidado`, {
+    const res = await apiFetch(`${API_URL}/proyectos/${projectId}/documento-consolidado`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al obtener documento');
@@ -358,7 +371,7 @@ export async function fetchDocumentoConsolidado(projectId) {
 
 export async function updateDiagramApi(diagramId, data) {
   try {
-    const res = await fetch(`${API_URL}/diagramas/${diagramId}`, {
+    const res = await apiFetch(`${API_URL}/diagramas/${diagramId}`, {
       method: 'PUT',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data)
@@ -372,14 +385,14 @@ export async function updateDiagramApi(diagramId, data) {
 }
 
 export async function fetchDiagramVersionsApi(diagramId) {
-  const res = await fetch(`${API_URL}/diagramas/${diagramId}/versiones`, { headers: getAuthHeaders() });
+  const res = await apiFetch(`${API_URL}/diagramas/${diagramId}/versiones`, { headers: getAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Error al consultar las versiones del diagrama');
   return data;
 }
 
 export async function restoreDiagramVersionApi(diagramId, version) {
-  const res = await fetch(`${API_URL}/diagramas/${diagramId}/restaurar`, {
+  const res = await apiFetch(`${API_URL}/diagramas/${diagramId}/restaurar`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ version })
@@ -392,7 +405,7 @@ export async function restoreDiagramVersionApi(diagramId, version) {
 // === MOCKUPS ===
 export async function generateMockupsApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null) {
   try {
-    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/generar`, {
+    const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/generar`, {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ pantallas, insumoAdicional, requerimientos })
@@ -413,7 +426,7 @@ export async function generateMockupsApi(projectId, pantallas = [], insumoAdicio
 }
 
 export async function startMockupJobApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null) {
-  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos`, {
+  const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ pantallas, insumoAdicional, requerimientos })
@@ -424,7 +437,7 @@ export async function startMockupJobApi(projectId, pantallas = [], insumoAdicion
 }
 
 export async function fetchMockupJobApi(jobId) {
-  const res = await fetch(`${API_URL}/mockups/trabajos/${jobId}`, {
+  const res = await apiFetch(`${API_URL}/mockups/trabajos/${jobId}`, {
     headers: getAuthHeaders()
   });
   const data = await res.json().catch(() => ({}));
@@ -433,7 +446,7 @@ export async function fetchMockupJobApi(jobId) {
 }
 
 export async function fetchLatestMockupJobApi(projectId) {
-  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos/ultimo`, {
+  const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos/ultimo`, {
     headers: getAuthHeaders()
   });
   const data = await res.json().catch(() => ({}));
@@ -443,7 +456,7 @@ export async function fetchLatestMockupJobApi(projectId) {
 
 export async function fetchMockupsApi(projectId) {
   try {
-    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}`, {
+    const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al obtener mockups');
@@ -455,7 +468,7 @@ export async function fetchMockupsApi(projectId) {
 }
 
 export async function updateMockupDesignSystemApi(projectId, sistemaDiseno) {
-  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/sistema-diseno`, {
+  const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/sistema-diseno`, {
     method: 'PUT',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ sistemaDiseno })
@@ -466,7 +479,7 @@ export async function updateMockupDesignSystemApi(projectId, sistemaDiseno) {
 }
 
 export async function suggestMockupDesignSystemApi(projectId) {
-  const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/sugerir-paleta`, {
+  const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/sugerir-paleta`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' })
   });
@@ -477,7 +490,7 @@ export async function suggestMockupDesignSystemApi(projectId) {
 
 export async function updateMockupApi(projectId, nombrePantalla, previewCode) {
   try {
-    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {
+    const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {
       method: 'PUT',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ previewCode })
@@ -495,7 +508,7 @@ export async function updateMockupApi(projectId, nombrePantalla, previewCode) {
 
 export async function deleteMockupApi(projectId, nombrePantalla) {
   try {
-    const res = await fetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {
+    const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
     });
@@ -512,7 +525,7 @@ export async function deleteMockupApi(projectId, nombrePantalla) {
 
 export async function syncProjectRequirementsApi(projectId, requerimientosList) {
   try {
-    const res = await fetch(`${API_URL}/requerimientos/proyecto/${projectId}`, {
+    const res = await apiFetch(`${API_URL}/requerimientos/proyecto/${projectId}`, {
       method: 'PUT',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ requerimientos: requerimientosList })
@@ -525,13 +538,7 @@ export async function syncProjectRequirementsApi(projectId, requerimientosList) 
   }
 }
 
-async function fetchCodeApi(url, options) {
-  const res = await fetch(url, options);
-  if (res.status === 401) {
-    window.dispatchEvent(new Event('icase:session-expired'));
-  }
-  return res;
-}
+const fetchCodeApi = apiFetch;
 
 export async function fetchCodePlanApi(projectId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion`, {
@@ -574,6 +581,25 @@ export async function reviewCodePhaseApi(projectId, phase, decision, observacion
   return data;
 }
 
+export async function executeOneClickModeApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/un-clic`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo ejecutar el modo un clic.');
+  return data;
+}
+
+export async function fetchGenerationReportApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/informe-generacion`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo calcular el informe de generación.');
+  return data;
+}
+
 export async function generateBackendArtifactApi(projectId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/backend/generar`, {
     method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' })
@@ -597,6 +623,33 @@ export async function verifyGeneratedArtifactApi(projectId, artifactId) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo verificar el artefacto.');
+  return data;
+}
+
+export async function startArtifactVerificationJobApi(projectId, artifactId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/verificar-async`, {
+    method: 'POST', headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo iniciar el trabajo de verificación.');
+  return data;
+}
+
+export async function fetchArtifactVerificationJobApi(projectId, artifactId, jobId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/verificar-trabajo/${jobId}`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar el trabajo de verificación.');
+  return data;
+}
+
+export async function fetchLatestArtifactVerificationJobApi(projectId, artifactId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/verificar-trabajo/ultimo`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar la última verificación.');
   return data;
 }
 

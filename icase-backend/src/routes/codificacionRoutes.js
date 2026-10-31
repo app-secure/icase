@@ -1,15 +1,20 @@
 const express = require('express');
 const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
-function buildCodificacionRoutes(controller) {
+function buildCodificacionRoutes(controller, access) {
   const router = express.Router();
   // Las decisiones de stack, arquitectura y estructura son aprobaciones
   // auditables; este módulo nunca admite acceso anónimo.
   router.use(authMiddleware);
+  router.param('id', access.proyecto);
+  router.param('artefactoId', access.artefacto);
+  router.param('trabajoId', access.trabajo);
   router.get('/:id/codificacion', (req, res) => controller.obtenerPlan(req, res));
+  router.post('/:id/codificacion/un-clic', (req, res) => controller.ejecutarModoUnClic(req, res));
   router.post('/:id/codificacion/etapas/:etapa/sugerencia', (req, res) => controller.sugerirEtapa(req, res));
   router.put('/:id/codificacion/etapas/:etapa', (req, res) => controller.proponerEtapa(req, res));
   router.post('/:id/codificacion/etapas/:etapa/revision', (req, res) => controller.revisarEtapa(req, res));
+  router.get('/:id/codificacion/informe-generacion', (req, res) => controller.informeGeneracion(req, res));
   router.post('/:id/codificacion/backend/generar', (req, res) => controller.generarBackend(req, res));
   router.post('/:id/codificacion/backend/:artefactoId/revision', (req, res) => controller.revisarBackend(req, res));
   router.post('/:id/codificacion/frontend/generar', (req, res) => controller.generarFrontend(req, res));
@@ -25,6 +30,9 @@ function buildCodificacionRoutes(controller) {
   router.get('/:id/codificacion/paquete/:artefactoId/descargar', (req, res) => controller.descargarPaquete(req, res));
   router.get('/:id/artefactos', (req, res) => controller.listarArtefactos(req, res));
   router.post('/:id/artefactos/:artefactoId/verificar', (req, res) => controller.verificarArtefacto(req, res));
+  router.post('/:id/artefactos/:artefactoId/verificar-async', (req, res) => controller.iniciarVerificacionAsync(req, res));
+  router.get('/:id/artefactos/:artefactoId/verificar-trabajo/ultimo', (req, res) => controller.obtenerUltimoTrabajoVerificacion(req, res));
+  router.get('/:id/artefactos/:artefactoId/verificar-trabajo/:trabajoId', (req, res) => controller.obtenerTrabajoVerificacion(req, res));
   router.put('/:id/artefactos/:artefactoId/archivos', (req, res) => controller.actualizarArchivo(req, res));
   return router;
 }

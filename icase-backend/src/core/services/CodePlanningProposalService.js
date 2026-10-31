@@ -1,13 +1,30 @@
 const { CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
+const AccessControlService = require('./AccessControlService');
+const ModuleService = require('./ModuleService');
 
 const CODE_DECISION_PHASES = Object.values(CODE_PHASE_DEFINITIONS)
   .filter((item) => item.tipo === 'decision')
   .map((item) => item.id);
 
+// Tecnologías habituales que el generador aún no produce (el aviso las nombra en lugar de ignorarlas).
+const NO_SOPORTADAS = [
+  [/\bdjango\b|\bflask\b|\bfastapi\b|\bpython\b/i, 'Python'],
+  [/asp\.net|\.net core|c#/i, '.NET / C#'],
+  [/\blaravel\b|\bphp\b/i, 'PHP'],
+  [/\bruby\b|\brails\b/i, 'Ruby on Rails'],
+  [/\bgolang\b|\bgo\s+(?:gin|fiber|echo)\b/i, 'Go'],
+  [/\bvue(?:\.js)?\b|\bangular\b|\bsvelte\b/i, 'Vue / Angular / Svelte (el frontend es React)'],
+  [/\boracle\b|sql\s*server|\bsqlite\b|\bmariadb\b|\bcassandra\b|\bdynamodb\b/i, 'esa base de datos']
+];
+
 const clean = (value) => String(value || '').trim();
 const unique = (values) => [...new Set(values.map(clean).filter(Boolean))];
 
 class CodePlanningProposalService {
+  constructor({ ruleInferenceService = null } = {}) {
+    this.ruleInferenceService = ruleInferenceService;
+  }
+
   generar({ etapa, proyecto, requerimientos = [], diagramas = [], plan }) {
     if (!CODE_DECISION_PHASES.includes(etapa)) {
       throw new Error(`La etapa ${etapa} no admite propuestas de planificación.`);
@@ -20,12 +37,41 @@ class CodePlanningProposalService {
     const texto = this._textoDe(requisitosAprobados, diagramasAprobados);
     const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto };
     const propuesta = this[`_${etapa}`](contexto);
-
-    return {
+    const construir = (resultado) => ({
       etapa,
-      propuesta: propuesta.valor,
+      propuesta: resultado.valor,
       evidencias: this._evidencias(requisitosAprobados, diagramasAprobados),
-      advertencias: propuesta.advertencias
+      advertencias: resultado.advertencias
+    });
+    // La etapa de reglas de negocio consulta a la IA, por lo que responde de forma asíncrona.
+    return propuesta && typeof propuesta.then === 'function' ? propuesta.then(construir) : construir(propuesta);
+  }
+
+  _modulos() {
+    return new ModuleService().proponer();
+  }
+
+  _control_acceso({ requisitosAprobados }) {
+    return new AccessControlService().proponer({ requerimientos: requisitosAprobados });
+  }
+
+  async _reglas_negocio({ requisitosAprobados, diagramasAprobados, plan }) {
+    const anterior = plan?.etapas?.find((item) => item.etapa === 'reglas_negocio');
+    if (!this.ruleInferenceService) {
+      return { valor: { reglas: [], notas: 'Sin inferencia automática: redacta las reglas manualmente.' }, advertencias: ['El servicio de inferencia de reglas no está configurado.'] };
+    }
+    const { reglas, advertencias } = await this.ruleInferenceService.inferir({
+      requerimientos: requisitosAprobados,
+      diagramas: diagramasAprobados,
+      retroalimentacion: anterior?.estado === 'rechazada' ? anterior.observaciones : ''
+    });
+    const pendientes = reglas.filter((item) => item.estado_decision === 'pendiente').length;
+    return {
+      valor: {
+        reglas,
+        notas: `Reglas propuestas desde los RF y el modelo de dominio aprobados. ${pendientes} requieren tu decisión (confirmar o rechazar) antes de aprobar la etapa.`
+      },
+      advertencias: [...advertencias, ...(reglas.length ? [] : ['No se propuso ninguna regla: puedes aprobar la etapa vacía o redactarlas manualmente.'])]
     };
   }
 
@@ -53,23 +99,32 @@ class CodePlanningProposalService {
 
   _stack_tecnologico({ texto }) {
     const advertencias = [];
+    const conSpring = /spring|\bjava\b/i.test(texto);
     const backend = /nestjs/i.test(texto) ? 'Node.js + NestJS'
-      : /express/i.test(texto) ? 'Node.js + Express' : 'Node.js + Express';
-    const frontend = /react native/i.test(texto) ? 'React + Vite para web; React Native para móvil'
-      : /react/i.test(texto) ? 'React + Vite' : 'React + Vite';
-    const baseDatos = /postgres(?:ql)?/i.test(texto) ? 'PostgreSQL'
+      : conSpring ? 'Java + Spring Boot'
+        : 'Node.js + Express';
+    const frontend = /react native/i.test(texto) ? 'React + Vite para web; React Native para móvil' : 'React + Vite';
+    let baseDatos = /postgres(?:ql)?/i.test(texto) ? 'PostgreSQL'
       : /mongodb|mongo\b/i.test(texto) ? 'MongoDB'
         : /mysql/i.test(texto) ? 'MySQL' : 'MongoDB';
-    if (!/nestjs|express/i.test(texto)) advertencias.push('Backend no especificado: se propone Node.js + Express para revisión.');
+    if (!/nestjs|express|spring|\bjava\b/i.test(texto)) advertencias.push('Backend no especificado: se propone Node.js + Express para revisión.');
     if (!/react/i.test(texto)) advertencias.push('Frontend no especificado: se propone React + Vite para revisión.');
     if (!/postgres(?:ql)?|mongodb|mongo\b|mysql/i.test(texto)) advertencias.push('Base de datos no especificada: se propone MongoDB para revisión.');
+    if (conSpring && baseDatos === 'MongoDB') {
+      baseDatos = 'PostgreSQL';
+      advertencias.push('Java + Spring Boot solo se genera con PostgreSQL o MySQL: se propone PostgreSQL en lugar de MongoDB.');
+    }
+    // Tecnologías que los requisitos mencionan y que el generador todavía no produce: se avisa, no se sustituyen en silencio.
+    for (const [patron, nombre] of NO_SOPORTADAS) {
+      if (patron.test(texto)) advertencias.push(`Los requisitos mencionan ${nombre}, que todavía no está soportado: se propone ${backend} con ${baseDatos}.`);
+    }
 
     return {
       valor: {
         backend,
         frontend,
         base_datos: baseDatos,
-        gestor_paquetes: /\bpnpm\b/i.test(texto) ? 'pnpm' : /\byarn\b/i.test(texto) ? 'yarn' : 'npm',
+        gestor_paquetes: conSpring ? 'Maven' : /\bpnpm\b/i.test(texto) ? 'pnpm' : /\byarn\b/i.test(texto) ? 'yarn' : 'npm',
         plataformas: unique([
           /\bweb\b|react/i.test(texto) && 'web',
           /react native|android|ios/i.test(texto) && 'móvil'

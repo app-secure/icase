@@ -1,5 +1,8 @@
 const express = require('express');
 const cors = require('cors');
+const { corsOptions, securityHeaders, jsonLimit } = require('./infrastructure/security/httpSecurity');
+const buildProjectAccess = require('./infrastructure/security/projectAccess');
+const { getJwtSecret } = require('./infrastructure/security/jwtSecret');
 
 // Repositorios
 const MongoProyectoRepository = require('./interface-adapters/repositories/MongoProyectoRepository');
@@ -24,6 +27,7 @@ const MockupTraceabilityService = require('./infrastructure/services/MockupTrace
 const FinalProjectAuditService = require('./infrastructure/services/FinalProjectAuditService');
 const RequirementChangeService = require('./core/services/RequirementChangeService');
 const CodePlanningProposalService = require('./core/services/CodePlanningProposalService');
+const BusinessRuleInferenceService = require('./infrastructure/services/BusinessRuleInferenceService');
 const BackendScaffoldGenerator = require('./infrastructure/services/BackendScaffoldGenerator');
 const FrontendScaffoldGenerator = require('./infrastructure/services/FrontendScaffoldGenerator');
 const TestSuiteGenerator = require('./infrastructure/services/TestSuiteGenerator');
@@ -62,25 +66,44 @@ const buildAuthRoutes = require('./routes/authRoutes');
 const buildMockupRoutes = require('./routes/mockupRoutes');
 const buildCodificacionRoutes = require('./routes/codificacionRoutes');
 
-function createApp() {
+/**
+ * @param {object} [options]
+ * @param {object} [options.repositories] repositorios alternativos (pruebas); los que falten usan MongoDB.
+ * @param {object} [options.env] variables de entorno (por defecto process.env).
+ */
+function createApp({ repositories = {}, env = process.env } = {}) {
   const app = express();
 
-  app.use(cors());
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  // Si falta el secreto de sesión en producción, el servidor no debe arrancar.
+  getJwtSecret(env);
+
+  app.disable('x-powered-by');
+  if (env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(env.TRUST_PROXY) ? Number(env.TRUST_PROXY) : env.TRUST_PROXY);
+  app.use(securityHeaders);
+  app.use(cors(corsOptions(env)));
+  app.use(express.json({ limit: jsonLimit(env) }));
+  app.use(express.urlencoded({ extended: true, limit: jsonLimit(env) }));
 
   // Inyección de Dependencias
-  const proyectoRepo = new MongoProyectoRepository();
-  const usuarioRepo = new MongoUsuarioRepository();
-  const requerimientoRepo = new MongoRequerimientoRepository();
-  const diagramaRepo = new MongoDiagramaRepository();
-  const estandarRepo = new MongoEstandarRepository();
-  const fuenteRepo = new MongoFuenteRepository();
-  const casoDeUsoRepo = new MongoCasoDeUsoRepository();
-  const disenoRepo = new MongoDisenoRepository();
-  const trabajoGeneracionRepo = new MongoTrabajoGeneracionRepository();
-  const planCodificacionRepo = new MongoPlanCodificacionRepository();
-  const artefactoGeneradoRepo = new MongoArtefactoGeneradoRepository();
+  const proyectoRepo = repositories.proyecto || new MongoProyectoRepository();
+  const usuarioRepo = repositories.usuario || new MongoUsuarioRepository();
+  const requerimientoRepo = repositories.requerimiento || new MongoRequerimientoRepository();
+  const diagramaRepo = repositories.diagrama || new MongoDiagramaRepository();
+  const estandarRepo = repositories.estandar || new MongoEstandarRepository();
+  const fuenteRepo = repositories.fuente || new MongoFuenteRepository();
+  const casoDeUsoRepo = repositories.casoDeUso || new MongoCasoDeUsoRepository();
+  const disenoRepo = repositories.diseno || new MongoDisenoRepository();
+  const trabajoGeneracionRepo = repositories.trabajoGeneracion || new MongoTrabajoGeneracionRepository();
+  const planCodificacionRepo = repositories.planCodificacion || new MongoPlanCodificacionRepository();
+  const artefactoGeneradoRepo = repositories.artefactoGenerado || new MongoArtefactoGeneradoRepository();
+  const access = buildProjectAccess({
+    proyectoRepository: proyectoRepo,
+    requerimientoRepository: requerimientoRepo,
+    diagramaRepository: diagramaRepo,
+    fuenteRepository: fuenteRepo,
+    trabajoGeneracionRepository: trabajoGeneracionRepo,
+    artefactoRepository: artefactoGeneradoRepo
+  });
 
   const modelosIaService = new ModelosIaService();
   const plantumlValidator = new PlantUMLValidatorService();
@@ -89,7 +112,9 @@ function createApp() {
   const mockupIaService = new MockupIaService();
   const mockupTraceabilityService = new MockupTraceabilityService();
   const finalProjectAuditService = new FinalProjectAuditService({ mockupTraceabilityService });
-  const codePlanningProposalService = new CodePlanningProposalService();
+  const codePlanningProposalService = new CodePlanningProposalService({
+    ruleInferenceService: new BusinessRuleInferenceService({ modelosIa: modelosIaService })
+  });
   const backendScaffoldGenerator = new BackendScaffoldGenerator();
   const frontendScaffoldGenerator = new FrontendScaffoldGenerator();
   const testSuiteGenerator = new TestSuiteGenerator();
@@ -202,7 +227,8 @@ function createApp() {
   });
 
   const authController = new AuthController({
-    usuarioRepository: usuarioRepo
+    usuarioRepository: usuarioRepo,
+    env
   });
 
   const mockupController = new MockupController({
@@ -215,7 +241,8 @@ function createApp() {
     gestionarPlanCodificacion,
     gestionarArtefactosCodigo,
     artefactoRepository: artefactoGeneradoRepo,
-    zipArchiveService
+    zipArchiveService,
+    trabajoGeneracionRepository: trabajoGeneracionRepo
   });
 
   // Health check
@@ -229,12 +256,24 @@ function createApp() {
 
   // Montaje de rutas
   app.use('/auth', buildAuthRoutes(authController));
-  app.use('/proyectos', buildProyectoRoutes(proyectoController));
-  app.use('/proyectos', buildCodificacionRoutes(codificacionController));
-  app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController));
-  app.use('/diagramas', buildDiagramaRoutes(diagramaController));
-  app.use('/', buildFuenteRoutes(fuenteController));
-  app.use('/mockups', buildMockupRoutes(mockupController));
+  app.use('/proyectos', buildProyectoRoutes(proyectoController, access));
+  app.use('/proyectos', buildCodificacionRoutes(codificacionController, access));
+  app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController, access));
+  app.use('/diagramas', buildDiagramaRoutes(diagramaController, access));
+  app.use('/', buildFuenteRoutes(fuenteController, access));
+  app.use('/mockups', buildMockupRoutes(mockupController, access));
+
+  // Rutas inexistentes y errores: siempre JSON y sin detalles internos en los fallos inesperados.
+  app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
+  app.use((error, req, res, next) => {
+    if (res.headersSent) return next(error);
+    if (error.type === 'entity.too.large') return res.status(413).json({ error: 'El contenido enviado es demasiado grande.' });
+    if (error.type === 'entity.parse.failed') return res.status(400).json({ error: 'El cuerpo de la petición no es JSON válido.' });
+    if (error.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'El archivo supera el tamaño máximo permitido (50 MB).' });
+    if (error.expose && error.status >= 400 && error.status < 500) return res.status(error.status).json({ error: error.message });
+    console.error(`[Error] ${req.method} ${req.originalUrl}:`, error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  });
 
   return {
     app,

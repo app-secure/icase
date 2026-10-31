@@ -21,7 +21,8 @@ const PlanCodificacionSchema = new mongoose.Schema({
     gestor_paquetes: { type: String, default: 'npm' },
     plataformas: { type: [String], default: ['web'] }
   },
-  etapas: { type: [EtapaCodificacionSchema], default: [] }
+  etapas: { type: [EtapaCodificacionSchema], default: [] },
+  modo_un_clic: { type: mongoose.Schema.Types.Mixed, default: null }
 }, {
   timestamps: true,
   toJSON: {

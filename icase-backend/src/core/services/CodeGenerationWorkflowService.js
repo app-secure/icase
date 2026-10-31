@@ -60,7 +60,8 @@ class CodeGenerationWorkflowService {
     while (nuevas.length) {
       const actual = nuevas.shift();
       for (const definition of Object.values(CODE_PHASE_DEFINITIONS)) {
-        if (definition.dependencias.includes(actual) && !afectadas.has(definition.id)) {
+        // `influyen`: etapas opcionales que no bloquean, pero cuyo cambio deja desactualizado lo ya generado.
+        if ((definition.dependencias.includes(actual) || (definition.influyen || []).includes(actual)) && !afectadas.has(definition.id)) {
           afectadas.add(definition.id);
           nuevas.push(definition.id);
         }

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const IGeneradorArtefacto = require('../../core/services/IGeneradorArtefacto');
+const StackCatalog = require('../../core/services/StackCatalog');
 
 class CiCdPipelineGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
@@ -7,9 +8,10 @@ class CiCdPipelineGenerator extends IGeneradorArtefacto {
     const explicitGithub = /github/i.test(JSON.stringify(decisiones || {}));
     const platforms = decisiones.alcance_plataforma?.plataformas || decisiones.stack_tecnologico?.plataformas || [];
     const mobile = platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item));
+    const java = StackCatalog.resolve(decisiones.stack_tecnologico || {}).language === 'java';
     const files = [
-      { ruta: '.github/workflows/ci-cd.yml', lenguaje: 'yaml', contenido: this._workflow(mobile) },
-      { ruta: 'ops/ci/validate-artifacts.mjs', lenguaje: 'javascript', contenido: this._validator() },
+      { ruta: '.github/workflows/ci-cd.yml', lenguaje: 'yaml', contenido: this._workflow(mobile, java) },
+      { ruta: 'ops/ci/validate-artifacts.mjs', lenguaje: 'javascript', contenido: this._validator(java) },
       { ruta: 'ops/ci/README.md', lenguaje: 'markdown', contenido: this._readme(proyecto.nombre, tests.version, infrastructure.version) },
       { ruta: 'ops/ci/pipeline-manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: proyecto.nombre, proveedor: 'GitHub Actions', pruebas_version: tests.version, infraestructura_version: infrastructure.version, movil_incluido: mobile, despliegue_automatico: false }, null, 2) }
     ];
@@ -23,7 +25,7 @@ class CiCdPipelineGenerator extends IGeneradorArtefacto {
     };
   }
 
-  _workflow(mobile = false) {
+  _workflow(mobile = false, java = false) {
     return `name: CI/CD
 
 on:
@@ -49,10 +51,18 @@ jobs:
           node-version: 22
       - name: Validate generated artifacts
         run: node ops/ci/validate-artifacts.mjs
-      - name: Install and build backend
+${java ? `      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Build backend
+        working-directory: backend
+        run: mvn -B -q -DskipTests package
+` : `      - name: Install and build backend
         working-directory: backend
         run: npm install && npm run build --if-present
-      - name: Install and build frontend
+`}      - name: Install and build frontend
         working-directory: frontend
         run: npm install && npm run build
 ${mobile ? `      - name: Bundle Android client
@@ -125,10 +135,10 @@ ${mobile ? `      - name: Bundle Android client
 `;
   }
 
-  _validator() {
+  _validator(java = false) {
     return `import fs from 'node:fs';
 
-const required = ['backend/package.json','frontend/package.json','tests/package.json','ops/docker-compose.yml'];
+const required = ['${java ? 'backend/pom.xml' : 'backend/package.json'}','frontend/package.json','tests/package.json','ops/docker-compose.yml'];
 const missing = required.filter((path) => !fs.existsSync(path));
 if (missing.length) {
   console.error('Faltan artefactos aprobados:', missing.join(', '));

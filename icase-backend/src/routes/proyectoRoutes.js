@@ -1,10 +1,13 @@
 const express = require('express');
-const { optionalAuthMiddleware } = require('../infrastructure/middlewares/authMiddleware');
+const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
 
-function buildProyectoRoutes(proyectoController) {
+function buildProyectoRoutes(proyectoController, access) {
   const router = express.Router();
 
-  router.use(optionalAuthMiddleware);
+  // Sesión obligatoria; cada :id es un proyecto que debe pertenecer al usuario.
+  router.use(authMiddleware);
+  router.param('id', access.proyecto);
+  router.param('trabajoId', access.trabajo);
 
   router.post('/', (req, res) => proyectoController.crear(req, res));
   router.get('/', (req, res) => proyectoController.listar(req, res));

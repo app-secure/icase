@@ -37,7 +37,9 @@ describe('generación funcional genérica', () => {
     const frontend = await new FrontendScaffoldGenerator().generar({ proyecto: { nombre: 'Restaurante' },
       insumos: { decisiones: { stack_tecnologico: { frontend: 'React + Vite' } }, diseno: { manifiesto_navegacion: screens, mockups: [] } }, versionesOrigen: {} });
     expect(frontend.generado_por).toBe('generador_frontend_generico_v2');
-    expect(frontend.archivos.find((item) => item.ruta === 'frontend/src/OperationScreen.jsx').contenido).toContain("fetch(path");
+    const source = (ruta) => frontend.archivos.find((item) => item.ruta === ruta).contenido;
+    expect(source('frontend/src/OperationScreen.jsx')).toContain('useSession');
+    expect(source('frontend/src/session.jsx')).toContain('fetch(path');
     expect(new ArtifactVerificationService().verificar({ tipo: 'codigo_frontend', archivos: frontend.archivos }).estado).toBe('apta_estructuralmente');
     const mobile = await new FrontendScaffoldGenerator().generar({ proyecto: { nombre: 'Restaurante' },
       insumos: { decisiones: { stack_tecnologico: { frontend: 'React + Vite' }, alcance_plataforma: { plataformas: ['web', 'móvil'] } },
