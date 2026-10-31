@@ -1,171 +1,105 @@
-# 🛠️ I-CASE: Plataforma Inteligente de Ingeniería de Software
+# I-CASE · Herramienta CASE asistida por IA
 
-I-CASE es una herramienta asistida por Inteligencia Artificial (Google Gemini) diseñada para convertir ideas, audios de reuniones, documentos PDF o notas de texto en un **documento técnico formal de software y arquitectura completa** en pocos segundos.
+I-CASE transforma fuentes de un proyecto en requisitos, diagramas, mockups y un documento técnico revisado por fases. Incluye planificación y generación de una base de código genérica con controles de ejecución.
 
-> **Trabajo paralelo de diagramas:** antes de implementar nuevos generadores o modificar el flujo de aprobación, consulta el [contrato de generación de diagramas](docs/diagram-generation-contract.md). Allí se definen los tipos oficiales, sus dependencias y la compatibilidad con proyectos existentes.
+## Documentación
 
----
+Consulta [el portal documental](docs/index.md): manual de usuario, contrato API, prompts, instalación, arquitectura, pruebas y despliegue. Se corresponde con los cuatro entregables del punto 1 de la guía APE.
 
-## 💡 ¿Cómo funciona la aplicación? 
-
-El flujo de trabajo utiliza aprobaciones manuales y consta de 5 pasos:
-
-1. **Ingreso de Insumos:**
-   * Subes uno o varios archivos: grabaciones de voz/audios de entrevistas (`.mp3`, `.m4a`, `.wav`), documentos (`.pdf`) o escribes texto directamente en el panel.
-   * El sistema extrae el texto automáticamente (usando transcripción con IA en audios y lectura de texto en PDFs).
-
-2. **Análisis de Requisitos con IA:**
-   * La IA analiza la información y define el **nombre del proyecto**, **objetivos** y **palabras clave del negocio**.
-   * Genera los **Requerimientos Funcionales (RF)** en formato formal y los **Requerimientos No Funcionales (RNF)** con métricas cuantitativas medibles (estándar IEEE 830).
-
-3. **Generación Autónoma de Diagramas y Arquitectura:**
-   * La IA genera 4 diagramas técnicos en código **PlantUML**:
-     - **Casos de Uso:** Muestra los actores y las operaciones principales del sistema.
-     - **Arquitectura C4 (Contenedores):** La IA selecciona el stack tecnológico más adecuado para el proyecto (móvil, web, tipo de base de datos, APIs) en lugar de usar uno fijo.
-     - **Clases del Dominio:** Entidades con atributos tipados y relaciones de datos.
-     - **Árbol de Navegación (WBS):** Estructura jerárquica de pantallas y módulos de la solución.
-   * Cada diagrama incluye su explicación operativa de cómo funciona el sistema.
-
-4. **Mockups de Interfaz:**
-   * La pestaña de mockups se habilita únicamente después de aprobar los cuatro diagramas.
-   * La generación se ejecuta como un trabajo persistente; cambiar de pestaña no la cancela y los clics repetidos reutilizan el trabajo activo.
-   * Los mockups se revisan y aprueban como una fase independiente.
-
-5. **Documento Formal y Exportación a PDF:**
-   * El documento consolidado se habilita únicamente después de aprobar los mockups.
-   * Puedes revisar el documento formal en la web o abrir el visor de **PDF formal listo para entrega** y descargarlo con un solo clic.
-
----
-
-## 🚀 Guía para Levantar el Proyecto
-
-### Requisitos Previos
-* **Node.js** (versión 18 o superior recomendada).
-* **MongoDB** instalado y corriendo localmente en el puerto por defecto (`mongodb://127.0.0.1:27017/icase_db`), o una URL de MongoDB Atlas.
-
----
-
-### Paso 1: Levantar el Backend (`icase-backend`)
-
-Abre una terminal y ejecuta:
-
-```bash
-# 1. Entrar a la carpeta del backend
-cd icase-backend
-
-# 2. Descargar e instalar las librerías
-npm install
-
-# 3. Iniciar el servidor en modo desarrollo
-npm run dev
-```
-
-El backend se iniciará en **`http://localhost:5000`**.
-
-#### 📦 Arquitectura Multi-IA y Librerías del Backend:
-Al ejecutar `npm install` se descargan las librerías necesarias para el sistema:
-* **`express`**: Servidor web y creación de las rutas API REST.
-* **`mongoose`**: Conexión y gestión de la base de datos MongoDB.
-* **`axios`**: Cliente HTTP para integración resiliente con APIs de Inteligencia Artificial (**DeepSeek API**, **Google Gemini**, **Groq Cloud**).
-* **`multer`**: Para recibir y procesar la subida de insumos (audios, PDFs, archivos de texto).
-* **`pdf-parse`**: Para extracción directa de texto de documentos PDF.
-* **`cors`**: Manejo de políticas de origen cruzado entre frontend y backend.
-* **`dotenv`**: Gestión segura de variables de entorno e identidades de proveedores de IA.
-
----
-
-### 🤖 Configuración y Orquestación Multi-IA (DeepSeek API + Google Gemini)
-
-El proyecto soporta **Orquestación Híbrida Inteligente** (*Smart Routing & Failover*):
-
-1. **DeepSeek API (`deepseek-chat` / `deepseek-reasoner`)**: Modelo principal de pago/consumo por tokens. Proporciona máxima precisión analítica en requerimientos IEEE 830 y generación JSON estructurada a bajo costo.
-2. **Google Gemini**: Motor multimodal para ingesta y generación. Los modelos de mockups se configuran mediante `GEMINI_MOCKUP_MODELS`, evitando depender de identificadores retirados en el código.
-3. **Groq Cloud / OpenAI / OpenRouter**: Fallback secundario ultra-rápido para redundancia en alta disponibilidad.
-
-Para cambiar de proveedor en `.env`:
-```env
-AI_PROVIDER=deepseek    # Opciones: 'deepseek', 'gemini', 'groq', 'auto'
-DEEPSEEK_API_KEY=tu_clave_deepseek
-DEEPSEEK_MODEL=deepseek-chat
-GEMINI_API_KEY=tu_clave_gemini
-GEMINI_MOCKUP_MODELS=gemini-3.5-flash-lite,gemini-3.8-flash
-GEMINI_ANALYSIS_MODELS=gemini-3.5-flash-lite,gemini-3.8-flash
-GEMINI_INGESTION_MODELS=gemini-3.5-flash-lite,gemini-3.8-flash
-GROQ_ANALYSIS_MODELS=openai/gpt-oss-120b
-GROQ_WHISPER_MODEL=whisper-large-v3-turbo
-```
-
-Los catálogos de análisis, ingesta y mockups se configuran desde el entorno. Los proveedores sin credenciales, modelos retirados o servicios temporalmente limitados se omiten mediante circuit breaker, sin recorrer listas antiguas ni repetir llamadas inútiles.
-
-
----
-
-### 🔐 Seguridad del backend
-
-- **Sesión obligatoria** en todas las rutas salvo `/health`, `/auth/registro` y `/auth/login`.
-- **Cada proyecto es de su dueño:** un proyecto, requisito, diagrama, fuente, mockup o artefacto ajeno responde `404` (sin revelar que existe). El dueño es siempre el usuario de la sesión; el cuerpo de la petición nunca lo fija.
-- **`JWT_SECRET` es obligatorio en producción** (`NODE_ENV=production`): mínimo 32 caracteres aleatorios y sin parecerse a un valor de ejemplo; si no, el servidor no arranca. En desarrollo, sin él se usa un secreto aleatorio por proceso (las sesiones se pierden al reiniciar). Genera uno con `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
-- **Acceso:** la sesión dura `JWT_EXPIRES_IN` (12 h por defecto); tras 5 intentos fallidos de inicio de sesión se bloquea 15 minutos (`429`); contraseñas de 8 a 72 bytes; los campos de acceso deben ser texto.
-- **CORS** solo admite los orígenes de `CORS_ORIGINS` (en desarrollo, `http://localhost:5173`; en producción, ninguno). Detrás de un proxy inverso define `TRUST_PROXY` para que el límite de intentos vea la IP real.
-- **Entrada:** el JSON admite hasta `JSON_LIMIT` (10 MB) y las subidas solo admiten audio, PDF y texto plano (50 MB).
-- **Proyectos creados antes de exigir sesión** no tienen dueño y dejan de ser accesibles. Asígnalos a una cuenta con:
-
-```bash
-npm run proyectos:asignar -- correo@ejemplo.com             # muestra qué se asignaría
-npm run proyectos:asignar -- correo@ejemplo.com --confirmar # los asigna
-```
-
-Las pruebas `tests/platform-security.test.js` recorren **todas** las rutas de la aplicación y comprueban que ninguna responde sin sesión ni con la sesión de otro usuario; añade una ruta nueva y la prueba la cubre sola.
-
----
-
-### Paso 2: Levantar el Frontend (`icase-frontend`)
-
-Abre **otra terminal diferente** y ejecuta:
-
-```bash
-# 1. Entrar a la carpeta del frontend
-cd icase-frontend
-
-# 2. Descargar e instalar las librerías
-npm install
-
-# 3. Iniciar la aplicación web
-npm run dev
-```
-
-El frontend se iniciará en **`http://localhost:5173`**.
-
-#### 📦 Librerías principales del Frontend:
-Al ejecutar `npm install` se descargan las siguientes librerías:
-* **`react`** y **`react-dom`**: Biblioteca base para la interfaz de usuario reactiva.
-* **`vite`**: Herramienta de compilación rápida para desarrollo local.
-* **`tailwindcss`**: Estilos visuales modernos y diseño responsivo.
-* **`jspdf`**: Generador del documento PDF formal en el navegador.
-* **`lucide-react`**: Iconografía moderna y minimalista de la interfaz.
-
----
-
-## 🖥️ ¿Cómo usar la aplicación una vez levantada?
-
-1. Abre tu navegador en **`http://localhost:5173`**.
-2. Haz clic en **"Nuevo Proyecto"** o selecciona uno existente.
-3. En la sección **Fuentes e Insumos**, arrastra tu audio, PDF o escribe el problema de software.
-4. Presiona **"Analizar Insumos con IA"**.
-5. Aprueba los requerimientos y revisa los seis **Diagramas PlantUML** secuenciales. Los mockups se habilitan únicamente después de aprobarlos.
-6. En **Mockups**, usa el explorador por flujo, módulo y plataforma para marcar solo las pantallas que deseas generar. Los trabajos continúan en el servidor aunque cambies de pestaña.
-7. Revisa los indicadores de calidad y cobertura Web/Tablet/Móvil. Una pantalla con HTML truncado, sin estilos, con imágenes rotas o rutas locales se marca como inválida y no puede aprobarse.
-8. Configura una paleta manual o solicita una sugerencia puntual a la IA. La paleta queda versionada y se incorpora al contrato visual de las regeneraciones posteriores.
-9. Aprueba los mockups válidos y abre **"Previsualizar documento en PDF"** para ver y descargar el informe formal entregable.
-
-La generación utiliza un manifiesto de navegación estructurado (`pantalla`, `flujo`, `módulo`, `rol`, `plataforma`, `shell` y `ruta`). Esto permite preservar recorridos móviles de cliente y tablet de mesero, y mantener un contrato visual común entre pantallas relacionadas.
-
-### Pruebas con proveedores reales
-
-La suite normal no consume cuota. Para ejecutar dos proyectos completos con los proveedores configurados, define `GEMINI_API_KEY` y/o `OPENAI_API_KEY` y ejecuta desde `icase-backend`:
+Para verlo localmente, desde la raíz:
 
 ```powershell
-npm run test:e2e:real
+python -m pip install -r requirements-docs.txt
+python scripts/docs/sync_prompts.py
+python scripts/docs/validate_docs.py
+python -m mkdocs serve
 ```
 
-La reparación controlada de diagramas realiza un intento adicional por defecto. Puede configurarse entre 0 y 2 con `AI_DIAGRAM_REPAIR_RETRIES`.
+Abre http://127.0.0.1:8000. El [contrato OpenAPI](docs/api/openapi.yaml) se puede consultar en el explorador Swagger del sitio. Para publicar, habilita GitHub Pages con GitHub Actions; el workflow de documentación construye y publica desde main.
+
+## Funcionalidades y flujo
+
+1. Crear proyecto, cargar texto, PDF o audio, revisar extracción y contextualizar fuentes.
+2. Generar RF/RNF con evidencia, editar y aprobar.
+3. Generar y aprobar seis diagramas: casos de uso, clases de dominio, arquitectura de software, arquitectura del sistema, clases de diseño y árbol de navegación.
+4. Generar mockups desde la navegación, revisar cobertura, editar y aprobar.
+5. Consultar auditoría y documento, descargar Markdown o construir PDF desde el navegador.
+6. Revisar alcance, stack, arquitectura y estructura de código; generar backend/frontend, pruebas, infraestructura, CI/CD y paquete ZIP con verificación.
+
+El flujo utiliza dependencias y versiones: consultar una vista no implica regenerar; cambiar una base aprobada puede invalidar descendientes. Los contratos técnicos están en [diagramas](docs/desarrollo/contratos/diagram-generation-contract.md) y [codificación](docs/desarrollo/contratos/code-generation-contract.md).
+
+## Estado
+
+La codificación ofrece CRUD genérico por RF y pantallas conectadas; todavía no traduce todas las reglas de negocio a modelos e invariantes específicos. Un build y un CRUD correctos no certifican el cumplimiento total del proyecto generado. El [estado y los límites](docs/index.md) y los [hallazgos actuales](docs/pruebas/resultados.md) están documentados.
+
+## Requisitos previos
+
+- Node.js compatible con Vite actual: se recomienda Node 22.13+ de la rama 22 o versión compatible de la rama 24; npm y Git.
+- MongoDB para I-CASE.
+- Claves de proveedores IA necesarios para las funciones utilizadas.
+- Docker Desktop/Compose para verificar artefactos de código.
+- Python para el sitio documental.
+
+## Instalación y configuración
+
+Terminal backend:
+
+```powershell
+cd icase-backend
+npm ci
+Copy-Item .env.example .env
+```
+
+Configura MONGO_URI, PORT y JWT_SECRET aleatorio en .env. Añade claves y modelos habilitados para tu cuenta. No subas ese archivo. Los ejemplos de identificadores de modelo no garantizan disponibilidad.
+
+```powershell
+npm run dev
+```
+
+El backend escucha normalmente en http://localhost:5000. Comprueba /health.
+
+Terminal frontend:
+
+```powershell
+cd icase-frontend
+npm ci
+npm run dev
+```
+
+Abre la URL de Vite, normalmente http://localhost:5173. El cliente usa actualmente http://localhost:5000 en src/services/api.js; ajustar si cambia el entorno.
+
+Detalles de variables, ejecución y resolución de problemas: [instalación](docs/desarrollo/instalacion.md).
+
+## Dependencias principales
+
+Backend: Express, Mongoose, Axios, bcryptjs, jsonwebtoken, Multer, pdf-parse y dotenv. Frontend: React, Vite, Tailwind, Mermaid, html2canvas y jsPDF. Versiones efectivas en package.json y lockfiles de cada módulo.
+
+Los proveedores están encapsulados en servicios. La selección depende de entorno y disponibilidad; la documentación distingue análisis, ingesta y mockups. No se publican credenciales.
+
+## Estructura
+
+```text
+icase-backend/src/
+  core/                   Entidades, casos de uso, constantes y servicios
+  interface-adapters/     Controladores y repositorios
+  infrastructure/         Esquemas, prompts, proveedores y generadores
+  routes/                 Endpoints
+icase-backend/tests/       Pruebas
+icase-frontend/src/        UI y cliente HTTP
+docs/                     Documentación
+scripts/docs/             Sincronización y validación documental
+```
+
+## Pruebas y compilación
+
+En backend: `npm test -- --runInBand`. En frontend: `npm run build`. Desde raíz: `python -m mkdocs build --strict`.
+
+Con Docker, en backend: `node scripts/verify-generic-runtime.js PostgreSQL NestJS full`. Para modelos reales, consulta el [plan](docs/pruebas/plan-y-ejecucion.md); requieren configuración y consumen cuota. El caso sintético CRUD no es una prueba de todas las reglas de negocio.
+
+## Capturas, contribución y mantenimiento
+
+El [caso de estudio](docs/usuario/caso-de-estudio.md) indica cómo recoger capturas reales y documentar resultados. No se presentan capturas ficticias como evidencia.
+
+Lee [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md) y [CHANGELOG.md](CHANGELOG.md). Actualiza API/manual cuando cambie el comportamiento y sincroniza prompts desde su fuente. Conserva bases de prueba separadas, revisa invalidación de versiones y registra límites de ejecución.
+
+No se añade una licencia de distribución sin decisión del equipo; la declaración de licencia en un package.json no sustituye ese acuerdo.
