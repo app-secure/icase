@@ -84,8 +84,11 @@ class MongoDiagramaRepository extends IDiagramaRepository {
     return this.listarPorProyecto(proyectoId);
   }
 
-  async actualizar(id, datos) {
-    const doc = await DiagramaModel.findByIdAndUpdate(id, datos, { new: true });
+  async actualizar(id, datos, { versionEsperada } = {}) {
+    const filter = { _id: id };
+    if (versionEsperada === 1) filter.$or = [{ version: 1 }, { version: { $exists: false } }];
+    else if (versionEsperada !== undefined) filter.version = versionEsperada;
+    const doc = await DiagramaModel.findOneAndUpdate(filter, { $set: datos }, { new: true });
     return doc ? doc.toJSON() : null;
   }
 

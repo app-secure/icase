@@ -8,7 +8,7 @@ Los detalles técnicos de cada pieza están en `docs/code-generation-contract.md
 
 ## 1. En una frase
 
-iCase toma insumos (audio, PDF, texto) y llega hasta una **aplicación entregable**: requisitos IEEE 830 → 6 diagramas → mockups → documento PDF → planificación del código → backend, frontend, pruebas, infraestructura y CI/CD → paquete verificado en Docker y descargable en ZIP.
+iCase toma insumos (audio, PDF, texto) y llega hasta una **aplicación entregable**: requisitos orientados a ISO/IEC/IEEE 29148:2018 → 6 diagramas → mockups → documento PDF → planificación del código → backend, frontend, pruebas, infraestructura y CI/CD → paquete verificado en Docker y descargable en ZIP.
 
 Lo que cambió en esta rama es la parte final: **la generación de código dejó de ser un CRUD genérico** y pasó a ser un generador con modelo de datos, reglas de negocio, autenticación y roles, documentación OpenAPI, varios stacks, informe de qué se generó y módulos elegibles. Además se cerró la seguridad de la propia plataforma iCase.
 
@@ -29,7 +29,7 @@ Lo que cambió en esta rama es la parte final: **la generación de código dejó
 | Fase | Qué ocurre | Estado |
 | --- | --- | --- |
 | Insumos | Audio, PDF y texto se convierten en fuentes | Ya existía |
-| Requisitos | RF y RNF en formato IEEE 830, con aprobación | Ya existía |
+| Requisitos | RF y RNF orientados a ISO/IEC/IEEE 29148:2018, con evidencia y aprobación | Ya existía |
 | Diagramas | 6 tipos (incluye clases de dominio), versionado y validación | Ya existía |
 | Mockups | Pantallas HTML con trazabilidad a los RF | Ya existía |
 | Documento | PDF con auditoría final | Ya existía |
@@ -256,8 +256,54 @@ Ordenado por lo que más acerca a «de requisitos a aplicación completa».
 
 ## 7. Cómo seguir sin romper nada
 
+### Outbox durable de procesos
+
+Al activar procesos y eventos, cada invalidación se guarda en PostgreSQL junto con la acción de negocio. La migración 0006 se conserva al regenerar. Los workers consumen con SKIP LOCKED, reintentan y confirman tras publicar; la entrega al transporte es al menos una vez y puede duplicarse. No garantiza recepción de clientes desconectados ni cubre CRUD/N:M ajenos al motor. Hay límite de 10 000 pendientes, backpressure transaccional 503 y limpieza gradual de publicados de más de siete días. No se borran pendientes por fallar repetidamente.
+
+Se verificaron rollback, reintentos, fallo de ack, workers concurrentes, terminación del productor y reinicio real de PostgreSQL en Express y NestJS. Ambos recorridos de interfaz pasaron también con el Compose exportado; NestJS necesitó repetir un timeout de arranque de PostgreSQL, que conserva su registro fallido. Suite general: 674 correctas y una omitida. Evidencias y alcance: `icase-backend/verification-results/specialized/outbox.md`. Los apartados siguientes describen bloques anteriores cuando indican que el outbox seguía pendiente. Faltan administración/alertas de cola, bandeja móvil y reapertura explícita.
+
+### Ampliación de procesos: protección y bandeja web
+
+El módulo opcional de procesos incorpora bloqueo persistente de edición/borrado CRUD sobre todos sus registros vinculados, incluso al cerrar, y evita que otro proceso reclame el mismo registro. Se normalizan IDs y se coordina el inicio con escrituras concurrentes. La migración reconstruye bloqueos históricos compatibles y revierte ante conflictos sin borrar datos.
+
+La web generada incorpora `/procesos`: selectores con búsqueda, inicio, lista paginada, historial y acciones por rol. Los roles ajenos no pueden consultar la auditoría. Con eventos_cambios se notifican cambios después del commit; no es un outbox durable. Express y NestJS pasaron API y recorrido web de dos actores, también en Compose exportado. Suite general: 670 correctas y una omitida; se reforzó después la regeneración incremental con pruebas específicas. Evidencias en `icase-backend/verification-results/specialized/procesos.md`. Se actualizan huellas de generación de backend/frontend para no reutilizar código previo sin estas mejoras; no se alteran ZIP o bases activas automáticamente. Quitar el módulo de un backend con sus migraciones requiere resolución explícita de instancias y bloqueos.
+
+Siguen pendientes bandeja móvil, reapertura explícita, protección de cambios indirectos N:M/adjuntos, outbox durable y procesos distribuidos. No confundir estas mejoras con cierre contable completo ni con validación semántica de todos los procesos del usuario.
+
+### Procesos de negocio — primer bloque experimental
+
+Se incorpora `procesos_negocio`, opcional y desactivado por defecto: definiciones confirmadas y trazables, estados persistentes, acciones por rol, separación del actor anterior, actualizaciones de varios registros, auditoría, control de versión e idempotencia. Express/NestJS, PostgreSQL y JWT. Se configura en Módulos con JSON y aprobación explícita; no se inventan cierres ni aprobaciones. Los procesos se ejecutan inicialmente por API, con transacciones SERIALIZABLE y rollback. La huella de definición evita reinterpretar instancias al regenerar.
+
+Se verificó rollback real, concurrencia y permisos con PostgreSQL en Docker, incluyendo Compose exportado; frontend y MkDocs compilaron. No se afirma todavía UI final de procesos, exclusividad sobre CRUD, notificaciones/outbox o procesos contables completos. Evidencias y diferencias de versión entre ejecuciones: `icase-backend/verification-results/specialized/procesos.md`. Contrato y ejemplo: `docs/desarrollo/contratos/procesos-negocio.md`.
+
+### Actualización móvil y réplicas — 2 de noviembre de 2026
+
+El usuario confirmó en un teléfono con Expo Go lectura de QR y sincronización inmediata de relaciones entre web y móvil en ambos sentidos. Se corrigió el origen WebSocket explícito de Android y se añadió estado visible del canal móvil. La pantalla sigue siendo técnica; esta prueba no acredita un SLA ni todos los dispositivos. Los apartados anteriores sobre ausencia de pruebas en teléfono son históricos.
+
+Se amplió el verificador del Compose exportado para esperar la salud de ambas réplicas, no solo del backend principal, antes de probar escrituras entre servidores. Se corrigió la herencia incompleta del servicio de réplica en el overlay de pruebas, que perdía la configuración de base de datos. Las nuevas ejecuciones Express y NestJS con PostgreSQL pasaron sandbox y Compose exportado; suite general: 652 pruebas correctas y una omitida. Los fallos anteriores conservan su resultado; una prueba móvil correcta no los reemplaza. Evidencia actualizada: `icase-backend/verification-results/specialized/resultado.md`.
+
+### Actualización verificada — 1 de noviembre de 2026
+
+La base activa del generador NestJS es **12.3.2** (paquetes principales fijados), con tipos Express 5 y Node.js 22.12+ o 24+. `NestRuntimePolicy` centraliza esta decisión y rechaza versiones antiguas fijadas explícitamente hasta revisar el stack. La caché de backend cambia de versión para exigir regeneración y nuevas verificaciones; no se modifican ZIP ni bases existentes.
+
+Verificación completada: 545 pruebas locales correctas y una omitida; Docker con PostgreSQL completo y MySQL/MongoDB con despliegue exportado, incluyendo integración, autenticación, N:M y navegador. Se aplica auditoría de dependencias nueva en cada construcción. Evidencias y alcance en `docs/pruebas/resultados.md`; los apartados anteriores describen el estado histórico y no sustituyen estas evidencias. El flujo completo con IA real y los módulos de negocio no soportados siguen pendientes.
+
 - **Un stack nuevo solo cuenta como soportado si pasa `verify-full-stack.js`.** Se registra en `StackCatalog` y en el generador, nunca en uno solo.
 - **Un módulo nuevo** se añade al catálogo de `ModuleService`, genera sus archivos desde plantillas, aporta sus propias pruebas (como hizo el de formularios con `typed-forms.spec.js`) y debe actualizar el texto de `generalLimits` si cambia un límite.
 - **La lista de límites generales** (`generalLimits` en `GenerationCapabilities.js`) es texto escrito a mano: se desactualiza si no se toca.
 - **Mensajes de commit:** cortos, de una línea y en español, como los del resto del historial. Sin líneas de coautor.
 - Antes de reescribir historial, comprobar que nada se haya subido y dejar una rama de respaldo.
+
+### Archivos, reportes/cálculos, recuperación y actualización segura
+
+Se incorporaron tres módulos opcionales (desactivados por defecto): `archivos_imagenes`, `reportes_calculos` y `recuperacion_cuentas`, para Express/NestJS con JWT. Archivos privados PNG/JPEG/PDF de hasta 512 KiB por registro, formularios React y selección/descarga Expo; agregados y CSV/PDF con límites explícitos; fórmulas aritméticas exclusivamente como reglas `calculo` confirmadas; recuperación SMTP con tokens hash de un uso, 15 minutos, compare-and-set de contraseña e invalidación de JWT previos. No incluyen S3, antivirus, dashboards, procesos contables completos, MFA ni notificaciones generales.
+
+Al regenerar backend se conserva el historial de migraciones y se agregan cambios aditivos. Se bloquean cambios destructivos y restricciones que necesitan backfill. Las entregas nuevas contienen baseline y `tools/update.cjs`: vista previa por defecto, conflictos bloqueantes, aprobación por huella y backups; no se extrae el ZIP encima de cambios manuales. Una entrega antigua sin baseline necesita recuperar su referencia original o fusionarse con Git.
+
+Se verificó Express y NestJS con PostgreSQL, Mailpit y navegador, tanto en sandbox como con Compose exportado, incluyendo un registro precargado antes de una migración incremental. Expo compiló, pero no se probó en dispositivo. El perfil SMTP de pruebas no acredita TLS de producción. Suite general: 637 correctas y 1 omitida. Documentación: `docs/desarrollo/contratos/modulos-y-actualizacion.md`; evidencias y límites: `icase-backend/verification-results/extended-modules/resultado.md`. Las huellas cambiaron para exigir nuevas generaciones/verificaciones; no se modificaron proyectos activos ni ZIP existentes.
+
+### Eventos de cambios: primer bloque experimental
+
+Se añadió `eventos_cambios`, opcional y desactivado por defecto. Genera un backend Socket.IO 4.8.4 para Express/NestJS con JWT y permisos GET revalidados, con avisos de invalidación CRUD sin datos de registros. Spring/API sin JWT se rechazan. React y Expo ya reconsultan la API autorizada ante avisos y al reconectar; Expo pausa en segundo plano. Vite y Nginx incluyen proxy WebSocket. Se genera una prueba de dos usuarios y recuperación de conexión; `scripts/verify-change-events-runtime.js` verifica una entrega aislada con PostgreSQL, navegador y bundle Android. No es todavía el módulo completo de tiempo real: no cubre N:M, HA, replay, chat ni una latencia garantizada. El catálogo mantiene esa limitación y compilar Expo no equivale a probar un teléfono físico. Evidencias: `icase-backend/verification-results/change-events/`.
+
+Verificación de este bloque: 619 pruebas correctas y una omitida; servidor/clientes Socket.IO reales en pruebas locales con núcleo de permisos simulado. Evidencia y límites en `icase-backend/verification-results/change-events/resultado.md`. El ZIP anterior conserva su verificación histórica con el módulo desactivado; no se actualiza automáticamente.

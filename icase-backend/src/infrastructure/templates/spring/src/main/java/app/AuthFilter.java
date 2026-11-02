@@ -22,7 +22,8 @@ public class AuthFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
-        String path = request.getRequestURI();
+        String path = request.getServletPath();
+        if (path == null || path.isEmpty()) path = request.getRequestURI();
         if (!auth.enabled() || !path.startsWith("/api") || auth.isPublic(request.getMethod(), path)) {
             chain.doFilter(request, response);
             return;
@@ -33,7 +34,7 @@ public class AuthFilter extends OncePerRequestFilter {
             request.setAttribute(USER, user);
         } catch (HttpError error) {
             Map<String, Object> body = new LinkedHashMap<>();
-            body.put("message", error.getMessage());
+            body.put("message", error.status() >= 500 ? "Error interno del servidor" : error.getMessage());
             response.setStatus(error.status());
             response.setContentType("application/json;charset=UTF-8");
             Support.JSON.writeValue(response.getOutputStream(), body);

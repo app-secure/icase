@@ -1,10 +1,18 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Eye, EyeOff, Lock, Mail, User, Phone, AlertCircle, ArrowRight } from "lucide-react";
 import RbixLogo from "./RbixLogo";
-import { loginApi, registroApi, setAuthToken, setStoredUser } from "../services/api";
+import { loginApi, registroApi, setAuthToken, setStoredUser, fetchAuthConfigApi } from "../services/api";
 
 export default function AuthView({ onAuthSuccess, onLoadingChange, sessionExpired = false }) {
   const [isLogin, setIsLogin] = useState(true);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetchAuthConfigApi().then((config) => {
+      if (active) setRegistrationEnabled(config.registro_publico === true);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -243,7 +251,7 @@ export default function AuthView({ onAuthSuccess, onLoadingChange, sessionExpire
         </div>
 
         {/* Alternador inferior de Login / Registro */}
-        <div className="text-center pt-1">
+        <div className="text-center pt-1" hidden={!registrationEnabled}>
           {isLogin ? (
             <p className="text-xs text-slate-400">
               ¿No tienes una cuenta aún?{" "}

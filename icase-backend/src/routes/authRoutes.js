@@ -6,6 +6,8 @@ function buildAuthRoutes(authController) {
 
   router.post('/registro', (req, res) => authController.registro(req, res));
   router.post('/login', (req, res) => authController.login(req, res));
+  router.get('/config', (req, res) => authController.configuracion(req, res));
+  router.post('/logout', authMiddleware, (req, res) => authController.logout(req, res));
   router.get('/perfil', authMiddleware, (req, res) => authController.perfil(req, res));
 
   return router;

@@ -49,6 +49,11 @@ try {
     console.log('Sin autenticación (decisión aprobada): la API es pública');
   }
 
+  for (const association of CONFIG.associations || []) {
+    await exerciseAssociation(api, CONFIG.operations, association, access, CONFIG.auth);
+    console.log('ICASE_ASSOCIATION_OK:' + association.table);
+  }
+
   // Integridad referencial: las claves foráneas declaradas deben respetarse en la base de datos elegida.
   for (const table of CONFIG.tables.filter((item) => item.references.length)) {
     for (const reference of table.references) {

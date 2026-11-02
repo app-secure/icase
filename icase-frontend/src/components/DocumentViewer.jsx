@@ -19,6 +19,7 @@ const capitalizeFirst = (text) => {
 };
 
 export default function DocumentViewer({ project, onBackToDiagrams }) {
+  const designClasses = project.diagrams?.designClassDiagram || project.diagrams?.designClasses;
   const [showPdfModal, setShowPdfModal] = useState(false);
   const finalAudit = project.finalAudit;
   const exportBlocked = Boolean(finalAudit && !finalAudit.exportable);
@@ -427,14 +428,14 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               8.3 Diagrama de Clases de Diseño
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
-              {project.diagrams?.designClasses?.description || "Define la estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades de dominio y DTOs."}
+              {designClasses?.description || "Define la estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades de dominio y DTOs."}
             </p>
             <StaticDiagram
-              code={project.diagrams?.designClasses?.code}
-              plantumlCode={project.diagrams?.designClasses?.plantumlCode}
+              code={designClasses?.code}
+              plantumlCode={designClasses?.plantumlCode}
               caption="Figura 8.3: Diagrama de Clases de Diseño en Capas"
             />
-            {renderDiagramExplanation(project.diagrams?.designClasses, "Diagrama de Clases de Diseño")}
+            {renderDiagramExplanation(designClasses, "Diagrama de Clases de Diseño")}
           </div>
 
           {/* 8.4 Árbol de Navegación */}

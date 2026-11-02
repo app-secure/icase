@@ -10,61 +10,61 @@ const CAPABILITIES = Object.freeze([
     id: 'tiempo_real',
     etiqueta: 'Tiempo real',
     patron: /tiempo real|websocket|socket\.?io|en vivo|chat\b|notificaci[oó]n(?:es)? (?:push|instant[aá]nea)/i,
-    alternativa: 'Los datos se consultan al abrir o recargar la pantalla; no hay actualización automática ni canal de eventos.'
+    alternativa: 'eventos_cambios invalida CRUD y N:M en React/Expo; eventos_replicas coordina por Redis con reautorización local. No acredita chat, push, replay ni un SLA de latencia/entrega.'
   },
   {
     id: 'archivos',
     etiqueta: 'Archivos e imágenes',
     patron: /\b(?:subir|cargar|adjuntar|adjunt[oa]s?)\b|\b(?:foto|fotograf[ií]a|imagen|im[aá]genes|logo|avatar)s?\b|almacenamiento de archivos/i,
-    alternativa: 'No hay subida ni descarga de archivos; el registro solo guarda campos de texto, números y fechas.'
+    alternativa: 'El módulo opcional archivos_imagenes adjunta PNG/JPEG/PDF privados por registro (512 KiB) en Express/NestJS con JWT y almacenamiento local de un proceso. No incluye S3, antivirus ni gestión avanzada de medios.'
   },
   {
     id: 'reportes',
     etiqueta: 'Reportes, gráficos y exportación',
     patron: /\breportes?\b|\binformes?\b|estad[ií]sticas?|dashboard|panel de (?:control|indicadores)|gr[aá]ficos?|\bkpi\b|indicadores|exportar|imprimir|\bpdf\b|\bexcel\b|\bcsv\b/i,
-    alternativa: 'Las listas muestran los registros tal cual; no se agregan, totalizan ni exportan.'
+    alternativa: 'El módulo opcional reportes_calculos ofrece agregados numéricos por operación y CSV/PDF autorizados, hasta 10000 registros o 2 MiB. No genera gráficos, reportes específicos ni cierres contables.'
   },
   {
     id: 'calculos',
     etiqueta: 'Cálculos y procesos de negocio',
     patron: /\bcalcul\w*|totaliz\w*|prorrate\w*|conciliaci[oó]n|liquidaci[oó]n|n[oó]mina|planilla|cierre (?:de caja|mensual|diario|contable)|autom[aá]ticamente (?:se )?(?:genera|calcula|asigna|aprueba|actualiza)|recomendaci[oó]n(?:es)? (?:autom|inteligent)|predic\w*/i,
-    alternativa: 'Los valores se escriben a mano; las reglas solo validan (requerido, único, rango, longitud, formato, comparación, estados, inmutable, valor por defecto) y no calculan.'
+    alternativa: 'Las reglas calculo confirmadas permiten fórmulas aritméticas acotadas. procesos_negocio es experimental PostgreSQL/JWT: estados, acciones por rol, actualizaciones transaccionales, bloqueo CRUD y bandeja web sobre definiciones confirmadas. Con eventos incluye outbox de invalidaciones al menos una vez al transporte, no confirmación por cliente. No inventa fórmulas ni implementa nóminas, conciliaciones o procesos contables completos.'
   },
   {
     id: 'notificaciones',
     etiqueta: 'Correo, SMS y notificaciones',
     patron: /\benvi\w*\b(?:\s+\S+){0,4}?\s+(?:por\s+|v[ií]a\s+)?(?:e-?mail|correo|sms|whatsapp|mensaje|notificaci[oó]n)|(?:confirm|notific|avis|inform|record)\w*\b(?:\s+\S+){0,3}?\s+por\s+(?:correo|e-?mail|sms|whatsapp)|\bnotific\w*|recordatorios?|\bsms\b|whatsapp|alertas? (?:por|v[ií]a)/i,
-    alternativa: 'La aplicación no envía mensajes; el correo solo existe como un dato más del registro.'
+    alternativa: 'recuperacion_cuentas puede enviar enlaces por SMTP configurado. No es un motor general de notificaciones y no incluye SMS, WhatsApp o push.'
   },
   {
     id: 'pagos',
     etiqueta: 'Pagos en línea y facturación',
     patron: /pasarela|stripe|paypal|mercado\s?pago|webpay|culqi|payu|tarjeta de (?:cr[eé]dito|d[eé]bito)|pago(?:s)? en l[ií]nea|pagar en l[ií]nea|cobro(?:s)? en l[ií]nea|factura(?:ci[oó]n)? electr[oó]nica|comprobante(?:s)? electr[oó]nico/i,
-    alternativa: 'Se puede registrar un pago como dato, pero no se cobra ni se emite factura electrónica.'
+    alternativa: 'pagos_prueba integra Checkout Stripe test e identifica confirmaciones firmadas e idempotentes. No se cobra dinero real ni se emite factura electrónica; no hay reembolsos ni conciliación.'
   },
   {
     id: 'ubicacion',
     etiqueta: 'Mapas y geolocalización',
     patron: /\bmapas?\b|geolocaliz\w*|\bgps\b|google maps|coordenadas|ubicaci[oó]n (?:en tiempo real|del (?:usuario|dispositivo))|geocerca/i,
-    alternativa: 'La dirección o las coordenadas se guardan como texto o número; no hay mapa ni cálculo de rutas.'
+    alternativa: 'mapas muestra coordenadas existentes con Leaflet y un proveedor de tiles configurado. No incluye geocodificación, seguimiento de ubicación, rutas o geocercas.'
   },
   {
     id: 'integraciones',
     etiqueta: 'Integraciones y acceso externo',
     patron: /\bapi (?:externa|de terceros)|servicio(?:s)? externo|integraci[oó]n con|sincroniz\w*|webhook|\berp\b|\bsunat\b|\breniec\b|\boauth\b|inicio de sesi[oó]n (?:con|mediante) (?:google|facebook|microsoft)|\bsso\b|\bldap\b|active directory/i,
-    alternativa: 'La aplicación funciona sola, con su propia base de datos y usuarios; no se conecta a otros sistemas.'
+    alternativa: 'sso_oidc integra identidades emisor+sujeto preautorizadas con PKCE y roles locales. No es un conector genérico de APIs/ERP/SAML ni autoprovisiona usuarios.'
   },
   {
     id: 'dispositivos',
     etiqueta: 'Cámara, códigos QR y biometría',
     patron: /c[aá]mara|escane\w*|c[oó]digo(?:s)? (?:qr|de barras)|\bqr\b|biom[eé]tric\w*|huella digital|reconocimiento (?:facial|de voz)|\bocr\b/i,
-    alternativa: 'No se accede al hardware del dispositivo; los códigos se escriben como texto.'
+    alternativa: 'camara_qr lee QR mediante cámara web/Expo con permiso explícito. La lectura no valida una reserva/pago ni ejecuta enlaces; no incluye OCR, biometría o todos los formatos de barras.'
   },
   {
     id: 'cuentas',
     etiqueta: 'Recuperación de contraseña y verificación de cuenta',
     patron: /recuperar (?:la |su |mi )?contrase|restablecer (?:la |su |mi )?contrase|olvid[eé] (?:mi )?contrase|verificaci[oó]n (?:de|del) correo|verificar (?:el |su )?correo|autenticaci[oó]n de (?:dos|2) (?:factores|pasos)|\b2fa\b|\bmfa\b/i,
-    alternativa: 'Las cuentas las administra un usuario con permiso; no hay envío de enlaces de recuperación ni segundo factor.'
+    alternativa: 'recuperacion_cuentas ofrece enlaces SMTP de un uso, caducidad e invalidación de sesiones al cambiar contraseña en Express/NestJS. No incluye verificación de correo, MFA ni 2FA.'
   }
 ]);
 
@@ -81,7 +81,7 @@ function generalLimits({ formulariosTipados = false, paginacion = false, seed = 
       ? 'Se generan datos iniciales (seed) deterministas derivados del esquema del modelo de dominio para pruebas de arranque.'
       : 'No se cargan datos iniciales (seed) salvo el usuario administrador.',
     'Los permisos son por rol y operación; no existe «propiedad» de registros (un usuario no queda limitado a los suyos).',
-    'Si se vuelve a generar el código se pierden las ediciones manuales hechas en los archivos.'
+    'No extraer un ZIP sobre archivos modificados: usar la vista previa y aprobación de tools/update.cjs. Se preservan cambios manuales y se bloquean conflictos. Las migraciones automáticas son solo aditivas; restricciones/backfill requieren revisión.'
   ];
 }
 

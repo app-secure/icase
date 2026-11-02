@@ -38,6 +38,24 @@
     }
   ],
   "paths": {
+    "/auth/config": {
+      "get": {
+        "summary": "Consultar si el registro público está habilitado",
+        "security": [],
+        "responses": { "200": { "description": "Configuración pública", "content": { "application/json": { "schema": { "type": "object", "properties": { "registro_publico": { "type": "boolean" } } } } } } }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "Revocar la sesión actual de forma persistente",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Token revocado; las otras sesiones no se modifican" },
+          "401": { "description": "Token ausente, inválido, expirado o ya revocado" },
+          "503": { "description": "No se pudo comprobar o revocar la sesión" }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -4381,6 +4399,59 @@
         }
       }
     },
+    "/proyectos/{id}/codificacion/informe-generacion": {
+      "get": {
+        "tags": ["Codificación"],
+        "summary": "Consultar vista previa del informe de generación",
+        "description": "Deriva el informe desde decisiones aprobadas sin guardar un artefacto ni modificar el plan.",
+        "operationId": "get_proyectos_id_codificacion_informe_generacion",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+        "responses": {"200":{"description":"Informe de cobertura y límites","content":{"application/json":{"schema":{"type":"object","additionalProperties":true}}}},"400":{"description":"Dependencias o plan no válidos"},"401":{"description":"Sesión requerida"},"403":{"description":"Proyecto no autorizado"}}
+      }
+    },
+    "/proyectos/{id}/codificacion/un-clic": {
+      "post": {
+        "tags": ["Codificación"],
+        "summary": "Ejecutar planificación de codificación en modo un clic",
+        "description": "Procesa las decisiones técnicas según las reglas del plan. No acredita ejecución del código ni sustituye la verificación de la entrega.",
+        "operationId": "post_proyectos_id_codificacion_un_clic",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+        "responses": {"200":{"description":"Resultado de la planificación","content":{"application/json":{"schema":{"type":"object","additionalProperties":true}}}},"400":{"description":"Dependencias o decisiones pendientes"},"401":{"description":"Sesión requerida"},"403":{"description":"Proyecto no autorizado"}}
+      }
+    },
+    "/proyectos/{id}/artefactos/{artefactoId}/verificar-async": {
+      "post": {
+        "tags": ["Codificación"],
+        "summary": "Iniciar o recuperar una verificación persistente",
+        "description": "Devuelve un trabajo que puede ejecutar compilación, Docker e integración. Consultar su estado por polling; la aceptación no significa que el artefacto haya aprobado.",
+        "operationId": "post_proyectos_id_artefactos_artefactoId_verificar_async",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string"}},{"name":"artefactoId","in":"path","required":true,"schema":{"type":"string"}}],
+        "responses": {"202":{"description":"Trabajo creado","content":{"application/json":{"schema":{"type":"object","properties":{"trabajo":{"type":"object","additionalProperties":true},"reutilizado":{"type":"boolean","enum":[false]}}}}}},"200":{"description":"Trabajo activo reutilizado","content":{"application/json":{"schema":{"type":"object","properties":{"trabajo":{"type":"object","additionalProperties":true},"reutilizado":{"type":"boolean","enum":[true]}}}}}},"400":{"description":"Solicitud no válida"},"401":{"description":"Sesión requerida"},"403":{"description":"Proyecto no autorizado"}}
+      }
+    },
+    "/proyectos/{id}/artefactos/{artefactoId}/verificar-trabajo/ultimo": {
+      "get": {
+        "tags": ["Codificación"],
+        "summary": "Consultar último trabajo de verificación del artefacto",
+        "operationId": "get_proyectos_id_artefactos_artefactoId_verificar_trabajo_ultimo",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string"}},{"name":"artefactoId","in":"path","required":true,"schema":{"type":"string"}}],
+        "responses": {"200":{"description":"Trabajo y resultado; pueden ser null si todavía no existen","content":{"application/json":{"schema":{"type":"object","properties":{"trabajo":{"type":"object","nullable":true,"additionalProperties":true},"verificacion":{"type":"object","nullable":true,"additionalProperties":true}}}}}},"401":{"description":"Sesión requerida"},"403":{"description":"Proyecto no autorizado"}}
+      }
+    },
+    "/proyectos/{id}/artefactos/{artefactoId}/verificar-trabajo/{trabajoId}": {
+      "get": {
+        "tags": ["Codificación"],
+        "summary": "Consultar un trabajo de verificación persistente",
+        "operationId": "get_proyectos_id_artefactos_artefactoId_verificar_trabajo_trabajoId",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"name":"id","in":"path","required":true,"schema":{"type":"string"}},{"name":"artefactoId","in":"path","required":true,"schema":{"type":"string"}},{"name":"trabajoId","in":"path","required":true,"schema":{"type":"string"}}],
+        "responses": {"200":{"description":"Trabajo y resultado disponible","content":{"application/json":{"schema":{"type":"object","properties":{"trabajo":{"type":"object","additionalProperties":true},"verificacion":{"type":"object","nullable":true,"additionalProperties":true}}}}}},"401":{"description":"Sesión requerida"},"403":{"description":"Proyecto no autorizado"},"404":{"description":"Trabajo inexistente"}}
+      }
+    },
     "/proyectos/{id}/artefactos/{artefactoId}/verificar": {
       "post": {
         "tags": [
@@ -5222,6 +5293,11 @@
       "MockupEntrada": {
         "type": "object",
         "properties": {
+          "soloReparar": {
+            "type": "boolean",
+            "default": false,
+            "description": "Repara únicamente mockups existentes inválidos o con criterios omitidos: máximo cinco pantallas y un intento por pantalla. No se aplican propuestas sin mejora. pantallas opcional restringe la selección."
+          },
           "pantallas": {
             "type": "array",
             "items": {

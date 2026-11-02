@@ -378,14 +378,77 @@ async function exerciseOpenApi(api, operations, auth) {
   if (secured !== Boolean(doc.paths['/api/auth/login'])) fail('la ruta de inicio de sesión debe documentarse solo con autenticación');
 }
 
+async function exerciseAssociation(api, operations, association, access, auth) {
+  const fail = (message) => { throw new Error('N:M ' + association.table + ': ' + message); };
+  const expectStatus = (response, expected, label) => {
+    if (response.status !== expected) fail(label + ' respondió ' + response.status + ' (se esperaba ' + expected + ')');
+    return response.data;
+  };
+  if (!association.endpoints_generated) fail('no hay API generada');
+  const endpoints = (association.operations || []).map((keys) => operations.find((operation) => keys.includes(operation.key)));
+  if (endpoints.length !== 2 || endpoints.some((endpoint) => !endpoint)) fail('faltan operaciones para crear ambos extremos');
+  const cleanups = [];
+  const path = '/api/associations/' + encodeURIComponent(association.table);
+  try {
+    const source = await createValidRecord(api, operations, endpoints[0], cleanups, 0);
+    const targets = [await createValidRecord(api, operations, endpoints[1], cleanups, 0), await createValidRecord(api, operations, endpoints[1], cleanups, 0)];
+    const pair = (target) => ({ source_id: String(source.id), target_id: String(target.id) });
+    const listPath = path + '?source_id=' + encodeURIComponent(source.id);
+    const absent = await createValidRecord(api, operations, endpoints[1], cleanups, 0);
+    expectStatus(await api(endpoints[1].collectionPath + '/' + absent.id, 'DELETE'), 200, 'preparar extremo inexistente');
+    expectStatus(await api(path, 'POST', pair(absent)), 404, 'rechazar extremo inexistente');
+    expectStatus(await api(path, 'POST', { source_id: String(source.id), target_id: 'no-es-un-id' }), 400, 'rechazar ID inválido');
+    for (const target of targets) {
+      cleanups.unshift(() => api(path, 'DELETE', pair(target)));
+      expectStatus(await api(path, 'POST', pair(target)), 200, 'asociar');
+      expectStatus(await api(path, 'POST', pair(target)), 200, 'repetir asociación idempotente');
+    }
+    const first = expectStatus(await api(listPath + '&limit=1'), 200, 'primera página');
+    if (!Array.isArray(first.data) || first.data.length !== 1 || first.has_more !== true) fail('primera página o has_more incorrectos');
+    const second = expectStatus(await api(listPath + '&limit=1&after_target_id=' + encodeURIComponent(first.data[0].target_id)), 200, 'segunda página');
+    if (!Array.isArray(second.data) || second.data.length !== 1 || second.has_more !== false) fail('segunda página o cursor incorrectos');
+    const rows = [...first.data, ...second.data];
+    if (new Set(rows.map((row) => String(row.target_id))).size !== 2 || targets.some((target) => !rows.some((row) => String(row.target_id) === String(target.id))) || rows.some((row) => String(row.source_id) !== String(source.id))) fail('vínculos duplicados, omitidos o asociados a otro origen');
+    expectStatus(await api(endpoints[0].collectionPath + '/' + source.id, 'DELETE'), 409, 'proteger origen vinculado');
+    expectStatus(await api(endpoints[1].collectionPath + '/' + targets[0].id, 'DELETE'), 409, 'proteger destino vinculado');
+    if (access) {
+      expectStatus(await access.anonymous(listPath), 401, 'consulta anónima');
+      expectStatus(await access.invalid(path, 'POST', pair(targets[0])), 401, 'token inválido');
+      for (const [role, session] of Object.entries(access.roles)) {
+        const permitted = (verbs) => association.operations.every((keys) => keys.some((key) => verbs.every((verb) => (auth.operaciones?.[key]?.[role] || []).includes(verb))));
+        expectStatus(await session.api(listPath), permitted(['GET']) ? 200 : 403, 'lectura del rol ' + role);
+        const write = permitted(['GET', 'PATCH']);
+        // Usar un vínculo ya existente para no alterar el caso de otros roles.
+        expectStatus(await session.api(path, 'POST', pair(targets[0])), write ? 200 : 403, 'asociación del rol ' + role);
+        expectStatus(await session.api(path, 'DELETE', pair(targets[0])), write ? 200 : 403, 'desasociación del rol ' + role);
+        if (write) expectStatus(await session.api(path, 'POST', pair(targets[0])), 200, 'restaurar vínculo del rol ' + role);
+      }
+    }
+    for (const target of targets) {
+      expectStatus(await api(path, 'DELETE', pair(target)), 200, 'desasociar');
+      expectStatus(await api(path, 'DELETE', pair(target)), 200, 'repetir desasociación idempotente');
+      const records = expectStatus(await api(endpoints[1].collectionPath), 200, 'conservar destino');
+      const data = Array.isArray(records) ? records : records.data;
+      if (!data?.some((record) => String(record.id || record._id) === String(target.id))) fail('desasociar borró el destino');
+    }
+    const empty = expectStatus(await api(listPath), 200, 'lista vacía');
+    if (!Array.isArray(empty.data) || empty.data.length || empty.has_more !== false) fail('desasociación no persistida');
+    expectStatus(await api(endpoints[0].collectionPath + '/' + source.id, 'DELETE'), 200, 'eliminar origen después de desasociar');
+    return { table: association.table, estado: 'correcta' };
+  } finally {
+    for (const cleanup of cleanups) { try { await cleanup(); } catch { /* Solo datos creados por esta prueba, mejor esfuerzo. */ } }
+  }
+}
+
 function runtimeSource() {
-  return [salted, samplePayload, createValidRecord, exerciseOperation, makeApi, setupAccess, exerciseAccess, exerciseAuth, exerciseOpenApi].map((fn) => fn.toString()).join('\n\n');
+  return [salted, samplePayload, createValidRecord, exerciseOperation, makeApi, setupAccess, exerciseAccess, exerciseAuth, exerciseOpenApi, exerciseAssociation].map((fn) => fn.toString()).join('\n\n');
 }
 
 samplePayload.exerciseOperation = exerciseOperation;
 samplePayload.exerciseAccess = exerciseAccess;
 samplePayload.exerciseAuth = exerciseAuth;
 samplePayload.exerciseOpenApi = exerciseOpenApi;
+samplePayload.exerciseAssociation = exerciseAssociation;
 samplePayload.setupAccess = setupAccess;
 samplePayload.makeApi = makeApi;
 samplePayload.runtimeSource = runtimeSource;

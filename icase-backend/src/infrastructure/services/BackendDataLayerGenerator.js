@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const ModuleService = require('../../core/services/ModuleService');
 
 const TEMPLATES = path.join(__dirname, '..', 'templates', 'data-layer');
@@ -86,7 +87,27 @@ class BackendDataLayerGenerator {
       operations[operation.key] = entity ? byEntity.get(entity.name) : GENERIC_TABLE;
     }
     if (Object.values(operations).includes(GENERIC_TABLE)) tables[GENERIC_TABLE] = { entity: null, generic: true, columns: [], references: [] };
-    return { database, tables, operations };
+    const associations = [];
+    const seen = new Set();
+    for (const relation of contract.relations || []) {
+      if (relation.cardinalidad !== 'muchos_a_muchos') continue;
+      const endpoints = [relation.from, relation.to].sort();
+      const key = JSON.stringify([endpoints, relation.label || '']);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const targets = endpoints.map((entity) => byEntity.get(entity));
+      if (targets.some((target) => !target)) throw new Error('Relación N:M con entidades inexistentes.');
+      const hash = crypto.createHash('sha256').update(key).digest('hex').slice(0, 12);
+      let name = `rel_${targets.join('_').slice(0, 30)}_${hash}`;
+      while (taken.has(name)) name += '_t';
+      taken.add(name);
+      // Roles estables incluso para autorrelaciones y nombres físicos truncados iguales.
+      const columns = targets.map((target, index) => ({ name: index === 0 ? 'source_id' : 'target_id', column: index === 0 ? 'source_id' : 'target_id', type: 'id', references: target, enforced: database !== 'mongodb', nullable: false }));
+      tables[name] = { entity: null, junction: true, columns, references: columns.map((column) => ({ column: column.column, table: column.references })),
+        unique: [{ columns: ['source_id', 'target_id'], types: ['id', 'id'] }] };
+      associations.push({ table: name, entities: endpoints, label: relation.label || null, fields: ['source_id', 'target_id'], endpoints_generated: false });
+    }
+    return { database, tables, operations, associations };
   }
 
   /** Reglas confirmadas por tabla, sin metadatos de revisión: es lo único que el motor del backend necesita. */
@@ -140,7 +161,7 @@ class BackendDataLayerGenerator {
       const columns = [
         pg ? `${q('id')} BIGSERIAL PRIMARY KEY` : `${q('id')} BIGINT AUTO_INCREMENT PRIMARY KEY`,
         ...(table.generic ? [`${q('capability')} ${pg ? 'TEXT' : 'VARCHAR(191)'} NOT NULL`] : []),
-        ...table.columns.map((column) => `${q(column.column)} ${!pg && column.unique && column.type === 'string' ? 'VARCHAR(255)' : types[column.type]}`),
+        ...table.columns.map((column) => `${q(column.column)} ${!pg && column.unique && column.type === 'string' ? 'VARCHAR(255)' : types[column.type]}${column.nullable === false ? ' NOT NULL' : ''}`),
         pg ? `${q('extra')} JSONB NOT NULL DEFAULT '{}'::jsonb` : `${q('extra')} JSON NOT NULL`,
         pg ? `${q('created_at')} TIMESTAMPTZ NOT NULL DEFAULT now()` : `${q('created_at')} DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)`,
         pg ? `${q('updated_at')} TIMESTAMPTZ NOT NULL DEFAULT now()` : `${q('updated_at')} DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)`
@@ -197,6 +218,10 @@ class BackendDataLayerGenerator {
       if (table.generic) indexes.push({ collection: name, keys: { capability: 1 } });
       for (const column of table.columns.filter((item) => item.references)) indexes.push({ collection: name, keys: { [column.column]: 1 } });
       for (const unique of table.unique || []) {
+        if (table.junction) {
+          indexes.push({ collection: name, keys: { source_id: 1, target_id: 1 }, options: { unique: true, name: 'uq_association_pair' } });
+          continue;
+        }
         // Índice parcial: los documentos sin el campo (o con null) no compiten por la unicidad, igual que NULL en SQL.
         const bson = { string: 'string', uuid: 'string', date: 'string', time: 'string', integer: 'number', number: 'number', boolean: 'bool', datetime: 'date' };
         indexes.push({
@@ -400,11 +425,14 @@ class BackendDataLayerGenerator {
     return {
       store,
       shared: [
+        { ruta: 'backend/src/data/associations.js', lenguaje: 'javascript', contenido: read('associations.js') },
+        ...(database === 'mongodb' ? [{ ruta: 'backend/src/data/mongo-associations.js', lenguaje: 'javascript', contenido: read('mongo-associations.js') }] : []),
         { ruta: 'backend/src/data/store-support.js', lenguaje: 'javascript', contenido: read('store-support.js') },
         { ruta: 'backend/src/data/model.js', lenguaje: 'javascript', contenido: modulo(model) },
         { ruta: 'backend/src/data/migrations.js', lenguaje: 'javascript', contenido: modulo(migrations) },
         { ruta: 'backend/src/data/rules.js', lenguaje: 'javascript', contenido: modulo(rules) },
         { ruta: 'backend/src/data/rules-engine.js', lenguaje: 'javascript', contenido: read('rules-engine.js') },
+        { ruta: 'backend/src/data/calculations.js', lenguaje: 'javascript', contenido: read('calculations.js') },
         ...documentation
       ]
     };

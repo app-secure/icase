@@ -137,6 +137,14 @@ class CodificacionController {
   }
 
   async _ejecutarVerificacion(trabajoId, proyectoId, artefactoId) {
+    let leaseLost = false;
+    const heartbeat = typeof this.trabajoGeneracionRepository.renovarLeaseVerificacion === 'function'
+      ? setInterval(() => {
+          this.trabajoGeneracionRepository.renovarLeaseVerificacion(trabajoId)
+            .then(renewed => { if (!renewed) leaseLost = true; }).catch(() => { leaseLost = true; });
+        }, Math.max(250, Number(this.trabajoGeneracionRepository.leaseMs || 120000) / 3))
+      : null;
+    heartbeat?.unref?.();
     try {
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'procesando',
@@ -144,6 +152,7 @@ class CodificacionController {
         mensaje: 'Iniciando verificación en contenedor Docker aislado'
       });
       const verificacion = await this.gestionarArtefactosCodigo.verificarArtefacto(proyectoId, artefactoId);
+      if (leaseLost) return;
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'completado',
         progreso: 100,
@@ -152,12 +161,15 @@ class CodificacionController {
         error: null
       }, true);
     } catch (err) {
+      if (leaseLost) return;
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'fallido',
         progreso: 100,
         mensaje: 'La verificación falló',
         error: err.message
       }, true);
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
     }
   }
 

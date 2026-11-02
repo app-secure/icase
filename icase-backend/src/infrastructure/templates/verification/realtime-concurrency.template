@@ -1,0 +1,19 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {subscribeChanges} from '../support/change-events-client.js';
+__SAMPLES__
+const base=process.env.BASE_API_URL||'http://localhost:3000',web=process.env.BASE_WEB_URL||base;
+const wait=async check=>{for(let attempt=0;attempt<200;attempt++){if(await check())return;await new Promise(resolve=>setTimeout(resolve,50));}throw new Error('No se sincronizaron los clientes dentro del límite de prueba');};
+test('12 clientes, 30 escrituras concurrentes y ciclo pausa/reanudación del cliente compartido Expo',{timeout:60000},async()=>{
+ const login=await makeApi(base,null)('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});assert.equal(login.status,200);
+ const api=makeApi(base,login.data.token),reader=makeApi(web,login.data.token),contract=(await api('/api/contract')).data,operation=contract.operations[0],cleanups=[],clients=[],states=Array(12).fill(''),counts=Array(12).fill(0),reads=Array(12).fill(0);
+ const before=(await api(operation.collectionPath)).data.length;
+ try{
+  for(let index=0;index<12;index++)clients.push(subscribeChanges({url:web,token:login.data.token,operations:[operation.key],onState:state=>{states[index]=state;},onChange:async()=>{const result=await reader(operation.collectionPath);assert.equal(result.status,200);counts[index]=result.data.length;reads[index]++;}}));
+  await wait(()=>states.every(state=>state==='activo'));
+  await Promise.all(Array.from({length:30},()=>createValidRecord(api,contract.operations,operation,cleanups,0)));
+  await wait(()=>counts.every(count=>count===before+30));
+  clients[0].pause();const readsBefore=reads[0];await createValidRecord(api,contract.operations,operation,cleanups,0);await new Promise(resolve=>setTimeout(resolve,200));assert.equal(reads[0],readsBefore);
+  clients[0].resume();await wait(()=>counts[0]===before+31);
+ }finally{for(const dispose of clients)dispose();for(const cleanup of cleanups){try{await cleanup();}catch{}}}
+});

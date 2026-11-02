@@ -4,6 +4,8 @@ import html2canvas from "html2canvas";
 import { X, Maximize2, Minimize2, Loader2, Download } from "lucide-react";
 import { getPlantUMLPngUrl } from "../utils/plantumlEncoder";
 import { prepareMockupHtml } from "../utils/mockupHtml";
+import { groupRequirementReferences } from "../utils/requirementReferences";
+import { embedCaptureFonts } from "../utils/captureFonts";
 
 // Los diagramas conservan PNG para mantener líneas y texto nítidos. Los
 // mockups son capturas fotográficas de pantalla y se comprimen mucho mejor en
@@ -93,6 +95,7 @@ const capitalizeFirst = (text) => {
 };
 
 export default function PdfPreviewModal({ project, onClose }) {
+  const designClasses = project.diagrams?.designClassDiagram || project.diagrams?.designClasses;
   const [pdfUrl, setPdfUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -111,7 +114,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         const [useCaseImg, classImg, designClassImg, navImg, softImg, sysImg] = await Promise.all([
           fetchPngDataUrl(project.diagrams?.useCase?.plantumlCode || project.diagrams?.useCase?.code),
           fetchPngDataUrl(project.diagrams?.classDiagram?.plantumlCode || project.diagrams?.classDiagram?.code),
-          fetchPngDataUrl(project.diagrams?.designClasses?.plantumlCode || project.diagrams?.designClasses?.code),
+          fetchPngDataUrl(designClasses?.plantumlCode || designClasses?.code),
           fetchPngDataUrl(project.diagrams?.navigationTree?.plantumlCode || project.diagrams?.navigationTree?.code),
           fetchPngDataUrl(softDiag?.plantumlCode || softDiag?.code),
           fetchPngDataUrl(sysDiag?.plantumlCode || sysDiag?.code)
@@ -348,7 +351,12 @@ export default function PdfPreviewModal({ project, onClose }) {
           const rowPadding = 2.8;
           const lineHeight = 4.4;
 
-          let estimatedTableH = 8;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(9.5);
+          const titleLines = doc.splitTextToSize(tableTitle.toUpperCase(), maxLineWidth - 8);
+          const headerHeight = Math.max(7.5, titleLines.length * 4.2 + 3);
+          doc.setFont('helvetica', 'normal');
+          let estimatedTableH = headerHeight;
           const preparedRows = rows.map(([label, val]) => {
             const valStr = String(val || "N/A");
             const wrapped = doc.splitTextToSize(valStr, col2W - 6);
@@ -357,22 +365,28 @@ export default function PdfPreviewModal({ project, onClose }) {
             return { label, wrapped, rowH };
           });
 
-          checkPageBreak(Math.min(estimatedTableH, 50));
+          // Mantener juntos los requisitos que caben en una página completa.
+          checkPageBreak(Math.min(estimatedTableH + 5.5, pageHeight - margin * 2 - 30));
 
           // Encabezado de la tabla estilo IEEE
-          doc.setFillColor(...COLOR_TABLE_HEADER);
-          doc.rect(margin, y, maxLineWidth, 7.5, "F");
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(9.5);
-          doc.setTextColor(255, 255, 255);
-          doc.text(tableTitle.toUpperCase(), margin + 4, y + 5.2);
-          y += 7.5;
+          const drawTableHeader = () => {
+            doc.setFillColor(...COLOR_TABLE_HEADER);
+            doc.rect(margin, y, maxLineWidth, headerHeight, 'F');
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9.5);
+            doc.setTextColor(255, 255, 255);
+            doc.text(titleLines, margin + 4, y + 5.2);
+            y += headerHeight;
+          };
+          drawTableHeader();
 
           doc.setDrawColor(...COLOR_LINE);
           doc.setLineWidth(0.25);
 
           preparedRows.forEach(({ label, wrapped, rowH }, idx) => {
+            const needsContinuation = y + rowH + 2 > pageHeight - margin - 12;
             checkPageBreak(rowH + 2);
+            if (needsContinuation) drawTableHeader();
 
             // Celda etiqueta (gris neutro alternado)
             doc.setFillColor(idx % 2 === 0 ? 248 : 255, idx % 2 === 0 ? 250 : 255, idx % 2 === 0 ? 252 : 255);
@@ -657,8 +671,8 @@ export default function PdfPreviewModal({ project, onClose }) {
             designClassImg,
             "8.3 Diagrama de Clases de Diseño",
             "Figura 8.3: Diagrama de Clases de Diseño en Capas",
-            project.diagrams?.designClasses?.description,
-            project.diagrams?.designClasses?.descripcion_jerarquica
+            designClasses?.description,
+            designClasses?.descripcion_jerarquica
           );
         }
 
@@ -695,21 +709,44 @@ export default function PdfPreviewModal({ project, onClose }) {
           );
         }
 
+        // Nunca omitir un diagrama existente si falla el servicio externo de PNG.
+        const unavailableDiagrams = [
+          [useCaseImg, project.diagrams?.useCase, "8.1 Diagrama de Casos de Uso"],
+          [classImg, project.diagrams?.classDiagram, "8.2 Diagrama de Clases de Dominio"],
+          [designClassImg, designClasses, "8.3 Diagrama de Clases de Diseño"],
+          [navImg, project.diagrams?.navigationTree, "8.4 Árbol de Navegación"],
+          [softImg, softDiag, "8.5 Diagrama de Arquitectura de Software"],
+          [sysImg, sysDiag, "8.6 Diagrama de Arquitectura de Sistema"]
+        ];
+        for (const [image, diagram, title] of unavailableDiagrams) {
+          const source = diagram?.plantumlCode || diagram?.code;
+          if (image || !source) continue;
+          checkPageBreak(pageHeight);
+          drawSubSectionHeader(title);
+          drawParagraph("No se pudo obtener la imagen del diagrama. Se conserva el código fuente como respaldo; esta sección no constituye una verificación visual.");
+          if (diagram.description) drawParagraph(diagram.description);
+          doc.setFont("courier", "normal");
+          doc.setFontSize(8);
+          const lines = String(source).split(/\r?\n/).flatMap(line => doc.splitTextToSize(line || " ", maxLineWidth));
+          for (const line of lines) {
+            checkPageBreak(4);
+            doc.setFont("courier", "normal");
+            doc.setFontSize(8);
+            doc.setTextColor(...COLOR_TEXT);
+            doc.text(line, margin, y);
+            y += 3.8;
+          }
+        }
+
         // --- 9. WIREFRAMES Y MOCKUPS DE INTERFAZ ---
         if (project.mockups && project.mockups.length > 0) {
-          drawSectionHeader("9. Wireframes y Prototipos de Interfaz");
+          let mockupSectionStarted = false;
 
           for (let i = 0; i < project.mockups.length; i++) {
             const mockup = project.mockups[i];
             if (!mockup.preview_code) continue;
 
-            checkPageBreak(45);
             const formattedScreen = formatScreenName(mockup.nombre_pantalla);
-            drawSubSectionHeader(`9.${i + 1} ${formattedScreen} (${capitalizeFirst(mockup.tipo || "interfaz")})`);
-
-            if (mockup.descripcion) {
-              drawParagraph(capitalizeFirst(mockup.descripcion));
-            }
 
             // Renderizar mockup HTML en iframe (para que Tailwind CDN y CSS ejecuten correctamente)
             let mockupImgData = null;
@@ -737,7 +774,7 @@ export default function PdfPreviewModal({ project, onClose }) {
                 const timeout = setTimeout(() => {
                   try { document.body.removeChild(iframe); } catch {}
                   resolve(null);
-                }, 12000);
+                }, 25000);
 
                 const tryCapture = async (attempts) => {
                   if (attempts <= 0) {
@@ -763,7 +800,9 @@ export default function PdfPreviewModal({ project, onClose }) {
                   );
 
                   if (tailwindReady) {
+                    let captureFontCss = "";
                     try {
+                      captureFontCss = await embedCaptureFonts(iDoc);
                       await iDoc.fonts?.ready;
                       await Promise.all([...iDoc.images].map((img) => img.complete
                         ? Promise.resolve()
@@ -799,7 +838,16 @@ export default function PdfPreviewModal({ project, onClose }) {
                       scrollY: 0,
                       allowTaint: false,
                       foreignObjectRendering: true,
-                      onclone: normalizeFormControlsForCapture
+                      onclone: clonedDocument => {
+                        normalizeFormControlsForCapture(clonedDocument);
+                        // html2canvas elimina los <style> al clonar con copyStyles.
+                        // Reponer @font-face aquí los conserva dentro del SVG.
+                        if (captureFontCss) {
+                          const fontStyle = clonedDocument.createElement("style");
+                          fontStyle.textContent = captureFontCss;
+                          clonedDocument.body.prepend(fontStyle);
+                        }
+                      }
                     }).then(canvas => {
                       clearTimeout(timeout);
                       try { document.body.removeChild(iframe); } catch {}
@@ -838,6 +886,21 @@ export default function PdfPreviewModal({ project, onClose }) {
               mockupImgData = null;
             }
 
+            // Cada pantalla empieza en una página propia: reservar espacio solo
+            // para el título dejaba descripciones huérfanas antes de su captura.
+            checkPageBreak(pageHeight);
+            if (!mockupSectionStarted) {
+              drawSectionHeader("9. Wireframes y Prototipos de Interfaz");
+              mockupSectionStarted = true;
+            }
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(11);
+            const screenTitle = doc.splitTextToSize(`9.${i + 1} ${formattedScreen} (${capitalizeFirst(mockup.tipo || "interfaz")})`, maxLineWidth);
+            doc.setTextColor(...COLOR_HEADING);
+            doc.text(screenTitle, margin, y);
+            y += screenTitle.length * 4.8 + 2;
+            if (mockup.descripcion) drawParagraph(capitalizeFirst(mockup.descripcion));
+
             if (mockupImgData) {
               const size = await getImageSize(mockupImgData);
               const maxW = maxLineWidth;
@@ -847,7 +910,7 @@ export default function PdfPreviewModal({ project, onClose }) {
               const pxToMm = (px) => px * 0.264583;
               let wMm = Math.min(pxToMm(w), maxW);
               let hMm = (wMm / pxToMm(w)) * pxToMm(h);
-              const maxAllowedH = 130;
+              const maxAllowedH = Math.max(20, Math.min(130, pageHeight - margin - 12 - y - 30));
               if (hMm > maxAllowedH) {
                 hMm = maxAllowedH;
                 wMm = hMm * (pxToMm(w) / pxToMm(h));
@@ -861,16 +924,19 @@ export default function PdfPreviewModal({ project, onClose }) {
               doc.setFont("helvetica", "bold");
               doc.setFontSize(9);
               doc.setTextColor(...COLOR_HEADING);
-              doc.text(`Figura 9.${i + 1}. Prototipo de Interfaz: ${formattedScreen}.`, pageWidth / 2, y, { align: "center" });
-              y += 6;
+              const captionLines = doc.splitTextToSize(`Figura 9.${i + 1}. Prototipo de Interfaz: ${formattedScreen}.`, maxLineWidth);
+              doc.text(captionLines, pageWidth / 2, y, { align: "center" });
+              y += captionLines.length * 4 + 2;
 
               // Trazabilidad RF
               if (mockup.rf_trazabilidad && mockup.rf_trazabilidad.length > 0) {
                 doc.setFont("helvetica", "normal");
                 doc.setFontSize(8.5);
                 doc.setTextColor(...COLOR_MUTED);
-                doc.text(`Trazabilidad RF: ${mockup.rf_trazabilidad.join(", ")}`, margin, y);
-                y += 5;
+                const groups = groupRequirementReferences(mockup.rf_trazabilidad);
+                for (const [label, references] of groups) {
+                  if (references.length) drawParagraph(`Trazabilidad ${label}: ${references.join(", ")}`);
+                }
               }
             } else {
               // Fallback: tabla de especificación textual IEEE
@@ -881,7 +947,7 @@ export default function PdfPreviewModal({ project, onClose }) {
                 ["Elementos visibles", (mockup.elementos_visibles || []).join(", ") || "N/A"],
                 ["Campos formulario", (mockup.campos_formulario || []).map(c => c.nombre || c).join(", ") || "N/A"],
                 ["Acciones principales", (mockup.acciones_principales || []).join(", ") || "N/A"],
-                ["RF trazabilidad", (mockup.rf_trazabilidad || []).join(", ") || "N/A"],
+                ["Requisitos referenciados", (mockup.rf_trazabilidad || []).join(", ") || "N/A"],
                 ["Estado", capitalizeFirst(mockup.estado || "generado")],
                 ["Versión", String(mockup.version || 1)]
               ];
@@ -892,10 +958,10 @@ export default function PdfPreviewModal({ project, onClose }) {
 
         // --- 10. CERTIFICACIÓN Y APROBACIÓN TÉCNICA ---
         checkPageBreak(45);
-        drawSectionHeader("10. Certificación y Aprobación Técnica");
+        drawSectionHeader("10. Revisión y Aprobación Técnica");
 
         const certText =
-          "El presente documento técnico de especificación de requisitos y diseño preliminar ha sido formalmente estructurado y validado conforme a los estándares internacionales de ingeniería de software ISO/IEC/IEEE 29148:2018 para especificaciones formales y modelado de sistemas.";
+          "Este documento reúne requisitos y diseños generados con asistencia de IA y revisados en el flujo de iCase. ISO/IEC/IEEE 29148:2018 se utiliza como referencia documental; las aprobaciones del proyecto y los controles automáticos no constituyen certificación normativa ni garantizan cobertura funcional completa. La aceptación técnica corresponde a los responsables del proyecto.";
         drawParagraph(certText);
         y += 10;
 

@@ -15,11 +15,20 @@ describe('paquete final de entrega', () => {
       artifact('infraestructura', 4, 'ops/compose.yml', 'ops'),
       artifact('pipeline_ci_cd', 5, '.github/workflows/ci.yml', 'ci')
     ];
+    const contract = { entities: [], operations: [] };
+    artifacts[0].archivos.push(
+      { ruta: 'backend/icase.manifest.json', contenido: JSON.stringify(contract) },
+      { ruta: 'backend/GENERATION-REPORT.json', contenido: JSON.stringify({
+        fuente_cobertura: { requisitos: [], contrato: contract, declaracion: { modo_entrega: 'parcial', aceptar_pendientes: true } }
+      }) }
+    );
     const result = await new DeliveryPackageGenerator().generar({ proyecto: { nombre: 'Demo' }, insumos: { artefactos: artifacts }, versionesOrigen: {} });
     expect(result.archivos.map((item) => item.ruta)).toEqual(expect.arrayContaining(['DELIVERY.md', 'delivery-manifest.json', 'backend/app.js']));
     expect(result.dependencias).toHaveLength(5);
     const manifest = JSON.parse(result.archivos.find((item) => item.ruta === 'delivery-manifest.json').contenido);
     expect(manifest.artefactos.find((item) => item.tipo === 'pipeline_ci_cd').version).toBe(5);
+    expect(manifest.alcance.modo_entrega).toBe('parcial');
+    expect(result.archivos.find((item) => item.ruta === 'DELIVERY.md').contenido).toContain('Entrega **parcial**');
   });
 
   test('rechaza colisiones de rutas con contenidos diferentes', async () => {

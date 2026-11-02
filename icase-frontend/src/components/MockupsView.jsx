@@ -79,7 +79,13 @@ export default function MockupsView({
     if (job.estado === "completado" && handledJobRef.current !== job.id) {
       handledJobRef.current = job.id;
       if (response.mockups?.length && onUpdateMockup) onUpdateMockup(response.mockups);
-      setFeedback({ type: "success", message: `Generación completada: ${job.total_generados || 0} mockups disponibles.` });
+      const repairWarnings = (job.advertencias || []).filter(message => /reparaci[oó]n no aplicada|reparables autom[aá]ticamente|quedan pendientes/i.test(message));
+      setFeedback({
+        type: job.solo_reparar && !job.total_generados ? "error" : "success",
+        message: job.solo_reparar
+          ? `Reparación terminada: ${job.total_generados || 0} pantallas modificadas. ${repairWarnings.length ? repairWarnings.join(' ') : 'Revisa los controles antes de aprobar.'}`
+          : `Generación completada: ${job.total_generados || 0} mockups disponibles.`
+      });
       loadCatalog().catch(() => {});
     } else if (job.estado === "fallido") {
       setFeedback({ type: "error", message: job.error || "La generación falló." });
@@ -134,11 +140,11 @@ export default function MockupsView({
     if (next.has(slug)) next.delete(slug); else next.add(slug);
     return next;
   });
-  const startGeneration = async (ids, label) => {
-    if (!projectId || busy || !ids.length) return;
+  const startGeneration = async (ids, label, soloReparar = false) => {
+    if (!projectId || busy || (!ids.length && !soloReparar)) return;
     try {
       setFeedback(null);
-      const response = await startMockupJobApi(projectId, ids, "", requirements);
+      const response = await startMockupJobApi(projectId, ids, "", requirements, soloReparar);
       applyJobResponse(response);
       setFeedback({ type: "success", message: response.reutilizado ? "Se recuperó el trabajo activo." : `${label} iniciada. Puedes cambiar de pestaña.` });
     } catch (error) {
@@ -184,8 +190,9 @@ export default function MockupsView({
         <div className={`rounded-xl border px-3 py-2 text-xs ${traceability.valido ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 font-semibold">{traceability.valido ? <Check size={13} /> : <AlertTriangle size={13} />}Trazabilidad árbol → mockups → RF</span>
-            <span>{traceability.metricas?.mockups_generados || 0}/{traceability.metricas?.pantallas_arbol || 0} pantallas · {traceability.metricas?.cobertura_rf_altos_porcentaje ?? 100}% RF altos</span>
+            <span>{traceability.metricas?.mockups_generados || 0}/{traceability.metricas?.pantallas_arbol || 0} pantallas · {traceability.metricas?.cobertura_rf_altos_porcentaje ?? 0}% RF altos con vínculo</span>
           </div>
+          <p className="mt-1">{traceability.metricas?.criterios_ui_con_evidencia || 0}/{traceability.metricas?.criterios_ui_evaluados || 0} criterios UI específicos con evidencia. Vincular un RF no garantiza su implementación completa.</p>
           {[...(traceability.errores || []), ...(traceability.advertencias || [])].map((message, index) => <p key={index} className="mt-1">• {message}</p>)}
         </div>
       )}
@@ -198,6 +205,7 @@ export default function MockupsView({
           <button onClick={() => setShowCatalog(value => !value)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${showCatalog ? 'border-[#CFC0F1] bg-[#F2EDFF] text-[#6D28D9]' : 'border-slate-200 text-slate-600'}`}><ListTree size={13} />Pantallas</button>
           <button onClick={() => setShowDetails(value => !value)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${showDetails ? 'border-[#CFC0F1] bg-[#F2EDFF] text-[#6D28D9]' : 'border-slate-200 text-slate-600'}`}><InfoIcon size={13} />Detalles</button>
           <button onClick={() => setSelectedIds(new Set(screens.filter(p => !mockupMap.has(p.slug) || quality(mockupMap.get(p.slug)) === 'invalido').map(p => p.slug)))} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600">Solo faltantes o inválidas</button>
+          <button disabled={busy || !mockups.length} onClick={() => startGeneration([], "Reparación de pendientes", true)} title="Una reparación por pantalla, hasta cinco por trabajo. Conserva originales si no mejora. No corrige vínculos o roles ambiguos." className="rounded-lg border border-violet-300 px-2.5 py-1.5 text-xs text-violet-700 disabled:opacity-40">Reparar pendientes</button>
           <button onClick={() => setShowPalette(v => !v)} className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700"><Palette size={13} />Paleta</button>
           <button disabled={busy || selectedIds.size === 0} onClick={() => startGeneration([...selectedIds], "Generación seleccionada")} className="flex items-center gap-1.5 rounded-lg bg-[#7C3AED] px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-violet-900/10 hover:bg-[#6D28D9] disabled:opacity-40"><WandSparkles size={13} />Generar seleccionadas ({selectedIds.size})</button>
         </div>

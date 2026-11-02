@@ -31,4 +31,16 @@ describe('generación persistente del frontend', () => {
     });
     expect(result.advertencias[0]).toContain('Reporte');
   });
+
+  test('una lista corregida vacía del mockup no hereda referencias antiguas del árbol', async () => {
+    const result = await new FrontendScaffoldGenerator().generar({
+      proyecto: { nombre: 'Biblioteca' }, versionesOrigen: {},
+      insumos: { decisiones: {}, diseno: {
+        manifiesto_navegacion: [{ pantalla_id: 'catalogo', nombre: 'Catálogo', slug: 'catalogo', rf_trazabilidad: ['RF-99'] }],
+        mockups: [{ pantalla_id: 'catalogo', nombre_pantalla: 'catalogo', rf_trazabilidad: [], preview_code: '<main>Catálogo</main>' }]
+      } }
+    });
+    expect(result.trazabilidad_rf).toEqual([]);
+    expect(result.advertencias.join(' ')).toContain('sin trazabilidad RF');
+  });
 });

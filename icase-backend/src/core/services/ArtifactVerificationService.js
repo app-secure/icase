@@ -40,8 +40,10 @@ class ArtifactVerificationService {
           const driver = { postgres: 'org.postgresql', mysql: 'mysql-connector-j' }[engine];
           if (!driver) errores.push('El backend Java solo admite PostgreSQL o MySQL.');
           else if (!(files.get('backend/pom.xml') || '').includes(driver)) errores.push(`Se declara ${engine}, pero el pom.xml no incluye su controlador (${driver}).`);
-        } else if (/postgres/i.test(text) && !/(?:\bpg\b|prisma|typeorm|sequelize|knex)/i.test(files.get('backend/package.json') || '')) {
-          errores.push('Se declara PostgreSQL, pero el backend no incluye un controlador de base de datos.');
+        } else {
+          const engine = (() => { try { return JSON.parse(files.get('backend/icase.manifest.json') || '{}').database; } catch { return null; } })();
+          // Las plantillas compartidas pueden mencionar otros motores; manda el contrato, no una búsqueda global.
+          if ((engine ? engine === 'postgres' : /postgres/i.test(text)) && !/(?:\bpg\b|prisma|typeorm|sequelize|knex)/i.test(files.get('backend/package.json') || '')) errores.push('Se declara PostgreSQL, pero el backend no incluye un controlador de base de datos.');
         }
         try {
           const manifest = JSON.parse(files.get('backend/icase.manifest.json') || '{}');

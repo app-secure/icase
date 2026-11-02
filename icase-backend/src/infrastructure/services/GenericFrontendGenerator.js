@@ -3,6 +3,7 @@ const path = require('node:path');
 
 const renderTemplate = require('./renderTemplate');
 const ModuleService = require('../../core/services/ModuleService');
+const MobileRuntime = require('../../core/constants/MobileRuntime');
 
 const TEMPLATES = path.join(__dirname, '..', 'templates', 'frontend');
 const template = (name) => fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
@@ -33,6 +34,7 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/JsonOperationScreen.jsx', lenguaje: 'javascript', contenido: template('OperationScreen.jsx') }
       ] : [{ ruta: 'frontend/src/OperationScreen.jsx', lenguaje: 'javascript', contenido: template('OperationScreen.jsx') }]),
       { ruta: 'frontend/src/session.jsx', lenguaje: 'javascript', contenido: template(auth ? 'session-auth.jsx' : 'session-open.jsx') },
+      { ruta: 'frontend/src/AssociationsPanel.jsx', lenguaje: 'javascript', contenido: template('AssociationsPanel.jsx') },
       ...(auth ? [
         { ruta: 'frontend/src/LoginScreen.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('LoginScreen.jsx'), { REGISTRO: JSON.stringify(openRoles) }) },
         { ruta: 'frontend/src/UsersScreen.jsx', lenguaje: 'javascript', contenido: template('UsersScreen.jsx') }
@@ -54,7 +56,18 @@ class GenericFrontendGenerator {
     const first = views[0]?.route || '/';
     files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes) : this._app(proyecto, views, imports, routes, first) });
     if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth));
-    return files;
+    if(new ModuleService().activos(decisiones.modulos).includes('procesos_negocio')){
+      if(!auth)throw new Error('La bandeja de procesos requiere JWT');
+      if(views.some(view=>view.route==='/procesos'))throw new Error('La ruta /procesos está reservada para la bandeja de procesos');
+      files.push({ruta:'frontend/src/ProcessScreen.jsx',lenguaje:'javascript',contenido:template('ProcessScreen.jsx')});
+      const app=files.find(file=>file.ruta==='frontend/src/App.jsx');
+      app.contenido="import ProcessScreen from './ProcessScreen';\n"+app.contenido;
+      app.contenido=app.contenido.replace('<Routes>','<Routes><Route path="/procesos" element={<ProcessScreen/>}/>')
+        .replace('<span>{user.nombre','<Link to="/procesos">Procesos</Link><span>{user.nombre');
+    }
+    const extended = new (require('./SpecializedFrontendGenerator'))().apply(new (require('./ExtendedFrontendGenerator'))().apply(files,{decisiones}),{decisiones});
+    return new ModuleService().activos(decisiones.modulos).includes('eventos_cambios')
+      ? new (require('./ChangeEventsClientGenerator'))().apply(extended, { auth }) : extended;
   }
 
   _view(screen) {
@@ -105,7 +118,7 @@ export default function App() {
 
   _mobile(name, auth = false) {
     return [
-      { ruta: 'mobile/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${slug(name)}-mobile`, version: '1.0.0', private: true, main: 'node_modules/expo/AppEntry.js', scripts: { start: 'expo start', 'export:android': 'expo export --platform android' }, dependencies: { expo: '~57.0.0', react: '19.2.3', 'react-native': '0.86.0' } }, null, 2) },
+      { ruta: 'mobile/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${slug(name)}-mobile`, version: '1.0.0', private: true, engines: { node: MobileRuntime.node }, main: 'node_modules/expo/AppEntry.js', scripts: { start: 'expo start', 'export:android': 'expo export --platform android' }, dependencies: { expo: MobileRuntime.expo, react: MobileRuntime.react, 'react-native': MobileRuntime.reactNative } }, null, 2) },
       { ruta: 'mobile/app.json', lenguaje: 'json', contenido: JSON.stringify({ expo: { name, slug: slug(name), version: '1.0.0', platforms: ['android', 'ios'] } }, null, 2) },
       { ruta: 'mobile/.env.example', lenguaje: 'dotenv', contenido: 'EXPO_PUBLIC_API_URL=http://YOUR_LAN_IP:3000\n' },
       { ruta: 'mobile/App.js', lenguaje: 'javascript', contenido: renderTemplate(template('mobile-App.js'), { AUTH: String(auth), TITLE: JSON.stringify(name) }) }

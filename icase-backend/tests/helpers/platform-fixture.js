@@ -59,9 +59,11 @@ function buildData() {
 
 async function startPlatform({ env = {}, usuario = null } = {}) {
   const data = buildData();
+  data.sesionRevocada = [];
   const calls = [];
   const repositories = Object.fromEntries(Object.entries(data).map(([name, rows]) => [name, fakeRepository(name, rows, calls)]));
   for (const name of ['usuario', 'estandar', 'casoDeUso', 'diseno', 'planCodificacion']) repositories[name] = fakeRepository(name, [], calls);
+  repositories.sesionRevocada.revocar = async (entry) => { data.sesionRevocada.push(entry); };
   if (usuario) repositories.usuario = usuario;
   const merged = { ...process.env, JWT_SECRET: SECRET, NODE_ENV: 'test', ...env };
   Object.assign(process.env, { JWT_SECRET: merged.JWT_SECRET });

@@ -1,6 +1,11 @@
 const FuenteModel = require('../../infrastructure/database/schemas/FuenteSchema');
 
 class MongoFuenteRepository {
+  async listarRutasArchivos() {
+    const rows = await FuenteModel.find({ ruta_archivo: { $type: 'string' } }).select('ruta_archivo').lean();
+    return rows.map((row) => row.ruta_archivo);
+  }
+
   async crear(datos) {
     const fuente = new FuenteModel(datos);
     const guardada = await fuente.save();

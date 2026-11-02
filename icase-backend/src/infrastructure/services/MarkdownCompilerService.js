@@ -69,7 +69,7 @@ class MarkdownCompilerService {
         md += `- ${obj}\n`;
       }
     } else {
-      md += `- Realizar el levantamiento y estructuración formal de requerimientos funcionales y no funcionales cuantificables bajo estándar IEEE 830.\n`;
+      md += `- Realizar el levantamiento y estructuración de requisitos orientados a ISO/IEC/IEEE 29148:2018, con evidencia y métricas sustentadas o pendientes de confirmación.\n`;
       md += `- Diseñar los casos de uso para los 4 procesos fundamentales con especificación de flujos básicos, alternativos y excepciones.\n`;
       md += `- Modelar la arquitectura de software y del sistema conforme a las tecnologías y restricciones expresamente aprobadas.\n`;
     }
@@ -118,7 +118,7 @@ class MarkdownCompilerService {
     md += `## 7. Análisis de Requerimientos\n\n`;
 
     // 7.1 Requerimientos Funcionales
-    md += `### 7.1 Especificación de Requerimientos Funcionales (IEEE 830)\n\n`;
+    md += `### 7.1 Especificación de Requerimientos Funcionales (ISO/IEC/IEEE 29148:2018)\n\n`;
     if (rfList.length === 0) {
       md += `*No se registran requerimientos funcionales aprobados aún.*\n\n`;
     } else {
@@ -309,7 +309,7 @@ class MarkdownCompilerService {
           md += `**Acciones Principales:** ${mockup.acciones_principales.join(', ')}  \n`;
         }
         if (mockup.rf_trazabilidad && mockup.rf_trazabilidad.length > 0) {
-          md += `**Trazabilidad RF:** ${mockup.rf_trazabilidad.join(', ')}  \n`;
+          md += `**Requisitos referenciados (no acredita cobertura):** ${mockup.rf_trazabilidad.join(', ')}  \n`;
         }
         md += `**Estado:** ${mockup.estado || 'generado'}  \n`;
         md += `**Versión:** ${mockup.version || 1}  \n\n`;
@@ -319,7 +319,7 @@ class MarkdownCompilerService {
     }
 
     md += `---\n\n`;
-    md += `*Documento de Especificación Técnica de Software (IEEE 830 / ISO 29148)*\n`;
+    md += `*Documento de Especificación Técnica de Software (ISO/IEC/IEEE 29148:2018)*\n`;
 
     return md;
   }

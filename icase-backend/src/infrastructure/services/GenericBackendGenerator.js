@@ -5,6 +5,8 @@ const BackendDataLayerGenerator = require('./BackendDataLayerGenerator');
 const AccessControlService = require('../../core/services/AccessControlService');
 const StackCatalog = require('../../core/services/StackCatalog');
 const OpenApiGenerator = require('./OpenApiGenerator');
+const NestRuntimePolicy = require('../../core/services/NestRuntimePolicy');
+const ChangeEventsGenerator = require('./ChangeEventsGenerator');
 
 const AUTH_TEMPLATES = path.join(__dirname, '..', 'templates', 'auth');
 const SPRING_TEMPLATES = path.join(__dirname, '..', 'templates', 'spring');
@@ -15,21 +17,62 @@ const slug = (value) => String(value || 'project').normalize('NFD').replace(/[̀
 
 class GenericBackendGenerator {
   generate({ proyecto, requirements, stack, domainModel = null, rules = [], access = null, modules = null }) {
+    if(modules?.modo==='personalizado'&&modules.modulos?.some(item=>item.id==='procesos_negocio'&&item.activo)){
+      const result=new (require('../../core/services/ModuleService'))().validar(modules);
+      if(result.errores.length)throw new Error('Procesos de negocio: '+result.errores.join(' '));
+    }
     const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules });
     const policy = new AccessControlService().politica(access, contract.operations);
     contract.auth = policy;
     const resolved = StackCatalog.resolve(stack);
+    if(resolved.backend==='spring'&&rules.some(rule=>rule.tipo==='calculo')) throw new Error('Los cálculos declarativos aún no soportan Spring.');
+    for(const operation of contract.operations) for(const rule of operation.rules.filter(rule=>rule.tipo==='calculo')) if(operation.schema?.properties?.[rule.campo]) operation.schema.properties[rule.campo].readOnly=true;
     const database = resolved.database;
     const data = new BackendDataLayerGenerator().build({ contract, database, policy, modules });
+    const associationApi = true;
+    for (const item of data.model.associations || []) {
+      item.endpoints_generated = associationApi;
+      if (database === 'mongodb') item.requires_replica_set = true;
+    }
+    contract.associations = (data.model.associations || []).map((item) => ({ ...item,
+      operations: item.entities.map((name) => contract.operations.filter((operation) => operation.entity === contract.entities.find((entity) => entity.name === name)?.key).map((operation) => operation.key))
+    }));
+    const modelFile = data.files.shared.find((file) => file.ruta === 'backend/src/data/model.js');
+    if (modelFile) modelFile.contenido = `module.exports = ${JSON.stringify(data.model, null, 2)};\n`;
     const openapi = new OpenApiGenerator().build({ proyecto, contract, model: data.model, policy });
+    if (associationApi && data.model.associations.length) {
+      const idPattern = database === 'mongodb' ? '^[a-fA-F0-9]{24}$' : '^[1-9][0-9]{0,18}$';
+      const pair = { type: 'object', additionalProperties: false, required: ['source_id', 'target_id'], properties: { source_id: { type: 'string', pattern: idPattern }, target_id: { type: 'string', pattern: idPattern } } };
+      for (const item of data.model.associations) {
+        const responses = { 200: { description: 'Operación completada; asociación y desasociación idempotentes.' }, 400: { description: 'Datos inválidos' }, 401: { description: 'Sesión requerida si está habilitada' }, 403: { description: 'Sin permisos sobre ambos extremos' }, 404: { description: 'Relación o extremo inexistente' }, 409: { description: 'Conflicto referencial' }, 429: { description: 'Límite HTTP excedido' } };
+        if (database === 'mongodb') responses[503] = { description: 'El servidor no soporta las transacciones requeridas; configura un replica set.' };
+        openapi.paths['/api/associations/' + item.table] = {
+          get: { summary: 'Listar vínculos de ' + item.entities.join(' / '), description: 'Requiere GET en ambos extremos. Lista desde source_id, máximo 100 resultados; has_more indica otra página. Continúa con after_target_id igual al último target_id recibido.', parameters: [{ name: 'source_id', in: 'query', required: true, schema: pair.properties.source_id }, { name: 'after_target_id', in: 'query', schema: pair.properties.target_id }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } }], responses },
+          post: { summary: 'Asociar registros', description: 'Requiere GET y PATCH sobre ambos extremos o administrador.', requestBody: { required: true, content: { 'application/json': { schema: pair } } }, responses },
+          delete: { summary: 'Desasociar registros sin borrarlos', description: 'Requiere GET y PATCH sobre ambos extremos o administrador.', requestBody: { required: true, content: { 'application/json': { schema: pair } } }, responses }
+        };
+      }
+    }
     data.files.shared.push(
+      { ruta: 'backend/src/security/http-security.js', lenguaje: 'javascript', contenido: fs.readFileSync(path.join(AUTH_TEMPLATES, 'http-security.js'), 'utf8') },
       { ruta: 'backend/openapi.json', lenguaje: 'json', contenido: `${JSON.stringify(openapi, null, 2)}\n` },
       { ruta: 'backend/src/docs/openapi.js', lenguaje: 'javascript', contenido: `module.exports = ${JSON.stringify(openapi)};\n` }
     );
-    if (resolved.backend === 'spring') return this._spring(proyecto, contract, resolved, data, policy);
-    return resolved.backend === 'nest'
+    const events = new ChangeEventsGenerator();
+    if (resolved.backend === 'spring') {
+      if(new (require('../../core/services/ModuleService'))().activos(modules).includes('procesos_negocio'))throw new Error('Procesos transaccionales aún no soportan Spring.');
+      if(new (require('../../core/services/ModuleService'))().activos(modules).some(id=>['pagos_prueba','sso_oidc','mapas','camara_qr'].includes(id)))throw new Error('Integraciones especializadas aún no soportan Spring.');
+      if (new (require('../../core/services/ModuleService'))().activos(modules).some(id=>['archivos_imagenes','reportes_calculos','recuperacion_cuentas'].includes(id))) throw new Error('Archivos/reportes/recuperación aún no soportan Spring.');
+      if (events.enabled(modules)) throw new Error('Eventos de cambios experimental aún no soporta Spring.');
+      return this._spring(proyecto, contract, resolved, data, policy);
+    }
+    const generated = resolved.backend === 'nest'
       ? this._nest(proyecto, contract, database, data, policy, resolved)
       : this._express(proyecto, contract, database, data, policy, resolved);
+    const withEvents = events.enabled(modules) ? events.apply(generated, { resolved, policy, contract,modules }) : generated;
+    const extended=new (require('./GeneratedExtensionsGenerator'))().apply(withEvents,{resolved,policy,contract,modules});
+    const integrated=new (require('./SpecializedIntegrationsGenerator'))().apply(extended,{resolved,policy,contract,modules});
+    return new (require('./BusinessProcessGenerator'))().apply(integrated,{resolved,policy,contract,modules,requirements});
   }
 
   _authFiles(policy, adapter) {
@@ -47,10 +90,10 @@ class GenericBackendGenerator {
     return JSON.stringify({
       ...contract,
       database,
-      stack: { backend: resolved.backend, lenguaje: resolved.language },
+      stack: { backend: resolved.backend, lenguaje: resolved.language, ...(resolved.backend === 'nest' ? { version_framework: NestRuntimePolicy.version, node: NestRuntimePolicy.node } : {}) },
       mode: contract.entities.length ? 'entity_crud_v1' : 'generic_crud_v1',
       docs: { openapi: '/api/openapi.json', archivo: 'backend/openapi.json' },
-      storage: { layout: 'table_per_entity', operations: data.model.operations, tables, migrations: data.migrations.map((item) => item.id) },
+      storage: { layout: 'table_per_entity', operations: data.model.operations, tables, associations: data.model.associations || [], migrations: data.migrations.map((item) => item.id) },
       requisitos: contract.operations.map((item) => ({ id: item.id, nombre: item.name })),
       endpoints: contract.operations.flatMap((item) => [item.collectionPath, item.itemPath])
     }, null, 2);
@@ -58,20 +101,21 @@ class GenericBackendGenerator {
 
   _dependencies(database, nest = false, auth = false) {
     return {
+      helmet: '^8.0.0', 'express-rate-limit': '^7.5.0', cors: '^2.8.5',
       ...(auth ? { jsonwebtoken: '^9.0.3' } : {}),
-      ...(nest ? { '@nestjs/common': '^10.0.0', '@nestjs/core': '^10.0.0', '@nestjs/platform-express': '^10.0.0', 'reflect-metadata': '^0.2.0', rxjs: '^7.8.0' } : { cors: '^2.8.5', dotenv: '^16.4.7', express: '^4.21.2' }),
+      ...(nest ? { '@nestjs/common': NestRuntimePolicy.version, '@nestjs/core': NestRuntimePolicy.version, '@nestjs/platform-express': NestRuntimePolicy.version, 'reflect-metadata': '^0.2.0', rxjs: '^7.8.0' } : { cors: '^2.8.5', dotenv: '^16.4.7', express: '^4.21.2' }),
       ...(database === 'postgres' ? { pg: '^8.13.0' } : database === 'mysql' ? { mysql2: '^3.11.0' } : { mongodb: '^6.12.0' })
     };
   }
 
   _nest(project, contract, database, data, policy, resolved) {
-    const packageJson = { name: `${slug(project.nombre)}-backend`, version: '1.0.0', private: true, scripts: { build: 'tsc', start: 'node dist/main.js', dev: 'ts-node src/main.ts', test: 'node --test' }, dependencies: this._dependencies(database, true, policy.habilitada), devDependencies: { '@types/node': '^22.0.0', '@types/pg': '^8.11.0', 'ts-node': '^10.9.0', typescript: '^5.0.0' } };
+    const packageJson = { name: `${slug(project.nombre)}-backend`, version: '1.0.0', private: true, engines: { node: NestRuntimePolicy.node }, scripts: { build: 'tsc', start: 'node dist/main.js', dev: 'ts-node src/main.ts', test: 'node --test' }, dependencies: this._dependencies(database, true, policy.habilitada), devDependencies: { '@types/express': '^5.0.0', '@types/node': '^22.0.0', '@types/pg': '^8.11.0', 'ts-node': '^10.9.0', typescript: '^5.0.0' } };
     return [
       { ruta: 'backend/package.json', lenguaje: 'json', contenido: JSON.stringify(packageJson, null, 2) },
       { ruta: 'backend/tsconfig.json', lenguaje: 'json', contenido: JSON.stringify({ compilerOptions: { module: 'commonjs', target: 'ES2022', experimentalDecorators: true, emitDecoratorMetadata: true, strict: true, esModuleInterop: true, allowJs: true, outDir: './dist' }, include: ['src/**/*.ts', 'src/**/*.js'] }, null, 2) },
       { ruta: 'backend/.env.example', lenguaje: 'dotenv', contenido: this._env(database, policy) },
       { ruta: 'backend/icase.manifest.json', lenguaje: 'json', contenido: this._manifest(project, contract, database, data, resolved) },
-      { ruta: 'backend/src/main.ts', lenguaje: 'typescript', contenido: "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\nimport { StoreExceptionFilter } from './store-exception.filter';\nasync function bootstrap(){const app=await NestFactory.create(AppModule);app.enableCors();app.useGlobalFilters(new StoreExceptionFilter());await app.listen(Number(process.env.PORT||3000));}\nbootstrap();\n" },
+      { ruta: 'backend/src/main.ts', lenguaje: 'typescript', contenido: "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\nimport { StoreExceptionFilter } from './store-exception.filter';\nconst configureHttpSecurity = require('./security/http-security');\nasync function bootstrap(){const app=await NestFactory.create(AppModule);configureHttpSecurity(app.getHttpAdapter().getInstance());app.useGlobalFilters(new StoreExceptionFilter());await app.listen(Number(process.env.PORT||3000));}\nbootstrap();\n" },
       { ruta: 'backend/src/store-exception.filter.ts', lenguaje: 'typescript', contenido: this._nestFilter() },
       { ruta: 'backend/src/app.module.ts', lenguaje: 'typescript', contenido: this._nestModule(policy) },
       { ruta: 'backend/src/app.controller.ts', lenguaje: 'typescript', contenido: this._nestController(contract) },
@@ -205,6 +249,8 @@ export class AuthController {
     });
     return [
       { ruta: 'backend/pom.xml', lenguaje: 'xml', contenido: renderTemplate(read('pom.xml'), { ARTIFACT: `${slug(project.nombre)}-backend`, DATABASE_DEPENDENCIES: driver }) },
+      { ruta: 'backend/src/test/java/app/HttpSecurityFilterTest.java', lenguaje: 'java', contenido: read('HttpSecurityFilterTest.java') },
+      { ruta: 'backend/src/test/java/app/AssociationStoreTest.java', lenguaje: 'java', contenido: read('AssociationStoreTest.java') },
       { ruta: 'backend/README.md', lenguaje: 'markdown', contenido: this._springReadme(project, database, policy) },
       { ruta: 'backend/.gitignore', lenguaje: 'gitignore', contenido: 'target/\n.env\n' },
       { ruta: 'backend/.env.example', lenguaje: 'dotenv', contenido: this._env(database, policy, 'spring') },
@@ -259,24 +305,28 @@ export class RecordStore extends Base implements OnModuleInit {
 export class StoreExceptionFilter implements ExceptionFilter {
   catch(error: any, host: ArgumentsHost) {
     const response = host.switchToHttp().getResponse();
-    if (error instanceof HttpException) return response.status(error.getStatus()).json(error.getResponse());
-    const status = Number.isInteger(error?.status) ? error.status : 500;
-    return response.status(status).json({ message: error?.message || 'Error interno', ...(error?.details ? { details: error.details } : {}) });
+    if (error instanceof HttpException) return response.status(error.getStatus()).json(error.getStatus() >= 500 ? { message: 'Error interno del servidor' } : error.getResponse());
+    const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
+    return response.status(status).json(status >= 500 ? { message: 'Error interno del servidor' } : { message: error?.message || 'Solicitud inválida', ...(error?.details ? { details: error.details } : {}) });
   }
 }
 `;
   }
 
   _nestController(contract) {
-    return `import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, Res } from '@nestjs/common';
+    return `import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { RecordStore } from './record.store';
 const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
+const associations=require('./data/associations');
 @Controller() export class AppController {
  constructor(private readonly store:RecordStore){}
  private capability(value:string){if(!allowed.has(value))throw new NotFoundException('Operación inexistente');return value;}
  @Get('health') async health(){await this.store.ping();return {status:'ok',database:'connected'};}
  @Get('api/contract') contract(){return ${JSON.stringify(contract)};}
  @Get('api/openapi.json') openapi(){return require('./docs/openapi.js');}
+ @Get('api/associations/:relation') links(@Param('relation') relation:string,@Query() query:any){return associations(this.store,'list',relation,query);}
+ @Post('api/associations/:relation') @HttpCode(200) link(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'link',relation,body);}
+ @Delete('api/associations/:relation') unlink(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'unlink',relation,body);}
  @Get('api/operations/:capability') async list(@Param('capability') capability:string,@Query() query:any,@Res({passthrough:true}) res:any){
    const result=await this.store.list(this.capability(capability),query);
    if(result&&result.pagination){
@@ -299,15 +349,19 @@ const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.ke
   _expressApp(contract, policy) {
     const auth = policy.habilitada;
     return `const express=require('express');
-const cors=require('cors');
+const configureHttpSecurity=require('./security/http-security');
+const associations=require('./data/associations');
 const Store=require('./record.store');
 ${auth ? "const mountAuth=require('./auth/auth-express');\nconst {createAuth}=require('./auth/auth-core');\n" : ''}const app=express();const store=new Store();const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
-app.locals.store=store;app.use(cors());app.use(express.json({limit:'1mb'}));
+app.locals.store=store;configureHttpSecurity(app);app.use(express.json({limit:'1mb'}));
 ${auth ? "const auth=createAuth({store});app.locals.auth=auth;mountAuth(app,auth);\n" : ''}app.locals.init=async()=>{await store.init();${auth ? 'await auth.init();' : ''}};
 const capability=(req,res,next)=>allowed.has(req.params.capability)?next():res.status(404).json({message:'Operación inexistente'});
 app.get('/health',async(_req,res,next)=>{try{await store.ping();res.json({status:'ok',database:'connected'})}catch(e){next(e)}});
 app.get('/api/contract',(_req,res)=>res.json(${JSON.stringify(contract)}));
 app.get('/api/openapi.json',(_req,res)=>res.json(require('./docs/openapi')));
+app.get('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'list',req.params.relation,req.query))}catch(e){next(e)}});
+app.post('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'link',req.params.relation,req.body))}catch(e){next(e)}});
+app.delete('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'unlink',req.params.relation,req.body))}catch(e){next(e)}});
 app.get('/api/operations/:capability',capability,async(req,res,next)=>{
   try{
     const result=await store.list(req.params.capability,req.query);
@@ -325,14 +379,15 @@ app.get('/api/operations/:capability',capability,async(req,res,next)=>{
 app.post('/api/operations/:capability',capability,async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')return res.status(400).json({message:'El cuerpo debe ser un objeto'});res.status(201).json(await store.create(req.params.capability,req.body))}catch(e){next(e)}});
 app.patch('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.update(req.params.capability,req.params.id,req.body);value?res.json(value):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
 app.delete('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.remove(req.params.capability,req.params.id);value?res.json({deleted:true,id:req.params.id}):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
-app.use((error,_req,res,_next)=>res.status(Number.isInteger(error.status)?error.status:500).json({message:error.message||'Error interno',...(error.details?{details:error.details}:{})}));module.exports=app;
+app.use((error,_req,res,_next)=>{const status=Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:500;res.status(status).json(status>=500?{message:'Error interno del servidor'}:{message:error.message||'Solicitud inválida',...(error.details?{details:error.details}:{})});});module.exports=app;
 `;
   }
 
   _env(database, policy = { habilitada: false }, runtime = 'node') {
     const url = database === 'postgres' ? 'postgresql://app:change-me@localhost:5432/app' : database === 'mysql' ? 'mysql://app:change-me@localhost:3306/app' : 'mongodb://localhost:27017/app';
     const auth = policy.habilitada ? `# Defínelos antes de producción: con ${runtime === 'spring' ? 'APP_ENV' : 'NODE_ENV'}=production se rechaza un JWT_SECRET débil.\nJWT_SECRET=change-me\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=ChangeMe-123\n` : '';
-    return `PORT=3000\nDATABASE_URL=${url}\nDB_NAME=app\n${auth}`;
+    const http = '# Orígenes permitidos en producción (separados por coma, sin barra final).\nCORS_ORIGINS=http://localhost:8080,http://localhost:5173\nHTTP_RATE_WINDOW_MS=60000\nHTTP_RATE_MAX=300\nAUTH_RATE_MAX=20\n' + (runtime === 'node' ? '# Ajustar solo si hay un proxy de confianza delante.\nTRUST_PROXY_HOPS=\n' : 'APP_ENV=development\n');
+    return `PORT=3000\nDATABASE_URL=${url}\nDB_NAME=app\n${http}${auth}`;
   }
 
   _class(value) { return value.split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(''); }

@@ -15,6 +15,15 @@ class CiCdPipelineGenerator extends IGeneradorArtefacto {
       { ruta: 'ops/ci/README.md', lenguaje: 'markdown', contenido: this._readme(proyecto.nombre, tests.version, infrastructure.version) },
       { ruta: 'ops/ci/pipeline-manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: proyecto.nombre, proveedor: 'GitHub Actions', pruebas_version: tests.version, infraestructura_version: infrastructure.version, movil_incluido: mobile, despliegue_automatico: false }, null, 2) }
     ];
+    if(new (require('../../core/services/ModuleService'))().activos(decisiones.modulos).includes('eventos_replicas')) {
+      const workflow=files.find(file=>file.ruta==='.github/workflows/ci-cd.yml');
+      workflow.contenido=workflow.contenido.replace('jobs:\n','env:\n  EVENTS_NAMESPACE: ci-${{ github.repository_id }}-${{ github.run_id }}\n\njobs:\n');
+    }
+    if(new (require('../../core/services/ModuleService'))().activos(decisiones.modulos).includes('recuperacion_cuentas')) {
+      const workflow=files.find(file=>file.ruta==='.github/workflows/ci-cd.yml');
+      workflow.contenido=workflow.contenido.replaceAll('docker compose -f ops/docker-compose.yml','docker compose -f ops/docker-compose.yml -f ops/docker-compose.test-mail.yml')
+        .replace('      AUTH_RATE_MAX: 300','      AUTH_RATE_MAX: 300\n      TEST_SMTP_URL: http://localhost:8025');
+    }
     return {
       archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
       dependencias: [{ tipo: 'pruebas', version: tests.version }, { tipo: 'infraestructura', version: infrastructure.version }],
@@ -43,7 +52,7 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,6 +68,9 @@ ${java ? `      - uses: actions/setup-java@v4
       - name: Build backend
         working-directory: backend
         run: mvn -B -q -DskipTests package
+      - name: Test generated Java HTTP security
+        working-directory: backend
+        run: mvn -B test
 ` : `      - name: Install and build backend
         working-directory: backend
         run: npm install && npm run build --if-present
@@ -74,12 +86,19 @@ ${mobile ? `      - name: Bundle Android client
       - name: Install test dependencies
         working-directory: tests
         run: npm install
+      - name: Audit Node dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for directory in ${java ? 'frontend tests' : 'backend frontend tests'}${mobile ? ' mobile' : ''}; do
+            (cd "$directory" && npm audit --audit-level=high)
+          done
       - name: Build deployment images
         run: docker compose -f ops/docker-compose.yml build
 
   test:
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       DB_NAME: icase_test
       DB_USER: icase_test
@@ -88,6 +107,9 @@ ${mobile ? `      - name: Bundle Android client
       JWT_SECRET: ci-only-secret-not-for-production
       ADMIN_EMAIL: admin@example.test
       ADMIN_PASSWORD: ci-admin-password-123
+      # Límites del entorno aislado: la batería concentra solicitudes de varios roles.
+      HTTP_RATE_MAX: 3000
+      AUTH_RATE_MAX: 300
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -121,7 +143,7 @@ ${mobile ? `      - name: Bundle Android client
   package:
     if: github.ref == 'refs/heads/main'
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Build images

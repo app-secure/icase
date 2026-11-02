@@ -1,0 +1,53 @@
+// Solo el verificador aislado lo ejecuta; no se incorpora al servidor del usuario.
+const assert=require('node:assert/strict'),fs=require('node:fs'),{randomUUID}=require('node:crypto'),{Pool}=require('pg');
+if(process.env.ICASE_OUTBOX_VERIFY!=='isolated')throw new Error('Este escenario requiere el entorno Docker aislado');
+const prefix=fs.existsSync('./src/processes/business-process-outbox.js')?'./src/':'./dist/';
+const {createWorker}=require(prefix+'processes/business-process-outbox');
+const {engine}=require(prefix+'processes/business-process');
+const {repository}=require(prefix+'processes/business-process-pg');
+const Store=require(prefix+(prefix.includes('dist')?'record.store.base':'record.store'));
+const definition=VERIFIED_DEFINITION;
+(async()=>{
+ const phase=process.env.ICASE_OUTBOX_PHASE;
+ if(phase&&!['persist','recover'].includes(phase))throw new Error('Fase de verificación inválida');
+ const schema=phase?'outbox_restart':'outbox_'+randomUUID().replaceAll('-',''),admin=new Pool({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:5000});
+ if(phase!=='recover')await admin.query('CREATE SCHEMA "'+schema+'"');
+ const makePool=()=>new Pool({connectionString:process.env.DATABASE_URL,options:'-c search_path='+schema,connectionTimeoutMillis:5000});
+ let pool=makePool(),worker,second,keep=false;
+ try{
+  const store=new Store();await store.pool.end();store.pool=pool;store.processOutboxEnabled=true;await store.init();
+  const service=engine({definitions:[definition],repository:repository(store),authorize:()=>{}});
+  if(phase==='recover'){
+   assert.equal((await pool.query('SELECT count(*) AS total FROM icase_process_outbox WHERE delivered_at IS NULL')).rows[0].total,'1');
+   let received=0;worker=createWorker({pool,publish:async()=>{received++;},interval:60000});await worker.tick();await worker.stop();
+   assert.equal(received,1);assert.equal((await pool.query('SELECT count(*) AS total FROM icase_process_outbox WHERE delivered_at IS NULL')).rows[0].total,'0');
+   console.log('OUTBOX_RESTART_RECOVERED: otro contenedor recuperó el aviso tras reiniciar PostgreSQL');return;
+  }
+  const record=async estado=>(await store.create('rf-01',{nombre:'Outbox '+randomUUID(),estado})).id;
+  const process=async bad=>{const ids=[await record('pendiente'),await record(bad?'cancelado':'pendiente')];const started=await service.start({id:'1',rol:'administrador'},definition.id,{primero:String(ids[0]),segundo:String(ids[1])});return {ids,id:started.id,action:{action:'cerrar',version:0,key:'outbox-'+randomUUID()}};};
+  const failed=await process(true);await assert.rejects(service.act({id:'2',rol:'administrador'},failed.id,failed.action),error=>error.status===409);
+  assert.equal((await pool.query('SELECT count(*) AS total FROM icase_process_outbox')).rows[0].total,'0');
+  assert.equal((await store.getRecord('rf-01',failed.ids[0])).data.estado,'pendiente');
+  const good=await process(false);await service.act({id:'2',rol:'administrador'},good.id,good.action);
+  await service.act({id:'2',rol:'administrador'},good.id,good.action);
+  assert.equal((await pool.query('SELECT count(*) AS total FROM icase_process_outbox')).rows[0].total,'1');
+  if(phase==='persist'){keep=true;console.log('OUTBOX_RESTART_PERSISTED: cambio y aviso confirmados; productor termina antes de publicar');return;}
+  await pool.end();pool=makePool();store.pool=pool; // El aviso sobrevive a perder el pool/proceso emisor.
+  worker=createWorker({pool,publish:async()=>{throw new Error('secret-adapter-error');},interval:60000});await worker.tick();await worker.stop();
+  let row=(await pool.query('SELECT * FROM icase_process_outbox')).rows[0];assert.equal(row.attempts,1);assert.equal(row.delivered_at,null);assert.equal(row.last_error,'publish_failed');
+  await pool.query('UPDATE icase_process_outbox SET available_at=now()');let delivered=0;
+  worker=createWorker({pool,publish:async operation=>{assert.equal(operation,'rf-01');assert.equal((await store.getRecord('rf-01',good.ids[0])).data.estado,'cerrado');delivered++;},interval:60000});await worker.tick();await worker.stop();
+  assert.equal(delivered,1);assert.ok((await pool.query('SELECT delivered_at FROM icase_process_outbox')).rows[0].delivered_at);
+  const crash=await process(false);await service.act({id:'2',rol:'administrador'},crash.id,crash.action);let failAck=true;
+  const proxy={connect:async()=>{const client=await pool.connect();return {release:()=>client.release(),query:(sql,args)=>{if(failAck&&sql.includes('SET delivered_at=now()')){failAck=false;throw new Error('simulated_crash_before_ack');}return client.query(sql,args);}};}};
+  worker=createWorker({pool:proxy,publish:async()=>{delivered++;},interval:60000});await worker.tick();await worker.stop();
+  assert.equal((await pool.query('SELECT count(*) AS total FROM icase_process_outbox WHERE delivered_at IS NULL')).rows[0].total,'1');
+  worker=createWorker({pool,publish:async()=>{delivered++;},interval:60000});await worker.tick();await worker.stop();
+  assert.equal(delivered,3);assert.equal((await service.read({id:'2',rol:'administrador'},crash.id)).history.length,1);
+  for(let i=0;i<2;i++){const p=await process(false);await service.act({id:'2',rol:'administrador'},p.id,p.action);}
+  let concurrent=0;const publish=async()=>{concurrent++;await new Promise(resolve=>setTimeout(resolve,25));};
+  worker=createWorker({pool,publish,interval:60000});second=createWorker({pool,publish,interval:60000});await Promise.all([worker.tick(),second.tick()]);await worker.stop();await second.stop();assert.equal(concurrent,2);
+  assert.equal((await pool.query('SELECT count(*) AS total FROM icase_process_outbox WHERE delivered_at IS NULL')).rows[0].total,'0');
+  console.log('OUTBOX_OK: rollback; persistencia tras reconexión; reintento; duplicado tras fallo de ack sin repetir negocio; dos workers SKIP LOCKED');
+ }finally{await worker?.stop();await second?.stop();await pool.end();if(!keep)await admin.query('DROP SCHEMA "'+schema+'" CASCADE');await admin.end();}
+})().catch(error=>{console.error(error.message);process.exitCode=1;});

@@ -37,8 +37,14 @@ class MockupValidatorService {
       return { html: '', advertencias: ['HTML vacío o inválido'] };
     }
 
-    let sanitizado = html;
+    // Reparaciones léxicas de contorno, nunca completar contenido perdido.
+    let sanitizado = html.replace(/^\uFEFF/, '').trim();
     const advertencias = [];
+    const original = sanitizado;
+    sanitizado = sanitizado.replace(/^```(?:html)?\s*([\s\S]*?)\s*```$/i, '$1').trim()
+      .replace(/^<+(?=<!doctype\s+html\b|<html\b)/i, '')
+      .replace(/(<\/html\s*>)>+\s*$/i, '$1');
+    if (sanitizado !== original) advertencias.push('Delimitadores externos de HTML normalizados sin modificar el contenido');
 
     // Preservar tailwind cdn y tailwind.config, remover cualquier otro script
     sanitizado = sanitizado.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (match, attrs, content) => {
@@ -150,8 +156,8 @@ html,body{background-color:var(--icase-bg)!important;color:var(--icase-text)!imp
       return false;
     }
     const trimmed = html.trim().toLowerCase();
-    return (trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html')) &&
-           trimmed.includes('</html>');
+    return /^(?:<!doctype\s+html[^>]*>\s*)?<html\b[^>]*>/i.test(trimmed) &&
+           /<head\b[^>]*>[\s\S]*<\/head\s*>\s*<body\b[^>]*>[\s\S]*<\/body\s*>\s*<\/html\s*>\s*$/i.test(trimmed);
   }
 }
 

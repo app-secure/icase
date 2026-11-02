@@ -1,8 +1,14 @@
+const MockupFunctionalCoverageService = require('./MockupFunctionalCoverageService');
+
 const STOPWORDS = new Set([
   'accion', 'actualizar', 'administrar', 'aplicacion', 'crear', 'debe', 'digital',
   'el', 'en', 'gestionar', 'gestion', 'la', 'las', 'los', 'mostrar', 'nuevo',
   'para', 'permitir', 'procesar', 'realizar', 'registrar', 'sistema', 'una',
-  'usuario', 'validar', 'ver'
+  'usuario', 'validar', 'ver', 'consultar', 'consulta', 'pantalla', 'vista',
+  'formulario', 'detalle', 'informacion', 'datos', 'cliente', 'personal',
+  'acceso', 'principal', 'modulo', 'flujo', 'interfaz', 'estado', 'por',
+  'del', 'con', 'sin', 'sus', 'que', 'como', 'mediante', 'cada',
+  'visualizacion', 'validacion', 'procesamiento', 'marcado', 'acumulacion'
 ]);
 
 const SYNONYMS = new Map([
@@ -25,8 +31,7 @@ function stem(value) {
 }
 
 function tokens(value) {
-  return [...new Set(normalize(value)
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
+  return [...new Set(normalize(String(value || '').replace(/([a-z])([A-Z])/g, '$1 $2'))
     .replace(/<[^>]+>/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .split(/\s+/)
@@ -42,19 +47,57 @@ function requirementText(requirement) {
   return [requirement?.nombre, requirement?.descripcion].filter(Boolean).join(' ');
 }
 
+function localHtmlText(html) {
+  const source = String(html || '');
+  const main = source.match(/<main\b[^>]*>([\s\S]*?)<\/main\s*>/i);
+  const clean = (main ? main[1] : source)
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style|nav|footer|aside)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
+  // Un header dentro de main identifica la pantalla, no el shell global.
+  const local = main ? clean : clean.replace(/<header\b[^>]*>[\s\S]*?<\/header\s*>/gi, ' ');
+  return local.replace(/<[^>]+>/g, ' ')
+    .replace(/&#(x[\da-f]+|\d+);/gi, (_, value) => {
+      const code = value[0].toLowerCase() === 'x' ? parseInt(value.slice(1), 16) : Number(value);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
+    })
+    .replace(/&(?:nbsp|amp|quot|lt|gt);/gi, ' ');
+}
+
+function pageHeadingText(html) {
+  const clean = String(html || '').replace(/<(script|style|nav|aside|footer)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
+  return [...clean.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map(match => localHtmlText(match[1])).join(' ');
+}
+
 function screenText(screen) {
+  // Con HTML disponible solo cuenta el contenido local, no etiquetas de la IA,
+  // nombres de módulos, rutas ancestras, clases CSS o enlaces del shell común.
+  if (screen?.preview_code) return localHtmlText(screen.preview_code) + ' ' + pageHeadingText(screen.preview_code);
   return [
-    screen?.nombre, screen?.nombre_visible, screen?.nombre_pantalla, screen?.ruta,
-    screen?.modulo, screen?.flujo, screen?.componentes, screen?.elementos_visibles,
+    screen?.nombre, screen?.nombre_visible, screen?.nombre_pantalla,
+    screen?.componentes, screen?.elementos_visibles,
     screen?.acciones_principales, screen?.campos_formulario?.map((field) => field?.nombre),
-    screen?.preview_code
   ].flat(Infinity).filter(Boolean).join(' ');
 }
 
 function hasSemanticEvidence(requirement, screen) {
-  const expected = tokens(requirementText(requirement));
-  const actual = new Set(tokens(screenText(screen)));
-  return expected.some((token) => actual.has(token));
+  const expected = tokens(requirement?.nombre || requirement?.descripcion);
+  const local = screenText(screen);
+  const actual = new Set(tokens(local));
+  if (screen?.preview_code) {
+    const source = String(screen.preview_code);
+    const main = source.match(/<main\b[^>]*>([\s\S]*?)<\/main\s*>/i);
+    const html = (main ? main[1] : source.replace(/<header\b[^>]*>[\s\S]*?<\/header\s*>/gi, ' '))
+      .replace(/<(script|style|nav|footer|aside)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
+    const headings = [...html.matchAll(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/gi)]
+      .map(match => localHtmlText(match[1])).join(' ');
+    const scope = new Set(tokens(headings + ' ' + pageHeadingText(source)));
+    if (scope.size && !expected.some(token => scope.has(token))) return false;
+    const intent = normalize(requirement?.nombre);
+    if (/^(validacion|validar)\b/.test(intent) && !/\bvalid(ar|acion|ado|ada)\b/.test(normalize(local))) return false;
+    if (/^(marcado|marcar)\b/.test(intent) && !/\bmarc(ar|ado|ada)\b/.test(normalize(local))) return false;
+  }
+  const matches = expected.filter(token => actual.has(token));
+  return matches.length > 0 && (matches.length >= 2 || matches.length / expected.length >= 0.5);
 }
 
 function isHighPriority(requirement) {
@@ -93,7 +136,7 @@ function uiEvidence(mockups, expected) {
   return {
     roles: expected.roles.length === 0 || expected.roles.some((actor) => {
       const normalizedActor = normalize(actor);
-      return roles.has(normalizedActor) || normalized.includes(normalizedActor);
+      return roles.has(normalizedActor) || [...roles].some(role => role.endsWith(' de ' + normalizedActor)) || normalized.includes(normalizedActor);
     }),
     fields: !expected.fields || mockups.some((mockup) =>
       (Array.isArray(mockup?.campos_formulario) && mockup.campos_formulario.length > 0) ||
@@ -103,11 +146,15 @@ function uiEvidence(mockups, expected) {
       (Array.isArray(mockup?.acciones_principales) && mockup.acciones_principales.length > 0) ||
       /<(?:button|a)\b/i.test(mockup?.preview_code || '')
     ),
-    states: !expected.states || /\b(estado|disponible|agotado|pendiente|aprobado|rechazado|confirmado|cancelado|preparacion|listo|activo|inactivo)\b/.test(normalized)
+    states: !expected.states || /\b(estado|disponible|agotado|pendiente|aprobado|rechazado|confirmado|cancelado|preparacion|listo|activo|inactivo)s?\b/.test(normalized)
   };
 }
 
 class MockupTraceabilityService {
+  constructor() {
+    this.functionalCoverage = new MockupFunctionalCoverageService();
+  }
+
   buildManifest(screens = [], requirements = []) {
     const functional = this.functionalRequirements(requirements);
     return (Array.isArray(screens) ? screens : []).map((screen) => ({
@@ -121,15 +168,11 @@ class MockupTraceabilityService {
 
   enrichMockup(mockup, screen, requirements = []) {
     const functional = this.functionalRequirements(requirements);
-    const known = new Map(functional.map((requirement) => [requirementId(requirement), requirement]));
-    const declared = (Array.isArray(mockup?.rf_trazabilidad) ? mockup.rf_trazabilidad : [])
-      .map((item) => String(item || '').trim().toUpperCase())
-      .filter((id) => known.has(id));
     const inferred = functional
       .filter((requirement) => hasSemanticEvidence(requirement, { ...screen, ...mockup }))
       .map(requirementId);
-    const inherited = Array.isArray(screen?.rf_trazabilidad) ? screen.rf_trazabilidad : [];
-    return [...new Set([...declared, ...inferred, ...inherited].filter(Boolean))];
+    // Declarar un ID o heredarlo del árbol no demuestra cobertura.
+    return [...new Set(inferred.filter(Boolean))];
   }
 
   enrichAll(mockups = [], manifest = [], requirements = []) {
@@ -150,7 +193,7 @@ class MockupTraceabilityService {
     const errors = [];
     const warnings = [];
     const screens = Array.isArray(manifest) ? manifest : [];
-    const generated = Array.isArray(mockups) ? mockups : [];
+    let generated = Array.isArray(mockups) ? mockups : [];
     const functional = this.functionalRequirements(requirements);
 
     if (screens.length && generated.length === 0 && !requireComplete) {
@@ -195,6 +238,18 @@ class MockupTraceabilityService {
     const unknownIds = [...traceIds].filter((id) => !knownIds.has(id));
     if (unknownIds.length) errors.push(`Los mockups referencian requisitos inexistentes o no aprobados: ${unknownIds.join(', ')}.`);
 
+    const rejectedReferences = [];
+    generated = generated.map(mockup => ({
+      ...mockup,
+      rf_trazabilidad: (mockup.rf_trazabilidad || []).filter(id => {
+        const requirement = functional.find(item => requirementId(item) === String(id).trim().toUpperCase());
+        const supported = requirement && hasSemanticEvidence(requirement, mockup);
+        if (!supported && requirement) rejectedReferences.push({ pantalla: mockup.nombre_pantalla || mockup.pantalla_id, requisito: requirementId(requirement) });
+        return supported;
+      })
+    }));
+    if (rejectedReferences.length) warnings.push(`Referencias sin evidencia local, no contabilizadas como cobertura: ${rejectedReferences.map(item => `${item.pantalla}: ${item.requisito}`).join('; ')}.`);
+
     const highUiRequirements = functional.filter((requirement) => isHighPriority(requirement) && hasHumanActor(requirement));
     const uncoveredHigh = highUiRequirements
       .filter((requirement) => {
@@ -217,6 +272,14 @@ class MockupTraceabilityService {
       );
       const expected = expectedUiEvidence(requirement);
       const evidence = uiEvidence(tracedMockups, expected);
+      const functionalCriteria = this.functionalCoverage.validate(requirement, tracedMockups);
+      for (const criterion of functionalCriteria.filter(item => !item.presente)) {
+        const message = `${id || requirement.nombre}: falta evidencia de ${criterion.tipo} (${criterion.valores.join(' / ')}).`;
+        // Solo condiciones explícitas de RF altos bloquean. Las inferencias
+        // lingüísticas se muestran para revisión, no como reglas inventadas.
+        if (criterion.confianza === 'explicita' && isHighPriority(requirement)) errors.push(message);
+        else warnings.push(message);
+      }
       const missing = Object.entries(evidence).filter(([, present]) => !present).map(([kind]) => kind);
       if (tracedMockups.length && missing.length) {
         const labels = { roles: 'roles', fields: 'campos de entrada', actions: 'acciones', states: 'estados' };
@@ -230,6 +293,7 @@ class MockupTraceabilityService {
         pantallas: tracedMockups.map((mockup) => mockup.nombre_visible || mockup.nombre_pantalla),
         esperado: expected,
         evidencia: evidence,
+        criterios_funcionales: functionalCriteria,
         faltantes: missing
       };
     });
@@ -256,7 +320,10 @@ class MockupTraceabilityService {
         cobertura_rf_altos_porcentaje: highUiRequirements.length
           ? Math.round(((highUiRequirements.length - uncoveredHigh.length) / highUiRequirements.length) * 100)
           : 100,
-        detalle_rf: requirementDetails
+        detalle_rf: requirementDetails,
+        criterios_ui_evaluados: requirementDetails.reduce((sum, item) => sum + item.criterios_funcionales.length, 0),
+        criterios_ui_con_evidencia: requirementDetails.reduce((sum, item) => sum + item.criterios_funcionales.filter(criterion => criterion.presente).length, 0),
+        referencias_sin_evidencia: rejectedReferences
       },
       validado_en: new Date()
     };

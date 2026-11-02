@@ -75,7 +75,7 @@ describe('Módulo de Mockups - Casos de Uso y Servicios', () => {
     });
 
     await expect(useCase.ejecutar({ proyectoId: 'proj-1' }))
-      .rejects.toThrow('Debes aprobar los cuatro diagramas');
+      .rejects.toThrow('Debes aprobar los seis diagramas');
     expect(mockupIaService.generarMockups).not.toHaveBeenCalled();
   });
 

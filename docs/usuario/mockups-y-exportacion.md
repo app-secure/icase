@@ -23,6 +23,10 @@ El mockup es una propuesta visual. Un botón en HTML no demuestra que exista una
 
 ## Versiones y fallos
 
+**Reparar pendientes** revisa los mockups existentes y solicita a la IA corregir solo HTML inválido o criterios UI omitidos. Hace un intento por pantalla y como máximo cinco pantallas por trabajo; no repara automáticamente vínculos o roles ambiguos. Las ediciones manuales se protegen de la selección automática.
+
+Si la propuesta sigue inválida, no mejora o pierde campos, acciones o criterios ya presentes, se conserva el original y se muestra el motivo. Solo una reparación aceptada aumenta la versión y conserva hasta diez versiones anteriores en almacenamiento. Los cambios concurrentes cancelan el guardado para evitar sobrescrituras. Una reparación aceptada vuelve a requerir aprobación de mockups. No garantiza que el proveedor consiga corregir el defecto en ese intento.
+
 La generación seleccionada evita rehacer pantallas que ya están correctas. No repitas clics mientras exista un trabajo activo. Si falla, revisa su mensaje y la configuración del proveedor antes de volver a intentarlo.
 
 Cambiar el árbol o un RF puede invalidar la cobertura de pantallas previas. Revisa las dependencias antes de aprobar nuevamente.

@@ -1,6 +1,7 @@
 const { CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
 const AccessControlService = require('./AccessControlService');
 const ModuleService = require('./ModuleService');
+const NestRuntimePolicy = require('./NestRuntimePolicy');
 
 const CODE_DECISION_PHASES = Object.values(CODE_PHASE_DEFINITIONS)
   .filter((item) => item.tipo === 'decision')
@@ -100,7 +101,7 @@ class CodePlanningProposalService {
   _stack_tecnologico({ texto }) {
     const advertencias = [];
     const conSpring = /spring|\bjava\b/i.test(texto);
-    const backend = /nestjs/i.test(texto) ? 'Node.js + NestJS'
+    const backend = /nestjs/i.test(texto) ? NestRuntimePolicy.label
       : conSpring ? 'Java + Spring Boot'
         : 'Node.js + Express';
     const frontend = /react native/i.test(texto) ? 'React + Vite para web; React Native para móvil' : 'React + Vite';
@@ -109,6 +110,9 @@ class CodePlanningProposalService {
         : /mysql/i.test(texto) ? 'MySQL' : 'MongoDB';
     if (!/nestjs|express|spring|\bjava\b/i.test(texto)) advertencias.push('Backend no especificado: se propone Node.js + Express para revisión.');
     if (!/react/i.test(texto)) advertencias.push('Frontend no especificado: se propone React + Vite para revisión.');
+    if (/nestjs/i.test(texto)) {
+      try { NestRuntimePolicy.validate(texto); } catch (error) { advertencias.push(error.message); }
+    }
     if (!/postgres(?:ql)?|mongodb|mongo\b|mysql/i.test(texto)) advertencias.push('Base de datos no especificada: se propone MongoDB para revisión.');
     if (conSpring && baseDatos === 'MongoDB') {
       baseDatos = 'PostgreSQL';
@@ -122,6 +126,7 @@ class CodePlanningProposalService {
     return {
       valor: {
         backend,
+        ...(/nestjs/i.test(backend) ? { version_backend: NestRuntimePolicy.version } : {}),
         frontend,
         base_datos: baseDatos,
         gestor_paquetes: conSpring ? 'Maven' : /\bpnpm\b/i.test(texto) ? 'pnpm' : /\byarn\b/i.test(texto) ? 'yarn' : 'npm',

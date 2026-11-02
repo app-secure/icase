@@ -40,7 +40,7 @@ function prepare(table, body) {
     if (rule.tipo === 'valor_por_defecto' && !present(result[rule.campo])) result[rule.campo] = rule.valor;
     if (rule.tipo === 'maquina_estados' && !present(result[rule.campo])) result[rule.campo] = rule.inicial;
   }
-  return result;
+  return require('./calculations').derive(rules[table] || [],result);
 }
 
 /**
@@ -102,4 +102,4 @@ function check(table, mode, next, previous) {
   }
 }
 
-module.exports = { prepare, check };
+module.exports = { prepare, check, derive:(table,body,previous)=>require('./calculations').derive(rules[table] || [],body,previous) };

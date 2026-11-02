@@ -3,6 +3,9 @@ const cors = require('cors');
 const { corsOptions, securityHeaders, jsonLimit } = require('./infrastructure/security/httpSecurity');
 const buildProjectAccess = require('./infrastructure/security/projectAccess');
 const { getJwtSecret } = require('./infrastructure/security/jwtSecret');
+const responseErrors = require('./infrastructure/security/responseErrors');
+const SessionRevocationService = require('./core/services/SessionRevocationService');
+const MongoSesionRevocadaRepository = require('./interface-adapters/repositories/MongoSesionRevocadaRepository');
 
 // Repositorios
 const MongoProyectoRepository = require('./interface-adapters/repositories/MongoProyectoRepository');
@@ -80,6 +83,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   app.disable('x-powered-by');
   if (env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(env.TRUST_PROXY) ? Number(env.TRUST_PROXY) : env.TRUST_PROXY);
   app.use(securityHeaders);
+  app.use(responseErrors);
   app.use(cors(corsOptions(env)));
   app.use(express.json({ limit: jsonLimit(env) }));
   app.use(express.urlencoded({ extended: true, limit: jsonLimit(env) }));
@@ -87,6 +91,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   // Inyección de Dependencias
   const proyectoRepo = repositories.proyecto || new MongoProyectoRepository();
   const usuarioRepo = repositories.usuario || new MongoUsuarioRepository();
+  app.locals.sessionRevocation = new SessionRevocationService(repositories.sesionRevocada || new MongoSesionRevocadaRepository());
+  app.locals.jwtSecret = getJwtSecret(env);
   const requerimientoRepo = repositories.requerimiento || new MongoRequerimientoRepository();
   const diagramaRepo = repositories.diagrama || new MongoDiagramaRepository();
   const estandarRepo = repositories.estandar || new MongoEstandarRepository();
@@ -228,6 +234,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
 
   const authController = new AuthController({
     usuarioRepository: usuarioRepo,
+    sessionService: app.locals.sessionRevocation,
     env
   });
 
@@ -278,7 +285,11 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   return {
     app,
     estandarRepo,
-    reanudarTrabajosDiagrama: () => proyectoController.reanudarTrabajosDiagrama()
+    fuenteRepo,
+    reanudarTrabajosDiagrama: async () => {
+      if (typeof trabajoGeneracionRepo.finalizarVerificacionesExpiradas === 'function') await trabajoGeneracionRepo.finalizarVerificacionesExpiradas();
+      return proyectoController.reanudarTrabajosDiagrama();
+    }
   };
 }
 

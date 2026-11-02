@@ -10,7 +10,7 @@ class Requerimiento {
     actores = [],
     precondiciones = '',
     poscondiciones = '',
-    metrica_medible = '', // Mandatorio para RNF según IEEE 830 y docente
+    metrica_medible = '', // RNF: métrica sustentada o Por confirmar con el usuario.
     origen = 'explicito',
     evidencia = '',
     fuentes_origen = [],
@@ -52,7 +52,7 @@ class Requerimiento {
     if (!this.identificador) throw new Error('El identificador de requerimiento es obligatorio.');
     if (!this.nombre) throw new Error('El nombre de requerimiento es obligatorio.');
     if (this.tipo === 'RNF' && (!this.metrica_medible || this.metrica_medible.trim() === '')) {
-      throw new Error('Todo RNF debe poseer una métrica medible y cuantificable.');
+      throw new Error('Todo RNF debe indicar una métrica sustentada o Por confirmar con el usuario.');
     }
   }
 }

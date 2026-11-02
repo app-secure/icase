@@ -1,6 +1,6 @@
 # 🏗️ Arquitectura del Sistema y Flujo de Trabajo de I-CASE
 
-Plataforma inteligente asistida por Inteligencia Artificial para la captura de insumos, especificación formal de requerimientos de software (estándar IEEE 830), síntesis de diagramas de arquitectura UML/C4 y exportación autónoma de informes técnicos en PDF.
+Plataforma inteligente asistida por Inteligencia Artificial para la captura de insumos, especificación de requisitos orientada a ISO/IEC/IEEE 29148:2018, síntesis de diagramas de arquitectura UML/C4 y exportación de informes técnicos en PDF.
 
 ---
 
@@ -42,7 +42,7 @@ Plataforma inteligente asistida por Inteligencia Artificial para la captura de i
 * **Groq Cloud (Llama 3.3 70B):** Inferencia de ultra-baja latencia (<2s) para generación de requerimientos y código UML.
 * **DeepSeek API (DeepSeek Chat):** Modelo especializado en razonamiento técnico y diseño arquitectónico de software.
 * **OpenRouter Fast API:** Gateway alternativo de respaldo (*fallback*) ante contingencias de cuotas o saldos.
-* **PlantUMLSynthesizer / Prompt Templates Engine:** Motor de plantillas de prompts (`analista_ieee830.md`, `disenador_arquitectura.md`, `auditor_qa.md`) y sintetizador de código UML.
+* **PlantUMLSynthesizer / Prompt Templates Engine:** Motor de plantillas de prompts (`analista_iso29148.md`, `disenador_arquitectura.md`, `auditor_qa.md`) y sintetizador de código UML.
 
 ---
 
@@ -54,7 +54,7 @@ El flujo operativo se divide en 5 etapas secuenciales:
 flowchart TD
     A[1. Ingesta de Insumos Brutos] -->|Audios / PDFs / Textos| B[2. Extracción y Normalización de Texto]
     B -->|Texto Unificado| C[3. Orquestación y Enrutamiento de IA]
-    C -->|Prompts + Directivas IEEE 830| D[4. Generación y Síntesis de Requerimientos y Diagramas]
+    C -->|Prompts + Directivas ISO 29148| D[4. Generación y Síntesis de Requerimientos y Diagramas]
     D -->|Persistencia en MongoDB| E[5. Visualización Interactiva y Exportación a PDF]
 ```
 
@@ -80,7 +80,7 @@ flowchart TD
 ### **Paso 3: Análisis y Enrutamiento Inteligente (Caso de Uso: `ProcesarConIA`)**
 * El caso de uso [`ProcesarConIA`](file:///c:/DaS/icase/icase-backend/src/core/use-cases/ProcesarConIA.js) recupera el texto consolidado y los estándares vigentes.
 * El servicio [`ModelosIaService`](file:///c:/DaS/icase/icase-backend/src/infrastructure/services/ModelosIaService.js) construye el prompt maestro integrando 3 directivas de agentes:
-  1. **Analista IEEE 830:** Define Requerimientos Funcionales (RF) y No Funcionales (RNF) con métricas medibles.
+  1. **Analista ISO 29148:** Define RF y RNF con evidencia del insumo; conserva las métricas proporcionadas y deja los umbrales ausentes pendientes de confirmación.
   2. **Diseñador de Arquitectura:** Selecciona el stack tecnológico idóneo y define los diagramas UML/C4.
   3. **Auditor QA:** Valida la coherencia y completitud del contenido.
 * El enrutador selecciona automáticamente el proveedor activo (**Groq**, **Gemini**, **DeepSeek** u **OpenRouter**).

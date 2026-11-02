@@ -137,7 +137,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     try {
       setBusy(true); setFeedback(null);
       const result = await executeOneClickModeApi(projectId);
-      setPlan(result.plan);
+      setPlan(await fetchCodePlanApi(projectId));
       const loaded = { ...drafts };
       for (const item of result.plan.etapas || []) {
         if (item.propuesta && EDITABLE_PHASES.includes(item.etapa)) {
@@ -165,7 +165,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     try {
       setBusy(true); setFeedback(null);
       const updated = await proposeCodePhaseApi(projectId, selected, drafts[selected], notes);
-      setPlan(updated);
+      setPlan((previous) => ({ ...updated, modulos: { ...updated.modulos, requisitos: previous?.modulos?.requisitos || [] } }));
       setFeedback({ type: 'success', message: 'Propuesta guardada. Ahora debe aprobarse explícitamente.' });
     } catch (error) { setFeedback({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
@@ -191,7 +191,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     try {
       setBusy(true); setFeedback(null);
       const updated = await reviewCodePhaseApi(projectId, selected, decision, rejection);
-      setPlan(updated);
+      setPlan((previous) => ({ ...updated, modulos: { ...updated.modulos, requisitos: previous?.modulos?.requisitos || [] } }));
       setNotes('');
       const next = updated.etapas?.find((item) => DECISION_PHASES.includes(item.etapa) && item.estado === 'pendiente');
       if (decision === 'aprobar' && next) setSelected(next.etapa);
@@ -711,6 +711,7 @@ function describeRule(rule) {
     case 'maquina_estados': return `«${rule.campo}» empieza en ${rule.inicial}. Transiciones: ${(rule.transiciones || []).map((item) => `${item.de} → ${item.a}`).join(', ')}`;
     case 'inmutable': return `«${rule.campo}» no puede cambiar una vez creado`;
     case 'valor_por_defecto': return `«${rule.campo}» vale ${JSON.stringify(rule.valor)} si no se envía`;
+    case 'calculo': return `«${rule.campo}» se calcula con ${JSON.stringify(rule.expresion)} (${rule.decimales} decimales). Solo se ejecuta tras confirmar la regla.`;
     default: return rule.tipo;
   }
 }
@@ -843,6 +844,9 @@ function AccessEditor({ value, onChange, disabled }) {
 }
 
 function ModulesEditor({ value, onChange, disabled, modules }) {
+  const [processDraft,setProcessDraft]=useState(()=>JSON.stringify(value.procesos||[],null,2));
+  const [processError,setProcessError]=useState('');
+  useEffect(()=>{setProcessDraft(JSON.stringify(value.procesos||[],null,2));setProcessError('');},[value.procesos]);
   const optional = modules?.opcionales || [];
   const included = modules?.incluidos || [];
   const mode = value.modo === 'personalizado' ? 'personalizado' : 'automatico';
@@ -854,6 +858,7 @@ function ModulesEditor({ value, onChange, disabled, modules }) {
   const setMode = (next) => onChange({ ...value, modo: next, modulos: optional.map((item) => ({ id: item.id, activo: next === 'automatico' ? item.porDefecto : stateOf(item.id) })) });
   const toggle = (id, active) => onChange({ ...value, modo: 'personalizado', modulos: optional.map((item) => ({ id: item.id, activo: item.id === id ? active : stateOf(item.id) })) });
   return <div className="space-y-5">
+    <CoverageEditor value={value.cobertura || {}} onChange={(cobertura) => onChange({ ...value, cobertura })} disabled={disabled} modules={modules} />
     <fieldset className="space-y-2">
       <legend className="mb-1 text-xs font-semibold text-slate-700">Modo</legend>
       <label className="flex items-start gap-2 text-sm"><input type="radio" name="modo-modulos" disabled={disabled} checked={mode === 'automatico'} onChange={() => setMode('automatico')} className="mt-1" /><span><span className="font-medium text-slate-800">Automático (recomendado)</span><span className="block text-xs text-slate-500">Usa los módulos recomendados. Es lo que se genera si no apruebas esta etapa.</span></span></label>
@@ -867,6 +872,14 @@ function ModulesEditor({ value, onChange, disabled, modules }) {
             <span className="block text-xs text-slate-600">{item.descripcion}</span>
             {item.sinEfecto && <span className="block text-xs text-slate-500">{item.sinEfecto}</span>}</span></label>
       </li>)}</ul>}
+      {mode==='personalizado'&&stateOf('procesos_negocio')&&<div className="mt-4 rounded border p-3">
+        <h4 className="font-semibold">Definiciones de procesos (experimental)</h4>
+        <p className="text-xs text-slate-600">Introduce una lista declarativa revisada con RF, estados, roles, registros y acciones. Solo PostgreSQL y JWT. No se inventan procesos al activar el módulo. Ver PROCESSES.md de la entrega; la validación contra el modelo se realiza al generar.</p>
+        <textarea aria-label="Definiciones de procesos" disabled={disabled} rows={12} className="mt-2 w-full rounded border p-2 font-mono text-xs" value={processDraft} onChange={event=>setProcessDraft(event.target.value)}/>
+        {processError&&<p role="alert" className="text-sm text-red-600">{processError}</p>}
+        <button type="button" disabled={disabled} className="rounded border px-3 py-2 text-sm" onClick={()=>{try{const procesos=JSON.parse(processDraft);if(!Array.isArray(procesos))throw new Error();onChange({...value,procesos});setProcessError('');}catch{setProcessError('Introduce una lista JSON válida. No se aplicaron cambios.');}}}>Aplicar definiciones para revisión</button>
+        <p className="text-xs text-slate-500">Aplicar no aprueba la etapa: revisa las definiciones y aprueba Módulos explícitamente. Los cambios sin aplicar no se guardan.</p>
+      </div>}
     </section>
     <section>
       <h3 className="mb-2 text-xs font-semibold text-slate-700">Incluido según otras etapas</h3>
@@ -876,6 +889,55 @@ function ModulesEditor({ value, onChange, disabled, modules }) {
       </li>)}</ul>
     </section>
   </div>;
+}
+
+function CoverageEditor({ value, onChange, disabled, modules }) {
+  const requirements = modules?.requisitos || [];
+  const catalog = modules?.capacidades || [];
+  const declaration = (rf) => (value.requisitos || []).find((item) => item.requisito === rf.identificador) || {
+    requisito: rf.identificador, tipo: rf.sugerencias?.length ? 'personalizado' : 'crud',
+    capacidades: (rf.sugerencias || []).map((item) => item.id), confirmado: false, justificacion: ''
+  };
+  const update = (rf, changes) => {
+    const current = declaration(rf);
+    const next = { ...current, confirmado: false, ...changes, huella_requisito: rf.huella_requisito };
+    onChange({ ...value, requisitos: [...(value.requisitos || []).filter((item) => item.requisito !== rf.identificador), next] });
+  };
+  return <section className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/30 p-3">
+    <h3 className="text-sm font-semibold text-slate-800">Alcance de la entrega</h3>
+    <p className="text-xs text-slate-600">El arranque y las pruebas técnicas no certifican todo el negocio. Declara qué necesita cada RF. Las capacidades pendientes no se activan al seleccionarlas.</p>
+    <label className="block text-xs font-medium">Modalidad
+      <select disabled={disabled} className="mt-1 block w-full rounded border p-2" value={value.modo_entrega || 'parcial'} onChange={(event) => onChange({ ...value, modo_entrega: event.target.value })}>
+        <option value="parcial">Parcial: incluir pendientes en el informe</option>
+        <option value="completa">Completa: resolver la cobertura del generador</option>
+      </select>
+    </label>
+    {(value.modo_entrega || 'parcial') === 'parcial' && <label className="flex gap-2 text-xs">
+      <input disabled={disabled} type="checkbox" checked={value.aceptar_pendientes === true} onChange={(event) => onChange({ ...value, aceptar_pendientes: event.target.checked })} />
+      Reconozco que la entrega puede tener funciones pendientes; revisaré su informe antes de aprobarla.
+    </label>}
+    {requirements.map((rf) => {
+      const item = declaration(rf);
+      return <details key={rf.identificador} className="rounded border bg-white p-2">
+        <summary className="cursor-pointer text-xs font-medium">{rf.identificador} · {rf.nombre} — {item.confirmado && item.huella_requisito === rf.huella_requisito ? 'confirmado' : 'por revisar'}</summary>
+        <label className="mt-2 block text-xs">Comportamiento
+          <select disabled={disabled} className="mt-1 w-full rounded border p-2" value={item.tipo} onChange={(event) => update(rf, { tipo: event.target.value })}>
+            <option value="crud">Gestión CRUD con las reglas declaradas</option><option value="personalizado">Proceso específico que requiere implementación adicional</option>
+          </select>
+        </label>
+        <p className="mt-2 text-xs text-slate-500">Sugerencias del texto: {(rf.sugerencias || []).map((capability) => capability.etiqueta).join(', ') || 'ninguna; esto no demuestra cobertura'}</p>
+        <div className="mt-2 grid gap-1 sm:grid-cols-2">{catalog.map((capability) => <label key={capability.id} className="flex gap-2 text-xs">
+          <input disabled={disabled} type="checkbox" checked={item.capacidades.includes(capability.id)} onChange={(event) => update(rf, { capacidades: event.target.checked ? [...item.capacidades, capability.id] : item.capacidades.filter((id) => id !== capability.id) })} />
+          {capability.etiqueta} (pendiente)
+        </label>)}</div>
+        <label className="mt-2 block text-xs">Justificación si descartas alguna sugerencia
+          <textarea disabled={disabled} className="mt-1 w-full rounded border p-2" value={item.justificacion || ''} onChange={(event) => update(rf, { justificacion: event.target.value })} />
+        </label>
+        <label className="mt-2 flex gap-2 text-xs"><input disabled={disabled} type="checkbox" checked={item.confirmado && item.huella_requisito === rf.huella_requisito} onChange={(event) => update(rf, { confirmado: event.target.checked })} />Confirmo esta declaración para la versión actual del RF.</label>
+      </details>;
+    })}
+    {!requirements.length && <p className="text-xs text-slate-500">Reabre el plan para cargar los RF aprobados.</p>}
+  </section>;
 }
 
 function PhaseForm({ phase, value, onChange, disabled, modules }) {

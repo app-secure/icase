@@ -1,0 +1,23 @@
+import {test,expect} from '@playwright/test';
+__SAMPLES__
+const base=process.env.BASE_API_URL||'http://localhost:3000',screens=__SCREENS__;
+test('N:M entre usuarios y réplicas: asociar y desasociar actualiza ambas vistas sin recarga',async({browser})=>{
+ const anonymous=makeApi(base,null),session=await anonymous('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});expect(session.status).toBe(200);
+ const admin=makeApi(base,session.data.token),contract=(await admin('/api/contract')).data,relation=contract.associations[0],operations=contract.operations,cleanups=[],contexts=[];let user;
+ try{
+  user=(await admin('/api/users','POST',{email:'relations-'+Date.now()+'@example.test',password:'Relations-Test-123!',rol:'administrador'})).data;
+  const other=await anonymous('/api/auth/login','POST',{email:user.email,password:'Relations-Test-123!'});expect(other.status).toBe(200);const writer=makeApi(base,other.data.token);
+  const source=await createValidRecord(admin,operations,operations.find(op=>relation.operations[0].includes(op.key)),cleanups,0),target=await createValidRecord(admin,operations,operations.find(op=>relation.operations[1].includes(op.key)),cleanups,0);
+  const route='/api/associations/'+relation.table,pair={source_id:String(source.id),target_id:String(target.id)};cleanups.unshift(()=>admin(route,'DELETE',pair));
+  const screen=screens.find(screen=>screen.operations.some(key=>relation.operations.flat().includes(key))),regions=[];
+  for(const token of [session.data.token,other.data.token]){
+   const context=await browser.newContext();contexts.push(context);await context.addInitScript(value=>localStorage.setItem('icase_token',value),token);const page=await context.newPage();await page.goto(screen.route);
+   const region=page.getByRole('region',{name:'Vínculos '+relation.entities.join(' / '),exact:true});await expect(region).toBeVisible();
+   const select=region.getByRole('group',{name:'Origen: '+relation.entities[0],exact:true}).getByRole('combobox');await expect(select.locator('option[value="'+source.id+'"]')).toHaveCount(1);await select.selectOption(String(source.id));regions.push(region);
+  }
+  expect((await writer(route,'POST',pair)).status).toBe(200);
+  for(const region of regions)await expect(region.getByRole('button',{name:'Desasociar #'+target.id,exact:true})).toBeVisible();
+  expect((await writer(route,'DELETE',pair)).status).toBe(200);
+  for(const region of regions)await expect(region.getByRole('button',{name:'Desasociar #'+target.id,exact:true})).toHaveCount(0);
+ }finally{for(const context of contexts)await context.close();for(const cleanup of cleanups){try{await cleanup();}catch{}}if(user?.id)await admin('/api/users/'+user.id,'DELETE');}
+});

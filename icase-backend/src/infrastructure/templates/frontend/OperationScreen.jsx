@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useSession } from './session';
+import AssociationsPanel from './AssociationsPanel';
 
 /** Editor de registros como JSON: sirve para cualquier esquema, incluso sin campos declarados. */
 export function JsonRecords({ capability }) {
@@ -95,5 +96,6 @@ export default function OperationScreen({ title, capabilities, referenceText }) 
     {!capabilities.length && <p className="error">Esta pantalla no tiene RF asociado; corrige la trazabilidad antes de aprobarla.</p>}
     {denied && <p role="alert" className="error">Tu rol no tiene permiso para ver esta pantalla.</p>}
     <JsonRecords key={capability} capability={capability} />
+    <AssociationsPanel key={capability} capability={capability} />
   </main>;
 }

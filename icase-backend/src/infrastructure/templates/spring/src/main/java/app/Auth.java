@@ -67,6 +67,7 @@ public class Auth {
 
     private final RecordStore store;
     private final JsonNode policy;
+    private final JsonNode contract;
     private final boolean enabled;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
     private final Limiter logins = new Limiter(5, Duration.ofMinutes(15));
@@ -74,6 +75,7 @@ public class Auth {
     private final String dummyHash = encoder.encode(UUID.randomUUID().toString());
 
     public Auth(RecordStore store, Data data) {
+        this.contract = data.contract();
         this.store = store;
         this.policy = data.policy();
         this.enabled = data.authEnabled();
@@ -259,6 +261,8 @@ public class Auth {
     }
 
     public void authorize(Map<String, Object> user, String method, String path) {
+        var association = Pattern.compile("^/api/associations/([^/]+)(?:/|$)").matcher(path);
+        if (association.find()) { AssociationPermissions.check(policy, contract, user, method, association.group(1)); return; }
         java.util.regex.Matcher operation = OPERATION.matcher(path);
         boolean admin = ADMIN.equals(user.get("rol"));
         if (operation.find()) {

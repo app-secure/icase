@@ -1,0 +1,30 @@
+import {test,expect} from '@playwright/test';
+__SAMPLES__
+const base=process.env.BASE_API_URL||'http://localhost:3000';
+const screens=__SCREENS__;
+const enabled=__EXTENSIONS__;
+test('interfaces de adjuntos y reportes generadas',async({page})=>{
+  const session=await makeApi(base,null)('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});expect(session.status).toBe(200);
+  const api=makeApi(base,session.data.token);const contract=(await api('/api/contract')).data;const operation=contract.operations.find(op=>screens.some(screen=>screen.operations.includes(op.key)));
+  const screen=screens.find(screen=>screen.operations.includes(operation.key));const cleanups=[];
+  try{
+    await createValidRecord(api,contract.operations,operation,cleanups,0);
+    await page.addInitScript(token=>localStorage.setItem('icase_token',token),session.data.token);await page.goto(screen.route);
+    if(enabled.includes('archivos_imagenes')) {
+      const panel=page.getByRole('region',{name:'Archivos del registro'}).first();await expect(panel).toBeVisible();
+      await panel.getByLabel('Adjuntar PNG, JPEG o PDF (512 KiB)').setInputFiles({name:'prueba.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6HkAAAAAASUVORK5CYII=','base64')});
+      const file=panel.getByRole('button',{name:'prueba.png',exact:true});await expect(file).toBeVisible();
+      const download=page.waitForEvent('download');await file.click();expect((await download).suggestedFilename()).toBe('prueba.png');
+      await panel.getByRole('button',{name:'Eliminar archivo'}).click();await expect(file).toHaveCount(0);
+    }
+    if(enabled.includes('reportes_calculos')) {
+      await page.getByRole('button',{name:'Consultar totales',exact:true}).click();await expect(page.getByText(/^Registros: /)).toBeVisible();
+      const download=page.waitForEvent('download');await page.getByRole('button',{name:'Exportar PDF',exact:true}).click();expect((await download).suggestedFilename()).toBe('reporte.pdf');
+    }
+  }finally{for(const cleanup of cleanups){try{await cleanup();}catch{}}}
+});
+test('la recuperación se puede solicitar desde la pantalla de acceso',{skip:!enabled.includes('recuperacion_cuentas')},async({page})=>{
+  await page.goto('/');await page.getByRole('button',{name:'Recuperar contraseña',exact:true}).click();
+  await page.getByLabel('Correo de recuperación').fill('unknown-ui@example.test');await page.getByRole('button',{name:'Enviar recuperación',exact:true}).click();
+  await expect(page.getByText('Si la cuenta existe y está activa, recibirás un enlace de recuperación.',{exact:true})).toBeVisible();
+});

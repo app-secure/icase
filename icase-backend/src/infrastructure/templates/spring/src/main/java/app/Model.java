@@ -16,9 +16,16 @@ public final class Model {
     private final String database;
     private final Map<String, String> operations = new LinkedHashMap<>();
     private final Map<String, Table> tables = new LinkedHashMap<>();
+    public record Association(String name, String source, String target) {}
+    private final Map<String, Association> associations = new LinkedHashMap<>();
 
     public Model(JsonNode model) {
         this.database = model.path("database").asText("postgres");
+        for (JsonNode relation : model.path("associations")) {
+            String name = relation.path("table").asText();
+            JsonNode columns = model.path("tables").path(name).path("columns");
+            associations.put(name, new Association(name, columns.path(0).path("references").asText(), columns.path(1).path("references").asText()));
+        }
         model.path("operations").fields().forEachRemaining(entry -> operations.put(entry.getKey(), entry.getValue().asText()));
         model.path("tables").fields().forEachRemaining(entry -> {
             JsonNode table = entry.getValue();
@@ -36,6 +43,11 @@ public final class Model {
 
     public String database() {
         return database;
+    }
+    public Association association(String name) {
+        Association relation = associations.get(name);
+        if (relation == null) throw new HttpError(404, "Relación inexistente.");
+        return relation;
     }
 
     public boolean postgres() {

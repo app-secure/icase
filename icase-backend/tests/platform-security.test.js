@@ -7,8 +7,8 @@ const { getJwtSecret } = require('../src/infrastructure/security/jwtSecret');
 const RateLimiter = require('../src/infrastructure/security/RateLimiter');
 const createApp = require('../src/app');
 
-const PUBLIC = new Set(['GET /health', 'POST /auth/registro', 'POST /auth/login']);
-const GLOBAL = new Set(['GET /auth/perfil', 'GET /proyectos', 'POST /proyectos', 'GET /proyectos/modelos-ia', 'POST /diagramas/validar-sintaxis']);
+const PUBLIC = new Set(['GET /health', 'POST /auth/registro', 'POST /auth/login', 'GET /auth/config']);
+const GLOBAL = new Set(['POST /auth/logout', 'GET /auth/perfil', 'GET /proyectos', 'POST /proyectos', 'GET /proyectos/modelos-ia', 'POST /diagramas/validar-sintaxis']);
 const normalize = (value) => value.replace(/\/+/g, '/').replace(/(.)\/$/, '$1');
 
 /** Sustituye los parámetros de una ruta por identificadores reales del proyecto de A. */

@@ -4,7 +4,7 @@ import ProjectDashboard from "./components/ProjectDashboard";
 import ProjectWorkspace from "./components/ProjectWorkspace";
 import AuthView from "./components/AuthView";
 import LoadingOverlay from "./components/LoadingOverlay";
-import { fetchProjects, fetchProjectById, deleteProjectApi, getAuthToken, getStoredUser, clearAuth } from "./services/api";
+import { fetchProjects, fetchProjectById, deleteProjectApi, getAuthToken, getStoredUser, clearAuth, logoutApi } from "./services/api";
 import { sanitizePlantUML } from "./utils/plantumlEncoder";
 
 export default function App() {
@@ -322,7 +322,13 @@ export default function App() {
 
   const handleLogout = async () => {
     setLoadingOverlay({ visible: true, message: "Cerrando sesión..." });
-    await new Promise((r) => setTimeout(r, 900));
+    try {
+      await logoutApi();
+    } catch (error) {
+      setLoadingOverlay({ visible: false, message: "" });
+      window.alert(`${error.message} Tu sesión sigue abierta; vuelve a intentarlo.`);
+      return;
+    }
     clearAuth();
     setUser(null);
     setToken(null);

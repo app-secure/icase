@@ -21,7 +21,8 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
     const { reglas, descartadas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf);
     const access = this._acceso(decisiones.control_acceso, rf);
-    const generados = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos });
+    const fresh = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos });
+    const generados = new (require('./IncrementalMigrationGenerator'))().apply(fresh,insumos.backendAnterior);
     const informe = this._informe({ proyecto, insumos, decisiones, archivos: generados });
     const archivos = [
       ...generados,
@@ -42,7 +43,7 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
           ? `Autenticación JWT con ${access.roles.filter((rol) => rol.incluir).length} roles de negocio más el administrador; define JWT_SECRET, ADMIN_EMAIL y ADMIN_PASSWORD antes de producción.`
           : 'La API se generó SIN autenticación, por decisión aprobada en la etapa de control de acceso.',
         `Reglas de negocio aplicadas: ${reglas.length}${descartadas ? `; ${descartadas} rechazadas por el usuario no se generaron` : ''}.`,
-        `Informe de generación: ${informe.resumen.completo} requisitos completos, ${informe.resumen.solo_datos} solo con datos y ${informe.resumen.no_soportado} no soportados (ver backend/GENERATION-REPORT.md).`
+        `Informe de generación: ${informe.resumen.completo} con CRUD tipado, ${informe.resumen.solo_datos} solo con datos y ${informe.resumen.no_soportado} no soportados (ver backend/GENERATION-REPORT.md).`
       ],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_backend_generico_v2'
@@ -58,6 +59,7 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const activos = modules.activos(decisiones.modulos);
     return new GenerationReportService().build({
       proyecto, requisitos: aprobados, contrato: manifest, stack: decisiones.stack_tecnologico || {}, plataformas,
+      declaracion: decisiones.modulos?.cobertura || {},
       modulos: {
         modo: decisiones.modulos ? (decisiones.modulos.modo || 'automatico') : 'automatico',
         incluidos: modules.incluidos(decisiones).filter((item) => item.activo),

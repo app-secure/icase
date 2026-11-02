@@ -17,7 +17,7 @@ describe('servicio de módulos', () => {
   test('en modo automático ignora lo que el usuario mande', () => {
     const { propuesta, errores } = service.validar({ modo: 'automatico', modulos: [{ id: 'formularios_tipados', activo: false }] });
     expect(errores).toEqual([]);
-    expect(propuesta.modulos[0].activo).toBe(true);
+    expect(propuesta.modulos.find(item=>item.id==='formularios_tipados').activo).toBe(true);
   });
 
   test('en modo personalizado respeta la elección y completa lo omitido con el valor recomendado', () => {
@@ -25,8 +25,8 @@ describe('servicio de módulos', () => {
     expect(off.errores).toEqual([]);
     expect(off.propuesta.modulos).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'formularios_tipados', activo: false, motivo: 'Desactivado por ti.' })]));
     const omitted = service.validar({ modo: 'personalizado', modulos: [] });
-    expect(omitted.propuesta.modulos[0].activo).toBe(true);
-    expect(omitted.advertencias.join(' ')).toMatch(/valor recomendado para: formularios_tipados/);
+    expect(omitted.propuesta.modulos.find(item=>item.id==='formularios_tipados').activo).toBe(true);
+    expect(omitted.advertencias.join(' ')).toMatch(/valor recomendado para:.*formularios_tipados/);
   });
 
   test.each([
@@ -111,7 +111,7 @@ describe('la etapa Módulos es opcional', () => {
     const { useCase } = crearCaso();
     const plan = await useCase.obtener('p1');
     expect(plan.etapas.find((item) => item.etapa === 'modulos')).toMatchObject({ opcional: true, tipo: 'decision' });
-    expect(plan.modulos.opcionales.map((item) => item.id)).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
+    expect(plan.modulos.opcionales.map((item) => item.id)).toEqual(['procesos_negocio','eventos_replicas','pagos_prueba','sso_oidc','mapas','camara_qr','archivos_imagenes', 'reportes_calculos', 'recuperacion_cuentas', 'formularios_tipados', 'paginacion_busqueda', 'datos_iniciales', 'eventos_cambios']);
     expect(plan.modulos.incluidos.map((item) => item.id)).toEqual(expect.arrayContaining(['datos', 'openapi', 'reglas', 'autenticacion']));
     expect(plan.modulos.activos).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
   });

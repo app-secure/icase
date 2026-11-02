@@ -28,6 +28,7 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
   progreso: { type: Number, min: 0, max: 100, default: 0 },
   mensaje: { type: String, default: 'Generación en cola' },
   pantallas: [String],
+  solo_reparar: { type: Boolean, default: false },
   insumo_adicional: { type: String, default: '' },
   requerimientos_locales: { type: mongoose.Schema.Types.Mixed, default: null },
   insumo_bruto: { type: String, default: '' },

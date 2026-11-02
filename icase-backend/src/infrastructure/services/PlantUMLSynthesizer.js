@@ -17,7 +17,7 @@ class PlantUMLSynthesizer {
       {
         tipo: DiagramTypes.CASOS_DE_USO,
         matcher: d => (d.tipo || '').toLowerCase().includes('caso') || (d.tipo || '').toLowerCase().includes('use'),
-        titulo: 'Diagrama de Casos de Uso (IEEE 830)'
+        titulo: 'Diagrama de Casos de Uso'
       },
       {
         tipo: DiagramTypes.ARQUITECTURA_SOFTWARE,

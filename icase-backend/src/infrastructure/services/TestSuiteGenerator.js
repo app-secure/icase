@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const IGeneradorArtefacto = require('../../core/services/IGeneradorArtefacto');
 const samplePayload = require('./SamplePayload');
+const BrowserTestRuntime = require('../../core/constants/BrowserTestRuntime');
 
 class TestSuiteGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
@@ -21,24 +22,41 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     }));
     const uncovered = matrix.filter((item) => !item.backend && !item.frontend).map((item) => item.requisito);
     const files = [
-      { ruta: 'tests/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${this._slug(proyecto.nombre)}-tests`, version: '0.1.0', private: true, type: 'module', scripts: { test: 'npm run test:unit && npm run test:integration', 'test:unit': 'node --test unit/*.test.js', 'test:integration': 'node --test integration/*.test.js', 'test:e2e': 'playwright test' }, devDependencies: { '@playwright/test': '1.50.0' } }, null, 2) },
+      { ruta: 'tests/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${this._slug(proyecto.nombre)}-tests`, version: '0.1.0', private: true, type: 'module', scripts: { test: 'npm run test:unit && npm run test:integration', 'test:unit': 'node --test unit/*.test.js', 'test:integration': 'node --test --test-concurrency=1 integration/*.test.js', 'test:e2e': 'playwright test' }, devDependencies: { '@playwright/test': BrowserTestRuntime.version } }, null, 2) },
       { ruta: 'tests/.env.example', lenguaje: 'dotenv', contenido: `BASE_API_URL=http://localhost:3000\nBASE_WEB_URL=http://localhost:5173\n${auth.habilitada ? '# Credenciales del administrador inicial del backend (ADMIN_EMAIL y ADMIN_PASSWORD).\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=ChangeMe-123\n' : ''}` },
       { ruta: 'tests/coverage-matrix.json', lenguaje: 'json', contenido: JSON.stringify(matrix, null, 2) },
       { ruta: 'tests/unit/traceability.test.js', lenguaje: 'javascript', contenido: this._unitTest(matrix) },
       { ruta: 'tests/integration/api-health.test.js', lenguaje: 'javascript', contenido: this._integrationTest() },
       ...(functional ? [{ ruta: 'tests/integration/contract-flow.test.js', lenguaje: 'javascript', contenido: this._contractIntegrationTest(contract) }] : []),
+      ...(contract.extensions?.enabled?.length ? [{ruta:'tests/integration/extensions.test.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.integration.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled))}] : []),
       { ruta: 'tests/e2e/navigation.spec.js', lenguaje: 'javascript', contenido: this._e2eTest(routes, auth) },
+      ...((contract.associations || []).length ? [{ ruta: 'tests/e2e/associations.spec.js', lenguaje: 'javascript', contenido: this._associationsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth) }] : []),
       ...(functional && typedForms ? [{ ruta: 'tests/e2e/typed-forms.spec.js', lenguaje: 'javascript', contenido: this._typedFormsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
+      ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)))}] : []),
+      ...(contract.eventos_cambios?.experimental ? [{ ruta: 'tests/e2e/change-events.spec.js', lenguaje: 'javascript', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/frontend/change-events.e2e.template'), 'utf8').replace('__SCREENS__', JSON.stringify(this._frontendScreens(frontend))).replace('__SAMPLES__', () => samplePayload.runtimeSource()) }] : []),
       { ruta: 'tests/playwright.config.js', lenguaje: 'javascript', contenido: "import { defineConfig } from '@playwright/test';\nexport default defineConfig({ testDir: './e2e', workers: 1, use: { baseURL: process.env.BASE_WEB_URL || 'http://localhost:5173', trace: 'retain-on-failure' } });\n" },
       { ruta: 'tests/README.md', lenguaje: 'markdown', contenido: this._readme(backend.version, frontend.version) }
     ];
+    const readTemplate=name=>require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification',name),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)));
+    if(contract.integraciones?.enabled?.length){
+      for(const [name,ruta] of [['specialized.integration.template','tests/integration/specialized.test.js'],['specialized.e2e.template','tests/e2e/specialized.spec.js']])files.push({ruta,lenguaje:'javascript',contenido:readTemplate(name).replace('__FIXTURE__',JSON.stringify(contract.integraciones.fixture||null)).replace('__ENABLED__',JSON.stringify(contract.integraciones.enabled))});
+    }
+    if(contract.eventos_cambios?.experimental){
+      files.push({ruta:'tests/integration/realtime-concurrency.test.js',lenguaje:'javascript',contenido:readTemplate('realtime-concurrency.template')},{ruta:'tests/support/change-events-client.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/frontend/change-events-client.js'),'utf8')});
+      const pkg=files.find(file=>file.ruta==='tests/package.json'),data=JSON.parse(pkg.contenido);data.devDependencies['socket.io-client']='4.8.4';pkg.contenido=JSON.stringify(data,null,2);
+      if(contract.associations?.length)files.push({ruta:'tests/e2e/realtime-associations.spec.js',lenguaje:'javascript',contenido:readTemplate('realtime-associations.template')});
+      if(contract.eventos_cambios.replicas){
+        data.devDependencies.redis='6.3.1';pkg.contenido=JSON.stringify(data,null,2);
+        files.push({ruta:'tests/integration/redis-isolation.test.js',lenguaje:'javascript',contenido:readTemplate('redis-isolation.template')},{ruta:'tests/support/redis-bridge.cjs',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/auth/change-events-redis.js'),'utf8')});
+      }
+    }
     return {
       archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
       dependencias: [{ tipo: 'codigo_backend', version: backend.version }, { tipo: 'codigo_frontend', version: frontend.version }],
       trazabilidad_rf: rf.map((item) => item.identificador),
-      advertencias: [...(uncovered.length ? [`RF sin cobertura en backend ni frontend aprobados: ${uncovered.join(', ')}.`] : []), ...(functional ? [] : ['La suite solo cubre salud, navegación y trazabilidad; faltan pruebas funcionales.'])],
+      advertencias: [...(uncovered.length ? [`RF sin cobertura en backend ni frontend aprobados: ${uncovered.join(', ')}.`] : []), ...(functional ? [] : ['La suite solo cubre salud, navegación y trazabilidad; faltan pruebas funcionales.']),...(contract.integraciones?.enabled?.length&&!contract.integraciones.fixture?['Sin fixture/proveedor configurado, las pruebas especializadas se omiten: no acreditan pagos, SSO o hardware reales.']:[])],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_pruebas_determinista_v1'
     };
@@ -91,6 +109,65 @@ test.beforeEach(async ({ page }) => {
     catch { return {}; }
   }
 
+  _associationsE2eTest({ screens, contract, auth }) {
+    const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
+    return `import { test, expect } from '@playwright/test';
+${session}
+${samplePayload.runtimeSource()}
+const operations = ${JSON.stringify(contract.operations || [])};
+const associations = ${JSON.stringify(contract.associations || [])};
+const screens = ${JSON.stringify(screens)};
+for (const relation of associations) {
+  test('N:M en navegador: ' + relation.table, async ({ page }) => {
+    const api = makeApi(apiBase, token || null);
+    const cleanups = [];
+    const endpoints = relation.operations.map((keys) => operations.find((op) => keys.includes(op.key)));
+    const screen = screens.find((item) => (item.operations || []).some((key) => relation.operations.some((keys) => keys.includes(key))));
+    expect(screen, 'Falta una pantalla para el vínculo').toBeTruthy();
+    expect(endpoints.every(Boolean), 'Faltan operaciones para los extremos').toBeTruthy();
+    try {
+      const source = await createValidRecord(api, operations, endpoints[0], cleanups, 0);
+      const target = await createValidRecord(api, operations, endpoints[1], cleanups, 0);
+      const pair = { source_id: String(source.id), target_id: String(target.id) };
+      const url = '/api/associations/' + encodeURIComponent(relation.table);
+      cleanups.unshift(() => api(url, 'DELETE', pair));
+      await page.goto(screen.route || screen.ruta);
+      const region = page.getByRole('region', { name: 'Vínculos ' + relation.entities.join(' / '), exact: true });
+      await expect(region).toBeVisible();
+      const choose = async (label, value) => {
+        const group = region.getByRole('group', { name: label, exact: true });
+        const select = group.getByRole('combobox');
+        for (let pageIndex = 0; pageIndex < 100; pageIndex++) {
+          await expect(select).toBeEnabled();
+          if (await select.locator('option[value="' + value + '"]').count()) { await select.selectOption(String(value)); return; }
+          const next = group.getByRole('button', { name: 'Siguiente', exact: true });
+          await expect(next, 'El selector no encontró el registro creado').toBeEnabled();
+          const response = page.waitForResponse((res) => res.url().includes('/api/operations/') && res.request().method() === 'GET');
+          await next.click(); await response;
+        }
+        throw new Error('El selector excedió 100 páginas');
+      };
+      await choose('Origen: ' + relation.entities[0], source.id);
+      await choose('Destino: ' + relation.entities[1], target.id);
+      await region.getByRole('button', { name: 'Asociar', exact: true }).click();
+      const unlink = region.getByRole('button', { name: 'Desasociar #' + target.id, exact: true });
+      await expect(unlink).toBeVisible();
+      let listed = await api(url + '?source_id=' + source.id);
+      expect(listed.status).toBe(200);
+      expect(listed.data.data.some((row) => row.target_id === String(target.id))).toBe(true);
+      await unlink.click();
+      await expect(region.getByText('Vínculo eliminado. Los registros se conservaron.', { exact: true })).toBeVisible();
+      await expect(unlink).toHaveCount(0);
+      listed = await api(url + '?source_id=' + source.id);
+      expect(listed.data.data).toEqual([]);
+    } finally {
+      for (const cleanup of cleanups) { try { await cleanup(); } catch {} }
+    }
+  });
+}
+`;
+  }
+
   _unitTest(matrix) {
     return `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs';\n\nconst expected = ${JSON.stringify(matrix.map((item) => item.requisito))};\n\ntest('los manifiestos generados mantienen trazabilidad RF', () => {\n  const backend = JSON.parse(fs.readFileSync('../backend/icase.manifest.json', 'utf8'));\n  const frontend = JSON.parse(fs.readFileSync('../frontend/icase.manifest.json', 'utf8'));\n  const actual = new Set([...(backend.requisitos || []).map((item) => item.id), ...(frontend.pantallas || []).flatMap((item) => item.requirements || item.rf || [])]);\n  for (const id of expected) assert.ok(actual.has(id), \`Falta trazabilidad para \${id}\`);\n});\n`;
   }
@@ -123,6 +200,7 @@ const base = process.env.BASE_API_URL || 'http://localhost:3000';
 ${samplePayload.runtimeSource()}
 
 const operations = ${JSON.stringify(contract.operations || [])};
+const associations = ${JSON.stringify(contract.associations || [])};
 const auth = ${JSON.stringify(auth)};
 const roles = Object.entries(auth.roles || {}).map(([id, role]) => ({ id, autoregistro: role.autoregistro === true }));
 let access = null;
@@ -134,6 +212,12 @@ before(async () => {
   api = access.admin;
 });
 after(async () => { if (access) await access.cleanup(); });
+
+for (const association of associations) {
+  test('N:M ' + association.table + ': vínculos, paginación, permisos e integridad', async () => {
+    await exerciseAssociation(api, operations, association, access, auth);
+  });
+}
 
 test('el contrato declara operaciones', () => {
   assert.ok(operations.length > 0, 'El contrato no contiene operaciones');
@@ -172,7 +256,7 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
   if (await editor.count()) {
     await editor.fill('{"origen":"prueba-e2e"}');
     await page.getByRole('button', { name: 'Crear' }).click();
-    await expect(page.getByRole('status')).toContainText('Registro creado');
+    await expect(page.locator('.success[role="status"]')).toContainText('Registro creado');
   }
 });
 `;
@@ -235,7 +319,7 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
       '      await fillField(page, form, name, value);',
       '    }',
       "    await form.getByRole('button', { name: 'Crear' }).click();",
-      "    await expect(page.getByRole('status')).toContainText('Registro creado');",
+      "    await expect(page.locator('.success[role=\"status\"]')).toContainText('Registro creado');",
       '',
       '    const created = ((await api(operation.collectionPath)).data || []).filter((item) => !before.has(item.id || item._id));',
       "    expect(created, 'el formulario debe crear exactamente un registro').toHaveLength(1);",
@@ -253,10 +337,10 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
       "    await row.getByRole('button', { name: 'Editar' }).click();",
       "    await expect(form.getByRole('button', { name: 'Guardar cambios' })).toBeVisible();",
       "    await form.getByRole('button', { name: 'Guardar cambios' }).click();",
-      "    await expect(page.getByRole('status')).toContainText('Registro actualizado');",
+      "    await expect(page.locator('.success[role=\"status\"]')).toContainText('Registro actualizado');",
       '',
       "    await (marker ? rows.filter({ hasText: marker[1] }) : rows.last()).getByRole('button', { name: 'Eliminar' }).click();",
-      "    await expect(page.getByRole('status')).toContainText('Registro eliminado');",
+      "    await expect(page.locator('.success[role=\"status\"]')).toContainText('Registro eliminado');",
       '    const after = ((await api(operation.collectionPath)).data || []).map((item) => item.id || item._id);',
       "    expect(after).not.toContain(created[0].id || created[0]._id);",
       '  } finally {',

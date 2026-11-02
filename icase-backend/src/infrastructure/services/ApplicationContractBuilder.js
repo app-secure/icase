@@ -25,6 +25,7 @@ class ApplicationContractBuilder {
     const approved = requerimientos.filter((item) => item.aprobado === true && item.tipo === 'RF');
     const entities = domainModel?.entities || [];
     const warnings = [];
+    if ((domainModel?.relations || []).some((r) => r.cardinalidad === 'muchos_a_muchos')) warnings.push('Relaciones N:M: API y panel web generados; MongoDB requiere replica set transaccional. Requiere verificación integral con base real antes de certificar la entrega completa.');
     const operations = approved.map((item, index) => {
       const key = this._uniqueKey(slug(item.identificador || item.nombre), approved, index);
       const id = item.identificador || `RF-${String(index + 1).padStart(2, '0')}`;

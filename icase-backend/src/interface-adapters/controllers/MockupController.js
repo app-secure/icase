@@ -24,12 +24,14 @@ class MockupController {
   async iniciarTrabajo(req, res) {
     try {
       const { proyectoId } = req.params;
-      const { pantallas = [], insumoAdicional = '', requerimientos = null } = req.body;
+      const { pantallas = [], insumoAdicional = '', requerimientos = null, soloReparar = false } = req.body;
+      if (typeof soloReparar !== 'boolean') return res.status(400).json({ error: 'soloReparar debe ser booleano' });
       const resultado = await this.trabajoGeneracionRepository.crearORecuperarActivo({
         proyectoId,
         pantallas,
         insumoAdicional,
-        requerimientosLocales: requerimientos
+        requerimientosLocales: requerimientos,
+        soloReparar
       });
 
       if (resultado.creado) {
@@ -37,7 +39,8 @@ class MockupController {
           proyectoId,
           pantallas,
           insumoAdicional,
-          requerimientosLocales: requerimientos
+          requerimientosLocales: requerimientos,
+          soloReparar
         });
       }
 
@@ -114,13 +117,15 @@ class MockupController {
         return res.status(400).json({ error: 'proyectoId es requerido' });
       }
 
-      const { pantallas = [], insumoAdicional = '', requerimientos = null } = req.body;
+      const { pantallas = [], insumoAdicional = '', requerimientos = null, soloReparar = false } = req.body;
+      if (typeof soloReparar !== 'boolean') return res.status(400).json({ error: 'soloReparar debe ser booleano' });
 
       const resultado = await this.generarMockupsUseCase.ejecutar({
         proyectoId,
         pantallas,
         insumoAdicional,
-        requerimientosLocales: requerimientos
+        requerimientosLocales: requerimientos,
+        soloReparar
       });
 
       const mockups = Array.isArray(resultado) ? resultado : (resultado.mockups || []);

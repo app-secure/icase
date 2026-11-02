@@ -4,6 +4,7 @@ const BusinessRuleService = require('../services/BusinessRuleService');
 const AccessControlService = require('../services/AccessControlService');
 const ModuleService = require('../services/ModuleService');
 const StackCatalog = require('../services/StackCatalog');
+const GenerationCoverageService = require('../services/GenerationCoverageService');
 const DomainModelExtractor = require('../../infrastructure/services/DomainModelExtractor');
 
 const PROJECT_STATES_WITH_APPROVED_DESIGN = new Set([
@@ -58,7 +59,14 @@ class GestionarPlanCodificacion {
         etapas: this.workflow.crearEtapasIniciales()
       });
     }
-    return { proyecto: { id: proyecto.id, nombre: proyecto.nombre }, ...this._conModulos(this.workflow.enriquecer(plan)) };
+    const result = { proyecto: { id: proyecto.id, nombre: proyecto.nombre }, ...this._conModulos(this.workflow.enriquecer(plan)) };
+    const requirements = this.requerimientoRepository ? await this.requerimientoRepository.listarPorProyecto(proyectoId) : [];
+    const coverage = new GenerationCoverageService();
+    result.modulos.requisitos = requirements.filter((item) => item.aprobado && item.tipo === 'RF').map((item) => ({
+      identificador: item.identificador, nombre: item.nombre, huella_requisito: coverage.huellaRequisito(item),
+      sugerencias: coverage.capabilities.sugerir(item)
+    }));
+    return result;
   }
 
   async proponer({ proyectoId, etapa, propuesta, observaciones = '' }) {
@@ -76,7 +84,7 @@ class GestionarPlanCodificacion {
     if (etapa === 'stack_tecnologico') StackCatalog.resolve(propuesta); // lanza un error claro si algo no está soportado
     if (etapa === 'reglas_negocio') propuesta = await this._normalizarReglas(proyectoId, propuesta);
     if (etapa === 'control_acceso') propuesta = await this._normalizarAcceso(proyectoId, propuesta);
-    if (etapa === 'modulos') propuesta = this._normalizarModulos(propuesta);
+    if (etapa === 'modulos') propuesta = await this._normalizarModulos(propuesta, proyectoId);
     const actual = plan.etapas.find((item) => item.etapa === etapa);
     const cambioReal = JSON.stringify(actual?.propuesta || null) !== JSON.stringify(propuesta);
     let etapas = plan.etapas.map((item) => item.etapa === etapa ? {
@@ -123,6 +131,7 @@ class GestionarPlanCodificacion {
       // Los RF pudieron cambiar desde que se guardó la propuesta.
       await this._normalizarAcceso(proyectoId, actual.propuesta);
     }
+    if (etapa === 'modulos' && decision === 'aprobar') await this._normalizarModulos(actual.propuesta, proyectoId);
 
     let etapas = plan.etapas.map((item) => item.etapa === etapa ? {
       ...item,
@@ -362,16 +371,26 @@ class GestionarPlanCodificacion {
     return { ...propuesta, reglas: resultado.reglas };
   }
 
-  _normalizarModulos(propuesta) {
+  async _normalizarModulos(propuesta, proyectoId) {
     const resultado = this.moduleService.validar(propuesta);
     if (resultado.errores.length) throw new Error(`Módulos no válidos: ${resultado.errores.join(' ')}`);
+    if (resultado.propuesta.cobertura.requisitos.length) {
+      if (!this.requerimientoRepository) throw new Error('No se puede validar la cobertura sin requisitos.');
+      const requirements = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      const coverage = new GenerationCoverageService();
+      for (const item of resultado.propuesta.cobertura.requisitos) {
+        const rf = requirements.find((requirement) => requirement.identificador === item.requisito && requirement.aprobado && requirement.tipo === 'RF');
+        if (!rf) throw new Error(`La cobertura cita un RF no aprobado de este proyecto: ${item.requisito}.`);
+        if (item.confirmado && item.huella_requisito !== coverage.huellaRequisito(rf)) throw new Error(`La confirmación de ${item.requisito} está desactualizada. Reabre el plan y revísala.`);
+      }
+    }
     return resultado.propuesta;
   }
 
   /** Añade al plan qué módulos incluye la aplicación según las decisiones aprobadas (se recalcula, no se guarda). */
   _conModulos(plan) {
     const decisiones = Object.fromEntries((plan.etapas || []).filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta).map((item) => [item.etapa, item.propuesta]));
-    return { ...plan, modulos: { incluidos: this.moduleService.incluidos(decisiones), opcionales: ModuleService.opcionales(), activos: this.moduleService.activos(decisiones.modulos) } };
+    return { ...plan, modulos: { incluidos: this.moduleService.incluidos(decisiones), opcionales: ModuleService.opcionales(), activos: this.moduleService.activos(decisiones.modulos), capacidades: ModuleService.capacidades() } };
   }
 
   /** Valida la política de acceso contra los RF aprobados; devuelve la propuesta normalizada. */

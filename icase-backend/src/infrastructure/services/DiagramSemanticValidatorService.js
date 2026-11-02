@@ -4,7 +4,8 @@ const STOPWORDS = new Set([
   'accion', 'actualizar', 'administrar', 'alta', 'aplicacion', 'baja', 'consultar',
   'crear', 'debe', 'digital', 'el', 'en', 'generar', 'gestionar', 'gestion', 'hacer',
   'la', 'las', 'los', 'manual', 'mostrar', 'nuevo', 'para', 'permitir', 'procesar',
-  'realizar', 'registrar', 'sistema', 'una', 'uno', 'validar', 'ver'
+  'realizar', 'registrar', 'sistema', 'una', 'uno', 'validar', 'ver',
+  'por', 'del', 'con', 'sin', 'mediante', 'toma', 'tomar'
 ]);
 
 const SYNONYMS = new Map([

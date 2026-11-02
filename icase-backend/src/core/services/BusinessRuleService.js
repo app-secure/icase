@@ -5,7 +5,7 @@
  * determinista. Este servicio valida que cada regla sea coherente con el modelo de dominio y los RF
  * aprobados, y decide cuáles pueden llegar al código (únicamente las `confirmado`).
  */
-const RULE_TYPES = Object.freeze(['requerido', 'unico', 'rango', 'longitud', 'formato', 'comparacion', 'maquina_estados', 'inmutable', 'valor_por_defecto']);
+const RULE_TYPES = Object.freeze(['requerido', 'unico', 'rango', 'longitud', 'formato', 'comparacion', 'maquina_estados', 'inmutable', 'valor_por_defecto', 'calculo']);
 const DECISIONS = Object.freeze(['confirmado', 'pendiente', 'rechazado']);
 const OPERATORS = Object.freeze(['<', '<=', '>', '>=', '==', '!=']);
 const FORMATS = Object.freeze(['email', 'url']);
@@ -79,6 +79,12 @@ class BusinessRuleService {
       else normalizadas.push(regla);
     });
 
+    for(const rule of normalizadas.filter(rule=>rule.tipo==='calculo')) {
+      const calculated=normalizadas.filter(item=>item.tipo==='calculo'&&item.entidad===rule.entidad);
+      if(calculated.filter(item=>item.campo===rule.campo).length>1) errores.push(rule.id+': el campo tiene más de una fórmula.');
+      const visit=node=>{if(!node||typeof node!=='object')return;if(node.campo&&calculated.some(item=>item.campo===node.campo)) errores.push(rule.id+': no se admiten dependencias entre campos calculados.');visit(node.izquierda);visit(node.derecha);};
+      visit(rule.expresion);
+    }
     return { reglas: errores.length ? [] : normalizadas, errores, advertencias };
   }
 
@@ -115,6 +121,24 @@ class BusinessRuleService {
       if (regla[clave] !== undefined && !isNumber(regla[clave])) fail(`"${clave}" debe ser un número.`);
     };
     switch (regla.tipo) {
+      case 'calculo': {
+        const target=campo(regla.campo);
+        if(!target || target.kind!=='numerico') {fail('el resultado del cálculo debe ser numérico.');break;}
+        regla.campo=target.nombre;
+        if(!Number.isInteger(regla.decimales)||regla.decimales<0||regla.decimales>6) fail('decimales debe estar entre 0 y 6.');
+        if(target.propiedad.type==='integer'&&regla.decimales!==0)fail('un resultado entero requiere decimales = 0.');
+        let nodes=0;
+        const visit=(node,depth=0)=>{
+          if(++nodes>63||depth>8){fail('expresión demasiado compleja.');return;}
+          if(typeof node==='number'){if(!Number.isFinite(node)||Math.abs(node)>1e12)fail('constante inválida.');return;}
+          if(!node||typeof node!=='object'||Array.isArray(node)){fail('expresión inválida.');return;}
+          if(Object.keys(node).length===1&&typeof node.campo==='string') {
+            const input=campo(node.campo); if(!input||input.kind!=='numerico'||input.nombre===regla.campo)fail('entrada no numérica o referencia circular.');
+          } else if(Object.keys(node).length===3&&['+','-','*','/'].includes(node.op)) {visit(node.izquierda,depth+1);visit(node.derecha,depth+1);}
+          else fail('solo se permiten campos, constantes y + - * /.');
+        };
+        visit(regla.expresion); break;
+      }
       case 'requerido': case 'inmutable': {
         const found = campo(regla.campo, { permitirReferencia: regla.tipo === 'requerido' });
         if (found) regla.campo = found.nombre;

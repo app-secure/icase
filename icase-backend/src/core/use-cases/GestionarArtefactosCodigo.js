@@ -3,6 +3,8 @@ const CodeGenerationWorkflowService = require('../services/CodeGenerationWorkflo
 const { CODE_PHASE_STATES } = require('../constants/CodeGenerationPhases');
 const ArtifactVerificationService = require('../services/ArtifactVerificationService');
 const SandboxRuntimeVerifier = require('../../infrastructure/services/SandboxRuntimeVerifier');
+const GenerationCoverageService = require('../services/GenerationCoverageService');
+const DependencyAudit = require('../constants/DependencyAudit');
 
 class GestionarArtefactosCodigo {
   constructor({ proyectoRepository, requerimientoRepository, diagramaRepository, disenoRepository, planCodificacionRepository, artefactoRepository, backendGenerator, frontendGenerator, testGenerator, infrastructureGenerator, pipelineGenerator, deliveryGenerator }) {
@@ -42,9 +44,14 @@ class GestionarArtefactosCodigo {
       }
       const runtime = await this.runtimeVerifier.verificar(runtimeArtifact);
       verificacion = { ...structural, estado: runtime.estado, nivel: runtime.nivel,
+        protocolo: runtime.protocolo,
+        protocolo_despliegue: runtime.protocolo_despliegue,
+        protocolo_dependencias: runtime.protocolo_dependencias,
+        ...(artefacto.tipo === 'codigo_backend' || artefacto.tipo === 'paquete_entrega'
+          ? { cobertura_funcional: this._evaluarCobertura(artefacto) } : {}),
         pruebas: runtime.pruebas, errores: runtime.errores || [],
         nota: runtime.estado === 'apta'
-          ? 'Compilación y pruebas de integración completadas en contenedores aislados para esta huella de archivos.'
+          ? 'Verificación técnica completada para esta huella de archivos. El alcance funcional se revisa por separado; no certifica todos los RF ni RNF.'
           : 'La ejecución aislada falló o Docker no está disponible. No se puede aprobar ni exportar este artefacto.' };
     }
     await this.artefactoRepository.actualizar(artefactoId, { verificacion });
@@ -80,7 +87,28 @@ class GestionarArtefactosCodigo {
     if (needsRuntime ? stored.estado !== 'apta' || stored.nivel !== 'ejecucion_aislada' : stored.estado !== 'apta_estructuralmente') {
       throw new Error(`La verificación del artefacto no fue satisfactoria: ${(stored.errores || []).join(' ')}`);
     }
+    if (['codigo_backend', 'paquete_entrega'].includes(artefacto.tipo)) {
+      let manifest = {};
+      try { manifest = JSON.parse(artefacto.archivos?.find((file) => file.ruta === 'backend/icase.manifest.json')?.contenido || '{}'); } catch { /* La revisión estructural rechaza JSON inválido. */ }
+      const hasAssociations = (manifest.associations || []).length || (manifest.storage?.associations || []).length || (manifest.relations || []).some((relation) => relation.cardinalidad === 'muchos_a_muchos');
+      const nodeBackend = manifest.stack?.lenguaje === 'node' || artefacto.archivos?.some((file) => file.ruta === 'backend/package.json');
+      if (nodeBackend && stored.protocolo_dependencias !== DependencyAudit.protocol) throw new Error('Repite la verificación: falta la auditoría obligatoria de dependencias Node para esta huella.');
+      if (hasAssociations && stored.protocolo !== 'runtime-v2-associations') throw new Error('Repite la verificación aislada: la evidencia anterior no incluye el protocolo N:M actual.');
+    }
+    if (artefacto.tipo === 'paquete_entrega') {
+      if (stored.protocolo_despliegue !== 'compose-exportado-v1') throw new Error('Repite la verificación del paquete: falta comprobar el despliegue del Compose exportado.');
+      new GenerationCoverageService().exigirEntrega(artefacto);
+    }
     return stored;
+  }
+
+  _evaluarCobertura(artefacto) {
+    const file = artefacto.archivos?.find((item) => item.ruta === 'backend/GENERATION-REPORT.json');
+    try {
+      const report = JSON.parse(file?.contenido || '{}');
+      return report.fuente_cobertura ? new GenerationCoverageService().evaluar(report.fuente_cobertura)
+        : { estado: 'sin_evaluar', exportable: false };
+    } catch { return { estado: 'sin_evaluar', exportable: false }; }
   }
 
   asegurarPaqueteEjecutable(artefacto) {
@@ -104,7 +132,7 @@ class GestionarArtefactosCodigo {
       ...plan.etapas.filter((item) => item.estado === CODE_PHASE_STATES.APPROVED).map((item) => [item.etapa, item.version || 1]),
       ...(diseno.mockups || []).map((item) => [`mockup:${item.nombre_pantalla}`, item.version || 1])
     ]);
-    const input = { decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
+    const input = { contrato_generacion: 'frontend-v9-process-inbox', decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_frontend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
@@ -148,11 +176,11 @@ class GestionarArtefactosCodigo {
 
   async generarBackend(proyectoId) {
     const { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio } = await this._insumosBackend(proyectoId);
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ decisiones, requerimientos: requerimientos.filter((item) => item.aprobado), dominio })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'capacidades-v16-process-outbox', decisiones, requerimientos: requerimientos.filter((item) => item.aprobado), dominio })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
 
-    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio }, versionesOrigen });
+    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio, backendAnterior: ultimo }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({
       proyecto_id: proyectoId, tipo: 'codigo_backend', version: (ultimo?.version || 0) + 1,
       estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, ...generado
@@ -201,7 +229,7 @@ class GestionarArtefactosCodigo {
     this.workflow.validarDependencias(plan, 'generacion_pruebas');
     if (!backend || !frontend) throw new Error('Debes aprobar backend y frontend antes de generar las pruebas.');
     const versionesOrigen = { codigo_backend: backend.version, codigo_frontend: frontend.version };
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pruebas-v7-replicas-provider-fixtures', versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'pruebas');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
     const generado = await this.testGenerator.generar({ proyecto, insumos: { requerimientos, backend, frontend }, versionesOrigen });
@@ -228,7 +256,7 @@ class GestionarArtefactosCodigo {
     const aprobados = diagramas.filter((item) => item.aprobado && item.estado === 'aprobado' && !item.desactualizado);
     const decisiones = Object.fromEntries(plan.etapas.filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta).map((item) => [item.etapa, item.propuesta]));
     const versionesOrigen = { codigo_backend: backend.version, codigo_frontend: frontend.version, ...Object.fromEntries(aprobados.map((item) => [item.tipo, item.version || 1])) };
-    const input = { versionesOrigen, decisiones, rnf: requerimientos.filter((item) => item.aprobado && item.tipo === 'RNF') };
+    const input = { contrato_generacion: 'infraestructura-v7-replicas-specialized', versionesOrigen, decisiones, rnf: requerimientos.filter((item) => item.aprobado && item.tipo === 'RNF') };
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'infraestructura');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
@@ -254,7 +282,7 @@ class GestionarArtefactosCodigo {
     if (!tests || !infrastructure) throw new Error('Debes aprobar pruebas e infraestructura antes de generar CI/CD.');
     const decisiones = Object.fromEntries(plan.etapas.filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta).map((item) => [item.etapa, item.propuesta]));
     const versionesOrigen = { pruebas: tests.version, infraestructura: infrastructure.version };
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ versionesOrigen, decisiones })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pipeline-v5-replica-namespace', versionesOrigen, decisiones })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'pipeline_ci_cd');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
     const generado = await this.pipelineGenerator.generar({ proyecto, insumos: { tests, infrastructure, decisiones }, versionesOrigen });
@@ -278,9 +306,10 @@ class GestionarArtefactosCodigo {
     this.workflow.validarDependencias(plan, 'paquete_entrega');
     const faltantes = tipos.filter((_tipo, index) => !artefactos[index]);
     if (faltantes.length) throw new Error(`Faltan artefactos aprobados para la entrega: ${faltantes.join(', ')}.`);
+    new GenerationCoverageService().exigirEntrega(artefactos[0]);
     for (const artefacto of artefactos) this._exigirVerificacion(artefacto);
     const versionesOrigen = Object.fromEntries(artefactos.map((item) => [item.tipo, item.version]));
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(versionesOrigen)).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({contrato_generacion:'entrega-v2-safe-update',versionesOrigen})).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'paquete_entrega');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
     const generado = await this.deliveryGenerator.generar({ proyecto, insumos: { artefactos }, versionesOrigen });

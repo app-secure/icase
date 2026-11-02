@@ -231,8 +231,10 @@ export default function DiagramsView({
   const handleSaveCode = async () => {
     if (!hasUnsavedCode || isSavingCode) return;
     setIsSavingCode(true);
-    const result = await onUpdateDiagramCode?.(selectedKey, codeDraft);
-    setIsSavingCode(false);
+    let result;
+    try { result = await onUpdateDiagramCode?.(selectedKey, codeDraft); }
+    catch (error) { result = { success: false, error: error.message }; }
+    finally { setIsSavingCode(false); }
     if (result?.success !== false) {
       setCodeDrafts((drafts) => {
         const next = { ...drafts };

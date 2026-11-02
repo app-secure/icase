@@ -35,7 +35,17 @@ class RecordStore {
       for (const migration of migrations) {
         if (applied.has(migration.id)) continue;
         // MySQL confirma implícitamente las sentencias DDL: la migración se aplica en orden, sin transacción.
-        for (const statement of migration.statements) await connection.query(statement);
+        for (const statement of migration.statements) {
+          const addition=/^ALTER TABLE `([^`]+)` ADD COLUMN `([^`]+)` ([A-Z0-9]+)/.exec(statement);
+          if(addition) {
+            const [columns]=await connection.query('SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',[addition[1],addition[2]]);
+            if(columns.length) {
+              if(columns[0].DATA_TYPE.toLowerCase()!==addition[3].toLowerCase())throw new Error('La columna existente no coincide con la migración incremental');
+              continue; // Reanudación tras DDL parcialmente aplicado, sin recrear datos.
+            }
+          }
+          await connection.query(statement);
+        }
         await connection.query('INSERT INTO schema_migrations (id) VALUES (?)', [migration.id]);
       }
     } finally {
@@ -116,12 +126,22 @@ class RecordStore {
     } catch (error) { throw translate(error); }
   }
 
+  async getRecord(operation,id) {
+    const {name,table}=tableFor(model,operation);
+    return this._find(name,table,operation,id);
+  }
+
+  async replacePassword(id,previous,password_hash) {
+    const [result]=await this.pool.query('UPDATE icase_users SET password_hash=?, updated_at=CURRENT_TIMESTAMP(3) WHERE id=? AND password_hash=? AND activo=1',[password_hash,id,previous]);
+    return result.affectedRows===1;
+  }
+
   async update(operation, id, body) {
     const { name, table } = tableFor(model, operation);
     const row = await this._row(name, table, operation, id);
     if (!row) return null;
     const previous = toRecord(table, operation, row).data;
-    const { values, extra } = split(table, body);
+    const { values, extra } = split(table, rules.derive(name,body,previous));
     rules.check(name, 'update', { ...previous, ...viewOf(table, values, extra) }, previous);
     const columns = Object.keys(values);
     const sets = [...columns.map((column) => `${quote(column)} = ?`), 'extra = JSON_MERGE_PATCH(extra, ?)'];

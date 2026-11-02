@@ -109,6 +109,18 @@ class RecordStore {
     return toRecord(table, operation, { ...document, _id: result.insertedId });
   }
 
+  async getRecord(operation,id) {
+    const {name,table}=tableFor(model,operation);
+    if (!/^[a-f0-9]{24}$/i.test(String(id))) return null;
+    const row=await this.db.collection(name).findOne({_id:new ObjectId(id),...(table.generic?{capability:operation}:{})});
+    return row ? toRecord(table,operation,row) : null;
+  }
+
+  async replacePassword(id,previous,password_hash) {
+    const result=await this.db.collection('icase_users').updateOne({_id:new ObjectId(id),password_hash:previous,activo:true},{$set:{password_hash,updated_at:new Date()}});
+    return result.modifiedCount===1;
+  }
+
   async update(operation, id, body) {
     const { name, table } = tableFor(model, operation);
     if (!ObjectId.isValid(id)) return null;
@@ -116,7 +128,7 @@ class RecordStore {
     const current = await this.db.collection(name).findOne(filter);
     if (!current) return null;
     const previous = toRecord(table, operation, current).data;
-    const { values, extra } = split(table, body, OPTIONS);
+    const { values, extra } = split(table, rules.derive(name,body,previous), OPTIONS);
     this._checkExtra(extra);
     rules.check(name, 'update', { ...previous, ...viewOf(table, values, extra) }, previous);
     await this._checkReferences(table, values);
@@ -130,6 +142,8 @@ class RecordStore {
   async remove(operation, id) {
     const { name } = tableFor(model, operation);
     if (!ObjectId.isValid(id)) return false;
+    const endpoint = (model.associations || []).some((relation) => model.tables[relation.table].columns.some((column) => column.references === name));
+    if (endpoint) return require('./data/mongo-associations').remove(this, name, id);
     for (const reference of this.inbound.filter((item) => item.target === name)) {
       if (await this.db.collection(reference.collection).countDocuments({ [reference.column]: new ObjectId(id) }, { limit: 1 })) {
         throw new HttpError(409, 'El registro es referenciado por otros registros.');

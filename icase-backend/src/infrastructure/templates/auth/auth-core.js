@@ -162,6 +162,21 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
   }
 
   function authorize(user, method, path) {
+    try { path = decodeURIComponent(path); } catch { throw new HttpError(400, 'Ruta inválida.'); }
+    const association = /^\/api\/associations\/([^/]+)(?:\/|$)/.exec(path);
+    if (association) {
+      const model = require('../data/model');
+      const relation = (model.associations || []).find((item) => item.table === association[1]);
+      if (!relation) throw new HttpError(404, 'Relación inexistente.');
+      if (user.rol === ADMIN) return;
+      const required = method === 'GET' ? ['GET'] : ['GET', 'PATCH'];
+      const endpoints = model.tables[relation.table].columns.map((column) => column.references);
+      for (const table of endpoints) {
+        const permitted = Object.entries(model.operations).some(([key, name]) => name === table && required.every((verb) => (policy.operaciones?.[key]?.[user.rol] || []).includes(verb)));
+        if (!permitted) throw new HttpError(403, 'Se requieren permisos sobre ambos extremos del vínculo.');
+      }
+      return;
+    }
     const operation = /^\/api\/operations\/([^/]+)/.exec(path);
     if (operation) {
       const byRole = Object.prototype.hasOwnProperty.call(policy.operaciones || {}, operation[1]) ? policy.operaciones[operation[1]] : null;

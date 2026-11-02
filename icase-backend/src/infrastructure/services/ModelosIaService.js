@@ -126,11 +126,11 @@ class ModelosIaService {
     };
     const directivas = (objetivo === 'requisitos'
       ? [
-        this.leerPrompt('analista_ieee830.md'),
+        this.leerPrompt('analista_iso29148.md'),
         this.leerPrompt('auditor_requisitos.md')
       ]
       : [
-        this.leerPrompt('analista_ieee830.md'),
+        this.leerPrompt('analista_iso29148.md'),
         this.leerPrompt('disenador_arquitectura.md'),
         tipoDiagrama && promptsEspecializados[tipoDiagrama]
           ? this.leerPrompt(promptsEspecializados[tipoDiagrama])

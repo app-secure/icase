@@ -121,6 +121,7 @@ class MockupIaService {
   }
 
   _clasificarError(error) {
+    if (error.code === 'MOCKUP_OUTPUT_TRUNCATED') return { tipo: 'salida_truncada', reintentable: true };
     const status = error.response?.status;
     const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
     if (status === 401 || status === 403) return { tipo: 'autenticacion', reintentable: false };
@@ -190,7 +191,9 @@ class MockupIaService {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.3, maxOutputTokens: 12000, responseMimeType: 'application/json' }
       }, { timeout: 90000 });
-      return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+      const candidate = res.data?.candidates?.[0];
+      if (candidate?.finishReason === 'MAX_TOKENS') throw Object.assign(new Error('Respuesta de mockup truncada por límite de salida; no se acepta como HTML completo.'), { code: 'MOCKUP_OUTPUT_TRUNCATED' });
+      return candidate?.content?.parts?.filter(part => !part.thought).map(part => part.text || '').join('') || null;
     }
 
     const apiKey = proveedor === 'groq' ? this.groqApiKey : this.openrouterApiKey;
@@ -210,7 +213,9 @@ class MockupIaService {
       response_format: { type: 'json_object' },
       temperature: 0.3
     }, { headers, timeout: 90000 });
-    return res.data?.choices?.[0]?.message?.content || null;
+    const choice = res.data?.choices?.[0];
+    if (choice?.finish_reason === 'length') throw Object.assign(new Error('Respuesta de mockup truncada por límite de salida; no se acepta como HTML completo.'), { code: 'MOCKUP_OUTPUT_TRUNCATED' });
+    return choice?.message?.content || null;
   }
 
   _construirPromptCompleto(promptBase, contextoProyecto, pantallas, insumoAdicional) {

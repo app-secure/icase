@@ -108,7 +108,7 @@ class DomainModelExtractor {
     return relations;
   }
 
-  _many(cardinality) { return /\*|\b[nm]\b|\.\.(?:[2-9]|\d{2,})/i.test(cardinality || ''); }
+  _many(cardinality) { return /\*|\b[nm]\b|\.\.(?:[2-9]|\d{2,})/i.test(cardinality || '') || /^\d+$/.test(cardinality || '') && Number(cardinality) > 1; }
 
   /** Una relación uno-a-muchos deja la clave foránea en el lado "muchos". */
   _references(entities, relations) {
@@ -132,6 +132,9 @@ class DomainModelExtractor {
     for (const entity of entities) {
       for (const attribute of entity.attributes) {
         if (!attribute.referencia || !byName.has(attribute.referencia)) continue;
+        // Una colección respaldada por N:M no es una FK escalar del propietario.
+        if (attribute.collection && relations.some((r) => r.cardinalidad === 'muchos_a_muchos' &&
+          ((r.from === entity.name && r.to === attribute.referencia) || (r.to === entity.name && r.from === attribute.referencia)))) continue;
         const field = `${snake(attribute.referencia)}_id`;
         if (!entity.references.some((item) => item.field === field)) {
           entity.references.push({ field, entity: attribute.referencia, relation: 'atributo', cardinality: attribute.collection ? 'uno_a_muchos' : 'muchos_a_uno', label: attribute.name });

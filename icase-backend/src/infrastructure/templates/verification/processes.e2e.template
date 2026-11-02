@@ -1,0 +1,29 @@
+import {test,expect} from '@playwright/test';
+const base=process.env.BASE_API_URL||'http://localhost:3000',web=process.env.BASE_WEB_URL||'http://localhost:8080';
+test('Bandeja: iniciar con selectores, aprobar con otro actor y sincronizar cierre',async({browser,request})=>{
+ test.setTimeout(60000);let stage='preparar datos';
+ const suffix=Date.now()+'-'+Math.random().toString(16).slice(2);
+ const adminEmail=process.env.ADMIN_EMAIL||'admin@example.test',adminPassword=process.env.ADMIN_PASSWORD||'test-admin-password';
+ const login=await request.post(base+'/api/auth/login',{data:{email:adminEmail,password:adminPassword}});expect(login.ok()).toBeTruthy();const {token}=await login.json(),headers={Authorization:'Bearer '+token};
+ const reviewerEmail='review-'+suffix+'@example.test',password='Process-UI-Only-123!';
+ expect((await request.post(base+'/api/users',{headers,data:{email:reviewerEmail,password,nombre:'Revisor UI',rol:'administrador',activo:true}})).ok()).toBeTruthy();
+ const ids=[];for(let i=0;i<2;i++){const response=await request.post(base+'/api/operations/rf-01',{headers,data:{nombre:'Proceso UI '+suffix+' '+i,estado:'pendiente'}});expect(response.ok()).toBeTruthy();ids.push(String((await response.json()).id));}
+ const a=await browser.newContext(),b=await browser.newContext();
+ try{
+  const first=await a.newPage(),second=await b.newPage();
+  const signIn=async(page,email,pass)=>{await page.goto(web);await page.getByLabel('Correo electrónico').fill(email);await page.getByLabel('Contraseña',{exact:true}).fill(pass);await page.getByRole('button',{name:'Iniciar sesión',exact:true}).click();await page.getByRole('link',{name:'Procesos',exact:true}).click();await expect(page.getByRole('heading',{name:'Procesos de negocio',exact:true})).toBeVisible();};
+  stage='iniciar sesión solicitante';await signIn(first,adminEmail,adminPassword);
+  await first.getByLabel('Definición',{exact:true}).selectOption('revision');
+  stage='seleccionar registros';for(const [i,alias] of ['primero','segundo'].entries()){const select=first.getByRole('group',{name:alias+' (rf-01)',exact:true}).locator('select');await expect(select.locator('option[value="'+ids[i]+'"]')).toHaveCount(1);await select.selectOption(ids[i]);}
+  stage='iniciar proceso';await first.getByRole('button',{name:'Iniciar',exact:true}).click();
+  const detail=first.getByRole('region',{name:'Detalle del proceso'});await expect(detail).toBeVisible();
+  const id=(await detail.innerText()).match(/ID: ([a-f0-9-]{36})/)[1];
+  await expect(detail.getByRole('button',{name:'Ejecutar cerrar'})).toHaveCount(0);
+  stage='iniciar sesión aprobador';await signIn(second,reviewerEmail,password);
+  await second.getByRole('button').filter({hasText:id}).click();
+  stage='ejecutar cierre';await second.getByRole('button',{name:'Ejecutar cerrar',exact:true}).click();
+  await expect(second.getByRole('status').filter({hasText:'Acción confirmada.'})).toBeVisible();
+  stage='recibir actualización en solicitante';await expect(detail.locator('strong')).toHaveText('cerrado',{timeout:5000});
+  const denied=await request.patch(base+'/api/operations/rf-01/'+ids[0],{headers,data:{estado:'pendiente'}});expect(denied.status()).toBe(409);
+ }catch(error){throw new Error('Paso del proceso: '+stage+'; '+error.message);}finally{await a.close().catch(()=>{});await b.close().catch(()=>{});}
+});

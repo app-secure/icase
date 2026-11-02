@@ -52,6 +52,19 @@ async function apiFetch(url, options) {
 }
 
 // === AUTENTICACIÓN ===
+export async function fetchAuthConfigApi() {
+  const res = await fetch(`${API_URL}/auth/config`);
+  if (!res.ok) throw new Error('No se pudo consultar la configuración de acceso.');
+  return res.json();
+}
+
+export async function logoutApi() {
+  const res = await apiFetch(`${API_URL}/auth/logout`, { method: 'POST', headers: getAuthHeaders() });
+  if (res.status === 401) return;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudo cerrar la sesión en el servidor.');
+}
+
 export async function registroApi({ nombre, apellido, correo, celular, password }) {
   const res = await fetch(`${API_URL}/auth/registro`, {
     method: 'POST',
@@ -376,10 +389,14 @@ export async function updateDiagramApi(diagramId, data) {
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data)
     });
-    if (!res.ok) throw new Error('Error al actualizar diagrama');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(body.error || 'Error al actualizar diagrama'), { status: res.status });
+    }
     return await res.json();
   } catch (err) {
     console.warn('[API] Error al actualizar diagrama:', err.message);
+    if (err.status === 409) throw err;
     return null;
   }
 }
@@ -425,11 +442,11 @@ export async function generateMockupsApi(projectId, pantallas = [], insumoAdicio
   }
 }
 
-export async function startMockupJobApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null) {
+export async function startMockupJobApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null, soloReparar = false) {
   const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ pantallas, insumoAdicional, requerimientos })
+    body: JSON.stringify({ pantallas, insumoAdicional, requerimientos, soloReparar })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo iniciar la generación de mockups.');

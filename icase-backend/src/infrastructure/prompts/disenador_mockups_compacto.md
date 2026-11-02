@@ -6,6 +6,7 @@ Genera exclusivamente las pantallas solicitadas usando el contexto entregado. Re
 
 - Un objeto por pantalla y en el mismo orden solicitado. `nombre_pantalla` debe coincidir exactamente con el slug recibido.
 - Cada `preview_code` debe ser HTML5 completo, autocontenido y comenzar con `<!DOCTYPE html>`.
+- El primer carácter es un solo `<`: nunca `<<!DOCTYPE`. Termina exactamente con `</html>`, sin `>` adicional ni cercos Markdown. Mantén CSS y datos de ejemplo compactos para completar la pantalla dentro del límite de salida; no omitas cierres ni uses puntos suspensivos como sustituto de contenido.
 - Usa Tailwind CDN, tipografía Inter, fondo slate-50, superficies blancas, bordes slate-200 y azul `#0b57d0` como color primario.
 - Mantén el mismo shell entre pantallas que comparten `shell`: nombre/logo textual, color y ancho de navegación, opciones y orden del menú, topbar, usuario y un único texto de estado "Sistema en línea". No inventes ni omitas opciones en pantallas hermanas.
 - Respeta `plataforma`: mobile se diseña a 390 px con barra inferior o cabecera compacta; tablet a 768-1024 px con objetivos táctiles; web a 1280 px con sidebar. Nunca conviertas una pantalla de cliente o mesero en escritorio.

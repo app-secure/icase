@@ -20,7 +20,7 @@ describe('propuestas de planificación de código', () => {
       ]
     });
 
-    expect(result.propuesta.backend).toBe('Node.js + NestJS');
+    expect(result.propuesta.backend).toBe('Node.js 22.12+ + NestJS 12.3.2');
     expect(result.propuesta.base_datos).toBe('PostgreSQL');
     expect(result.propuesta.tiempo_real).toBe('Socket.IO');
     expect(result.propuesta.estilos).toBe('Tailwind CSS');

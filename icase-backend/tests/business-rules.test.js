@@ -1,5 +1,4 @@
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const DomainModelExtractor = require('../src/infrastructure/services/DomainModelExtractor');
 const BusinessRuleService = require('../src/core/services/BusinessRuleService');
@@ -165,13 +164,19 @@ describe('generación con reglas de negocio', () => {
 });
 
 describe('motor de reglas y ejercitador sobre el código generado', () => {
+  const temporaryDirs = [];
+  afterAll(() => {
+    for (const dir of temporaryDirs) fs.rmSync(dir, { recursive: true, force: true });
+  });
   const cargar = async (reglas, { vaciarMotor = false } = {}) => {
     const result = await new BackendScaffoldGenerator().generar({
       proyecto: { nombre: 'Demo' },
       insumos: { decisiones: { stack_tecnologico: { backend: 'Express', base_datos: 'PostgreSQL' }, reglas_negocio: { reglas } }, requerimientos: requirements, diagramaDominio: { codigo_plantuml: PLANTUML } },
       versionesOrigen: {}
     });
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'icase-rules-'));
+    // Mantener el código generado dentro de las raíces que indexa Jest.
+    const dir = fs.mkdtempSync(path.join(__dirname, '.generated-rules-'));
+    temporaryDirs.push(dir);
     for (const file of result.archivos.filter((item) => item.ruta.startsWith('backend/src/data/'))) {
       const destination = path.join(dir, path.basename(file.ruta));
       fs.writeFileSync(destination, vaciarMotor && file.ruta.endsWith('/rules.js') ? 'module.exports = {};\n' : file.contenido);

@@ -128,12 +128,22 @@ class RecordStore {
     } catch (error) { throw translate(error); }
   }
 
+  async getRecord(operation,id) {
+    const {name,table}=tableFor(model,operation);
+    const row=await this._row(name,table,operation,id);
+    return row ? toRecord(table,operation,row) : null;
+  }
+
+  async replacePassword(id,previous,password_hash) {
+    return (await this.pool.query('UPDATE icase_users SET password_hash=$1, updated_at=now() WHERE id=$2 AND password_hash=$3 AND activo=true',[password_hash,id,previous])).rowCount===1;
+  }
+
   async update(operation, id, body) {
     const { name, table } = tableFor(model, operation);
     const row = await this._row(name, table, operation, id);
     if (!row) return null;
     const previous = toRecord(table, operation, row).data;
-    const { values, extra } = split(table, body);
+    const { values, extra } = split(table, rules.derive(name,body,previous));
     rules.check(name, 'update', { ...previous, ...viewOf(table, values, extra) }, previous);
     const columns = Object.keys(values);
     const params = columns.map((column) => this._param(table, column, values[column]));

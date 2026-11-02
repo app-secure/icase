@@ -14,7 +14,10 @@ class FrontendScaffoldGenerator extends IGeneradorArtefacto {
     const manifest = Array.isArray(diseno.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
     const mockups = Array.isArray(diseno.mockups) ? diseno.mockups : [];
     const mockupMap = new Map(mockups.map((item) => [item.pantalla_id || item.nombre_pantalla, item]));
-    const screens = manifest.length ? manifest.map((screen) => ({ ...screen, mockup: mockupMap.get(screen.pantalla_id) || mockupMap.get(screen.slug) }))
+    const screens = manifest.length ? manifest.map((screen) => {
+      const mockup = mockupMap.get(screen.pantalla_id) || mockupMap.get(screen.slug);
+      return { ...screen, mockup, rf_trazabilidad: Array.isArray(mockup?.rf_trazabilidad) ? mockup.rf_trazabilidad : (screen.rf_trazabilidad || []) };
+    })
       : mockups.map((mockup) => ({ ...mockup, nombre: mockup.nombre_visible, slug: mockup.nombre_pantalla, mockup }));
     const files = new GenericFrontendGenerator().generate({ proyecto, screens, decisiones, sistemaDiseno: diseno.sistema_diseno || {} });
     const missing = screens.filter((screen) => !screen.mockup).map((screen) => screen.nombre || screen.slug);

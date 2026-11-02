@@ -34,6 +34,9 @@ nav:
       - Arquitectura: desarrollo/arquitectura.md
       - Contrato de diagramas: desarrollo/contratos/diagram-generation-contract.md
       - Contrato de codificación: desarrollo/contratos/code-generation-contract.md
+      - Módulos y actualización segura: desarrollo/contratos/modulos-y-actualizacion.md
+      - Tiempo real e integraciones: desarrollo/contratos/tiempo-real-integraciones.md
+      - Procesos de negocio: desarrollo/contratos/procesos-negocio.md
   - Pruebas:
       - Plan y ejecución: pruebas/plan-y-ejecucion.md
       - Resultados y pendientes: pruebas/resultados.md

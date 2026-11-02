@@ -8,8 +8,8 @@ Las plantillas fuente son archivos Markdown de `icase-backend/src/infrastructure
 | --- | --- | --- | --- |
 | Ingesta | FileIngestionService; directivas inline de extracción/transcripción | Archivo, MIME y tarea | Texto extraído o transcrito |
 | Metadatos de fuente | FuenteController; instrucción inline | Texto de una fuente y proveedor | Título, descripción, tipo y etiquetas sugeridos |
-| Requisitos | plantilla_orquestador, analista_ieee830, auditor_requisitos, estructura_salida_requisitos | Insumo, contexto acotado y cambios | JSON con RF/RNF; diagramas vacío |
-| Casos de uso y dominio | plantilla_orquestador, analista_ieee830, disenador_arquitectura, auditor_qa, estructura_salida | Requisitos/dependencias aprobadas y tipo | JSON con un diagrama del tipo solicitado |
+| Requisitos | plantilla_orquestador, analista_iso29148, auditor_requisitos, estructura_salida_requisitos | Insumo, contexto acotado y cambios | JSON con RF/RNF; diagramas vacío |
+| Casos de uso y dominio | plantilla_orquestador, analista_iso29148, disenador_arquitectura, auditor_qa, estructura_salida | Requisitos/dependencias aprobadas y tipo | JSON con un diagrama del tipo solicitado |
 | Arquitectura de software | Base de diagramas + disenador_arquitectura_software | Dependencias y RNF aplicables | PlantUML, explicación y trazabilidad |
 | Arquitectura del sistema | Base + disenador_arquitectura_sistema | Arquitectura lógica y restricciones confirmadas | Despliegue justificado y trazabilidad RNF |
 | Clases de diseño | Base + disenador_clases_diseno | Casos de uso, dominio y software aprobados | Clases técnicas e interfaces |
@@ -74,7 +74,8 @@ El índice siguiente se genera desde las plantillas fuente y conserva su conteni
 
 <!-- PROMPT_INDEX -->
 
-- [analista_ieee830](plantillas/analista-ieee830.md)
+- [analista_iso29148](plantillas/analista-iso29148.md)
+- [analista_reglas_negocio](plantillas/analista-reglas-negocio.md)
 - [auditor_qa](plantillas/auditor-qa.md)
 - [auditor_requisitos](plantillas/auditor-requisitos.md)
 - [disenador_arquitectura](plantillas/disenador-arquitectura.md)

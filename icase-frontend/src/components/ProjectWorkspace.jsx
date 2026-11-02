@@ -30,6 +30,7 @@ import {
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
 import { DIAGRAM_TYPES } from "../constants/diagramTypes";
+import { completedDiagramAlreadyLoaded } from '../utils/diagramJobRecovery';
 
 const DIAGRAM_KEY_BY_TYPE = Object.freeze({
   [DIAGRAM_TYPES.USE_CASES]: "useCase",
@@ -332,6 +333,7 @@ export default function ProjectWorkspace({
     if (job.estado === 'completado' && response.resultado && !handledDiagramJobs.current.has(job.id)) {
       handledDiagramJobs.current.add(job.id);
       const current = project;
+      if (completedDiagramAlreadyLoaded(job, response.resultado, current.diagrams, DIAGRAM_KEY_BY_TYPE)) return;
       const { diags } = transformAiOutput(response.resultado, current.name, current.diagrams || {});
       onUpdateProject({
         ...current,
@@ -1183,6 +1185,7 @@ export default function ProjectWorkspace({
               const diagId = project.diagrams?.[key]?.id;
               if (diagId && diagId.length === 24) {
                 const updated = await updateDiagramApi(diagId, {
+                  version_esperada: Number(project.diagrams[key].version || 1),
                   codigo_plantuml: newCode,
                   codigo_mermaid: newCode
                 });

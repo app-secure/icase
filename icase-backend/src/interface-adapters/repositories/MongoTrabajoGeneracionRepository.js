@@ -11,7 +11,7 @@ class MongoTrabajoGeneracionRepository {
     return new Date(Date.now() + this.leaseMs);
   }
 
-  async crearORecuperarActivo({ proyectoId, pantallas, insumoAdicional, requerimientosLocales }) {
+  async crearORecuperarActivo({ proyectoId, pantallas, insumoAdicional, requerimientosLocales, soloReparar = false }) {
     const claveActiva = `mockups:${proyectoId}`;
     let existente = await TrabajoGeneracionModel.findOne({ clave_activa: claveActiva });
     if (existente && existente.ejecutor_id === this.ejecutorId) {
@@ -35,6 +35,7 @@ class MongoTrabajoGeneracionRepository {
         proyecto_id: proyectoId,
         tipo: 'mockups',
         pantallas,
+        solo_reparar: soloReparar,
         insumo_adicional: insumoAdicional,
         requerimientos_locales: requerimientosLocales,
         ejecutor_id: this.ejecutorId,
@@ -192,6 +193,23 @@ class MongoTrabajoGeneracionRepository {
       .findOne({ proyecto_id: proyectoId, tipo: 'verificacion', artefacto_id: artefactoId })
       .sort({ createdAt: -1 });
     return trabajo ? trabajo.toJSON() : null;
+  }
+
+  async finalizarVerificacionesExpiradas() {
+    const now = new Date();
+    return TrabajoGeneracionModel.updateMany({
+      tipo: 'verificacion', estado: { $in: ['encolado', 'procesando'] },
+      $or: [{ lease_expires_at: { $lte: now } }, { lease_expires_at: null, updatedAt: { $lte: new Date(Date.now() - this.leaseMs) } }]
+    }, {
+      $set: { estado: 'fallido', progreso: 100, mensaje: 'Verificación interrumpida', error: 'La verificación perdió su proceso ejecutor. Inicia un nuevo intento; los archivos se conservaron.' },
+      $unset: { clave_activa: 1 }
+    });
+  }
+
+  async renovarLeaseVerificacion(id) {
+    const result = await TrabajoGeneracionModel.updateOne({ _id: id, tipo: 'verificacion', ejecutor_id: this.ejecutorId,
+      estado: { $in: ['encolado', 'procesando'] }, lease_expires_at: { $gt: new Date() } }, { $set: { lease_expires_at: this.leaseUntil() } });
+    return result.matchedCount === 1;
   }
 
   async actualizar(id, cambios, finalizar = false) {

@@ -228,10 +228,10 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
 
     await useCase.ejecutar({ id: 'd1', datos: { descripcion: 'Nueva descripción' } });
 
-    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({ aprobado: false, version: 2 }));
+    expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({ aprobado: false, version: 2 }), { versionEsperada: 1 });
     expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d1', expect.objectContaining({
       historial_versiones: [expect.objectContaining({ version: 1 })]
-    }));
+    }), { versionEsperada: 1 });
     expect(diagramaRepository.actualizar).toHaveBeenCalledWith('d2', expect.objectContaining({ estado: 'desactualizado', desactualizado: true }));
     expect(proyectoRepository.actualizarEstadoFase).toHaveBeenCalledWith('p1', 'diseno_pendiente');
   });
@@ -532,7 +532,7 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
       crearMuchos: jest.fn().mockResolvedValue([])
     };
     const mockEstandarRepo = {
-      obtenerEstandares: jest.fn().mockResolvedValue([{ clave: 'IEEE-830' }])
+      obtenerEstandares: jest.fn().mockResolvedValue([{ clave: 'ESTRUCTURA_RF', categoria: 'ISO/IEC/IEEE 29148:2018' }])
     };
 
     let payloadEnviado = null;
@@ -562,7 +562,7 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(payloadEnviado).toHaveProperty('diccionario_estandares');
     expect(payloadEnviado).toHaveProperty('contexto_proyecto');
     expect(payloadEnviado.insumo_bruto).toBe('Acta de prueba');
-    expect(payloadEnviado.diccionario_estandares).toEqual([{ clave: 'IEEE-830' }]);
+    expect(payloadEnviado.diccionario_estandares).toEqual([{ clave: 'ESTRUCTURA_RF', categoria: 'ISO/IEC/IEEE 29148:2018' }]);
   });
 
   test('ProcesarConIA genera solo requisitos antes de aprobar el análisis', async () => {

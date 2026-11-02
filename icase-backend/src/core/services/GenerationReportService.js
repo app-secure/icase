@@ -1,7 +1,9 @@
 const { CAPABILITIES, generalLimits } = require('../constants/GenerationCapabilities');
+const GenerationCoverageService = require('./GenerationCoverageService');
+const GenerationCapabilityService = require('./GenerationCapabilityService');
 
 const LEVELS = Object.freeze({
-  completo: 'Completo',
+  completo: 'CRUD tipado generado',
   solo_datos: 'Solo datos',
   no_soportado: 'No soportado'
 });
@@ -24,7 +26,7 @@ class GenerationReportService {
    * @param {{ proyecto?: object, requisitos: Array (aprobados, los mismos con los que se construyó el contrato), contrato: object, stack?: object, plataformas?: string[] }} entrada
    *   `contrato` es el contrato de aplicación del backend (operaciones y entidades).
    */
-  build({ proyecto = {}, requisitos = [], contrato = {}, stack = {}, plataformas = [], modulos = null }) {
+  build({ proyecto = {}, requisitos = [], contrato = {}, stack = {}, plataformas = [], modulos = null, declaracion = {} }) {
     const rf = requisitos.filter((item) => item.tipo === 'RF');
     const rnf = requisitos.filter((item) => item.tipo === 'RNF');
     const operations = new Map((contrato.operations || []).map((item) => [item.id, item]));
@@ -32,7 +34,7 @@ class GenerationReportService {
     const hayModelo = (contrato.entities || []).length > 0;
 
     const items = rf.map((requirement, index) => {
-      const operation = operations.get(requirement.identificador) || [...operations.values()][index];
+      const operation = operations.get(requirement.identificador);
       const entity = operation?.entity ? entities.get(operation.entity) : null;
       const capabilities = this._capabilities(requirement);
       const reasons = [];
@@ -80,10 +82,14 @@ class GenerationReportService {
 
     const mapped = new Set((contrato.operations || []).map((item) => item.entity).filter(Boolean));
     const count = (level) => items.filter((item) => item.nivel === level).length;
+    const fuenteCobertura = { requisitos, contrato, declaracion, stack };
     return {
-      version: 1,
+      version: 2,
+      cobertura_funcional: new GenerationCoverageService().evaluar(fuenteCobertura),
+      fuente_cobertura: fuenteCobertura,
+      catalogo_capacidades: new GenerationCapabilityService().catalogo(),
       proyecto: clean(proyecto.nombre) || 'Proyecto',
-      deteccion: 'Las capacidades no soportadas se detectan por palabras clave en el nombre, la descripción y la métrica de cada RF. Un RF «completo» puede pedir algo con otras palabras: revísalo.',
+      deteccion: 'Los niveles históricos describen CRUD generado, no cumplimiento funcional. Las palabras clave son sugerencias; confirma el alcance por RF. La ejecución y la cobertura se evalúan por separado.',
       resumen: { total: items.length, completo: count('completo'), solo_datos: count('solo_datos'), no_soportado: count('no_soportado') },
       ...(modulos ? { modulos } : {}),
       requisitos: items,
@@ -118,9 +124,9 @@ class GenerationReportService {
     const lines = [
       `# Informe de generación — ${report.proyecto}`,
       '',
-      `Requisitos funcionales: ${report.resumen.total}. Completos: ${report.resumen.completo}. Solo datos: ${report.resumen.solo_datos}. No soportados: ${report.resumen.no_soportado}.`,
+      `Requisitos funcionales: ${report.resumen.total}. Con CRUD tipado: ${report.resumen.completo}. Solo datos: ${report.resumen.solo_datos}. No soportados: ${report.resumen.no_soportado}.`,
       '',
-      '- **Completo**: alta, consulta, edición y baja con validación de tipos, reglas confirmadas y permisos.',
+      '- **CRUD tipado generado**: base de datos y operaciones con validaciones; no acredita todo el comportamiento del RF.',
       '- **Solo datos**: solo se guardan y consultan registros; parte de lo pedido no se genera.',
       '- **No soportado**: el requisito pide algo que el generador no produce y no hay entidad que lo sostenga.',
       '',
@@ -129,6 +135,14 @@ class GenerationReportService {
       ...rows,
       ''
     ];
+    if (report.cobertura_funcional) {
+      const coverage = report.cobertura_funcional;
+      lines.push('## Alcance funcional de la entrega', '',
+        `Modalidad: ${coverage.modo_entrega}. Estado: ${coverage.estado}. Habilitada por alcance: ${coverage.exportable ? 'sí' : 'no'}.`, '',
+        coverage.semantica, '', coverage.ejecucion, '',
+        '**Los niveles de la tabla anterior describen la base CRUD y no certifican el RF.**', '',
+        ...coverage.bloqueos.map((item) => `- ${item}`), '');
+    }
     if (report.modulos) {
       lines.push('## Módulos', '', `Modo: ${report.modulos.modo}.`, '',
         ...report.modulos.incluidos.map((item) => `- ${item.etiqueta} — incluido (${item.motivo}).`),
