@@ -21,6 +21,26 @@ describe('generación del artefacto de pruebas', () => {
     expect(result.advertencias).not.toContain('La suite solo cubre salud, navegación y trazabilidad; faltan pruebas funcionales.');
   });
 
+  test('genera unitarias de reglas confirmadas y de procesos', async () => {
+    const result = await new TestSuiteGenerator().generar({
+      proyecto: { nombre: 'Demo' }, versionesOrigen: {},
+      insumos: {
+        requerimientos: [{ aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Calcular total' }],
+        backend: {
+          version: 1, trazabilidad_rf: ['RF-01'], archivos: [{
+            ruta: 'backend/icase.manifest.json',
+            contenido: JSON.stringify({
+              operations: [{ id: 'RF-01', key: 'rf-01', collectionPath: '/api/operations/rf-01', schema: { title: 'Pedido' }, rules: [{ id: 'RN-01', tipo: 'calculo', campo: 'total', expresion: { op: '*', izquierda: { campo: 'precio' }, derecha: { campo: 'cantidad' } } }, { id: 'RN-02', tipo: 'requerido', campo: 'precio' }] }],
+              procesos: { enabled: true, definitions: [{ id: 'proc-1', initial: 'abierto', actions: [{ id: 'cerrar', from: 'abierto', to: 'cerrado', roles: ['administrador'] }] }] }
+            })
+          }]
+        },
+        frontend: { version: 1, trazabilidad_rf: ['RF-01'], archivos: [{ ruta: 'frontend/icase.manifest.json', contenido: JSON.stringify({ pantallas: [{ ruta: '/' }] }) }] }
+      }
+    });
+    expect(result.archivos.map((item) => item.ruta)).toEqual(expect.arrayContaining(['tests/unit/rules.test.js', 'tests/unit/processes.test.js', 'tests/support/calculations.cjs']));
+  });
+
   test('reporta RF que no aparecen en ninguno de los códigos aprobados', async () => {
     const result = await new TestSuiteGenerator().generar({
       proyecto: { nombre: 'Demo' }, versionesOrigen: {},

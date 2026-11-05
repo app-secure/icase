@@ -24,6 +24,14 @@ describe('generación persistente del frontend', () => {
     expect(result.archivos.every((item) => item.huella.length === 64)).toBe(true);
   });
 
+  test('el HTML incrustado no conserva javascript, iframe ni manejadores', () => {
+    const html = FrontendScaffoldGenerator.sanitizeMarkup('<body><a href="javascript:alert(1)">x</a><iframe src="https://evil"></iframe><img src="x" onerror="steal()"><p>Hola</p></body>');
+    expect(html).toContain('Hola');
+    expect(html).not.toMatch(/javascript:/i);
+    expect(html).not.toMatch(/<iframe/i);
+    expect(html).not.toMatch(/onerror/i);
+  });
+
   test('advierte pantallas del árbol que no tienen mockup', async () => {
     const result = await new FrontendScaffoldGenerator().generar({
       proyecto: { nombre: 'Demo' }, versionesOrigen: {},

@@ -778,11 +778,18 @@ function AccessEditor({ value, onChange, disabled }) {
   const setAuth = (changes) => onChange({ ...value, autenticacion: { ...auth, ...changes } });
   const setRole = (id, changes) => onChange({ ...value, roles: roles.map((role) => (role.id === id ? { ...role, ...changes } : role)) });
   const has = (operation, role, method) => permisos.some((item) => item.operacion === operation && item.rol === role && item.metodos.includes(method));
+  const ownOnly = (operation, role) => permisos.some((item) => item.operacion === operation && item.rol === role && item.alcance === 'propios');
   const toggle = (operation, role, method) => {
     const current = permisos.find((item) => item.operacion === operation && item.rol === role);
     const methods = current ? (current.metodos.includes(method) ? current.metodos.filter((item) => item !== method) : [...current.metodos, method]) : [method];
     const others = permisos.filter((item) => item !== current);
-    onChange({ ...value, permisos: methods.length ? [...others, { operacion: operation, rol: role, metodos: methods }] : others });
+    const alcance = current?.alcance === 'propios' ? 'propios' : 'todos';
+    onChange({ ...value, permisos: methods.length ? [...others, { operacion: operation, rol: role, metodos: methods, alcance }] : others });
+  };
+  const toggleOwn = (operation, role) => {
+    const current = permisos.find((item) => item.operacion === operation && item.rol === role);
+    if (!current) return;
+    onChange({ ...value, permisos: permisos.map((item) => item === current ? { ...item, alcance: item.alcance === 'propios' ? 'todos' : 'propios' } : item) });
   };
   const addRole = () => {
     const name = newRole.trim();
@@ -834,6 +841,9 @@ function AccessEditor({ value, onChange, disabled }) {
               {active.map((role) => <td key={role.id} className="p-2"><div className="flex flex-wrap gap-1" role="group" aria-label={`${operation.id} para ${role.nombre}`}>
                 {ACCESS_METHODS.map(({ method, label }) => <button key={method} type="button" disabled={disabled} aria-pressed={has(operation.id, role.id, method)} onClick={() => toggle(operation.id, role.id, method)}
                   className={`rounded border px-1.5 py-0.5 ${has(operation.id, role.id, method) ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400 hover:text-slate-600'}`}>{label}</button>)}
+                {permisos.some((item) => item.operacion === operation.id && item.rol === role.id) && <label className="mt-1 flex items-center gap-1 text-[11px] text-slate-600">
+                  <input type="checkbox" disabled={disabled} checked={ownOnly(operation.id, role.id)} onChange={() => toggleOwn(operation.id, role.id)} />Solo registros propios
+                </label>}
               </div></td>)}
             </tr>)}</tbody>
           </table>

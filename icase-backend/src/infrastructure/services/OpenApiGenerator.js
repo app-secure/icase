@@ -70,7 +70,8 @@ class OpenApiGenerator {
     const referenced = Object.values(model.tables).some((other) => (other.references || []).some((reference) => reference.table === table));
     const hasRules = (operation.rules || []).some((rule) => rule.tipo !== 'unico');
     const access = secured ? { 401: responseRef('Unauthorized'), 403: responseRef('Forbidden') } : {};
-    const roles = (method) => [ADMIN, ...Object.entries(policy.operaciones?.[operation.key] || {}).filter(([, methods]) => methods.includes(method)).map(([role]) => role)];
+    const { methodsOf } = require('../templates/auth/ownership');
+    const roles = (method) => [ADMIN, ...Object.entries(policy.operaciones?.[operation.key] || {}).filter(([, methods]) => methodsOf(methods).includes(method)).map(([role]) => role)];
     const listDescription = [`Lista los registros (${operation.id}: ${operation.name}).`, operation.description, operation.actors?.length ? `Actores: ${operation.actors.join(', ')}.` : '', secured ? `Roles con permiso: ${roles('GET').join(', ')}.` : ''].filter(Boolean).join(' ');
     const rulesNote = (operation.rules || []).length ? ` Reglas de negocio aplicadas: ${operation.rules.map((rule) => `${rule.id} (${rule.mensaje})`).join('; ')}.` : '';
     const common = (method, extra) => ({ tags: [operation.id], ...extra, ...(secured ? { 'x-roles': roles(method) } : {}) });

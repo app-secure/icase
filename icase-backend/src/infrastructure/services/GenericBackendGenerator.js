@@ -25,6 +25,13 @@ class GenericBackendGenerator {
     const policy = new AccessControlService().politica(access, contract.operations);
     contract.auth = policy;
     const resolved = StackCatalog.resolve(stack);
+    const ownership = require('../templates/auth/ownership');
+    if (ownership.policyUsesOwnership(policy)) {
+      if (resolved.backend === 'spring') throw new Error('La propiedad de registros aún no soporta Spring.');
+      const activos = new (require('../../core/services/ModuleService'))().activos(modules);
+      const blocked = ownership.BLOCKED_MODULES.filter((id) => activos.includes(id));
+      if (blocked.length) throw new Error('La propiedad de registros no se puede combinar con: ' + blocked.join(', ') + '.');
+    }
     if(resolved.backend==='spring'&&rules.some(rule=>rule.tipo==='calculo')) throw new Error('Los cálculos declarativos aún no soportan Spring.');
     for(const operation of contract.operations) for(const rule of operation.rules.filter(rule=>rule.tipo==='calculo')) if(operation.schema?.properties?.[rule.campo]) operation.schema.properties[rule.campo].readOnly=true;
     const database = resolved.database;
@@ -80,6 +87,7 @@ class GenericBackendGenerator {
     const read = (name) => fs.readFileSync(path.join(AUTH_TEMPLATES, name), 'utf8');
     return [
       { ruta: 'backend/src/auth/policy.js', lenguaje: 'javascript', contenido: `module.exports = ${JSON.stringify(policy, null, 2)};\n` },
+      { ruta: 'backend/src/auth/ownership.js', lenguaje: 'javascript', contenido: read('ownership.js') },
       { ruta: 'backend/src/auth/auth-core.js', lenguaje: 'javascript', contenido: read('auth-core.js') },
       ...(adapter === 'express' ? [{ ruta: 'backend/src/auth/auth-express.js', lenguaje: 'javascript', contenido: read('auth-express.js') }] : [])
     ];
@@ -118,7 +126,7 @@ class GenericBackendGenerator {
       { ruta: 'backend/src/main.ts', lenguaje: 'typescript', contenido: "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\nimport { StoreExceptionFilter } from './store-exception.filter';\nconst configureHttpSecurity = require('./security/http-security');\nasync function bootstrap(){const app=await NestFactory.create(AppModule);configureHttpSecurity(app.getHttpAdapter().getInstance());app.useGlobalFilters(new StoreExceptionFilter());await app.listen(Number(process.env.PORT||3000));}\nbootstrap();\n" },
       { ruta: 'backend/src/store-exception.filter.ts', lenguaje: 'typescript', contenido: this._nestFilter() },
       { ruta: 'backend/src/app.module.ts', lenguaje: 'typescript', contenido: this._nestModule(policy) },
-      { ruta: 'backend/src/app.controller.ts', lenguaje: 'typescript', contenido: this._nestController(contract) },
+      { ruta: 'backend/src/app.controller.ts', lenguaje: 'typescript', contenido: this._nestController(contract, policy) },
       { ruta: 'backend/src/record.store.ts', lenguaje: 'typescript', contenido: this._nestStore() },
       { ruta: 'backend/src/record.store.base.js', lenguaje: 'javascript', contenido: data.files.store },
       ...data.files.shared,
@@ -313,9 +321,13 @@ export class StoreExceptionFilter implements ExceptionFilter {
 `;
   }
 
-  _nestController(contract) {
-    return `import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Res } from '@nestjs/common';
+  _nestController(contract, policy = { habilitada: false }) {
+    const scoped = policy.habilitada
+      ? "const {scopeOf}=require('./auth/ownership');const policy=require('./auth/policy');const scope=(user:any,key:string)=>scopeOf(policy,user,key);"
+      : 'const scope=(_user:any,_key:string)=>null;';
+    return `import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { RecordStore } from './record.store';
+${scoped}
 const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
 const associations=require('./data/associations');
 @Controller() export class AppController {
@@ -327,8 +339,9 @@ const associations=require('./data/associations');
  @Get('api/associations/:relation') links(@Param('relation') relation:string,@Query() query:any){return associations(this.store,'list',relation,query);}
  @Post('api/associations/:relation') @HttpCode(200) link(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'link',relation,body);}
  @Delete('api/associations/:relation') unlink(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'unlink',relation,body);}
- @Get('api/operations/:capability') async list(@Param('capability') capability:string,@Query() query:any,@Res({passthrough:true}) res:any){
-   const result=await this.store.list(this.capability(capability),query);
+ @Get('api/operations/:capability') async list(@Param('capability') capability:string,@Query() query:any,@Req() req:any,@Res({passthrough:true}) res:any){
+   const key=this.capability(capability);
+   const result=await this.store.list(key,query,scope(req.user,key));
    if(result&&result.pagination){
      res.set({
        'X-Total-Count':String(result.pagination.total),
@@ -339,9 +352,9 @@ const associations=require('./data/associations');
    }
    return result;
  }
- @Post('api/operations/:capability') create(@Param('capability') capability:string,@Body() body:any){if(!body||Array.isArray(body)||typeof body!=='object')throw new BadRequestException('El cuerpo debe ser un objeto');return this.store.create(this.capability(capability),body);}
- @Patch('api/operations/:capability/:id') async update(@Param('capability') capability:string,@Param('id') id:string,@Body() body:any){const value=await this.store.update(this.capability(capability),id,body);if(!value)throw new NotFoundException('Registro inexistente');return value;}
- @Delete('api/operations/:capability/:id') async remove(@Param('capability') capability:string,@Param('id') id:string){const removed=await this.store.remove(this.capability(capability),id);if(!removed)throw new NotFoundException('Registro inexistente');return {deleted:true,id};}
+ @Post('api/operations/:capability') create(@Param('capability') capability:string,@Body() body:any,@Req() req:any){if(!body||Array.isArray(body)||typeof body!=='object')throw new BadRequestException('El cuerpo debe ser un objeto');const key=this.capability(capability);return this.store.create(key,body,scope(req.user,key));}
+ @Patch('api/operations/:capability/:id') async update(@Param('capability') capability:string,@Param('id') id:string,@Body() body:any,@Req() req:any){const key=this.capability(capability);const value=await this.store.update(key,id,body,scope(req.user,key));if(!value)throw new NotFoundException('Registro inexistente');return value;}
+ @Delete('api/operations/:capability/:id') async remove(@Param('capability') capability:string,@Param('id') id:string,@Req() req:any){const key=this.capability(capability);const removed=await this.store.remove(key,id,scope(req.user,key));if(!removed)throw new NotFoundException('Registro inexistente');return {deleted:true,id};}
 }
 `;
   }
@@ -352,9 +365,9 @@ const associations=require('./data/associations');
 const configureHttpSecurity=require('./security/http-security');
 const associations=require('./data/associations');
 const Store=require('./record.store');
-${auth ? "const mountAuth=require('./auth/auth-express');\nconst {createAuth}=require('./auth/auth-core');\n" : ''}const app=express();const store=new Store();const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
+${auth ? "const mountAuth=require('./auth/auth-express');\nconst {createAuth}=require('./auth/auth-core');\nconst {scopeOf}=require('./auth/ownership');\nconst policy=require('./auth/policy');\n" : ''}const app=express();const store=new Store();const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
 app.locals.store=store;configureHttpSecurity(app);app.use(express.json({limit:'1mb'}));
-${auth ? "const auth=createAuth({store});app.locals.auth=auth;mountAuth(app,auth);\n" : ''}app.locals.init=async()=>{await store.init();${auth ? 'await auth.init();' : ''}};
+${auth ? "const auth=createAuth({store});app.locals.auth=auth;mountAuth(app,auth);\nconst scope=(req,key)=>scopeOf(policy,req.user,key);\n" : 'const scope=()=>null;\n'}app.locals.init=async()=>{await store.init();${auth ? 'await auth.init();' : ''}};
 const capability=(req,res,next)=>allowed.has(req.params.capability)?next():res.status(404).json({message:'Operación inexistente'});
 app.get('/health',async(_req,res,next)=>{try{await store.ping();res.json({status:'ok',database:'connected'})}catch(e){next(e)}});
 app.get('/api/contract',(_req,res)=>res.json(${JSON.stringify(contract)}));
@@ -364,7 +377,7 @@ app.post('/api/associations/:relation',async(req,res,next)=>{try{res.json(await 
 app.delete('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'unlink',req.params.relation,req.body))}catch(e){next(e)}});
 app.get('/api/operations/:capability',capability,async(req,res,next)=>{
   try{
-    const result=await store.list(req.params.capability,req.query);
+    const result=await store.list(req.params.capability,req.query,scope(req,req.params.capability));
     if(result&&result.pagination){
       res.set({
         'X-Total-Count':result.pagination.total,
@@ -376,9 +389,9 @@ app.get('/api/operations/:capability',capability,async(req,res,next)=>{
     res.json(result);
   }catch(e){next(e)}
 });
-app.post('/api/operations/:capability',capability,async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')return res.status(400).json({message:'El cuerpo debe ser un objeto'});res.status(201).json(await store.create(req.params.capability,req.body))}catch(e){next(e)}});
-app.patch('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.update(req.params.capability,req.params.id,req.body);value?res.json(value):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
-app.delete('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.remove(req.params.capability,req.params.id);value?res.json({deleted:true,id:req.params.id}):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
+app.post('/api/operations/:capability',capability,async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')return res.status(400).json({message:'El cuerpo debe ser un objeto'});res.status(201).json(await store.create(req.params.capability,req.body,scope(req,req.params.capability)))}catch(e){next(e)}});
+app.patch('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.update(req.params.capability,req.params.id,req.body,scope(req,req.params.capability));value?res.json(value):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
+app.delete('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.remove(req.params.capability,req.params.id,scope(req,req.params.capability));value?res.json({deleted:true,id:req.params.id}):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
 app.use((error,_req,res,_next)=>{const status=Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:500;res.status(status).json(status>=500?{message:'Error interno del servidor'}:{message:error.message||'Solicitud inválida',...(error.details?{details:error.details}:{})});});module.exports=app;
 `;
   }

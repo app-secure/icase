@@ -60,9 +60,39 @@ class FrontendScaffoldGenerator extends IGeneradorArtefacto {
   }
 
   _body(html) {
-    const safe = String(html || '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*(["']).*?\1/gi, '');
-    return safe.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1]?.trim() || safe || '<section><h1>Pantalla pendiente</h1></section>';
+    return FrontendScaffoldGenerator.sanitizeMarkup(html);
   }
 }
+
+const BLOCKED_TAGS = new Set(['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'svg']);
+
+FrontendScaffoldGenerator.sanitizeMarkup = function sanitizeMarkup(html) {
+  const { parse, serialize } = require('parse5');
+  const source = String(html || '').trim() || '<section><h1>Pantalla pendiente</h1></section>';
+  const wrapped = /<html[\s>]/i.test(source) ? source : `<!DOCTYPE html><html><body>${source}</body></html>`;
+  const document = parse(wrapped);
+  const clean = (node) => {
+    if (!node || !node.childNodes) return;
+    node.childNodes = node.childNodes.filter((child) => {
+      if (child.tagName && BLOCKED_TAGS.has(child.tagName)) return false;
+      if (child.attrs) {
+        child.attrs = child.attrs.filter((attr) => {
+          const name = String(attr.name || '').toLowerCase();
+          const value = String(attr.value || '');
+          if (name.startsWith('on')) return false;
+          if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action') && /^\s*(javascript|data|vbscript):/i.test(value)) return false;
+          return true;
+        });
+      }
+      clean(child);
+      return true;
+    });
+  };
+  clean(document);
+  const htmlNode = document.childNodes.find((node) => node.tagName === 'html') || document;
+  const body = (htmlNode.childNodes || []).find((node) => node.tagName === 'body');
+  const inner = body ? body.childNodes.map((node) => serialize(node)).join('').trim() : serialize(document);
+  return inner || '<section><h1>Pantalla pendiente</h1></section>';
+};
 
 module.exports = FrontendScaffoldGenerator;

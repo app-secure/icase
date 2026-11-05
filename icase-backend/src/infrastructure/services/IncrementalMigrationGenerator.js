@@ -24,6 +24,7 @@ class IncrementalMigrationGenerator {
         if(next.database!=='mongodb') {
           const type=types[next.database][column.type];if(!type)throw new Error('Tipo de columna desconocido');
           statements.push('ALTER TABLE '+q(name)+' ADD COLUMN '+q(column.column)+' '+type);
+          if(column.column==='owner_id') statements.push('CREATE INDEX '+(next.database==='postgres'?'IF NOT EXISTS ':'')+q(('idx_'+name+'_owner_id').slice(0,60))+' ON '+q(name)+' ('+q('owner_id')+')');
         }
       }
     }
@@ -39,7 +40,13 @@ class IncrementalMigrationGenerator {
     let incremental=null;
     if(next.database==='mongodb') {
       const indexes=(fresh[0].indexes||[]).filter(index=>additions[index.collection]);
-      if(Object.keys(additions).length) incremental={collections:Object.keys(additions),indexes};
+      for(const [name,old] of Object.entries(oldModel.tables)) {
+        const table=next.tables[name];
+        if(table.columns.some(column=>column.column==='owner_id')&&!old.columns.some(column=>column.column==='owner_id')) {
+          indexes.push({collection:name,keys:{owner_id:1},options:{name:'idx_owner_id'}});
+        }
+      }
+      if(Object.keys(additions).length||indexes.length) incremental={collections:Object.keys(additions),indexes};
     } else if(statements.length) incremental={statements};
     const processIds=['0004_business_process_instances','0005_business_process_locks','0006_business_process_outbox'];
     if(oldMigrations.some(item=>processIds.includes(item.id))&&!fresh.some(item=>item.id==='0004_business_process_instances'))throw new Error('Eliminar procesos de negocio requiere resolver sus instancias y bloqueos mediante migración explícita.');

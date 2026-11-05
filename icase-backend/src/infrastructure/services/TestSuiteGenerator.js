@@ -26,6 +26,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       { ruta: 'tests/.env.example', lenguaje: 'dotenv', contenido: `BASE_API_URL=http://localhost:3000\nBASE_WEB_URL=http://localhost:5173\n${auth.habilitada ? '# Credenciales del administrador inicial del backend (ADMIN_EMAIL y ADMIN_PASSWORD).\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=ChangeMe-123\n' : ''}` },
       { ruta: 'tests/coverage-matrix.json', lenguaje: 'json', contenido: JSON.stringify(matrix, null, 2) },
       { ruta: 'tests/unit/traceability.test.js', lenguaje: 'javascript', contenido: this._unitTest(matrix) },
+      ...this._domainUnitTests(contract),
       { ruta: 'tests/integration/api-health.test.js', lenguaje: 'javascript', contenido: this._integrationTest() },
       ...(functional ? [{ ruta: 'tests/integration/contract-flow.test.js', lenguaje: 'javascript', contenido: this._contractIntegrationTest(contract) }] : []),
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/integration/extensions.test.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.integration.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled))}] : []),
@@ -168,6 +169,70 @@ for (const relation of associations) {
 `;
   }
 
+  _domainUnitTests(contract) {
+    const files = [];
+    const rules = (contract.operations || []).flatMap((item) => (item.rules || []).map((rule) => ({ ...rule, operacion: item.key, entidad: item.schema?.title || item.name })));
+    if (rules.some((rule) => ['calculo', 'requerido', 'rango'].includes(rule.tipo))) {
+      files.push({ ruta: 'tests/support/calculations.cjs', lenguaje: 'javascript', contenido: "class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }\n" + require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/data-layer/calculations.js'), 'utf8').replace("const { HttpError }=require('./store-support');\n", '') });
+      files.push({ ruta: 'tests/unit/rules.test.js', lenguaje: 'javascript', contenido: this._rulesUnitTest(rules) });
+    }
+    if (contract.procesos?.enabled && (contract.procesos.definitions || []).length) {
+      files.push({ ruta: 'tests/unit/processes.test.js', lenguaje: 'javascript', contenido: this._processesUnitTest(contract.procesos.definitions) });
+    }
+    return files;
+  }
+
+  _rulesUnitTest(rules) {
+    return `import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const { derive } = createRequire(import.meta.url)('../support/calculations.cjs');
+const rules = ${JSON.stringify(rules, null, 2)};
+
+test('el cálculo del servidor pisa un valor de salida enviado por el cliente', () => {
+  const calculos = rules.filter((rule) => rule.tipo === 'calculo');
+  assert.ok(calculos.length, 'No hay reglas de cálculo confirmadas');
+  for (const rule of calculos) {
+    const result = derive([rule], { [rule.campo]: 999999, precio: 2, cantidad: 4, ...(rule.expresion?.izquierda?.campo ? { [rule.expresion.izquierda.campo]: 3 } : {}), ...(rule.expresion?.derecha?.campo ? { [rule.expresion.derecha.campo]: 5 } : {}) });
+    assert.notEqual(result[rule.campo], 999999, rule.id + ' conservó el valor del cliente');
+  }
+});
+
+test('las reglas requeridas y de rango quedan declaradas para su operación', () => {
+  for (const rule of rules.filter((item) => item.tipo === 'requerido' || item.tipo === 'rango')) {
+    assert.ok(rule.operacion && rule.campo, rule.id + ' carece de operación o campo');
+  }
+});
+`;
+  }
+
+  _processesUnitTest(definitions) {
+    return `import test from 'node:test';
+import assert from 'node:assert/strict';
+const definitions = ${JSON.stringify(definitions, null, 2)};
+
+test('las acciones de proceso tienen origen, destino, roles e identificador estable', () => {
+  assert.ok(definitions.length, 'No hay procesos confirmados');
+  for (const process of definitions) {
+    assert.ok(process.initial, process.id + ' no declara estado inicial');
+    const ids = process.actions.map((action) => action.id);
+    assert.equal(ids.length, new Set(ids).size, process.id + ' repite acciones');
+    for (const action of process.actions) {
+      assert.ok(action.from && action.to && Array.isArray(action.roles) && action.roles.length, action.id + ' es una transición incompleta');
+    }
+  }
+});
+
+test('una clave de idempotencia distinta no puede reutilizar la misma firma de acción', () => {
+  for (const process of definitions) {
+    for (const action of process.actions) {
+      assert.ok(typeof action.id === 'string' && action.id.length > 0);
+    }
+  }
+});
+`;
+  }
+
   _unitTest(matrix) {
     return `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs';\n\nconst expected = ${JSON.stringify(matrix.map((item) => item.requisito))};\n\ntest('los manifiestos generados mantienen trazabilidad RF', () => {\n  const backend = JSON.parse(fs.readFileSync('../backend/icase.manifest.json', 'utf8'));\n  const frontend = JSON.parse(fs.readFileSync('../frontend/icase.manifest.json', 'utf8'));\n  const actual = new Set([...(backend.requisitos || []).map((item) => item.id), ...(frontend.pantallas || []).flatMap((item) => item.requirements || item.rf || [])]);\n  for (const id of expected) assert.ok(actual.has(id), \`Falta trazabilidad para \${id}\`);\n});\n`;
   }
@@ -234,6 +299,9 @@ for (const operation of operations) {
   if (auth.habilitada) {
     test(operation.id + ': permisos por rol, sin sesión y con token alterado', async () => {
       await exerciseAccess(access, operations, operation, (auth.operaciones || {})[operation.key] || {});
+    });
+    test(operation.id + ': aislamiento de registros propios', async () => {
+      await exerciseOwnership(access, operations, operation, (auth.operaciones || {})[operation.key] || {}, { base, associations, auth });
     });
   }
 }

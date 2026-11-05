@@ -5,6 +5,7 @@ const { promisify } = require('node:util');
 const jwt = require('jsonwebtoken');
 const { HttpError } = require('../data/store-support');
 const policy = require('./policy');
+const { methodsOf, associationForbidden } = require('./ownership');
 
 const scrypt = promisify(crypto.scrypt);
 const METHODS = ['GET', 'POST', 'PATCH', 'DELETE'];
@@ -68,7 +69,7 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
     const isAdmin = user.rol === ADMIN;
     const operaciones = {};
     for (const [key, byRole] of Object.entries(policy.operaciones || {})) {
-      const methods = isAdmin ? METHODS : byRole[user.rol] || [];
+      const methods = isAdmin ? METHODS : methodsOf(byRole[user.rol]);
       if (methods.length) operaciones[key] = [...methods];
     }
     return { rol: user.rol, nombre_rol: isAdmin ? 'Administrador' : (roles()[user.rol] || {}).nombre || user.rol, administrador: isAdmin, operaciones };
@@ -172,16 +173,17 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
       const required = method === 'GET' ? ['GET'] : ['GET', 'PATCH'];
       const endpoints = model.tables[relation.table].columns.map((column) => column.references);
       for (const table of endpoints) {
-        const permitted = Object.entries(model.operations).some(([key, name]) => name === table && required.every((verb) => (policy.operaciones?.[key]?.[user.rol] || []).includes(verb)));
+        const permitted = Object.entries(model.operations).some(([key, name]) => name === table && required.every((verb) => methodsOf(policy.operaciones?.[key]?.[user.rol]).includes(verb)));
         if (!permitted) throw new HttpError(403, 'Se requieren permisos sobre ambos extremos del vínculo.');
       }
+      if (associationForbidden(policy, user, relation, model)) throw new HttpError(403, 'Se requieren permisos sobre ambos extremos del vínculo.');
       return;
     }
     const operation = /^\/api\/operations\/([^/]+)/.exec(path);
     if (operation) {
       const byRole = Object.prototype.hasOwnProperty.call(policy.operaciones || {}, operation[1]) ? policy.operaciones[operation[1]] : null;
       if (!byRole) return; // operación inexistente: responde 404 la ruta
-      if (user.rol !== ADMIN && !(byRole[user.rol] || []).includes(method)) throw new HttpError(403, 'No tienes permiso para esta operación.');
+      if (user.rol !== ADMIN && !methodsOf(byRole[user.rol]).includes(method)) throw new HttpError(403, 'No tienes permiso para esta operación.');
       return;
     }
     if (/^\/api\/users(?:\/|$)/.test(path) && user.rol !== ADMIN) throw new HttpError(403, 'Solo el administrador gestiona usuarios.');

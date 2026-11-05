@@ -8,7 +8,7 @@ const MIGRATION_ID = '0001_init';
 const AUTH_MIGRATION_ID = '0002_auth';
 const GENERIC_TABLE = 'icase_records';
 const RESERVED_TABLES = ['icase_users', 'schema_migrations'];
-const SYSTEM_COLUMNS = new Set(['id', 'extra', 'created_at', 'updated_at', 'capability']);
+const SYSTEM_COLUMNS = new Set(['id', 'extra', 'created_at', 'updated_at', 'capability', 'owner_id']);
 
 const identifier = (value, fallback) => {
   const text = String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -28,6 +28,7 @@ class BackendDataLayerGenerator {
    */
   build({ contract, database, policy = null, modules = null }) {
     const model = this._model(contract, database);
+    this._applyOwnership(model, policy);
     const rules = this._rules(contract.rules || [], model);
     this._applyUniques(model, contract.rules || []);
     const migration = database === 'mongodb' ? this._mongoMigration(model) : this._sqlMigration(model, database);
@@ -110,6 +111,15 @@ class BackendDataLayerGenerator {
     return { database, tables, operations, associations };
   }
 
+  _applyOwnership(model, policy) {
+    const { policyUsesOwnership } = require('../templates/auth/ownership');
+    if (!policyUsesOwnership(policy)) return;
+    for (const table of Object.values(model.tables)) {
+      if (table.junction || table.columns.some((column) => column.column === 'owner_id')) continue;
+      table.columns.push({ name: '__owner', column: 'owner_id', type: 'id', internal: true });
+    }
+  }
+
   /** Reglas confirmadas por tabla, sin metadatos de revisión: es lo único que el motor del backend necesita. */
   _rules(confirmed, model) {
     const tableOf = new Map(Object.entries(model.tables).filter(([, table]) => table.entity).map(([name, table]) => [table.entity, name]));
@@ -168,6 +178,9 @@ class BackendDataLayerGenerator {
       ];
       statements.push(`CREATE TABLE IF NOT EXISTS ${q(name)} (\n  ${columns.join(',\n  ')}\n)`);
       if (table.generic) statements.push(`CREATE INDEX ${pg ? 'IF NOT EXISTS ' : ''}${q(`idx_${name}_capability`)} ON ${q(name)} (${q('capability')})`);
+      if (table.columns.some((column) => column.column === 'owner_id')) {
+        statements.push(`CREATE INDEX ${pg ? 'IF NOT EXISTS ' : ''}${q(`idx_${name}_owner_id`.slice(0, 60))} ON ${q(name)} (${q('owner_id')})`);
+      }
       for (const column of table.columns.filter((item) => item.references)) {
         const index = `idx_${name}_${column.column}`.slice(0, 60);
         statements.push(`CREATE INDEX ${pg ? 'IF NOT EXISTS ' : ''}${q(index)} ON ${q(name)} (${q(column.column)})`);
@@ -216,6 +229,7 @@ class BackendDataLayerGenerator {
     const indexes = [];
     for (const [name, table] of Object.entries(model.tables)) {
       if (table.generic) indexes.push({ collection: name, keys: { capability: 1 } });
+      if (table.columns.some((column) => column.column === 'owner_id')) indexes.push({ collection: name, keys: { owner_id: 1 }, options: { name: 'idx_owner_id' } });
       for (const column of table.columns.filter((item) => item.references)) indexes.push({ collection: name, keys: { [column.column]: 1 } });
       for (const unique of table.unique || []) {
         if (table.junction) {
@@ -304,6 +318,7 @@ class BackendDataLayerGenerator {
     const pg = database === 'postgres';
     const row = { id: i };
     for (const column of table.columns) {
+      if (column.internal || column.column === 'owner_id') continue;
       if (column.references) {
         row[column.column] = i === 1 ? 1 : 2;
         continue;
@@ -362,6 +377,7 @@ class BackendDataLayerGenerator {
       _id: `60000000000000000000000${i}`
     };
     for (const column of table.columns) {
+      if (column.internal || column.column === 'owner_id') continue;
       if (column.references) {
         doc[column.column] = `60000000000000000000000${i === 1 ? 1 : 2}`;
         continue;

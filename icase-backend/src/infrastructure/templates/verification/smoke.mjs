@@ -39,6 +39,7 @@ try {
     if (secured) {
       await exerciseAccess(access, CONFIG.operations, operation, CONFIG.auth.operaciones[operation.key] || {});
       console.log('Permisos por rol correctos para ' + operation.collectionPath + ` (${roles.length} roles + administrador + anónimo)`);
+      await exerciseOwnership(access, CONFIG.operations, operation, CONFIG.auth.operaciones[operation.key] || {}, { base, associations: CONFIG.associations || [], auth: CONFIG.auth });
     }
   }
 

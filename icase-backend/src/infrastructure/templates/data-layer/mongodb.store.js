@@ -1,7 +1,7 @@
 const { MongoClient, ObjectId } = require('mongodb');
 const model = require('./data/model');
 const migrations = require('./data/migrations');
-const { HttpError, withRetry, split, viewOf, toRecord, tableFor } = require('./data/store-support');
+const { HttpError, withRetry, split, viewOf, toRecord, tableFor, publicColumns, ownerWhere, assignOwner } = require('./data/store-support');
 const rules = require('./data/rules-engine');
 
 const OPTIONS = { idKind: 'objectid' };
@@ -54,7 +54,7 @@ class RecordStore {
     await this.db.command({ ping: 1 });
   }
 
-  async list(operation, query = {}) {
+  async list(operation, query = {}, scope = null) {
     const { name, table } = tableFor(model, operation);
     const hasPaging = query && (query.page !== undefined || query.limit !== undefined || query.search !== undefined || query.envelope === 'true');
     const page = Math.max(1, parseInt(query?.page, 10) || 1);
@@ -63,9 +63,10 @@ class RecordStore {
 
     const filter = {};
     if (table.generic) filter.capability = operation;
+    this._applyOwnerFilter(filter, table, scope);
 
     if (query && typeof query === 'object') {
-      for (const column of table.columns) {
+      for (const column of publicColumns(table)) {
         if (query[column.name] !== undefined && query[column.name] !== '') {
           filter[column.column] = column.type === 'id' && ObjectId.isValid(query[column.name])
             ? new ObjectId(query[column.name])
@@ -74,7 +75,7 @@ class RecordStore {
       }
       if (query.search && typeof query.search === 'string' && query.search.trim()) {
         const regex = new RegExp(query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-        const orClauses = table.columns
+        const orClauses = publicColumns(table)
           .filter((col) => ['string', 'date', 'datetime', 'uuid'].includes(col.type))
           .map((col) => ({ [col.column]: regex }));
         orClauses.push({ extra: regex });
@@ -97,22 +98,26 @@ class RecordStore {
     };
   }
 
-  async create(operation, body) {
+  async create(operation, body, scope = null) {
     const { name, table } = tableFor(model, operation);
     const { values, extra } = split(table, rules.prepare(name, body), OPTIONS);
+    assignOwner(table, values, extra, scope);
     this._checkExtra(extra);
     rules.check(name, 'create', viewOf(table, values, extra), null);
     await this._checkReferences(table, values);
+    await this._assertOwnedReferences(table, values, scope);
     const now = new Date();
     const document = { ...(table.generic ? { capability: operation } : {}), ...this._stored(table, values), extra, created_at: now, updated_at: now };
     const result = await this._write(() => this.db.collection(name).insertOne(document));
     return toRecord(table, operation, { ...document, _id: result.insertedId });
   }
 
-  async getRecord(operation,id) {
+  async getRecord(operation,id,scope=null) {
     const {name,table}=tableFor(model,operation);
     if (!/^[a-f0-9]{24}$/i.test(String(id))) return null;
-    const row=await this.db.collection(name).findOne({_id:new ObjectId(id),...(table.generic?{capability:operation}:{})});
+    const filter={_id:new ObjectId(id),...(table.generic?{capability:operation}:{})};
+    this._applyOwnerFilter(filter,table,scope);
+    const row=await this.db.collection(name).findOne(filter);
     return row ? toRecord(table,operation,row) : null;
   }
 
@@ -121,17 +126,20 @@ class RecordStore {
     return result.modifiedCount===1;
   }
 
-  async update(operation, id, body) {
+  async update(operation, id, body, scope = null) {
     const { name, table } = tableFor(model, operation);
     if (!ObjectId.isValid(id)) return null;
     const filter = { _id: new ObjectId(id), ...(table.generic ? { capability: operation } : {}) };
+    this._applyOwnerFilter(filter, table, scope);
     const current = await this.db.collection(name).findOne(filter);
     if (!current) return null;
     const previous = toRecord(table, operation, current).data;
     const { values, extra } = split(table, rules.derive(name,body,previous), OPTIONS);
+    assignOwner(table, values, extra, null);
     this._checkExtra(extra);
     rules.check(name, 'update', { ...previous, ...viewOf(table, values, extra) }, previous);
     await this._checkReferences(table, values);
+    await this._assertOwnedReferences(table, values, scope);
     const set = { ...this._stored(table, values), updated_at: new Date() };
     for (const [key, value] of Object.entries(extra)) set[`extra.${key}`] = value;
     const updated = await this._write(() => this.db.collection(name).findOneAndUpdate(filter, { $set: set }, { returnDocument: 'after' }));
@@ -139,9 +147,12 @@ class RecordStore {
     return row ? toRecord(table, operation, row) : null;
   }
 
-  async remove(operation, id) {
-    const { name } = tableFor(model, operation);
+  async remove(operation, id, scope = null) {
+    const { name, table } = tableFor(model, operation);
     if (!ObjectId.isValid(id)) return false;
+    const filter = { _id: new ObjectId(id) };
+    this._applyOwnerFilter(filter, table, scope);
+    if (scope?.ownerId && !(await this.db.collection(name).findOne(filter))) return false;
     const endpoint = (model.associations || []).some((relation) => model.tables[relation.table].columns.some((column) => column.references === name));
     if (endpoint) return require('./data/mongo-associations').remove(this, name, id);
     for (const reference of this.inbound.filter((item) => item.target === name)) {
@@ -149,7 +160,7 @@ class RecordStore {
         throw new HttpError(409, 'El registro es referenciado por otros registros.');
       }
     }
-    const result = await this.db.collection(name).deleteOne({ _id: new ObjectId(id) });
+    const result = await this.db.collection(name).deleteOne(filter);
     return result.deletedCount > 0;
   }
 
@@ -206,6 +217,25 @@ class RecordStore {
 
   _checkExtra(extra) {
     for (const key of Object.keys(extra)) if (!FIELD.test(key)) throw new HttpError(400, `El nombre de campo "${key}" no es válido.`);
+  }
+
+  _applyOwnerFilter(filter, table, scope) {
+    const owner = ownerWhere(table, scope);
+    if (!owner) return;
+    filter.owner_id = ObjectId.isValid(owner) ? new ObjectId(owner) : owner;
+  }
+
+  async _assertOwnedReferences(table, values, scope) {
+    const owner = ownerWhere(table, scope);
+    if (!owner) return;
+    for (const reference of table.references || []) {
+      const id = values[reference.column];
+      if (id == null) continue;
+      const target = model.tables[reference.table];
+      if (!target || !target.columns.some((column) => column.column === 'owner_id')) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+      const row = await this.db.collection(reference.table).findOne({ _id: new ObjectId(id) });
+      if (!row || row.owner_id == null || String(row.owner_id) !== owner) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+    }
   }
 
   /** Equivale a la restricción de clave foránea de las bases relacionales. */

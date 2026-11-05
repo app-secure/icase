@@ -74,6 +74,7 @@ describe('API de asociaciones SQL', () => {
     const policy = { habilitada: true, operaciones: { 'rf-01': { lector: ['GET'], editor: ['GET', 'PATCH'] }, 'rf-02': { lector: ['GET'], editor: ['GET', 'PATCH'] } } };
     const sandbox = { module: { exports: {} }, process, Buffer, require: (name) => {
       if (name === './policy') return policy;
+      if (name === './ownership') return require('../src/infrastructure/templates/auth/ownership');
       if (name === '../data/model') return model;
       if (name === '../data/store-support') return { HttpError };
       return require(name);

@@ -1,7 +1,7 @@
 const mysql = require('mysql2/promise');
 const model = require('./data/model');
 const migrations = require('./data/migrations');
-const { HttpError, withRetry, split, viewOf, toRecord, tableFor } = require('./data/store-support');
+const { HttpError, withRetry, split, viewOf, toRecord, tableFor, publicColumns, ownerWhere, assignOwner } = require('./data/store-support');
 const rules = require('./data/rules-engine');
 
 const LOCK = 'icase_migrations';
@@ -58,7 +58,7 @@ class RecordStore {
     await this.pool.query('SELECT 1');
   }
 
-  async list(operation, query = {}) {
+  async list(operation, query = {}, scope = null) {
     const { name, table } = tableFor(model, operation);
     const hasPaging = query && (query.page !== undefined || query.limit !== undefined || query.search !== undefined || query.envelope === 'true');
     const page = Math.max(1, parseInt(query?.page, 10) || 1);
@@ -71,9 +71,11 @@ class RecordStore {
       params.push(operation);
       conditions.push('capability = ?');
     }
+    const owner = ownerWhere(table, scope);
+    if (owner) { params.push(owner); conditions.push(`${quote('owner_id')} = ?`); }
 
     if (query && typeof query === 'object') {
-      for (const column of table.columns) {
+      for (const column of publicColumns(table)) {
         if (query[column.name] !== undefined && query[column.name] !== '') {
           params.push(this._param(table, column.column, query[column.name]));
           conditions.push(`${quote(column.column)} = ?`);
@@ -82,7 +84,7 @@ class RecordStore {
       if (query.search && typeof query.search === 'string' && query.search.trim()) {
         const term = `%${query.search.trim()}%`;
         const searchClauses = [];
-        for (const column of table.columns) {
+        for (const column of publicColumns(table)) {
           if (['string', 'date', 'datetime', 'uuid'].includes(column.type)) {
             searchClauses.push(`${quote(column.column)} LIKE ?`);
             params.push(term);
@@ -111,9 +113,11 @@ class RecordStore {
     } catch (error) { throw translate(error); }
   }
 
-  async create(operation, body) {
+  async create(operation, body, scope = null) {
     const { name, table } = tableFor(model, operation);
     const { values, extra } = split(table, rules.prepare(name, body));
+    assignOwner(table, values, extra, scope);
+    await this._assertOwnedReferences(table, values, scope);
     rules.check(name, 'create', viewOf(table, values, extra), null);
     if (table.generic) values.capability = operation;
     const columns = Object.keys(values);
@@ -126,9 +130,9 @@ class RecordStore {
     } catch (error) { throw translate(error); }
   }
 
-  async getRecord(operation,id) {
+  async getRecord(operation,id,scope=null) {
     const {name,table}=tableFor(model,operation);
-    return this._find(name,table,operation,id);
+    return this._find(name,table,operation,id,scope);
   }
 
   async replacePassword(id,previous,password_hash) {
@@ -136,31 +140,38 @@ class RecordStore {
     return result.affectedRows===1;
   }
 
-  async update(operation, id, body) {
+  async update(operation, id, body, scope = null) {
     const { name, table } = tableFor(model, operation);
-    const row = await this._row(name, table, operation, id);
+    const row = await this._row(name, table, operation, id, scope);
     if (!row) return null;
     const previous = toRecord(table, operation, row).data;
     const { values, extra } = split(table, rules.derive(name,body,previous));
+    assignOwner(table, values, extra, null);
+    await this._assertOwnedReferences(table, values, scope);
     rules.check(name, 'update', { ...previous, ...viewOf(table, values, extra) }, previous);
     const columns = Object.keys(values);
     const sets = [...columns.map((column) => `${quote(column)} = ?`), 'extra = JSON_MERGE_PATCH(extra, ?)'];
     const params = [...columns.map((column) => this._param(table, column, values[column])), JSON.stringify(extra), id];
     let sql = `UPDATE ${quote(name)} SET ${sets.join(', ')} WHERE id = ?`;
     if (table.generic) { params.push(operation); sql += ' AND capability = ?'; }
+    const owner = ownerWhere(table, scope);
+    if (owner) { params.push(owner); sql += ` AND ${quote('owner_id')} = ?`; }
     try {
       const [result] = await this.pool.query(sql, params);
       return result.affectedRows ? this._find(name, table, operation, id) : null;
     } catch (error) { throw translate(error); }
   }
 
-  async remove(operation, id) {
+  async remove(operation, id, scope = null) {
     const { name, table } = tableFor(model, operation);
     if (!/^\d{1,18}$/.test(String(id))) return false;
     try {
-      const [result] = table.generic
-        ? await this.pool.query(`DELETE FROM ${quote(name)} WHERE id = ? AND capability = ?`, [id, operation])
-        : await this.pool.query(`DELETE FROM ${quote(name)} WHERE id = ?`, [id]);
+      const params = [id];
+      let sql = `DELETE FROM ${quote(name)} WHERE id = ?`;
+      if (table.generic) { params.push(operation); sql += ' AND capability = ?'; }
+      const owner = ownerWhere(table, scope);
+      if (owner) { params.push(owner); sql += ` AND ${quote('owner_id')} = ?`; }
+      const [result] = await this.pool.query(sql, params);
       return result.affectedRows > 0;
     } catch (error) { throw translate(error); }
   }
@@ -208,19 +219,36 @@ class RecordStore {
     return result.affectedRows > 0;
   }
 
-  async _row(name, table, operation, id) {
+  async _row(name, table, operation, id, scope = null) {
     if (!/^\d{1,18}$/.test(String(id))) return null;
     try {
-      const [rows] = table.generic
-        ? await this.pool.query(`SELECT * FROM ${quote(name)} WHERE id = ? AND capability = ?`, [id, operation])
-        : await this.pool.query(`SELECT * FROM ${quote(name)} WHERE id = ?`, [id]);
+      const params = [id];
+      let sql = `SELECT * FROM ${quote(name)} WHERE id = ?`;
+      if (table.generic) { params.push(operation); sql += ' AND capability = ?'; }
+      const owner = ownerWhere(table, scope);
+      if (owner) { params.push(owner); sql += ` AND ${quote('owner_id')} = ?`; }
+      const [rows] = await this.pool.query(sql, params);
       return rows[0] || null;
     } catch (error) { throw translate(error); }
   }
 
-  async _find(name, table, operation, id) {
-    const row = await this._row(name, table, operation, id);
+  async _find(name, table, operation, id, scope = null) {
+    const row = await this._row(name, table, operation, id, scope);
     return row ? toRecord(table, operation, row) : null;
+  }
+
+  async _assertOwnedReferences(table, values, scope) {
+    const owner = ownerWhere(table, scope);
+    if (!owner) return;
+    for (const reference of table.references || []) {
+      const id = values[reference.column];
+      if (id == null) continue;
+      const target = model.tables[reference.table];
+      if (!target || !target.columns.some((column) => column.column === 'owner_id')) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+      const [rows] = await this.pool.query(`SELECT owner_id FROM ${quote(reference.table)} WHERE id = ?`, [id]);
+      const row = rows[0];
+      if (!row || row.owner_id == null || String(row.owner_id) !== owner) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+    }
   }
 
   _param(table, column, value) {

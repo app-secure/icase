@@ -252,6 +252,16 @@ async function setupAccess(base, config) {
   };
 }
 
+function permissionMethods(entry) {
+  if (!entry) return [];
+  return Array.isArray(entry) ? entry : (Array.isArray(entry.metodos) ? entry.metodos : []);
+}
+
+function permissionScope(entry) {
+  if (!entry || Array.isArray(entry)) return 'todos';
+  return entry.alcance === 'propios' ? 'propios' : 'todos';
+}
+
 /** Comprueba la matriz de permisos de una operación para cada rol, además del acceso sin sesión. */
 async function exerciseAccess(access, operations, operation, matrix) {
   const fail = (message) => { throw new Error(operation.id + ' (acceso): ' + message); };
@@ -269,7 +279,7 @@ async function exerciseAccess(access, operations, operation, matrix) {
     status(await access.invalid(path), 401, 'listar con un token alterado');
     const record = await createValidRecord(access.admin, operations, operation, cleanups, 0);
     for (const [role, session] of Object.entries(access.roles)) {
-      const allowed = matrix[role] || [];
+      const allowed = permissionMethods(matrix[role]);
       const label = 'rol ' + role;
       const check = (response, method, text) => (allowed.includes(method) ? permitted(response, label + ' ' + text) : status(response, 403, label + ' ' + text + ' sin permiso'));
       check(await session.api(path), 'GET', 'listar');
@@ -440,12 +450,74 @@ async function exerciseAssociation(api, operations, association, access, auth) {
   }
 }
 
+/** Dos usuarios del mismo rol con alcance «propios»: aislamiento, 404 cruzado y propietario no falsificable. */
+async function exerciseOwnership(access, operations, operation, matrix, config = {}) {
+  const fail = (message) => { throw new Error(operation.id + ' (propiedad): ' + message); };
+  const status = (response, expected, label) => {
+    if (response.status !== expected) fail(label + ' respondió ' + response.status + ' (se esperaba ' + expected + '): ' + JSON.stringify(response.data));
+    return response;
+  };
+  const limited = Object.entries(matrix || {}).find(([, entry]) => permissionScope(entry) === 'propios' && permissionMethods(entry).includes('POST') && permissionMethods(entry).includes('GET'));
+  if (!limited) return;
+  const role = limited[0];
+  const first = access.roles[role];
+  if (!first) fail('falta el usuario del rol ' + role);
+  const base = config.base;
+  const email = 'own-peer-' + access.salt + '-' + operation.key + '@example.test';
+  const password = 'Passw0rd-' + access.salt;
+  const createdUser = status(await access.admin('/api/users', 'POST', { email, password, nombre: 'Par', rol: role }), 201, 'crear segundo usuario');
+  const session = status(await access.anonymous('/api/auth/login', 'POST', { email, password }), 200, 'sesión del segundo usuario');
+  const second = { api: makeApi(base, session.data.token), userId: createdUser.data.id };
+  const cleanups = [() => access.admin('/api/users/' + second.userId, 'DELETE')];
+  try {
+    const mine = await createValidRecord(first.api, operations, operation, cleanups, 0);
+    const theirs = await createValidRecord(second.api, operations, operation, cleanups, 1);
+    const listed = status(await first.api(operation.collectionPath), 200, 'listar propios');
+    const rows = Array.isArray(listed.data) ? listed.data : listed.data.data;
+    if (!rows.some((row) => String(row.id) === String(mine.id))) fail('el listado omitió el registro propio');
+    if (rows.some((row) => String(row.id) === String(theirs.id))) fail('el listado expuso un registro ajeno');
+    status(await first.api(operation.collectionPath + '/' + theirs.id, 'PATCH', { verification: 'ajeno' }), 404, 'modificar ajeno');
+    status(await first.api(operation.collectionPath + '/' + theirs.id, 'DELETE'), 404, 'borrar ajeno');
+    const forged = await first.api(operation.collectionPath, 'POST', { ...(await createValidRecord(first.api, operations, operation, cleanups, 2)).body, owner_id: second.userId, __owner: second.userId });
+    if (forged.status === 201) {
+      cleanups.unshift(() => first.api(operation.collectionPath + '/' + forged.data.id, 'DELETE'));
+      const seen = status(await second.api(operation.collectionPath), 200, 'listar tras falsificar propietario');
+      const data = Array.isArray(seen.data) ? seen.data : seen.data.data;
+      if (data.some((row) => String(row.id) === String(forged.data.id))) fail('el cliente pudo asignar un propietario ajeno');
+      if (JSON.stringify(forged.data).includes(String(second.userId)) && /owner/.test(JSON.stringify(forged.data))) fail('la API expuso el propietario');
+    }
+    const filtered = await first.api(operation.collectionPath + '?owner_id=' + second.userId + '&__owner=' + second.userId);
+    if (filtered.status === 200) {
+      const data = Array.isArray(filtered.data) ? filtered.data : filtered.data.data;
+      if (data.some((row) => String(row.id) === String(theirs.id))) fail('el filtro de consulta reveló registros ajenos');
+    }
+    for (const candidate of operations) {
+      const keyOf = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const reference = Object.entries(candidate.schema?.properties || {}).find(([, schema]) => schema && keyOf(schema['x-references']) === String(operation.entity || ''));
+      if (!reference) continue;
+      if (permissionScope((config.auth?.operaciones || {})[candidate.key]?.[role]) !== 'propios') continue;
+      const payload = await createValidRecord(first.api, operations, candidate, cleanups, 0);
+      const conflict = await first.api(candidate.collectionPath, 'POST', { ...payload.body, [reference[0]]: theirs.id });
+      if (conflict.status !== 409) fail('referencia cruzada respondió ' + conflict.status);
+    }
+    for (const association of config.associations || []) {
+      const keys = (association.operations || []).flat();
+      if (!keys.includes(operation.key)) continue;
+      const link = await first.api('/api/associations/' + encodeURIComponent(association.table), 'POST', { source_id: String(mine.id), target_id: String(theirs.id) });
+      if (link.status !== 403 && link.status !== 400 && link.status !== 404) fail('N:M con alcance limitado respondió ' + link.status);
+    }
+  } finally {
+    for (const cleanup of cleanups) { try { await cleanup(); } catch { /* mejor esfuerzo */ } }
+  }
+}
+
 function runtimeSource() {
-  return [salted, samplePayload, createValidRecord, exerciseOperation, makeApi, setupAccess, exerciseAccess, exerciseAuth, exerciseOpenApi, exerciseAssociation].map((fn) => fn.toString()).join('\n\n');
+  return [salted, samplePayload, createValidRecord, exerciseOperation, makeApi, setupAccess, permissionMethods, permissionScope, exerciseAccess, exerciseOwnership, exerciseAuth, exerciseOpenApi, exerciseAssociation].map((fn) => fn.toString()).join('\n\n');
 }
 
 samplePayload.exerciseOperation = exerciseOperation;
 samplePayload.exerciseAccess = exerciseAccess;
+samplePayload.exerciseOwnership = exerciseOwnership;
 samplePayload.exerciseAuth = exerciseAuth;
 samplePayload.exerciseOpenApi = exerciseOpenApi;
 samplePayload.exerciseAssociation = exerciseAssociation;

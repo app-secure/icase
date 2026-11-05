@@ -7,6 +7,7 @@
 const METHODS = Object.freeze(['GET', 'POST', 'PATCH', 'DELETE']);
 const AUTH_METHODS = Object.freeze(['jwt', 'ninguna']);
 const EXPIRATIONS = Object.freeze(['1h', '8h', '24h', '7d']);
+const SCOPES = Object.freeze(['todos', 'propios']);
 const ADMIN_ROLE = 'administrador';
 // Actores que suelen ser sistemas externos y no personas con credenciales.
 const SYSTEM_ACTOR = /^(?:sistema|system|api|servicio|servidor|pasarela|gateway|base de datos|cron|scheduler|bot|plataforma externa)\b/i;
@@ -88,14 +89,22 @@ class AccessControlService {
       const operacion = String(permiso?.operacion || '').toUpperCase();
       const rol = slug(permiso?.rol);
       const metodos = [...new Set((Array.isArray(permiso?.metodos) ? permiso.metodos : []).map((item) => String(item).toUpperCase()))];
+      const alcance = permiso?.alcance === undefined || permiso?.alcance === null || permiso?.alcance === '' ? 'todos' : String(permiso.alcance);
       if (!conocidas.has(operacion)) { errores.push(`${etiqueta}: la operación «${permiso?.operacion}» no corresponde a un RF aprobado.`); return; }
       if (!vistos.has(rol)) { errores.push(`${etiqueta}: el rol «${permiso?.rol}» no está declarado.`); return; }
       if (!metodos.length || metodos.some((item) => !METHODS.includes(item))) { errores.push(`${etiqueta}: los métodos deben ser un subconjunto de ${METHODS.join(', ')}.`); return; }
+      if (!SCOPES.includes(alcance)) { errores.push(`${etiqueta}: el alcance debe ser uno de: ${SCOPES.join(', ')}.`); return; }
       if (!incluidos.has(rol)) { advertencias.push(`Se ignoraron los permisos del rol «${rol}» porque no está incluido.`); return; }
       const clave = `${operacion}|${rol}`;
-      fusionados.set(clave, { operacion: rf.find((item) => String(item.identificador).toUpperCase() === operacion).identificador, rol, metodos: [...new Set([...(fusionados.get(clave)?.metodos || []), ...metodos])] });
+      const previo = fusionados.get(clave);
+      fusionados.set(clave, {
+        operacion: rf.find((item) => String(item.identificador).toUpperCase() === operacion).identificador,
+        rol,
+        metodos: [...new Set([...(previo?.metodos || []), ...metodos])],
+        alcance: (!previo || previo.alcance === 'propios') && alcance === 'propios' ? 'propios' : 'todos'
+      });
     });
-    const permisos = [...fusionados.values()].map((item) => ({ ...item, metodos: METHODS.filter((method) => item.metodos.includes(method)) }));
+    const permisos = [...fusionados.values()].map((item) => ({ ...item, metodos: METHODS.filter((method) => item.metodos.includes(method)), alcance: item.alcance === 'propios' ? 'propios' : 'todos' }));
 
     if (autenticacion.metodo === 'ninguna') {
       advertencias.push('Sin autenticación, cualquier persona con acceso a la red podrá leer, crear, modificar y eliminar datos.');
@@ -125,7 +134,9 @@ class AccessControlService {
     const porOperacion = Object.fromEntries(operaciones.map((item) => [item.key, {}]));
     for (const permiso of propuesta.permisos || []) {
       const key = llaves.get(String(permiso.operacion).toUpperCase());
-      if (key && incluidos.some((rol) => rol.id === permiso.rol)) porOperacion[key][permiso.rol] = [...permiso.metodos];
+      if (key && incluidos.some((rol) => rol.id === permiso.rol)) {
+        porOperacion[key][permiso.rol] = { metodos: [...permiso.metodos], alcance: permiso.alcance === 'propios' ? 'propios' : 'todos' };
+      }
     }
     return {
       habilitada: true,
@@ -137,6 +148,7 @@ class AccessControlService {
 }
 
 AccessControlService.METHODS = METHODS;
+AccessControlService.SCOPES = SCOPES;
 AccessControlService.ADMIN_ROLE = ADMIN_ROLE;
 AccessControlService.operationKey = operationKey;
 module.exports = AccessControlService;

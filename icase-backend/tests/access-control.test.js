@@ -107,9 +107,22 @@ describe('AccessControlService.validar', () => {
     expect(politica.habilitada).toBe(true);
     expect(politica.roles).toEqual({ cliente: { nombre: 'Cliente', autoregistro: true }, mesero: { nombre: 'Mesero', autoregistro: false } });
     expect(politica.operaciones['rf-03']).toEqual({});
-    expect(politica.operaciones['rf-02'].mesero).toEqual(['GET', 'POST', 'PATCH', 'DELETE']);
+    expect(politica.operaciones['rf-02'].mesero).toEqual({ metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'todos' });
     expect(service.politica({ autenticacion: { metodo: 'ninguna' } }, [])).toEqual({ habilitada: false });
     expect(service.politica(null, [])).toEqual({ habilitada: false });
+  });
+
+  test('acepta alcance propios, fusiona al más amplio y lo publica en la política', () => {
+    const propuesta = base();
+    propuesta.permisos.push({ operacion: 'RF-01', rol: 'cliente', metodos: ['GET'], alcance: 'propios' });
+    propuesta.permisos = propuesta.permisos.filter((item) => !(item.operacion === 'RF-02' && item.rol === 'cliente'));
+    propuesta.permisos.push({ operacion: 'RF-02', rol: 'cliente', metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'propios' });
+    const { propuesta: normalizada, errores } = validar(propuesta);
+    expect(errores).toEqual([]);
+    expect(normalizada.permisos.find((item) => item.operacion === 'RF-01' && item.rol === 'cliente').alcance).toBe('todos');
+    expect(normalizada.permisos.find((item) => item.operacion === 'RF-02' && item.rol === 'cliente').alcance).toBe('propios');
+    const politica = service.politica(normalizada, [{ id: 'RF-01', key: 'rf-01' }, { id: 'RF-02', key: 'rf-02' }, { id: 'RF-03', key: 'rf-03' }]);
+    expect(politica.operaciones['rf-02'].cliente).toEqual({ metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'propios' });
   });
 });
 

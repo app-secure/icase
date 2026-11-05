@@ -8,7 +8,7 @@ El generador reconoce las relaciones N:M explícitas en el diagrama de dominio a
 
 Express, NestJS y Spring con PostgreSQL/MySQL generan `GET`, `POST` y `DELETE /api/associations/{tabla}`. La tabla y sus extremos aparecen en `storage.associations` y en OpenAPI. Para listar usa `source_id` y opcionalmente `limit` (máximo 100); `has_more` indica que hay resultados adicionales. Para asociar/desasociar envía `{ "source_id": "1", "target_id": "2" }`; los identificadores deben ser cadenas de enteros positivos. Repetir una asociación o desasociación es idempotente. Los cambios usan transacciones, comprueban que ambos registros existan y bloquean su lectura durante la operación para evitar que se borren concurrentemente.
 
-Con autenticación habilitada, listar requiere permiso GET sobre ambos extremos; modificar vínculos requiere GET y PATCH sobre ambos, o ser administrador. No se inventan nuevos permisos. Sin autenticación, las rutas son públicas conforme a la decisión aprobada. Esto no implementa propiedad de registros por usuario.
+Con autenticación habilitada, listar requiere permiso GET sobre ambos extremos; modificar vínculos requiere GET y PATCH sobre ambos, o ser administrador. No se inventan nuevos permisos. Sin autenticación, las rutas son públicas conforme a la decisión aprobada. Un rol con alcance «solo registros propios» sobre algún extremo recibe 403 al operar el vínculo.
 
 Las pantallas web incluyen un panel «Relaciones muchos a muchos» en las operaciones asociadas a cada extremo. Los selectores permiten buscar y paginar registros; el panel lista vínculos y permite asociar/desasociar según los permisos del usuario. «Cargar más vínculos» continúa la consulta mediante `after_target_id`. Los paneles se derivan de `GET /api/contract`, no de nombres fijos de entidades, y funcionan tanto con formularios tipados como con el editor JSON. No sustituyen automáticamente el diseño visual de los mockups ni incorporan gestión N:M al cliente móvil.
 
@@ -17,6 +17,14 @@ Express/NestJS con MongoDB también generan API y panel N:M. Sus identificadores
 Para MongoDB con N:M, el Compose exportado incluye scripts que preparan un replica set autenticado de un solo nodo y una clave interna persistida en `database-key`. Eso habilita transacciones, **no alta disponibilidad**. Conserva backups de datos y claves, revisa usuarios/permisos de producción y no borres volúmenes para actualizar una instalación existente. El entorno aislado de verificación utiliza su propio replica set efímero, sin exponer puertos de la base al host.
 
 El informe mantiene bloqueada una entrega declarada completa con N:M hasta completar la verificación integral con base real; sigue permitiendo la entrega parcial confirmada. No se inventan vínculos en los datos iniciales. Las migraciones siguen siendo iniciales: no apliques una regeneración sobre una base existente sin preparar una migración incremental y respaldo. Los scripts de despliegue y la concurrencia real deben validarse con Docker/MongoDB; las pruebas simuladas no certifican su ejecución.
+
+## Propiedad de registros
+
+En la etapa de autenticación y roles puedes marcar **Solo registros propios** en un permiso. Es opt-in: si no lo marcas, el rol sigue viendo todos los registros de esa operación. El administrador y el alcance «todos» no se filtran.
+
+El backend añade una columna interna `owner_id` (no aparece en la API, OpenAPI ni el contrato). Al crear, el servidor la rellena con el usuario autenticado; el cuerpo y los filtros del cliente no pueden escribirla. Listar, modificar y borrar un registro ajeno responden `404`, igual que si no existiera. Una referencia a un registro que el rol no podría leer responde `409`.
+
+La generación se detiene con un mensaje claro si combinas esta opción con Spring o con procesos, eventos, archivos, reportes, pagos o mapas: esos módulos leen datos fuera del CRUD con alcance. Los datos iniciales y lo que crea el administrador quedan sin propietario; un rol limitado no los ve. Regenerar un proyecto existente añade la columna con una migración aditiva.
 
 ## Seguridad del backend generado
 
