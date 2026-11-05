@@ -324,8 +324,8 @@ export class StoreExceptionFilter implements ExceptionFilter {
 
   _nestController(contract, policy = { habilitada: false }) {
     const scoped = policy.habilitada
-      ? "const {scopeOf}=require('./auth/ownership');const policy=require('./auth/policy');const scope=(user:any,key:string)=>scopeOf(policy,user,key);"
-      : 'const scope=(_user:any,_key:string)=>null;';
+      ? "const {scopeOf,associationScopes}=require('./auth/ownership');const policy=require('./auth/policy');const model=require('./data/model');const scope=(user:any,key:string)=>scopeOf(policy,user,key);const linkScopes=(user:any,relation:string)=>{const item=(model.associations||[]).find((entry:any)=>entry.table===relation);return item?associationScopes(policy,user,item,model):{};};"
+      : 'const scope=(_user:any,_key:string)=>null;const linkScopes=(_user:any,_relation:string)=>({});';
     return `import { BadRequestException, Body, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
 import { RecordStore } from './record.store';
 ${scoped}
@@ -338,9 +338,9 @@ const associations=require('./data/associations');
  @Get('api/contract') contract(){return ${JSON.stringify(contract)};}
  @Get('api/openapi.json') openapi(){return require('./docs/openapi.js');}
  @Get('api/docs') docs(@Res() res:any){res.type('html').send(require('./docs/swagger-ui').html());}
- @Get('api/associations/:relation') links(@Param('relation') relation:string,@Query() query:any){return associations(this.store,'list',relation,query);}
- @Post('api/associations/:relation') @HttpCode(200) link(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'link',relation,body);}
- @Delete('api/associations/:relation') unlink(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'unlink',relation,body);}
+ @Get('api/associations/:relation') links(@Param('relation') relation:string,@Query() query:any,@Req() req:any){return associations(this.store,'list',relation,query,linkScopes(req.user,relation));}
+ @Post('api/associations/:relation') @HttpCode(200) link(@Param('relation') relation:string,@Body() body:any,@Req() req:any){return associations(this.store,'link',relation,body,linkScopes(req.user,relation));}
+ @Delete('api/associations/:relation') unlink(@Param('relation') relation:string,@Body() body:any,@Req() req:any){return associations(this.store,'unlink',relation,body,linkScopes(req.user,relation));}
  @Get('api/operations/:capability') async list(@Param('capability') capability:string,@Query() query:any,@Req() req:any,@Res({passthrough:true}) res:any){
    const key=this.capability(capability);
    const result=await this.store.list(key,query,scope(req.user,key));
@@ -367,18 +367,18 @@ const associations=require('./data/associations');
 const configureHttpSecurity=require('./security/http-security');
 const associations=require('./data/associations');
 const Store=require('./record.store');
-${auth ? "const mountAuth=require('./auth/auth-express');\nconst {createAuth}=require('./auth/auth-core');\nconst {scopeOf}=require('./auth/ownership');\nconst policy=require('./auth/policy');\n" : ''}const app=express();const store=new Store();const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
+${auth ? "const mountAuth=require('./auth/auth-express');\nconst {createAuth}=require('./auth/auth-core');\nconst {scopeOf,associationScopes}=require('./auth/ownership');\nconst policy=require('./auth/policy');\nconst dataModel=require('./data/model');\n" : ''}const app=express();const store=new Store();const allowed=new Set(${JSON.stringify(contract.operations.map((item) => item.key))});
 app.locals.store=store;configureHttpSecurity(app);app.use(express.json({limit:'1mb'}));
-${auth ? "const auth=createAuth({store});app.locals.auth=auth;mountAuth(app,auth);\nconst scope=(req,key)=>scopeOf(policy,req.user,key);\n" : 'const scope=()=>null;\n'}app.locals.init=async()=>{await store.init();${auth ? 'await auth.init();' : ''}};
+${auth ? "const auth=createAuth({store});app.locals.auth=auth;mountAuth(app,auth);\nconst scope=(req,key)=>scopeOf(policy,req.user,key);\nconst linkScopes=(req,relation)=>{const item=(dataModel.associations||[]).find(entry=>entry.table===relation);return item?associationScopes(policy,req.user,item,dataModel):{};};\n" : 'const scope=()=>null;\nconst linkScopes=()=>({});\n'}app.locals.init=async()=>{await store.init();${auth ? 'await auth.init();' : ''}};
 const capability=(req,res,next)=>allowed.has(req.params.capability)?next():res.status(404).json({message:'Operación inexistente'});
 app.get('/health',async(_req,res,next)=>{try{await store.ping();res.json({status:'ok',database:'connected'})}catch(e){next(e)}});
 app.get('/api/contract',(_req,res)=>res.json(${JSON.stringify(contract)}));
 app.get('/api/openapi.json',(_req,res)=>res.json(require('./docs/openapi')));
 app.get('/api/docs',(_req,res)=>res.type('html').send(require('./docs/swagger-ui').html()));
 app.use('/api/docs/static',(req,res,next)=>{try{express.static(require('./docs/swagger-ui').absoluteAssetPath(),{index:false})(req,res,next);}catch(e){next(e);}});
-app.get('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'list',req.params.relation,req.query))}catch(e){next(e)}});
-app.post('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'link',req.params.relation,req.body))}catch(e){next(e)}});
-app.delete('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'unlink',req.params.relation,req.body))}catch(e){next(e)}});
+app.get('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'list',req.params.relation,req.query,linkScopes(req,req.params.relation)))}catch(e){next(e)}});
+app.post('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'link',req.params.relation,req.body,linkScopes(req,req.params.relation)))}catch(e){next(e)}});
+app.delete('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'unlink',req.params.relation,req.body,linkScopes(req,req.params.relation)))}catch(e){next(e)}});
 app.get('/api/operations/:capability',capability,async(req,res,next)=>{
   try{
     const result=await store.list(req.params.capability,req.query,scope(req,req.params.capability));

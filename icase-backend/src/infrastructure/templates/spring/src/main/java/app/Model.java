@@ -60,4 +60,18 @@ public final class Model {
         if (name == null) throw new HttpError(404, "Operación inexistente");
         return tables.get(name);
     }
+
+    public List<String> operationsForTable(String tableName) {
+        List<String> keys = new ArrayList<>();
+        for (Map.Entry<String, String> entry : operations.entrySet()) {
+            if (tableName.equals(entry.getValue())) keys.add(entry.getKey());
+        }
+        return keys;
+    }
+
+    public boolean hasOwnerColumn(String tableName) {
+        Table table = tables.get(tableName);
+        if (table == null) return false;
+        return table.columns().stream().anyMatch(column -> "owner_id".equals(column.column()));
+    }
 }

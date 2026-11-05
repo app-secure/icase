@@ -29,18 +29,35 @@ function scopeOf(policy, user, operation) {
   return { ownerId: String(user.id) };
 }
 
-function associationForbidden(policy, user, relation, model) {
-  if (!user || user.rol === ADMIN) return false;
-  const table = model.tables[relation.table];
-  if (!table) return false;
-  const endpoints = table.columns.map((column) => column.references).filter(Boolean);
-  for (const endpoint of endpoints) {
-    const keys = Object.entries(model.operations).filter(([, name]) => name === endpoint).map(([key]) => key);
-    if (keys.some((key) => alcanceOf(policy?.operaciones?.[key]?.[user.rol]) === 'propios')) return true;
-  }
+function keysForTable(model, tableName) {
+  return Object.entries(model?.operations || {}).filter(([, name]) => name === tableName).map(([key]) => key);
+}
+
+/** Scopes de ownership para los extremos de un vínculo N:M (sin dueño en la fila intermedia). */
+function associationScopes(policy, user, relation, model) {
+  const table = model?.tables?.[relation?.table];
+  if (!table?.columns?.length) return { sourceKey: null, targetKey: null, sourceScope: null, targetScope: null };
+  const sourceTable = table.columns[0].references;
+  const targetTable = table.columns[1]?.references;
+  const pick = (tableName) => {
+    const keys = keysForTable(model, tableName);
+    if (!keys.length) return { key: null, scope: null };
+    for (const key of keys) {
+      const scope = scopeOf(policy, user, key);
+      if (scope) return { key, scope };
+    }
+    return { key: keys[0], scope: null };
+  };
+  const source = pick(sourceTable);
+  const target = pick(targetTable);
+  return { sourceKey: source.key, targetKey: target.key, sourceScope: source.scope, targetScope: target.scope };
+}
+
+/** @deprecated El N:M filtra por GET con scope; ya no se bloquea la API entera. */
+function associationForbidden() {
   return false;
 }
 
 module.exports = {
-  ADMIN, BLOCKED_MODULES, methodsOf, alcanceOf, policyUsesOwnership, scopeOf, associationForbidden
+  ADMIN, BLOCKED_MODULES, methodsOf, alcanceOf, policyUsesOwnership, scopeOf, associationScopes, associationForbidden, keysForTable
 };

@@ -5,7 +5,7 @@ const { promisify } = require('node:util');
 const jwt = require('jsonwebtoken');
 const { HttpError } = require('../data/store-support');
 const policy = require('./policy');
-const { methodsOf, associationForbidden } = require('./ownership');
+const { methodsOf } = require('./ownership');
 
 const scrypt = promisify(crypto.scrypt);
 const METHODS = ['GET', 'POST', 'PATCH', 'DELETE'];
@@ -178,7 +178,6 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
         const permitted = Object.entries(model.operations).some(([key, name]) => name === table && required.every((verb) => methodsOf(policy.operaciones?.[key]?.[user.rol]).includes(verb)));
         if (!permitted) throw new HttpError(403, 'Se requieren permisos sobre ambos extremos del vínculo.');
       }
-      if (associationForbidden(policy, user, relation, model)) throw new HttpError(403, 'Se requieren permisos sobre ambos extremos del vínculo.');
       return;
     }
     const operation = /^\/api\/operations\/([^/]+)/.exec(path);

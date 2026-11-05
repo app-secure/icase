@@ -30,7 +30,18 @@ async function lock(store, table, id, session) {
   if (!result.matchedCount) throw new HttpError(404, 'Uno de los extremos del vínculo no existe.');
 }
 
-async function execute(store, action, relation, input) {
+async function visible(store, operationKey, recordId, scope) {
+  if (!operationKey) return true;
+  return Boolean(await store.getRecord(operationKey, String(recordId), scope || null));
+}
+
+async function assertVisible(store, operationKey, recordId, scope) {
+  if (!(await visible(store, operationKey, recordId, scope))) {
+    throw new HttpError(404, 'Uno de los extremos del vínculo no existe.');
+  }
+}
+
+async function execute(store, action, relation, input, scopes = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new HttpError(400, 'Datos de vínculo inválidos.');
   const list = action === 'list';
   if (!list && !['link', 'unlink'].includes(action)) throw new HttpError(400, 'Acción inválida.');
@@ -45,13 +56,31 @@ async function execute(store, action, relation, input) {
   return transaction(store, async (session) => {
     if (list) {
       if (!(await store.db.collection(columns[0].references).findOne({ _id: source }, { session, projection: { _id: 1 } }))) throw new HttpError(404, 'El registro de origen no existe.');
-      const rows = await store.db.collection(relation.table).find({ source_id: source, ...(after ? { target_id: { $gt: after } } : {}) }, { session })
-        .sort({ target_id: 1 }).limit(limit + 1).toArray();
-      return { data: rows.slice(0, limit).map((row) => ({ source_id: String(row.source_id), target_id: String(row.target_id) })), has_more: rows.length > limit };
+      await assertVisible(store, scopes.sourceKey, source, scopes.sourceScope);
+      const data = [];
+      let cursor = after;
+      let hasMore = false;
+      while (data.length < limit) {
+        const batch = Math.min(100, limit - data.length + 1);
+        const rows = await store.db.collection(relation.table).find({ source_id: source, ...(cursor ? { target_id: { $gt: cursor } } : {}) }, { session })
+          .sort({ target_id: 1 }).limit(batch).toArray();
+        if (!rows.length) break;
+        for (const row of rows) {
+          if (!(await visible(store, scopes.targetKey, row.target_id, scopes.targetScope))) continue;
+          data.push({ source_id: String(row.source_id), target_id: String(row.target_id) });
+          if (data.length === limit) { hasMore = true; break; }
+        }
+        cursor = rows[rows.length - 1].target_id;
+        if (rows.length < batch) { hasMore = false; break; }
+        if (data.length === limit) break;
+      }
+      return { data, has_more: hasMore };
     }
     const endpoints = [{ table: columns[0].references, id: source }, { table: columns[1].references, id: target }]
       .sort((a, b) => a.table.localeCompare(b.table) || String(a.id).localeCompare(String(b.id)));
     for (const endpoint of endpoints) await lock(store, endpoint.table, endpoint.id, session);
+    await assertVisible(store, scopes.sourceKey, source, scopes.sourceScope);
+    await assertVisible(store, scopes.targetKey, target, scopes.targetScope);
     const pair = { source_id: source, target_id: target };
     if (action === 'link') await store.db.collection(relation.table).updateOne(pair, { $setOnInsert: { ...pair, extra: {}, created_at: new Date(), updated_at: new Date() } }, { session, upsert: true });
     else await store.db.collection(relation.table).deleteOne(pair, { session });

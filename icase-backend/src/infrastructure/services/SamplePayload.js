@@ -501,10 +501,26 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
       if (conflict.status !== 409) fail('referencia cruzada respondió ' + conflict.status);
     }
     for (const association of config.associations || []) {
-      const keys = (association.operations || []).flat();
-      if (!keys.includes(operation.key)) continue;
-      const link = await first.api('/api/associations/' + encodeURIComponent(association.table), 'POST', { source_id: String(mine.id), target_id: String(theirs.id) });
-      if (link.status !== 403 && link.status !== 400 && link.status !== 404) fail('N:M con alcance limitado respondió ' + link.status);
+      const ends = association.operations || [];
+      const sourceKeys = Array.isArray(ends[0]) ? ends[0] : [];
+      const targetKeys = Array.isArray(ends[1]) ? ends[1] : [];
+      // Solo cuando la operación actual es el extremo source: source_id = registro propio.
+      if (!sourceKeys.includes(operation.key)) continue;
+      const targetOp = operations.find((item) => targetKeys.includes(item.key));
+      if (!targetOp) continue;
+      if (permissionScope((config.auth?.operaciones || {})[targetOp.key]?.[role]) !== 'propios') continue;
+      const myTarget = await createValidRecord(first.api, operations, targetOp, cleanups, 0);
+      const theirTarget = await createValidRecord(second.api, operations, targetOp, cleanups, 0);
+      // Extremo ajeno: 404 (mismo contrato CRUD), nunca 403 de “N:M prohibido”.
+      const foreign = await first.api('/api/associations/' + encodeURIComponent(association.table), 'POST', { source_id: String(mine.id), target_id: String(theirTarget.id) });
+      if (foreign.status !== 404) fail('N:M con extremo ajeno respondió ' + foreign.status);
+      const linked = status(await first.api('/api/associations/' + encodeURIComponent(association.table), 'POST', { source_id: String(mine.id), target_id: String(myTarget.id) }), 200, 'vincular extremos propios');
+      if (!linked.data?.associated) fail('N:M no asoció extremos propios');
+      // Sin filtro de targets, el listado incluiría el vínculo ajeno si alguien lo hubiera creado; comprobamos que el 404 se mantuvo.
+      const listed = status(await first.api('/api/associations/' + encodeURIComponent(association.table) + '?source_id=' + encodeURIComponent(String(mine.id))), 200, 'listar vínculos propios');
+      const linkRows = Array.isArray(listed.data?.data) ? listed.data.data : [];
+      if (!linkRows.some((row) => String(row.target_id) === String(myTarget.id))) fail('N:M omitió el vínculo propio');
+      if (linkRows.some((row) => String(row.target_id) === String(theirTarget.id))) fail('N:M listó un extremo ajeno');
     }
   } finally {
     for (const cleanup of cleanups) { try { await cleanup(); } catch { /* mejor esfuerzo */ } }

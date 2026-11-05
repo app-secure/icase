@@ -35,8 +35,8 @@ class BusinessProcessGenerator {
   const associations=files.find(f=>f.ruta==='backend/src/data/associations.js');
   if(associations&&!associations.contenido.includes('assertAssociation')){
     associations.contenido=associations.contenido.replace(
-      'module.exports = async function associations(store, action, key, input = {}) {',
-      "module.exports = async function associations(store, action, key, input = {}) {\n  if (action !== 'list' && store.pool) await require('../processes/business-process-guard').assertAssociation(store, key, input);"
+      'module.exports = async function associations(store, action, key, input = {}, scopes = {}) {',
+      "module.exports = async function associations(store, action, key, input = {}, scopes = {}) {\n  if (action !== 'list' && store.pool) await require('../processes/business-process-guard').assertAssociation(store, key, input);"
     );
   }
   const extensions=files.find(f=>f.ruta==='backend/src/extensions/generated-extensions.js');

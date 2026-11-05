@@ -115,7 +115,9 @@ describe('ownership por registro', () => {
     expect(spring.find((file) => file.ruta.endsWith('RecordStore.java')).contenido).toContain('owner_id');
     expect(spring.find((file) => file.ruta.endsWith('OperationsController.java')).contenido).toContain('ownerScope');
     expect(spring.find((file) => file.ruta.endsWith('Auth.java')).contenido).toContain('ownerScope');
-    expect(spring.find((file) => file.ruta.endsWith('OwnershipAuthTest.java')).contenido).toContain('associationRejectsOwnedScope');
+    expect(spring.find((file) => file.ruta.endsWith('OwnershipAuthTest.java')).contenido).toContain('associationAllowsOwnedScopeWithMethodPermissions');
+    expect(spring.find((file) => file.ruta.endsWith('AssociationPermissions.java')).contenido).not.toContain('no admiten alcance');
+    expect(spring.find((file) => file.ruta.endsWith('AssociationsController.java')).contenido).toContain('ownerFor');
     const withReports = generator.generate({
       proyecto: { nombre: 'Demo' }, requirements, domainModel, rules: [], access: control,
       stack: { backend: 'Express', base_datos: 'PostgreSQL' },

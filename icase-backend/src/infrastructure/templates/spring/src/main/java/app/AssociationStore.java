@@ -28,7 +28,30 @@ public class AssociationStore {
             try (ResultSet rows = statement.executeQuery()) { if (!rows.next()) throw new HttpError(404, "Uno de los extremos del vínculo no existe."); }
         }
     }
+    private void assertOwned(Connection connection, String table, long id, String ownerScope) throws SQLException {
+        if (ownerScope == null || !model.hasOwnerColumn(table)) return;
+        String sql = "SELECT id FROM " + quote(table) + " WHERE id = ? AND " + quote("owner_id") + " = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, id);
+            statement.setLong(2, Long.parseLong(ownerScope));
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) throw new HttpError(404, "Uno de los extremos del vínculo no existe.");
+            }
+        }
+    }
+    private boolean owned(Connection connection, String table, long id, String ownerScope) throws SQLException {
+        if (ownerScope == null || !model.hasOwnerColumn(table)) return true;
+        String sql = "SELECT id FROM " + quote(table) + " WHERE id = ? AND " + quote("owner_id") + " = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, id);
+            statement.setLong(2, Long.parseLong(ownerScope));
+            try (ResultSet rows = statement.executeQuery()) { return rows.next(); }
+        }
+    }
     public Object run(String action, String name, JsonNode input) {
+        return run(action, name, input, null, null);
+    }
+    public Object run(String action, String name, JsonNode input, String sourceOwner, String targetOwner) {
         Model.Association relation = model.association(name);
         boolean list = "list".equals(action);
         if (!list && !"link".equals(action) && !"unlink".equals(action)) throw new HttpError(400, "Acción inválida.");
@@ -53,19 +76,37 @@ public class AssociationStore {
                 if (!list && !sourceFirst) lock(connection, relation.target(), to);
                 lock(connection, relation.source(), from);
                 if (!list && sourceFirst) lock(connection, relation.target(), to);
+                assertOwned(connection, relation.source(), from, sourceOwner);
+                if (!list) assertOwned(connection, relation.target(), to, targetOwner);
                 Object result;
                 if (list) {
-                    String sql = "SELECT source_id, target_id FROM " + quote(name) + " WHERE source_id = ?" + (after == null ? "" : " AND target_id > ?") + " ORDER BY target_id LIMIT ?";
                     List<Map<String, String>> items = new ArrayList<>();
-                    try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                        statement.setLong(1, from);
-                        if (after != null) statement.setLong(2, after);
-                        statement.setInt(after == null ? 2 : 3, limit + 1);
-                        try (ResultSet rows = statement.executeQuery()) {
-                            while (rows.next()) items.add(Map.of("source_id", rows.getString("source_id"), "target_id", rows.getString("target_id")));
+                    Long cursor = after;
+                    boolean hasMore = false;
+                    while (items.size() < limit) {
+                        int batch = Math.min(100, limit - items.size() + 1);
+                        String sql = "SELECT source_id, target_id FROM " + quote(name) + " WHERE source_id = ?" + (cursor == null ? "" : " AND target_id > ?") + " ORDER BY target_id LIMIT ?";
+                        List<Map<String, String>> rows = new ArrayList<>();
+                        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                            statement.setLong(1, from);
+                            if (cursor != null) statement.setLong(2, cursor);
+                            statement.setInt(cursor == null ? 2 : 3, batch);
+                            try (ResultSet resultSet = statement.executeQuery()) {
+                                while (resultSet.next()) rows.add(Map.of("source_id", resultSet.getString("source_id"), "target_id", resultSet.getString("target_id")));
+                            }
                         }
+                        if (rows.isEmpty()) break;
+                        for (Map<String, String> row : rows) {
+                            long targetId = Long.parseLong(row.get("target_id"));
+                            if (!owned(connection, relation.target(), targetId, targetOwner)) continue;
+                            items.add(row);
+                            if (items.size() == limit) { hasMore = true; break; }
+                        }
+                        cursor = Long.parseLong(rows.get(rows.size() - 1).get("target_id"));
+                        if (rows.size() < batch) { hasMore = false; break; }
+                        if (items.size() == limit) break;
                     }
-                    result = Map.of("data", items.subList(0, Math.min(items.size(), limit)), "has_more", items.size() > limit);
+                    result = Map.of("data", items, "has_more", hasMore);
                 } else {
                     String sql = "link".equals(action)
                         ? "INSERT INTO " + quote(name) + " (source_id, target_id, extra) VALUES (?, ?, " + (model.postgres() ? "'{}'::jsonb" : "'{}'") + ") " + (model.postgres() ? "ON CONFLICT (source_id, target_id) DO NOTHING" : "ON DUPLICATE KEY UPDATE source_id = VALUES(source_id)")
