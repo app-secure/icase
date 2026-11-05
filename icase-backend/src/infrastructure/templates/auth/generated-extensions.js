@@ -5,6 +5,8 @@ const { HttpError } = require('../data/store-support');
 module.exports = function mountExtensions(app, { store, auth, contract, enabled }) {
   const router = express.Router();
   const operations = new Map(contract.operations.map(operation => [operation.key, operation]));
+  const policy = require('../auth/policy');
+  const { scopeOf } = require('../auth/ownership');
   const wrap = handler => async (req,res,next) => { try { await handler(req,res,next); } catch(error) { next(error); } };
   const access = async (req,key,method) => {
     if (!operations.has(key)) throw new HttpError(404,'Operación inexistente');
@@ -12,8 +14,8 @@ module.exports = function mountExtensions(app, { store, auth, contract, enabled 
     auth.authorize(user,method,'/api/operations/'+key);
     return user;
   };
-  const recordExists = async (operation,id) => {
-    if (!await store.getRecord(operation,id)) throw new HttpError(404,'Registro inexistente');
+  const recordExists = async (operation,id,user) => {
+    if (!await store.getRecord(operation,id,scopeOf(policy,user,operation))) throw new HttpError(404,'Registro inexistente');
   };
   if(enabled.includes('recuperacion_cuentas')) {
     const {rateLimit}=require('express-rate-limit');
@@ -37,7 +39,7 @@ module.exports = function mountExtensions(app, { store, auth, contract, enabled 
     }
     router.post('/files/:operation/:record',wrap(async(req,res,next) => {
       req.fileUser = await access(req,req.params.operation,'PATCH');
-      await recordExists(req.params.operation,req.params.record);
+      await recordExists(req.params.operation,req.params.record,req.fileUser);
       next();
     }), express.raw({type:()=>true,limit:512*1024}),wrap(async(req,res) => {
       let name; try { name=decodeURIComponent(req.get('X-File-Name') || 'archivo'); } catch { throw new HttpError(400,'Nombre inválido'); }
@@ -45,27 +47,27 @@ module.exports = function mountExtensions(app, { store, auth, contract, enabled 
       res.status(201).json(file);
     }));
     router.get('/files/:operation/:record',wrap(async(req,res) => {
-      await access(req,req.params.operation,'GET'); await recordExists(req.params.operation,req.params.record);
+      const user=await access(req,req.params.operation,'GET'); await recordExists(req.params.operation,req.params.record,user);
       res.json(await files.list(req.params.operation,req.params.record));
     }));
     // Las rutas de descarga tienen dos segmentos; registrar antes del listado genérico.
     router.get('/download/:id',wrap(async(req,res) => {
       const file = await files.get(req.params.id);
-      await access(req,file.operation,'GET'); await recordExists(file.operation,file.record);
+      const user=await access(req,file.operation,'GET'); await recordExists(file.operation,file.record,user);
       res.set({'Content-Type':file.type,'Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(file.name),'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store'}).send(await files.read(file.id));
     }));
     router.delete('/download/:id',wrap(async(req,res) => {
       const file = await files.get(req.params.id);
-      await access(req,file.operation,'PATCH'); await recordExists(file.operation,file.record);
+      const user=await access(req,file.operation,'PATCH'); await recordExists(file.operation,file.record,user);
       await files.remove(file.id); res.json({deleted:true});
     }));
   }
   if(enabled.includes('reportes_calculos')) {
     router.get('/reports/:operation',wrap(async(req,res)=>{
-      await access(req,req.params.operation,'GET');
+      const user=await access(req,req.params.operation,'GET');
       const format=req.query.format || 'json';
       if(!['json','csv','pdf'].includes(format)) throw new HttpError(400,'Formato inválido');
-      const data=await require('./generated-reports').report(store,operations.get(req.params.operation));
+      const data=await require('./generated-reports').report(store,operations.get(req.params.operation),scopeOf(policy,user,req.params.operation));
       res.set('Cache-Control','private, no-store');
       if(format==='json') return res.json(data);
       if(format==='csv') return res.type('text/csv').attachment('reporte.csv').send('\ufeff'+require('./generated-reports').csv([data.columns,...data.rows.map(row=>data.columns.map(key=>row[key]))]));

@@ -50,6 +50,7 @@ class OpenApiGenerator {
     doc.paths['/health'] = { get: { tags: ['Sistema'], summary: 'Comprobación de salud', operationId: 'salud', ...(secured ? { security: [] } : {}), responses: { 200: json({ type: 'object', required: ['status'], properties: { status: { type: 'string', const: 'ok' }, database: { type: 'string' } } }, 'El servicio y su base de datos responden.') } } };
     doc.paths['/api/contract'] = { get: { tags: ['Sistema'], summary: 'Contrato de la aplicación', description: 'Operaciones, entidades, reglas y política de acceso con los que se generó el backend.', operationId: 'contrato', responses: { 200: json({ type: 'object' }, 'Contrato.'), ...(secured ? { 401: responseRef('Unauthorized') } : {}) } } };
     doc.paths['/api/openapi.json'] = { get: { tags: ['Sistema'], summary: 'Esta documentación', operationId: 'openapi', responses: { 200: json({ type: 'object' }, 'Documento OpenAPI 3.1.'), ...(secured ? { 401: responseRef('Unauthorized') } : {}) } } };
+    doc.paths['/api/docs'] = { get: { tags: ['Sistema'], summary: 'Explorador Swagger UI', description: 'Interfaz interactiva generada con swagger-ui-dist. Apunta a /api/openapi.json.', operationId: 'docs', responses: { 200: { description: 'HTML del explorador.' }, ...(secured ? { 401: responseRef('Unauthorized') } : {}) } } };
 
     for (const operation of contract.operations) this._operation(doc, operation, { entityNames, contract, model, policy, secured });
     if (secured) this._authentication(doc, policy);
@@ -129,9 +130,9 @@ class OpenApiGenerator {
       post: common('POST', {
         summary: `Crear ${operation.name}`, operationId: `crear_${operation.key.replace(/-/g, '_')}`,
         description: `Crea un registro.${rulesNote}`,
-        requestBody: { required: true, content: { 'application/json': { schema: schemaRef(name) } } },
+        requestBody: { required: true, content: { 'application/json': { schema: schemaRef(name), example: this._exampleBody(entity, operation.rules) } } },
         responses: {
-          201: json(schemaRef(`${name}Record`), 'Registro creado.'), 400: responseRef('BadRequest'), ...access,
+          201: { description: 'Registro creado.', content: { 'application/json': { schema: schemaRef(`${name}Record`), example: this._exampleRecord(operation.key, name, entity, operation.rules) } } }, 400: responseRef('BadRequest'), ...access,
           ...(writesConflict ? { 409: responseRef('Conflict') } : {}), ...(hasRules ? { 422: responseRef('Unprocessable') } : {})
         }
       })
@@ -141,15 +142,15 @@ class OpenApiGenerator {
       patch: common('PATCH', {
         summary: `Modificar ${operation.name}`, operationId: `modificar_${operation.key.replace(/-/g, '_')}`,
         description: `Modificación parcial: solo se cambian los campos enviados.${rulesNote}`,
-        requestBody: { required: true, content: { 'application/json': { schema: schemaRef(`${name}Update`) } } },
+        requestBody: { required: true, content: { 'application/json': { schema: schemaRef(`${name}Update`), example: this._exampleBody(entity, operation.rules) } } },
         responses: {
-          200: json(schemaRef(`${name}Record`), 'Registro actualizado.'), 400: responseRef('BadRequest'), ...access, 404: responseRef('NotFound'),
+          200: { description: 'Registro actualizado.', content: { 'application/json': { schema: schemaRef(`${name}Record`), example: this._exampleRecord(operation.key, name, entity, operation.rules) } } }, 400: responseRef('BadRequest'), ...access, 404: responseRef('NotFound'),
           ...(writesConflict ? { 409: responseRef('Conflict') } : {}), ...(hasRules ? { 422: responseRef('Unprocessable') } : {})
         }
       }),
       delete: common('DELETE', {
         summary: `Eliminar ${operation.name}`, operationId: `eliminar_${operation.key.replace(/-/g, '_')}`,
-        responses: { 200: json(schemaRef('Deleted'), 'Registro eliminado.'), ...access, 404: responseRef('NotFound'), ...(referenced ? { 409: responseRef('Conflict') } : {}) }
+        responses: { 200: { description: 'Registro eliminado.', content: { 'application/json': { schema: schemaRef('Deleted'), example: { deleted: true, id: '1' } } } }, ...access, 404: responseRef('NotFound'), ...(referenced ? { 409: responseRef('Conflict') } : {}) }
       })
     };
     if (!entity && !doc.components.schemas.GenericoRecord) {
@@ -206,6 +207,26 @@ class OpenApiGenerator {
         created_at: { type: 'string', format: 'date-time' },
         updated_at: { type: 'string', format: 'date-time' }
       }
+    };
+  }
+
+  /** Ejemplo derivado del esquema y reglas; no inventa campos ajenos al contrato. */
+  _exampleBody(entity, rules) {
+    if (!entity?.schema) return { valor: 'ejemplo' };
+    const samplePayload = require('./SamplePayload');
+    const { payload, parents } = samplePayload(entity.schema, rules || [], 'docs');
+    const body = { ...payload };
+    for (const parent of parents) body[parent.campo] = '1';
+    return body;
+  }
+
+  _exampleRecord(capability, schemaName, entity, rules) {
+    return {
+      id: '1',
+      capability,
+      data: this._exampleBody(entity, rules),
+      created_at: '2030-01-02T03:04:05.000Z',
+      updated_at: '2030-01-02T03:04:05.000Z'
     };
   }
 

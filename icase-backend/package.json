@@ -9,7 +9,7 @@
     "test": "jest",
     "verify:nm": "node scripts/verify-associations-runtime.js",
     "audit:generated": "node scripts/audit-generated-backend.js",
-    "test:e2e:real": "set RUN_REAL_AI_E2E=true&& jest tests/real-model-flow.e2e.test.js --runInBand",
+    "test:e2e:real": "env RUN_REAL_AI_E2E=true jest tests/real-model-flow.e2e.test.js --runInBand",
     "proyectos:asignar": "node scripts/asignar-proyectos-huerfanos.js"
   },
   "keywords": [
@@ -50,6 +50,7 @@
     "react-dom": "^19.0.0",
     "redis": "^6.3.1",
     "socket.io": "4.8.4",
-    "socket.io-client": "4.8.4"
+    "socket.io-client": "4.8.4",
+    "swagger-ui-dist": "^5.18.2"
   }
 }

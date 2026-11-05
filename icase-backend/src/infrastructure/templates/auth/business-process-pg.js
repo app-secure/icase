@@ -24,6 +24,7 @@ function repository(store){
       const tx=transactionalStore(client);
       const update=tx.update.bind(tx);tx.update=async(key,...args)=>{const value=await update(key,...args);if(value)changed.add(key);return value;};
       tx.save=next=>client.query('UPDATE icase_process_instances SET document=$2::jsonb WHERE id=$1',[id,JSON.stringify(next)]);
+      tx.unlock=()=>client.query('DELETE FROM icase_process_locks WHERE instance_id=$1',[id]);
       // El aviso y el cambio se guardan juntos; el worker solo ve filas confirmadas.
       const result=await run(tx,instance);
       if(store.processOutboxEnabled&&changed.size){

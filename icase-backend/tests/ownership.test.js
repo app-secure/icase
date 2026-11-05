@@ -105,18 +105,27 @@ describe('ownership por registro', () => {
     } finally { await access.cleanup(); }
   }, 60000);
 
-  test('bloquea Spring y módulos incompatibles', () => {
+  test('Spring y módulos laterales aceptan ownership', () => {
     const domainModel = new DomainModelExtractor().extract(PLANTUML);
     const generator = new GenericBackendGenerator();
-    expect(() => generator.generate({
+    const spring = generator.generate({
       proyecto: { nombre: 'Demo' }, requirements, domainModel, rules: [], access: control,
       stack: { backend: 'Spring Boot', base_datos: 'PostgreSQL' }
-    })).toThrow('Spring');
-    expect(() => generator.generate({
+    });
+    expect(spring.find((file) => file.ruta.endsWith('RecordStore.java')).contenido).toContain('owner_id');
+    expect(spring.find((file) => file.ruta.endsWith('OperationsController.java')).contenido).toContain('ownerScope');
+    expect(spring.find((file) => file.ruta.endsWith('Auth.java')).contenido).toContain('ownerScope');
+    expect(spring.find((file) => file.ruta.endsWith('OwnershipAuthTest.java')).contenido).toContain('associationRejectsOwnedScope');
+    const withReports = generator.generate({
       proyecto: { nombre: 'Demo' }, requirements, domainModel, rules: [], access: control,
       stack: { backend: 'Express', base_datos: 'PostgreSQL' },
-      modules: { modo: 'personalizado', modulos: [{ id: 'reportes_calculos', activo: true }, { id: 'formularios_tipados', activo: false }, { id: 'paginacion_busqueda', activo: false }, { id: 'datos_iniciales', activo: false }] }
-    })).toThrow('reportes_calculos');
+      modules: { modo: 'personalizado', modulos: [
+        { id: 'reportes_calculos', activo: true }, { id: 'archivos_imagenes', activo: true },
+        { id: 'formularios_tipados', activo: false }, { id: 'paginacion_busqueda', activo: false }, { id: 'datos_iniciales', activo: false }
+      ] }
+    });
+    expect(withReports.find((file) => file.ruta.endsWith('generated-extensions.js')).contenido).toContain('scopeOf');
+    expect(withReports.find((file) => file.ruta.endsWith('generated-reports.js')).contenido).toContain('scope');
   });
 
   test('la migración incremental añade owner_id e índice al activar ownership', async () => {

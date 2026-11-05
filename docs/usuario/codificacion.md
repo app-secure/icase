@@ -18,13 +18,17 @@ Para MongoDB con N:M, el Compose exportado incluye scripts que preparan un repli
 
 El informe mantiene bloqueada una entrega declarada completa con N:M hasta completar la verificación integral con base real; sigue permitiendo la entrega parcial confirmada. No se inventan vínculos en los datos iniciales. Las migraciones siguen siendo iniciales: no apliques una regeneración sobre una base existente sin preparar una migración incremental y respaldo. Los scripts de despliegue y la concurrencia real deben validarse con Docker/MongoDB; las pruebas simuladas no certifican su ejecución.
 
+## Documentación OpenAPI y Swagger UI
+
+El backend generado incluye `backend/openapi.json`, `GET /api/openapi.json` y el explorador interactivo en `GET /api/docs` (Swagger UI). Con autenticación JWT ambas rutas exigen sesión; los estáticos bajo `/api/docs/static` son públicos para poder cargar la interfaz. Los cuerpos de ejemplo del documento se derivan del esquema y las reglas confirmadas. En Spring el explorador usa el mismo HTML con assets por CDN (no es SpringDoc).
+
 ## Propiedad de registros
 
 En la etapa de autenticación y roles puedes marcar **Solo registros propios** en un permiso. Es opt-in: si no lo marcas, el rol sigue viendo todos los registros de esa operación. El administrador y el alcance «todos» no se filtran.
 
 El backend añade una columna interna `owner_id` (no aparece en la API, OpenAPI ni el contrato). Al crear, el servidor la rellena con el usuario autenticado; el cuerpo y los filtros del cliente no pueden escribirla. Listar, modificar y borrar un registro ajeno responden `404`, igual que si no existiera. Una referencia a un registro que el rol no podría leer responde `409`.
 
-La generación se detiene con un mensaje claro si combinas esta opción con Spring o con procesos, eventos, archivos, reportes, pagos o mapas: esos módulos leen datos fuera del CRUD con alcance. Los datos iniciales y lo que crea el administrador quedan sin propietario; un rol limitado no los ve. Regenerar un proyecto existente añade la columna con una migración aditiva.
+Archivos, reportes, pagos de prueba, mapas, eventos y procesos aplican el mismo alcance en sus lecturas y escrituras laterales: un rol «propios» no lista adjuntos, totales, cobros, puntos de mapa ni instancias de proceso sobre registros ajenos (404). Un reporte global exige alcance «todos» o administrador. Los vínculos N:M siguen respondiendo 403 si algún extremo es «propios». Spring Boot filtra `owner_id` igual que Express/Nest. Los datos iniciales y lo que crea el administrador quedan sin propietario; un rol limitado no los ve. Regenerar añade la columna con una migración aditiva; para filas históricas usa `tools/backfill-owners.cjs` (vista previa + `--approve`, nunca automático).
 
 ## Seguridad del backend generado
 

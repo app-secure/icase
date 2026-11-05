@@ -165,8 +165,26 @@ describe('documento OpenAPI generado', () => {
     expect((await fetch(`${booted.base}/api/openapi.json`)).status).toBe(401);
     const access = await runtime.setupAccess(booted.base, { base: booted.base, adminEmail: ENV.ADMIN_EMAIL, adminPassword: ENV.ADMIN_PASSWORD, roles: [] });
     expect((await access.admin('/api/openapi.json')).data).toEqual(booted.openapi);
-    expect(booted.manifest.docs).toEqual({ openapi: '/api/openapi.json', archivo: 'backend/openapi.json' });
-    expect(booted.files.map((file) => file.ruta)).toEqual(expect.arrayContaining(['backend/openapi.json', 'backend/src/docs/openapi.js']));
+    expect(booted.manifest.docs).toEqual({ openapi: '/api/openapi.json', docs: '/api/docs', archivo: 'backend/openapi.json' });
+    expect(booted.files.map((file) => file.ruta)).toEqual(expect.arrayContaining(['backend/openapi.json', 'backend/src/docs/openapi.js', 'backend/src/docs/swagger-ui.js']));
+  });
+
+  test('expone Swagger UI en /api/docs y ejemplos en POST', async () => {
+    const booted = await arrancar();
+    expect((await fetch(`${booted.base}/api/docs`)).status).toBe(401);
+    const login = await fetch(`${booted.base}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: ENV.ADMIN_EMAIL, password: ENV.ADMIN_PASSWORD })
+    });
+    const { token } = await login.json();
+    const docs = await fetch(`${booted.base}/api/docs`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(docs.status).toBe(200);
+    expect(await docs.text()).toMatch(/SwaggerUIBundle/);
+    const post = booted.openapi.paths['/api/operations/rf-01'].post;
+    expect(post.requestBody.content['application/json'].example).toEqual(expect.objectContaining({ email: expect.any(String) }));
+    expect(post.responses['201'].content['application/json'].example).toEqual(expect.objectContaining({ id: '1', capability: 'rf-01' }));
+    const pkg = JSON.parse(booted.files.find((file) => file.ruta === 'backend/package.json').contenido);
+    expect(pkg.dependencies['swagger-ui-dist']).toBe('5.18.2');
   });
 });
 

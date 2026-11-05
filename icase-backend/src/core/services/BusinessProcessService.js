@@ -8,7 +8,7 @@ class BusinessProcessService {
     const keys=(value,allowed)=>{if(Object.keys(value).some(key=>!allowed.includes(key)))fail('Propiedades no admitidas en la definición del proceso.');};
     for(const p of definitions)try{
       if(!p||!/^[a-z][a-z0-9_-]{0,59}$/.test(p.id)||ids.has(p.id))fail('Identificador de proceso inválido o repetido.');ids.add(p.id);
-      keys(p,['id','estado_decision','rf','states','initial','terminal','records','start_roles','actions']);
+      keys(p,['id','estado_decision','rf','states','initial','terminal','records','start_roles','actions','reopen']);
       if(p.estado_decision!=='confirmado')fail(p.id+': confirma explícitamente la definición antes de generar.');
       if(!Array.isArray(p.rf)||!p.rf.length||p.rf.some(r=>!approved.has(r)))fail(p.id+': cita RF aprobados existentes.');
       if(!Array.isArray(p.states)||p.states.length<2||p.states.length>20||p.states.some(s=>typeof s!=='string'||!/^[a-z][a-z0-9_-]{0,39}$/.test(s))||new Set(p.states).size!==p.states.length||!p.states.includes(p.initial))fail(p.id+': estados o estado inicial inválidos.');
@@ -17,12 +17,22 @@ class BusinessProcessService {
       for(const [alias,key] of Object.entries(p.records))if(!/^[a-z][a-z0-9_]{0,39}$/.test(alias)||!operations.some(o=>o.key===key))fail(p.id+': registro u operación inexistente.');
       const validRoles=list=>Array.isArray(list)&&list.length>0&&list.every(role=>roles.includes(role));
       if(!validRoles(p.start_roles))fail(p.id+': los roles de inicio deben existir en el acceso aprobado.');
+      if(p.reopen!==undefined){
+        if(!p.reopen||typeof p.reopen!=='object'||Array.isArray(p.reopen))fail(p.id+': reopen inválido.');
+        keys(p.reopen,['to','roles']);
+        if(!p.states.includes(p.reopen.to)||p.terminal.includes(p.reopen.to)||!validRoles(p.reopen.roles))fail(p.id+': reopen debe apuntar a un estado no terminal con roles válidos.');
+      }
       if(!Array.isArray(p.actions)||!p.actions.length||p.actions.length>30)fail(p.id+': declara entre 1 y 30 acciones.');
       const names=new Set();
       for(const a of p.actions){
         if(!a||!/^[a-z][a-z0-9_-]{0,39}$/.test(a.id)||names.has(a.id))fail(p.id+': acción inválida o repetida.');names.add(a.id);
-        keys(a,['id','from','to','roles','different_actor','steps']);
+        keys(a,['id','from','to','roles','different_actor','steps','notify']);
         if(!p.states.includes(a.from)||!p.states.includes(a.to)||a.from===a.to||p.terminal.includes(a.from)||!validRoles(a.roles)||typeof a.different_actor!=='boolean')fail(p.id+': transición, roles o separación de actores inválidos.');
+        if(a.notify!==undefined){
+          if(!a.notify||typeof a.notify!=='object'||Array.isArray(a.notify))fail(p.id+': notify inválido.');
+          keys(a.notify,['roles','plantilla']);
+          if(!validRoles(a.notify.roles)||(a.notify.plantilla!==undefined&&a.notify.plantilla!=='accion'))fail(p.id+': notify.roles o plantilla inválidos.');
+        }
         if(!Array.isArray(a.steps)||a.steps.length>10)fail(p.id+': pasos inválidos (máximo 10).');
         for(const step of a.steps){
           if(!step||typeof step!=='object'||Array.isArray(step))fail(p.id+': paso inválido.');

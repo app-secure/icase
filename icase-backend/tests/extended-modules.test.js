@@ -84,7 +84,7 @@ describe('archivos/reportes/correo generados',()=>{
     const old=process.env.APP_DATA_DIR;process.env.APP_DATA_DIR=root;
     const app=express();const store={getRecord:async(_op,id)=>id==='1'?{id}:null,list:async()=>[{data:{precio:12}}]};
     const auth={authenticate:async header=>{if(!['Bearer reader','Bearer writer'].includes(header))throw new support.HttpError(401,'Sesión requerida');return {id:header};},authorize:(user,method)=>{if(user.id==='Bearer reader'&&method!=='GET')throw new support.HttpError(403,'Denegado');}};
-    template('generated-extensions.js',{'./generated-files':files,'./generated-reports':reports})(app,{store,auth,contract:{operations:[{key:'rf-01',name:'Productos',schema:{properties:{precio:{type:'number'}}}}]},enabled:['archivos_imagenes','reportes_calculos']});
+    template('generated-extensions.js',{'./generated-files':files,'./generated-reports':reports,'../auth/policy':{operaciones:{}},'../auth/ownership':{scopeOf:()=>null}})(app,{store,auth,contract:{operations:[{key:'rf-01',name:'Productos',schema:{properties:{precio:{type:'number'}}}}]},enabled:['archivos_imagenes','reportes_calculos']});
     const server=http.createServer(app);await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url='http://127.0.0.1:'+server.address().port;
     try {
       const upload=(token,type='image/png')=>fetch(url+'/api/files/rf-01/1',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':type},body:png});

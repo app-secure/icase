@@ -31,20 +31,23 @@ Las instancias guardan la huella de su definición. Cambiarla al regenerar bloqu
 - `POST /api/processes/{definition}/instances`: vincula registros existentes e inicia estado y versión persistentes.
 - `GET /api/processes/instances/{id}`: consulta estado, versión, acciones disponibles y auditoría, sin claves de idempotencia.
 - `POST /api/processes/instances/{id}/actions`: requiere acción, versión esperada y clave de idempotencia de 16–100 caracteres.
+- `POST /api/processes/instances/{id}/reopen`: solo si la definición declara `reopen`; libera bloqueos y vuelve al estado indicado.
 - `GET /api/processes/definitions`: catálogo de procesos que el usuario puede iniciar.
 - `GET /api/processes/instances?page=1`: bandeja autorizada, de 20 en 20.
 
-La web generada incorpora `/procesos`: selectores de registros con búsqueda, inicio, detalle, acciones disponibles e historial. No hace falta copiar IDs para iniciar desde la web. Los conflictos de versión se muestran y se vuelve a consultar el estado; una solicitud fallida conserva su clave para reintentar sin duplicar acciones.
+La web generada incorpora `/procesos` y, con móvil, una bandeja Expo: selectores (web), inicio, detalle, acciones, reapertura e historial. No hace falta copiar IDs para iniciar desde la web. Los conflictos de versión se muestran y se vuelve a consultar el estado; una solicitud fallida conserva su clave para reintentar sin duplicar acciones.
 
 JWT y permisos GET/PATCH se comprueban sobre todas las operaciones involucradas; el rol de la acción se comprueba incluso para administradores. Si la acción exige otro actor, otra sesión del mismo usuario no sirve. Los pasos, el estado y la auditoría se confirman juntos en PostgreSQL SERIALIZABLE, con bloqueos, límites de tiempo y rollback ante errores. Un conflicto devuelve 409; no se reintenta silenciosamente. La repetición de una acción confirmada con la misma clave y usuario no vuelve a aplicar sus pasos.
 
 ## Alcance y pendientes
 
-Hasta 20 definiciones, 10 registros y pasos por acción, 30 acciones por definición y 100 ejecuciones por instancia. Se conservan las reglas del almacén para validar los cambios. Al iniciar se bloquea la edición y el borrado CRUD de todos los registros vinculados, incluso para administradores y después del cierre. Los bloqueos comparten la base transaccional y normalizan IDs equivalentes. Otro proceso no puede reclamar esos registros. No existe aún una acción explícita de reapertura/desvinculación.
+Hasta 20 definiciones, 10 registros y pasos por acción, 30 acciones por definición y 100 ejecuciones por instancia. Se conservan las reglas del almacén para validar los cambios. Al iniciar se bloquea la edición y el borrado CRUD de todos los registros vinculados, incluso para administradores y después del cierre. También se rechazan con 409 las asociaciones N:M y los adjuntos sobre registros bloqueados. Los bloqueos comparten la base transaccional y normalizan IDs equivalentes. Otro proceso no puede reclamar esos registros. La reapertura es opt-in (`"reopen":{"to":"pendiente","roles":["administrador"]}`).
+
+Una acción puede declarar `"notify":{"roles":["cliente"],"plantilla":"accion"}` para correo SMTP con las mismas variables que la recuperación de cuentas. Sin SMTP configurado responde 503 y no confirma la transición. No cubre SMS, WhatsApp ni push.
 
 Con `eventos_cambios`, la acción guarda sus invalidaciones en el outbox PostgreSQL dentro de la misma transacción. Un worker publica las filas confirmadas; un rollback no deja avisos. Las instancias abiertas se reconsultan en la web. La bandeja se actualiza manualmente para descubrir nuevas instancias.
 
-Pendientes: bandeja móvil nativa, búsqueda avanzada de instancias, protección de modificaciones indirectas N:M/adjuntos, creación de registros en pasos, cálculos entre registros, trabajos largos, notificaciones, compensaciones e integraciones externas. No se afirma soporte de MySQL/MongoDB/Spring ni transacciones distribuidas. El inicio de instancias no se deduplica; la idempotencia se aplica a acciones dentro de una instancia.
+Pendientes: búsqueda avanzada de instancias, creación de registros en pasos, cálculos entre registros, trabajos largos, compensaciones e integraciones externas. No se afirma soporte de MySQL/MongoDB/Spring ni transacciones distribuidas. El inicio de instancias no se deduplica; la idempotencia se aplica a acciones dentro de una instancia.
 
 ## Outbox durable
 

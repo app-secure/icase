@@ -64,6 +64,13 @@ class GenericFrontendGenerator {
       app.contenido="import ProcessScreen from './ProcessScreen';\n"+app.contenido;
       app.contenido=app.contenido.replace('<Routes>','<Routes><Route path="/procesos" element={<ProcessScreen/>}/>')
         .replace('<span>{user.nombre','<Link to="/procesos">Procesos</Link><span>{user.nombre');
+      const mobileApp=files.find(file=>file.ruta==='mobile/App.js');
+      if(mobileApp){
+        files.push({ruta:'mobile/ProcessScreen.js',lenguaje:'javascript',contenido:template('mobile-ProcessScreen.js')});
+        mobileApp.contenido="import ProcessScreen from './ProcessScreen';\n"+mobileApp.contenido
+          .replace("const [error, setError] = useState('');","const [error, setError] = useState('');\n  const [screen, setScreen] = useState('crud');")
+          .replace('{AUTH && <Button title="Cerrar sesión" onPress={() => { setToken(null); setPermisos(null); }} />}','{AUTH && <Button title="Procesos" onPress={() => setScreen(screen === \'procesos\' ? \'crud\' : \'procesos\')} />}\n    {screen === \'procesos\' ? <ProcessScreen api={call} token={token} /> : null}\n    {AUTH && <Button title="Cerrar sesión" onPress={() => { setToken(null); setPermisos(null); setScreen(\'crud\'); }} />}');
+      }
     }
     const extended = new (require('./SpecializedFrontendGenerator'))().apply(new (require('./ExtendedFrontendGenerator'))().apply(files,{decisiones}),{decisiones});
     return new ModuleService().activos(decisiones.modulos).includes('eventos_cambios')

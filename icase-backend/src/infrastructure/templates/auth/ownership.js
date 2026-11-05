@@ -1,8 +1,6 @@
 const ADMIN = 'administrador';
-const BLOCKED_MODULES = Object.freeze([
-  'procesos_negocio', 'eventos_replicas', 'eventos_cambios',
-  'archivos_imagenes', 'reportes_calculos', 'pagos_prueba', 'mapas'
-]);
+/** Vacío: ownership se combina con los módulos listados tras la oleada 2. Se conserva el símbolo para tests. */
+const BLOCKED_MODULES = Object.freeze([]);
 
 function methodsOf(entry) {
   if (!entry) return [];

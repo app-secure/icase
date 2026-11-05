@@ -9,7 +9,7 @@ import java.util.Map;
 /** Modelo físico del backend, leído de icase/model.json. */
 public final class Model {
     /** Columna de una tabla: `name` es el atributo de la API y `column` el nombre en la base de datos. */
-    public record Column(String name, String column, String type) {}
+    public record Column(String name, String column, String type, boolean internal) {}
 
     public record Table(String name, String entity, boolean generic, List<Column> columns, Map<String, Column> byName) {}
 
@@ -32,7 +32,7 @@ public final class Model {
             List<Column> columns = new ArrayList<>();
             Map<String, Column> byName = new LinkedHashMap<>();
             for (JsonNode node : table.path("columns")) {
-                Column column = new Column(node.path("name").asText(), node.path("column").asText(), node.path("type").asText());
+                Column column = new Column(node.path("name").asText(), node.path("column").asText(), node.path("type").asText(), node.path("internal").asBoolean(false));
                 columns.add(column);
                 byName.put(column.name(), column);
             }

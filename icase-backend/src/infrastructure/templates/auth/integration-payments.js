@@ -1,7 +1,7 @@
 const crypto=require('node:crypto');
 const {HttpError}=require('../data/store-support');
 const {hash}=require('./integration-storage');
-function payments({store,ledger,operations,env=process.env,fetcher=fetch}) {
+function payments({store,ledger,operations,scopeOf=()=>null,env=process.env,fetcher=fetch}) {
   const configured=()=>{
     if(!/^sk_test_[A-Za-z0-9_]+$/.test(env.STRIPE_SECRET_KEY||'')||!env.STRIPE_WEBHOOK_SECRET||!env.PAYMENT_RETURN_URL||!/^[a-zA-Z0-9:_-]{16,120}$/.test(env.PAYMENT_NAMESPACE||''))throw new HttpError(503,'Configura Stripe test, namespace único y URL de retorno');
     const url=new URL(env.PAYMENT_RETURN_URL);
@@ -14,7 +14,7 @@ function payments({store,ledger,operations,env=process.env,fetcher=fetch}) {
       const base=configured(),operation=operations.find(operation=>operation.key===key);
       let binding;try{binding=JSON.parse(env.PAYMENT_BINDINGS||'{}')[key];}catch{throw new HttpError(503,'Configuración de pagos inválida');}
       if(!operation||!binding||operation.schema?.properties?.[binding.amountField]?.type!=='integer'||!/^[a-z]{3}$/.test(binding.currency||''))throw new HttpError(503,'Configura importe entero en unidades menores y moneda sobre campos aprobados');
-      const record=await store.getRecord(key,id);if(!record)throw new HttpError(404,'Registro inexistente');
+      const record=await store.getRecord(key,id,scopeOf(user,key));if(!record)throw new HttpError(404,'Registro inexistente');
       const amount=(record.data||record)[binding.amountField];
       if(!Number.isSafeInteger(amount)||amount<1||amount>99999999)throw new HttpError(422,'Importe fuera de rango');
       const reference=hash(env.PAYMENT_NAMESPACE+':'+key+':'+id),old=await ledger.get(reference);
@@ -42,6 +42,8 @@ function payments({store,ledger,operations,env=process.env,fetcher=fetch}) {
       const session=event.data?.object,reference=session?.metadata?.reference;if(!/^[a-f0-9]{64}$/.test(reference||''))throw new HttpError(400,'Referencia inválida');
       const item=await ledger.get(reference);
       if(!item||item.session!==session.id||session.amount_total!==item.amount||session.currency!==item.currency||session.payment_status!=='paid')throw new HttpError(400,'El evento no coincide con el pago esperado');
+      // El webhook no lleva JWT: confirma que el registro sigue existiendo sin ampliar alcance.
+      if(!await store.getRecord(item.operation,item.record))throw new HttpError(400,'El registro del pago ya no existe');
       if(item.status!=='paid')await ledger.put(reference,{...item,status:'paid',event:event.id});
       return {received:true};
     });}

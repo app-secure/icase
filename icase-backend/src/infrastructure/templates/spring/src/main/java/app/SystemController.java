@@ -34,4 +34,32 @@ public class SystemController {
     public JsonNode openapi() {
         return data.openapi();
     }
+
+    /** Explorador Swagger UI estático (CDN). No incluye SpringDoc ni assets empaquetados. */
+    @GetMapping(value = "/api/docs", produces = "text/html;charset=UTF-8")
+    public String docs() {
+        return """
+            <!DOCTYPE html>
+            <html lang="es"><head>
+            <meta charset="UTF-8"/>
+            <meta name="viewport" content="width=device-width,initial-scale=1"/>
+            <title>Documentación de la API</title>
+            <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css"/>
+            <style>body{margin:0}</style>
+            </head><body>
+            <div id="swagger-ui"></div>
+            <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js"></script>
+            <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-standalone-preset.js"></script>
+            <script>
+            window.ui = SwaggerUIBundle({
+              url: '/api/openapi.json',
+              dom_id: '#swagger-ui',
+              presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+              layout: 'StandaloneLayout',
+              deepLinking: true
+            });
+            </script>
+            </body></html>
+            """;
+    }
 }

@@ -27,7 +27,6 @@ class GenericBackendGenerator {
     const resolved = StackCatalog.resolve(stack);
     const ownership = require('../templates/auth/ownership');
     if (ownership.policyUsesOwnership(policy)) {
-      if (resolved.backend === 'spring') throw new Error('La propiedad de registros aún no soporta Spring.');
       const activos = new (require('../../core/services/ModuleService'))().activos(modules);
       const blocked = ownership.BLOCKED_MODULES.filter((id) => activos.includes(id));
       if (blocked.length) throw new Error('La propiedad de registros no se puede combinar con: ' + blocked.join(', ') + '.');
@@ -63,7 +62,8 @@ class GenericBackendGenerator {
     data.files.shared.push(
       { ruta: 'backend/src/security/http-security.js', lenguaje: 'javascript', contenido: fs.readFileSync(path.join(AUTH_TEMPLATES, 'http-security.js'), 'utf8') },
       { ruta: 'backend/openapi.json', lenguaje: 'json', contenido: `${JSON.stringify(openapi, null, 2)}\n` },
-      { ruta: 'backend/src/docs/openapi.js', lenguaje: 'javascript', contenido: `module.exports = ${JSON.stringify(openapi)};\n` }
+      { ruta: 'backend/src/docs/openapi.js', lenguaje: 'javascript', contenido: `module.exports = ${JSON.stringify(openapi)};\n` },
+      { ruta: 'backend/src/docs/swagger-ui.js', lenguaje: 'javascript', contenido: fs.readFileSync(path.join(AUTH_TEMPLATES, 'swagger-ui.js'), 'utf8') }
     );
     const events = new ChangeEventsGenerator();
     if (resolved.backend === 'spring') {
@@ -100,7 +100,7 @@ class GenericBackendGenerator {
       database,
       stack: { backend: resolved.backend, lenguaje: resolved.language, ...(resolved.backend === 'nest' ? { version_framework: NestRuntimePolicy.version, node: NestRuntimePolicy.node } : {}) },
       mode: contract.entities.length ? 'entity_crud_v1' : 'generic_crud_v1',
-      docs: { openapi: '/api/openapi.json', archivo: 'backend/openapi.json' },
+      docs: { openapi: '/api/openapi.json', docs: '/api/docs', archivo: 'backend/openapi.json' },
       storage: { layout: 'table_per_entity', operations: data.model.operations, tables, associations: data.model.associations || [], migrations: data.migrations.map((item) => item.id) },
       requisitos: contract.operations.map((item) => ({ id: item.id, nombre: item.name })),
       endpoints: contract.operations.flatMap((item) => [item.collectionPath, item.itemPath])
@@ -109,7 +109,7 @@ class GenericBackendGenerator {
 
   _dependencies(database, nest = false, auth = false) {
     return {
-      helmet: '^8.0.0', 'express-rate-limit': '^7.5.0', cors: '^2.8.5',
+      helmet: '^8.0.0', 'express-rate-limit': '^7.5.0', cors: '^2.8.5', 'swagger-ui-dist': '5.18.2',
       ...(auth ? { jsonwebtoken: '^9.0.3' } : {}),
       ...(nest ? { '@nestjs/common': NestRuntimePolicy.version, '@nestjs/core': NestRuntimePolicy.version, '@nestjs/platform-express': NestRuntimePolicy.version, 'reflect-metadata': '^0.2.0', rxjs: '^7.8.0' } : { cors: '^2.8.5', dotenv: '^16.4.7', express: '^4.21.2' }),
       ...(database === 'postgres' ? { pg: '^8.13.0' } : database === 'mysql' ? { mysql2: '^3.11.0' } : { mongodb: '^6.12.0' })
@@ -123,7 +123,7 @@ class GenericBackendGenerator {
       { ruta: 'backend/tsconfig.json', lenguaje: 'json', contenido: JSON.stringify({ compilerOptions: { module: 'commonjs', target: 'ES2022', experimentalDecorators: true, emitDecoratorMetadata: true, strict: true, esModuleInterop: true, allowJs: true, outDir: './dist' }, include: ['src/**/*.ts', 'src/**/*.js'] }, null, 2) },
       { ruta: 'backend/.env.example', lenguaje: 'dotenv', contenido: this._env(database, policy) },
       { ruta: 'backend/icase.manifest.json', lenguaje: 'json', contenido: this._manifest(project, contract, database, data, resolved) },
-      { ruta: 'backend/src/main.ts', lenguaje: 'typescript', contenido: "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\nimport { StoreExceptionFilter } from './store-exception.filter';\nconst configureHttpSecurity = require('./security/http-security');\nasync function bootstrap(){const app=await NestFactory.create(AppModule);configureHttpSecurity(app.getHttpAdapter().getInstance());app.useGlobalFilters(new StoreExceptionFilter());await app.listen(Number(process.env.PORT||3000));}\nbootstrap();\n" },
+      { ruta: 'backend/src/main.ts', lenguaje: 'typescript', contenido: "import 'reflect-metadata';\nimport { NestFactory } from '@nestjs/core';\nimport { AppModule } from './app.module';\nimport { StoreExceptionFilter } from './store-exception.filter';\nconst express=require('express');\nconst configureHttpSecurity = require('./security/http-security');\nasync function bootstrap(){const app=await NestFactory.create(AppModule);const http=app.getHttpAdapter().getInstance();configureHttpSecurity(http);http.use('/api/docs/static',(req:any,res:any,next:any)=>{try{express.static(require('./docs/swagger-ui').absoluteAssetPath(),{index:false})(req,res,next);}catch(e){next(e);}});app.useGlobalFilters(new StoreExceptionFilter());await app.listen(Number(process.env.PORT||3000));}\nbootstrap();\n" },
       { ruta: 'backend/src/store-exception.filter.ts', lenguaje: 'typescript', contenido: this._nestFilter() },
       { ruta: 'backend/src/app.module.ts', lenguaje: 'typescript', contenido: this._nestModule(policy) },
       { ruta: 'backend/src/app.controller.ts', lenguaje: 'typescript', contenido: this._nestController(contract, policy) },
@@ -259,6 +259,7 @@ export class AuthController {
       { ruta: 'backend/pom.xml', lenguaje: 'xml', contenido: renderTemplate(read('pom.xml'), { ARTIFACT: `${slug(project.nombre)}-backend`, DATABASE_DEPENDENCIES: driver }) },
       { ruta: 'backend/src/test/java/app/HttpSecurityFilterTest.java', lenguaje: 'java', contenido: read('HttpSecurityFilterTest.java') },
       { ruta: 'backend/src/test/java/app/AssociationStoreTest.java', lenguaje: 'java', contenido: read('AssociationStoreTest.java') },
+      { ruta: 'backend/src/test/java/app/OwnershipAuthTest.java', lenguaje: 'java', contenido: read('OwnershipAuthTest.java') },
       { ruta: 'backend/README.md', lenguaje: 'markdown', contenido: this._springReadme(project, database, policy) },
       { ruta: 'backend/.gitignore', lenguaje: 'gitignore', contenido: 'target/\n.env\n' },
       { ruta: 'backend/.env.example', lenguaje: 'dotenv', contenido: this._env(database, policy, 'spring') },
@@ -286,7 +287,7 @@ mvn -B package
 DATABASE_URL=${database === 'postgres' ? 'postgresql://app:clave@localhost:5432/app' : 'mysql://app:clave@localhost:3306/app'} ${policy.habilitada ? 'JWT_SECRET=<secreto> ADMIN_EMAIL=<correo> ADMIN_PASSWORD=<clave> ' : ''}java -jar target/app.jar
 \`\`\`
 
-Requiere Java 21. La documentación de la API está en \`openapi.json\` y en \`GET /api/openapi.json\`.
+Requiere Java 21. La documentación de la API está en \`openapi.json\`, \`GET /api/openapi.json\` y el explorador HTML en \`GET /api/docs\` (Swagger UI vía CDN; no es SpringDoc).
 ${policy.habilitada ? '\nCon \`APP_ENV=production\` se rechaza un \`JWT_SECRET\` débil (menos de 16 caracteres o con valores de ejemplo).\n' : ''}`;
   }
 
@@ -336,6 +337,7 @@ const associations=require('./data/associations');
  @Get('health') async health(){await this.store.ping();return {status:'ok',database:'connected'};}
  @Get('api/contract') contract(){return ${JSON.stringify(contract)};}
  @Get('api/openapi.json') openapi(){return require('./docs/openapi.js');}
+ @Get('api/docs') docs(@Res() res:any){res.type('html').send(require('./docs/swagger-ui').html());}
  @Get('api/associations/:relation') links(@Param('relation') relation:string,@Query() query:any){return associations(this.store,'list',relation,query);}
  @Post('api/associations/:relation') @HttpCode(200) link(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'link',relation,body);}
  @Delete('api/associations/:relation') unlink(@Param('relation') relation:string,@Body() body:any){return associations(this.store,'unlink',relation,body);}
@@ -372,6 +374,8 @@ const capability=(req,res,next)=>allowed.has(req.params.capability)?next():res.s
 app.get('/health',async(_req,res,next)=>{try{await store.ping();res.json({status:'ok',database:'connected'})}catch(e){next(e)}});
 app.get('/api/contract',(_req,res)=>res.json(${JSON.stringify(contract)}));
 app.get('/api/openapi.json',(_req,res)=>res.json(require('./docs/openapi')));
+app.get('/api/docs',(_req,res)=>res.type('html').send(require('./docs/swagger-ui').html()));
+app.use('/api/docs/static',(req,res,next)=>{try{express.static(require('./docs/swagger-ui').absoluteAssetPath(),{index:false})(req,res,next);}catch(e){next(e);}});
 app.get('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'list',req.params.relation,req.query))}catch(e){next(e)}});
 app.post('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'link',req.params.relation,req.body))}catch(e){next(e)}});
 app.delete('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'unlink',req.params.relation,req.body))}catch(e){next(e)}});

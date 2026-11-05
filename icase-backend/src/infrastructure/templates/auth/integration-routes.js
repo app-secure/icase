@@ -6,7 +6,9 @@ module.exports=function integrations(app,{store,auth,contract,enabled}) {
   const authorize=async(req,key,method='GET')=>{if(!operations.has(key))throw new HttpError(404,'Operación inexistente');const user=await auth.authenticate(req.headers.authorization);auth.authorize(user,method,'/api/operations/'+key);return user;};
   const {storage}=require('./integration-storage');
   if(enabled.includes('pagos_prueba')) {
-    const service=require('./integration-payments').payments({store,operations:contract.operations,ledger:storage(path.join(process.env.APP_DATA_DIR||'./app-data','payments'))});
+    const policy=require('../auth/policy');
+    const {scopeOf}=require('../auth/ownership');
+    const service=require('./integration-payments').payments({store,operations:contract.operations,ledger:storage(path.join(process.env.APP_DATA_DIR||'./app-data','payments')),scopeOf:(user,key)=>scopeOf(policy,user,key)});
     router.post('/payments/webhook',express.raw({type:'application/json',limit:'64kb'}),wrap(async(req,res)=>res.json(await service.webhook(req.paymentRawBody||req.body,req.get('Stripe-Signature')))));
     router.post('/payments/:operation/:record',express.json({limit:'1kb'}),wrap(async(req,res)=>{const user=await authorize(req,req.params.operation,'PATCH');await authorize(req,req.params.operation);res.json(await service.checkout(user,req.params.operation,req.params.record));}));
     router.get('/payments/status/:reference',wrap(async(req,res)=>{const user=await auth.authenticate(req.headers.authorization);const item=await service.status(user,req.params.reference);await authorize(req,item.operation);res.json(item);}));

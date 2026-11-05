@@ -4,10 +4,15 @@ const Backend=require('../src/infrastructure/services/GenericBackendGenerator');
 const Access=require('../src/core/services/AccessControlService');
 const {HttpError}=require('../src/infrastructure/templates/data-layer/store-support');
 const source=fs.readFileSync(path.join(__dirname,'../src/infrastructure/templates/auth/business-process.js'),'utf8');
-const engine=()=>{const module={exports:{}};vm.runInNewContext(source,{module,require:name=>name==='../data/store-support'?{HttpError}:require(name)});return module.exports.engine;};
+const engine=()=>{const module={exports:{}};vm.runInNewContext(source,{module,require:name=>{
+  if(name==='../data/store-support')return {HttpError};
+  if(name==='./business-process-notify')return {smtpConfigured:()=>false,sendActionMail:async()=>{}};
+  if(name==='../auth/ownership')return {scopeOf:()=>null};
+  return require(name);
+}});return module.exports.engine;};
 const requirements=[{identificador:'RF-01',tipo:'RF',nombre:'Gestionar solicitudes',aprobado:true}];
 const operations=[{key:'rf-01',schema:{properties:{estado:{type:'string'}}}}];
-const definition=()=>({id:'revision',estado_decision:'confirmado',rf:['RF-01'],states:['pendiente','aprobado','cerrado'],initial:'pendiente',terminal:['cerrado'],records:{solicitud:'rf-01',otra:'rf-01'},start_roles:['administrador'],actions:[{id:'aprobar',from:'pendiente',to:'aprobado',roles:['administrador'],different_actor:true,steps:[{record:'solicitud',expect:{estado:'pendiente'},set:{estado:'aprobado'}},{record:'otra',expect:{estado:'pendiente'},set:{estado:'aprobado'}}]},{id:'cerrar',from:'aprobado',to:'cerrado',roles:['administrador'],different_actor:false,steps:[]}]});
+const definition=()=>({id:'revision',estado_decision:'confirmado',rf:['RF-01'],states:['pendiente','aprobado','cerrado'],initial:'pendiente',terminal:['cerrado'],records:{solicitud:'rf-01',otra:'rf-01'},start_roles:['administrador'],reopen:{to:'pendiente',roles:['administrador']},actions:[{id:'aprobar',from:'pendiente',to:'aprobado',roles:['administrador'],different_actor:true,steps:[{record:'solicitud',expect:{estado:'pendiente'},set:{estado:'aprobado'}},{record:'otra',expect:{estado:'pendiente'},set:{estado:'aprobado'}}]},{id:'cerrar',from:'aprobado',to:'cerrado',roles:['administrador'],different_actor:false,steps:[]}]});
 describe('definiciones de procesos confirmados',()=>{
  test('acepta transiciones trazables y rechaza RF, roles, campos y decisiones inventados',()=>{
   const validate=p=>new Service().validar([p],{operations,requirements,roles:['administrador']});
@@ -90,13 +95,58 @@ describe('ejecución de procesos',()=>{
  test('un rol ajeno al proceso no puede consultar su auditoría aunque conozca el UUID',async()=>{
   await expect(service.read({id:'9',rol:'ajeno'},state.id)).rejects.toMatchObject({status:403});
  });
+ test('reabre un proceso terminal, libera el estado y exige clave de idempotencia',async()=>{
+  await service.act(user('2'),state.id,input);
+  await service.act(user('2'),state.id,{action:'cerrar',version:1,key:'unique-request-key-0002'});
+  expect(state.state).toBe('cerrado');
+  const unlocked=[];
+  const previous=service;
+  const repository={start:async()=>null,read:async()=>structuredClone(state),transaction:async(id,run)=>{
+   const draft=structuredClone(state);
+   const result=await run({getRecord:async()=>null,update:async()=>null,save:async value=>Object.assign(draft,value),unlock:async()=>{unlocked.push(id);}},draft);
+   state=draft;return result;
+  }};
+  service=engine()({definitions:[definition()],repository,authorize});
+  const view=await previous.read(user('2'),state.id);expect(view.can_reopen).toBe(true);
+  const reopened=await service.reopen(user('2'),state.id,{version:2,key:'unique-request-key-reopen'});
+  expect(reopened).toMatchObject({state:'pendiente',version:3,replayed:false});
+  expect(unlocked).toEqual([state.id]);
+  expect((await service.reopen(user('2'),state.id,{version:2,key:'unique-request-key-reopen'})).replayed).toBe(true);
+ });
+ test('una acción con notify sin SMTP responde 503 y no cambia el estado',async()=>{
+  const withMail={...definition(),actions:definition().actions.map(a=>a.id==='aprobar'?{...a,notify:{roles:['administrador'],plantilla:'accion'}}:a)};
+  const repository={start:async instance=>{state=structuredClone(instance);return {id:instance.id,state:instance.state,version:0};},read:async()=>structuredClone(state),transaction:async(id,run)=>{
+   const draft=structuredClone(state),next=structuredClone(records);
+   try{
+    const result=await run({getRecord:async(key,id)=>next[id]||null,update:async(key,id,patch)=>{Object.assign(next[id].data,patch);return next[id];},save:async value=>Object.assign(draft,value)},draft);
+    state=draft;records=next;return result;
+   }catch(error){throw error;}
+  }};
+  service=engine()({definitions:[withMail],repository,authorize,store:{listUsers:async()=>[]}});
+  await service.start(user('1'),'revision',{solicitud:'1',otra:'2'});
+  await expect(service.act(user('2'),state.id,input)).rejects.toMatchObject({status:503});
+  expect(state.version).toBe(0);expect(records['1'].data.estado).toBe('pendiente');
+ });
 });
 
-test('frontend incorpora bandeja opt-in, selectores y ruta protegida por sesión',()=>{
+test('frontend incorpora bandeja opt-in, selectores, reapertura y ruta protegida por sesión',()=>{
  const Frontend=require('../src/infrastructure/services/GenericFrontendGenerator');
- const files=new Frontend().generate({proyecto:{nombre:'Prueba'},screens:[],decisiones:{control_acceso:{autenticacion:{metodo:'jwt'}},modulos:{modo:'personalizado',modulos:[{id:'procesos_negocio',activo:true}],procesos:[definition()]}}});
+ const files=new Frontend().generate({proyecto:{nombre:'Prueba'},screens:[],decisiones:{control_acceso:{autenticacion:{metodo:'jwt'}},alcance_plataforma:{plataformas:['web','móvil']},modulos:{modo:'personalizado',modulos:[{id:'procesos_negocio',activo:true}],procesos:[definition()]}}});
  const app=files.find(file=>file.ruta==='frontend/src/App.jsx').contenido;
  expect(app).toContain('path="/procesos"');expect(app).toContain('if (!user) return <LoginScreen />');
  const screen=files.find(file=>file.ruta==='frontend/src/ProcessScreen.jsx').contenido;
- expect(screen).toContain('Registro {alias}');expect(screen).toContain('getRandomValues');expect(screen).not.toContain('crypto.randomUUID');
+ expect(screen).toContain('Registro {alias}');expect(screen).toContain('can_reopen');expect(screen).toContain('/reopen');expect(screen).toContain('getRandomValues');expect(screen).not.toContain('crypto.randomUUID');
+ const mobile=files.find(file=>file.ruta==='mobile/App.js').contenido;
+ expect(mobile).toContain("import ProcessScreen from './ProcessScreen'");
+ expect(files.find(file=>file.ruta==='mobile/ProcessScreen.js').contenido).toContain('/api/processes/instances');
+});
+
+test('el generador engancha protección N:M/adjuntos y documenta reopen',()=>{
+ const access=new Access().proponer({requerimientos:requirements}).valor;
+ const modules={modo:'personalizado',modulos:[{id:'procesos_negocio',activo:true},{id:'archivos_imagenes',activo:true}],procesos:[{...definition(),actions:definition().actions.map(a=>({...a,steps:[]}))}]};
+ const files=new Backend().generate({proyecto:{nombre:'Prueba'},requirements,stack:{backend:'Express',base_datos:'PostgreSQL'},access,modules,domainModel:{codigo_plantuml:'@startuml\nclass Solicitud {\n+String id\n+String estado\n}\n@enduml'}});
+ expect(files.find(f=>f.ruta==='backend/src/data/associations.js').contenido).toContain('assertAssociation');
+ expect(files.find(f=>f.ruta==='backend/src/extensions/generated-extensions.js').contenido).toContain('assertFile');
+ expect(files.find(f=>f.ruta==='backend/openapi.json').contenido).toContain('/api/processes/instances/{id}/reopen');
+ expect(files.find(f=>f.ruta==='backend/src/processes/business-process-notify.js')).toBeTruthy();
 });

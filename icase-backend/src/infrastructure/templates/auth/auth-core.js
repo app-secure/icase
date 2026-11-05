@@ -159,7 +159,9 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
   }
 
   function isPublic(method, path) {
-    return (method === 'GET' && path === '/health') || (method === 'POST' && (path === '/api/auth/login' || path === '/api/auth/register'));
+    return (method === 'GET' && path === '/health')
+      || (method === 'GET' && path.startsWith('/api/docs/static/'))
+      || (method === 'POST' && (path === '/api/auth/login' || path === '/api/auth/register'));
   }
 
   function authorize(user, method, path) {

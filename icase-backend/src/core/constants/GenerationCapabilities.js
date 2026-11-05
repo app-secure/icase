@@ -34,7 +34,7 @@ const CAPABILITIES = Object.freeze([
     id: 'notificaciones',
     etiqueta: 'Correo, SMS y notificaciones',
     patron: /\benvi\w*\b(?:\s+\S+){0,4}?\s+(?:por\s+|v[ií]a\s+)?(?:e-?mail|correo|sms|whatsapp|mensaje|notificaci[oó]n)|(?:confirm|notific|avis|inform|record)\w*\b(?:\s+\S+){0,3}?\s+por\s+(?:correo|e-?mail|sms|whatsapp)|\bnotific\w*|recordatorios?|\bsms\b|whatsapp|alertas? (?:por|v[ií]a)/i,
-    alternativa: 'recuperacion_cuentas puede enviar enlaces por SMTP configurado. No es un motor general de notificaciones y no incluye SMS, WhatsApp o push.'
+    alternativa: 'recuperacion_cuentas puede enviar enlaces por SMTP configurado. En procesos_negocio, una acción confirmada puede declarar notify por correo SMTP a roles locales. No es un motor general de notificaciones y no incluye SMS, WhatsApp o push.'
   },
   {
     id: 'pagos',
@@ -80,7 +80,7 @@ function generalLimits({ formulariosTipados = false, paginacion = false, seed = 
     seed
       ? 'Se generan datos iniciales (seed) deterministas derivados del esquema del modelo de dominio para pruebas de arranque.'
       : 'No se cargan datos iniciales (seed) salvo el usuario administrador.',
-    'Los permisos son por rol y operación; no existe «propiedad» de registros (un usuario no queda limitado a los suyos).',
+    'Los permisos son por rol y operación. El alcance «propios» es opt-in en la política de acceso: sin esa marca el rol ve todos los registros de su operación; con ella solo los que creó.',
     'No extraer un ZIP sobre archivos modificados: usar la vista previa y aprobación de tools/update.cjs. Se preservan cambios manuales y se bloquean conflictos. Las migraciones automáticas son solo aditivas; restricciones/backfill requieren revisión.'
   ];
 }
