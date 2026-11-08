@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { ZoomIn, ZoomOut, RotateCcw, AlertCircle, RefreshCw, Maximize2, X, MoveHorizontal, Scan } from "lucide-react";
 import { getPlantUMLSvgUrl } from "../utils/plantumlEncoder";
+import { diagramPng, downloadDiagram } from "../utils/diagramImage";
 
 /**
  * Extrae las dimensiones intrínsecas del SVG a partir de viewBox o width/height
@@ -34,6 +35,9 @@ export default function PlantUMLViewer({ code, title }) {
   const [zoom, setZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [diagramSize, setDiagramSize] = useState(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageFeedback, setImageFeedback] = useState(null);
+  const exportLock = useRef(false);
   const canvasRef = useRef(null);
   const fullscreenCanvasRef = useRef(null);
   const autoFittedRef = useRef(false);
@@ -54,6 +58,7 @@ export default function PlantUMLViewer({ code, title }) {
 
   useEffect(() => {
     let isMounted = true;
+    setImageFeedback(null);
 
     async function loadDiagram() {
       if (!code || !code.trim() || code.includes("No hay diagrama disponible")) {
@@ -142,6 +147,32 @@ export default function PlantUMLViewer({ code, title }) {
   }, [isFullscreen]);
 
   const handleZoomIn = () => setZoom((prev) => Math.min(Number((prev + 0.15).toFixed(2)), 3.0));
+  const handleImage = async (copy) => {
+    if (exportLock.current) return;
+    exportLock.current = true;
+    setImageBusy(true);
+    setImageFeedback(null);
+    try {
+      if (copy && (!window.isSecureContext || !navigator.clipboard?.write || typeof ClipboardItem === 'undefined')) {
+        throw new Error('Este navegador no permite copiar imágenes. Usa Descargar PNG o abre la aplicación en HTTPS/localhost.');
+      }
+      const image = diagramPng(svgContent);
+      image.catch(() => {}); // Clipboard puede rechazar antes de que termine la conversión.
+      if (copy) {
+        // Inicia la escritura dentro del clic, incluso si la conversión es asíncrona.
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': image })]);
+        setImageFeedback('Imagen copiada al portapapeles.');
+      } else {
+        downloadDiagram(await image, title);
+        setImageFeedback('PNG descargado.');
+      }
+    } catch (error) {
+      setImageFeedback(`No se pudo ${copy ? 'copiar' : 'descargar'}: ${error.message || 'permiso denegado; puedes descargar el PNG.'}`);
+    } finally {
+      setImageBusy(false);
+      exportLock.current = false;
+    }
+  };
   const handleZoomOut = () => setZoom((prev) => Math.max(Number((prev - 0.15).toFixed(2)), 0.25));
   const handleResetZoom = () => setZoom(1);
   const handleFitScreen = () => {
@@ -228,6 +259,12 @@ export default function PlantUMLViewer({ code, title }) {
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
+            <button type="button" disabled={imageBusy || isLoading || !!renderError || !svgContent}
+              onClick={() => handleImage(false)} className="rounded px-2 py-1 hover:bg-slate-200 disabled:opacity-40"
+              title="Descargar el diagrama completo como imagen PNG">Descargar PNG</button>
+            <button type="button" disabled={imageBusy || isLoading || !!renderError || !svgContent}
+              onClick={() => handleImage(true)} className="rounded px-2 py-1 hover:bg-slate-200 disabled:opacity-40"
+              title="Copiar la imagen completa al portapapeles">Copiar imagen</button>
             <button
               onClick={handleZoomOut}
               title="Alejar (-15%)"
@@ -270,6 +307,7 @@ export default function PlantUMLViewer({ code, title }) {
           </div>
         </div>
 
+        {imageFeedback && <p role="status" className="px-4 py-2 text-xs text-slate-700 whitespace-pre-wrap">{imageFeedback}</p>}
         {/* Contenedor scrolleable horizontal y verticalmente sin recortes ni overflow negativo */}
         <div
           ref={canvasRef}

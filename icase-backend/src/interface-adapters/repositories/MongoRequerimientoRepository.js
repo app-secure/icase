@@ -16,7 +16,13 @@ class MongoRequerimientoRepository extends IRequerimientoRepository {
       metrica_medible: req.metrica_medible,
       origen: req.origen,
       evidencia: req.evidencia,
+      evidencias: req.evidencias,
       fuentes_origen: req.fuentes_origen,
+      necesidades_origen: req.necesidades_origen,
+      criterios_aceptacion: req.criterios_aceptacion,
+      reglas_relacionadas: req.reglas_relacionadas,
+      estado_decision: req.estado_decision,
+      restricciones_excluidas: req.restricciones_excluidas,
       requiere_confirmacion: req.requiere_confirmacion,
       aprobado: req.aprobado
     });
@@ -38,7 +44,13 @@ class MongoRequerimientoRepository extends IRequerimientoRepository {
       metrica_medible: req.metrica_medible,
       origen: req.origen,
       evidencia: req.evidencia,
+      evidencias: req.evidencias,
       fuentes_origen: req.fuentes_origen,
+      necesidades_origen: req.necesidades_origen,
+      criterios_aceptacion: req.criterios_aceptacion,
+      reglas_relacionadas: req.reglas_relacionadas,
+      estado_decision: req.estado_decision,
+      restricciones_excluidas: req.restricciones_excluidas,
       requiere_confirmacion: req.requiere_confirmacion,
       aprobado: req.aprobado
     }));

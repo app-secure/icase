@@ -6,6 +6,10 @@ const requirement = { identificador: 'RF-01', tipo: 'RF', nombre: 'Seleccionar m
 const mockup = html => ({ pantalla_id: 'modalidad', nombre_pantalla: 'modalidad', rf_trazabilidad: ['RF-01'], preview_code: html });
 
 describe('cobertura funcional concreta de mockups', () => {
+  test('no confunde calificadores ni preposiciones con opciones de interfaz', () => {
+    expect(service.expectations({ nombre: 'Reservar mesa completa o una silla' })).not.toEqual(expect.arrayContaining([expect.objectContaining({ valores: ['completa', 'una'] })]));
+    expect(service.expectations({ nombre: 'Cobrar', descripcion: 'Elegir efectivo o por transferencia.' })).toContainEqual(expect.objectContaining({ valores: ['efectivo', 'transferencia'] }));
+  });
   test('texto descriptivo o un botón ajeno no acredita opciones seleccionables', () => {
     const result = service.validate(requirement, [mockup('<main><h1>Modalidad</h1><p>Presencial o virtual</p><input placeholder="Nombre"><button>Salir</button></main>')]);
     expect(result).toContainEqual(expect.objectContaining({ tipo: 'opciones', presente: false, confianza: 'explicita' }));

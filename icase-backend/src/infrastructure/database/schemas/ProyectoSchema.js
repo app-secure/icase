@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const ProyectoSchema = new mongoose.Schema({
+  auditoria_requisitos: { type: mongoose.Schema.Types.Mixed, default: null },
   usuario_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Usuario',

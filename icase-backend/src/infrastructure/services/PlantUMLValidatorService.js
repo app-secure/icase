@@ -4,6 +4,8 @@ const ArquitecturaSistemaValidatorService = require('./ArquitecturaSistemaValida
 const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const DiagramSemanticValidatorService = require('./DiagramSemanticValidatorService');
 const CrossDiagramConsistencyValidatorService = require('./CrossDiagramConsistencyValidatorService');
+const { useCaseLimits } = require('../../core/constants/UseCaseDiagramPolicy');
+const DomainModelQualityService = require('./DomainModelQualityService');
 
 class PlantUMLValidatorService {
   constructor() {
@@ -50,6 +52,8 @@ class PlantUMLValidatorService {
     if (tipoNormalizado === DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE) {
       detalles = this.softwareValidator.validar({
         codigo: trimmed,
+        requisitos: opts.requisitos,
+        analisisRequisitos: opts.analisisRequisitos,
         rnfList: opts.rnfList,
         trazabilidad_rnf: opts.trazabilidad_rnf
       });
@@ -71,6 +75,7 @@ class PlantUMLValidatorService {
     if (tipoNormalizado === DIAGRAM_TYPES.SYSTEM_ARCHITECTURE) {
       detalles = this.sistemaValidator.validar({
         codigo: trimmed,
+        requisitos: opts.requisitos,
         rnfList: opts.rnfList,
         trazabilidad_rnf: opts.trazabilidad_rnf
       });
@@ -91,6 +96,11 @@ class PlantUMLValidatorService {
 
     if (tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES) {
       detalles = this.disenoValidator.validar(trimmed, tipoNormalizado);
+      const domain = (opts.diagramasDependencia || []).filter(item => normalizeDiagramType(item.tipo) === DIAGRAM_TYPES.DOMAIN_CLASSES && item.aprobado !== false)
+        .sort((a, b) => Number(b.version || 1) - Number(a.version || 1))[0];
+      const domainWarnings = domain ? new DomainModelQualityService().comparar(domain.codigo_plantuml, trimmed) : [];
+      const clases = (trimmed.match(/^\s*(?:abstract\s+)?(?:class|interface|enum)\s+/gim) || []).length;
+      metricas.clases = clases;
       const consistencia = this.crossDiagramValidator.validar({
         tipo: tipoNormalizado,
         codigo: trimmed,
@@ -99,7 +109,7 @@ class PlantUMLValidatorService {
       return {
         ...this.resultado(
           [...(detalles.valido ? [] : [detalles.error].filter(Boolean)), ...(consistencia.errores || [])],
-          consistencia.advertencias || [],
+          [...(detalles.advertencias || []), ...(consistencia.advertencias || []), ...domainWarnings, ...(clases > 20 ? ['Diagrama extenso: organiza las clases por paquetes sin omitir conceptos aprobados.'] : [])],
           { ...metricas, ...(consistencia.metricas || {}) }
         ),
         detalles: { ...detalles, consistencia }
@@ -112,7 +122,10 @@ class PlantUMLValidatorService {
       const relaciones = (trimmed.match(/(?:--+|\.\.+|<[-.]+|[-.]+>)/g) || []).length;
       Object.assign(metricas, { actores, casos_uso: casos, relaciones });
       if (actores < 1 || actores > 10) errores.push('Casos de uso debe contener entre 1 y 10 actores.');
-      if (casos < 2 || casos > 14) errores.push('Casos de uso debe contener entre 2 y 14 casos para conservar legibilidad.');
+      const limits = useCaseLimits(opts.requisitos);
+      metricas.limite_casos_uso = limits.max;
+      if (casos < limits.min || casos > limits.max) errores.push(`Casos de uso debe contener entre ${limits.min} y ${limits.max} casos para este alcance (${limits.rf} RF). Agrupa visualmente por módulos, sin eliminar funciones aprobadas.`);
+      if (casos > 14 && (trimmed.match(/^\s*package\s+/gim) || []).length < 2) advertencias.push('La vista es extensa: organiza los casos en módulos para facilitar su lectura, sin reducir cobertura.');
       if (!/^\s*(?:rectangle|package)\s+/im.test(trimmed)) errores.push('Los casos de uso deben estar delimitados por el sistema o por módulos.');
       if (relaciones < actores) advertencias.push('Algunos actores podrían no estar relacionados con casos de uso.');
     }
@@ -140,12 +153,20 @@ class PlantUMLValidatorService {
     }
 
     if ([DIAGRAM_TYPES.DOMAIN_CLASSES, DIAGRAM_TYPES.DESIGN_CLASSES].includes(tipoNormalizado)) {
+      if (tipoNormalizado === DIAGRAM_TYPES.DOMAIN_CLASSES) {
+        const quality = new DomainModelQualityService().validar(trimmed);
+        errores.push(...quality.errores);
+        advertencias.push(...quality.advertencias);
+        Object.assign(metricas, quality.metricas);
+      }
       const clases = (trimmed.match(/^\s*(?:abstract\s+)?(?:class|interface|enum)\s+/gim) || []).length;
       const relaciones = (trimmed.match(/^\s*[A-Za-z_][\w.]*\s+"[^"]+"\s+[^\n]+\s+"[^"]+"\s+[A-Za-z_][\w.]*/gim) || []).length +
         (trimmed.match(/^\s*[A-Za-z_][\w.]*\s+(?:--|\.\.|<\||\*--|o--)[^\n]+/gim) || []).length;
       Object.assign(metricas, { clases, relaciones });
-      const maximo = tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES ? 20 : 12;
-      if (clases < 3 || clases > maximo) errores.push(`El diagrama debe contener entre 3 y ${maximo} clases o interfaces legibles.`);
+      const maximo = tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES ? 20 : Math.max(12,
+        (Array.isArray(opts.requisitos) ? opts.requisitos : []).filter(r => r.tipo === 'RF' && r.aprobado !== false).length + 4);
+      if (clases < 3) errores.push('El diagrama debe contener al menos 3 clases o interfaces legibles.');
+      if (clases > maximo) advertencias.push('Diagrama extenso: organiza las clases por paquetes sin omitir conceptos aprobados.');
       if (relaciones < 1) errores.push('El diagrama debe incluir relaciones entre sus clases.');
       if (tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES && !/^\s*package\s+/im.test(trimmed)) {
         advertencias.push('Conviene agrupar las clases de diseño por capas o paquetes.');

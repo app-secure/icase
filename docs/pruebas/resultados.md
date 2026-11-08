@@ -243,3 +243,30 @@ Duración y métricas:
 Evidencia:
 Hallazgos y seguimiento:
 ```
+## Evaluación de requisitos · 7 de noviembre de 2026
+
+### Corrección del fallback por presupuesto de entrada
+
+Se añadió una alternativa compacta de extracción/redacción para Groq que conserva todo el insumo y las citas verificadas de los objetivos, con lotes ajustados al presupuesto de entrada. No se aumentó `GROQ_ANALYSIS_INPUT_BUDGET=3000`. El fallo de extracción por indisponibilidad ya no lanza otro borrador más grande; devuelve diagnóstico acotado por proveedor. Saturación, cuota y saldo insuficiente se distinguen. El 429 permite un solo reintento corto dentro del presupuesto global.
+
+La comprobación final está en `icase-backend/verification-results/requirements-evaluation/2026-11-07T22-29-31-712Z/`: Groq generó 8 requisitos en 30.289 segundos y 5 solicitudes HTTP. Una espera indicada por el proveedor de 15.250 ms permitió recuperar la redacción del segundo lote. No se agotó el presupuesto global ni hubo bloqueos estructurales o evidencias no verificables. La auditoría semántica siguió pendiente por límite de entrada; la expectativa léxica de autenticación no encontró coincidencia. Por tanto, se acredita la recuperación operativa, no exhaustividad semántica ni el recorrido hasta ZIP. Los intentos previos incompletos también se conservaron. No se modificó `.env` ni se aprobaron proyectos de trabajo.
+
+Se implementó el protocolo reproducible descrito en [Evaluación de requisitos](evaluacion-requisitos.md). Las nuevas pruebas HTTP reales con repositorios en memoria y los componentes React en JSDOM pasaron; no acreditan navegador ni persistencia MongoDB tras reiniciar.
+
+Se ejecutaron llamadas reales con dos dominios sintéticos (archivo clínico y biblioteca). No se obtuvo una generación completa utilizable en esta sesión: Gemini informó alta demanda en los modelos configurados; un modelo alternativo fue rechazado por disponibilidad para la cuenta; Groq respondió a la extracción pero la redacción superó el presupuesto de entrada configurado. Una de sus solicitudes también alcanzó el límite de tokens por minuto. Una repetición clínica registró expresamente `limite_entrada_proveedor` en la etapa `redaccion_lote_1`. No se aumentaron límites para ocultar el bloqueo y no se aprobaron resultados fallidos.
+
+Los informes de cada intento se guardaron en `icase-backend/verification-results/requirements-evaluation/`, bajo las carpetas fechadas `2026-11-07T21-43-09-857Z`, `2026-11-07T21-46-11-512Z` y `2026-11-07T21-49-19-662Z`. El intento previo dentro del sandbox terminó por restricciones de red y no mide la calidad del proveedor.
+
+La prueba de navegador quedó `bloqueado_entorno`: Playwright/Chromium no estaban instalados en el entorno de ejecución; tampoco se obtuvo conexión del controlador de navegador ni del motor Docker. No se presentan los tests JSDOM como sustitutos de navegador. Falta ejecutar ese escenario en un entorno habilitado, resolver/evaluar el presupuesto de entrada de Groq y repetir las generaciones con cuota disponible antes de concluir sobre calidad semántica o mejoras comparativas. No se modificaron proyectos de trabajo ni la base activa.
+
+### Seguimiento: navegador instalado y prueba ejecutada
+
+### Nueva ejecución de la prueba pendiente
+
+Las evidencias más recientes están en `verification-results/requirements-evaluation/2026-11-07T22-12-45-847Z/` (incluye `revision-manual.md`) y `verification-results/requirements-browser/2026-11-07T22-12-36-166Z/`. Chromium pasó cuatro comprobaciones sin errores JavaScript. Gemini produjo el caso clínico en 15.3 segundos (6 RF, 2 RNF), con aprobación estructural habilitada y métricas pendientes. Biblioteca tardó 27.8 segundos (4 RF, 3 RNF): faltan gestión de usuarios e inicio de sesión, y respaldo/recuperación queda solo como restricción. Distintos RNF comparten un objetivo incorrecto, por lo que la aprobación se bloquea. La auditoría semántica no señaló esas omisiones: se registró como falso negativo, no como éxito. Groq continuó limitado por presupuesto de entrada/cuota. Las pruebas de navegador y proveedores se ejecutaron por separado; no son el recorrido completo de App hasta ZIP. No se hicieron correcciones al producto durante esta ejecución.
+
+Se incorporó `@playwright/test` como dependencia de desarrollo con versión fija y se descargó Chromium oficial mediante `npm run test:browser:install`. La caché está dentro de `node_modules` y no se versiona. La ejecución local ya no depende de Docker ni de la conexión externa del asistente.
+
+La prueba real del navegador terminó correctamente en `icase-backend/verification-results/requirements-browser/2026-11-07T22-08-25-428Z/resultado.json`, con captura `revision.png`. Pasaron cuatro comprobaciones: validación desde el botón, bloqueo de aprobación con necesidad pendiente, corrección de fragmento mediante formulario y conservación de la resolución al recargar. No se registraron errores JavaScript. Durante la preparación se corrigió una duplicación de React en el empaquetado del escenario aislado, no en el producto. Los intentos fallidos anteriores se conservan como historial.
+
+Este resultado acredita componentes productivos y API con repositorios en memoria, no navegación completa de `App`, MongoDB tras reiniciar, IA real, diagramas, ZIP o despliegue. Los bloqueos de proveedores descritos arriba siguen pendientes. La instalación npm informó diez vulnerabilidades en el árbol total de dependencias (tres altas); no se ejecutó `audit fix` ni se atribuyen automáticamente a Playwright.

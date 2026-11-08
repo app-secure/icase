@@ -131,7 +131,9 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const requirementChangeService = new RequirementChangeService({
     proyectoRepository: proyectoRepo,
     diagramaRepository: diagramaRepo,
-    disenoRepository: disenoRepo
+    disenoRepository: disenoRepo,
+    planCodificacionRepository: planCodificacionRepo,
+    artefactoRepository: artefactoGeneradoRepo
   });
 
   const crearProyectoUseCase = new CrearProyecto({ proyectoRepository: proyectoRepo });
@@ -143,7 +145,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     estandarRepository: estandarRepo,
     fuenteRepository: fuenteRepo,
     plantumlValidatorService: plantumlValidator,
-    aiOrchestratorService: modelosIaService
+    aiOrchestratorService: modelosIaService,
+    requirementChangeService
   });
   const actualizarRequerimientoManualUseCase = new ActualizarRequerimientoManual({
     requerimientoRepository: requerimientoRepo
@@ -209,7 +212,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     disenoRepository: disenoRepo,
     markdownCompilerService: markdownCompiler,
     trabajoGeneracionRepository: trabajoGeneracionRepo,
-    finalProjectAuditService
+    finalProjectAuditService,
+    requirementChangeService
   });
 
   const requerimientoController = new RequerimientoController({

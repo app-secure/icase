@@ -32,7 +32,7 @@ class ArquitecturaSistemaValidatorService {
    * @param {Array} [params.trazabilidad_rnf] - Mapeo RNF -> elemento
    * @returns {Object} { valido, errores, advertencias, trazabilidad, alta_disponibilidad_solicitada, alta_disponibilidad_detectada }
    */
-  validar({ codigo, rnfList = [], trazabilidad_rnf = [] } = {}) {
+  validar({ codigo, rnfList = [], trazabilidad_rnf = [], requisitos = [] } = {}) {
     const errores = [];
     const advertencias = [];
 
@@ -58,6 +58,24 @@ class ArquitecturaSistemaValidatorService {
     }
 
     const lowerCode = trimmed.toLowerCase();
+    const orm = /\b(?:prisma|typeorm|hibernate|sequelize|entity framework)\b/i;
+    for (const match of trimmed.matchAll(/\bContainerDb\s*\(\s*([^,]+),\s*"([^"]*)"\s*,\s*"([^"]*)"/gim)) {
+      if (orm.test(match[3])) advertencias.push(`Despliegue por verificar: "${match[2]}" incluye un ORM en la tecnología del almacén. El ORM pertenece al backend; conserva aquí el motor de datos aprobado.`);
+    }
+    for (const match of trimmed.matchAll(/\bRel(?:_[A-Za-z]+)?\s*\([^,]+,[^,]+,\s*"([^"]*)"\s*,\s*"([^"]*)"/gim)) {
+      if (orm.test(match[2]) || /^(?:prisma|typeorm|hibernate|sequelize)\s*(?:\/\s*sql)?$/i.test(match[1])) {
+        advertencias.push('Despliegue por verificar: un ORM aparece como protocolo de comunicación. Describe la operación y usa el canal aprobado o «Canal por definir»; ubica el ORM en el backend.');
+      }
+    }
+    const backupRequested = [...(Array.isArray(requisitos) ? requisitos : []), ...(Array.isArray(rnfList) ? rnfList : [])].some(r => {
+      if (r.aprobado === false) return false;
+      const text = `${r.nombre || ''} ${r.descripcion || ''}`;
+      return /respaldo|backup|copia[s]? de seguridad/i.test(text) && !/\bno\s+(?:se\s+)?(?:requiere|necesita|solicita)|fuera de alcance/i.test(text);
+    });
+    const operational = trimmed.split(/\r?\n/).filter(line => !/^\s*(?:'|!|title\b)/i.test(line)).join('\n');
+    if (backupRequested && !/respaldo|backup|copia[s]? de seguridad/i.test(operational)) {
+      advertencias.push('Despliegue por verificar: hay un requisito aprobado de respaldos sin una responsabilidad visible de copia y recuperación. Indica el mecanismo o destino por definir; no agregues alta disponibilidad ni frecuencias no acordadas.');
+    }
 
     // 2. Elementos de Infraestructura (nodos, servidores, despliegue)
     const tieneNodos = /deployment_node|node\s+|server|servidor|host|instance|cloud|vps|cluster/i.test(trimmed);

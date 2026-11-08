@@ -3,6 +3,94 @@ const { normalizeDiagramType, isValidDiagramType } = require('../../core/constan
 const { pick, PROJECT_EDITABLE } = require('../../infrastructure/security/sanitize');
 
 class ProyectoController {
+  async revisarRequisitos(req, res) {
+    try {
+      const project = await this.proyectoRepository.obtenerPorId(req.params.id);
+      const requirements = await this.requerimientoRepository.listarPorProyecto(req.params.id);
+      const audit = structuredClone(project.auditoria_requisitos || {});
+      const { accion, id, justificacion } = req.body;
+      const Approval = require('../../core/services/RequirementApprovalService');
+      if (accion !== 'validar') {
+        if (requirements.some(item => item.aprobado)) return res.status(409).json({ error: 'Reabre el análisis antes de cambiar una especificación aprobada.' });
+        if (typeof justificacion !== 'string' || !justificacion.trim()) return res.status(400).json({ error: 'La revisión requiere una justificación.' });
+        const record = { accion, justificacion: justificacion.trim(), usuario_id: req.usuario.id, fecha: new Date().toISOString() };
+        if (accion === 'editar_analisis') {
+          const original = audit.inventario?.find(item => item.id === id);
+          if (!original) return res.status(404).json({ error: 'Elemento del análisis no encontrado.' });
+          const fields = ['tipo', 'necesidad', 'estado', 'objetivo_id'];
+          const next = { ...original, ...pick(req.body.cambios, fields) };
+          const sources = this.fuenteRepository ? await this.fuenteRepository.listarPorProyecto(req.params.id) : [];
+          const input = sources.filter(source => source.texto_transcrito?.trim()).map(source => `[Fuente enriquecida]\nArchivo: ${source.nombre_archivo}\n\n[Contenido extraído]\n${source.texto_transcrito}`).join('\n\n---\n\n') || project.insumo_bruto || '';
+          const report = new (require('../../infrastructure/services/RequirementCoverageService'))().inspectInventory([next], input);
+          if (report.invalid.length) return res.status(400).json({ error: 'Clasificación, datos o evidencias inválidos.', diagnostico: report.invalid });
+          audit.inventario = audit.inventario.map(item => item.id === id ? report.valid[0] : item);
+          Object.assign(audit, require('../../core/constants/RequirementAnalysisContract').analysisSections(audit.inventario));
+          audit.historial_revision = [...(audit.historial_revision || []), { ...record, id, anterior: original, posterior: report.valid[0] }];
+        } else {
+          const finding = audit.revision_semantica?.hallazgos?.find(item => item.id === id);
+          if (!finding || !['confirmar', 'resolver', 'descartar', 'aceptar'].includes(accion)) return res.status(400).json({ error: 'Hallazgo o acción inválidos.' });
+          if (accion === 'aceptar' && finding.estado !== 'corregido') return res.status(400).json({ error: 'Solo se puede aceptar una corrección aplicada.' });
+          const checkAudit = { ...audit, revision_semantica: { ...audit.revision_semantica, hallazgos: [] } };
+          if (accion === 'resolver' && new Approval().evaluate(requirements, checkAudit).bloqueado) return res.status(400).json({ error: 'Corrige primero los errores estructurales o necesidades pendientes.' });
+          finding.estado = ({ confirmar: 'confirmado', resolver: 'resuelto', descartar: 'descartado', aceptar: 'aceptado' })[accion];
+          finding.severidad = accion === 'confirmar' && req.body.severidad === 'critico' ? 'critico' : 'advertencia';
+          finding.historial = [...(finding.historial || []), record];
+        }
+        audit.version_analisis = Number(audit.version_analisis || 0) + 1;
+        const { contextOf } = require('../../core/services/RequirementAnalysisContext');
+        if (JSON.stringify(contextOf(project.auditoria_requisitos)) !== JSON.stringify(contextOf(audit))) {
+          await (this.requirementChangeService || new (require('../../core/services/RequirementChangeService'))({ proyectoRepository: this.proyectoRepository, diagramaRepository: this.diagramaRepository, disenoRepository: this.disenoRepository })).invalidate(req.params.id, 'Cambió una regla, restricción o decisión del análisis.');
+        }
+      }
+      audit.control_aprobacion = new Approval().evaluate(requirements, audit);
+      audit.revision_actual = { fecha: new Date().toISOString(), errores: audit.control_aprobacion.errores_criticos, advertencias: audit.control_aprobacion.advertencias };
+      await this.proyectoRepository.actualizar(req.params.id, { auditoria_requisitos: audit });
+      return res.json({ auditoria_requisitos: audit });
+    } catch (error) {
+      console.error('[ProyectoController] Error revisando requisitos:', error);
+      return res.status(500).json({ error: 'No se pudo guardar la revisión de requisitos.' });
+    }
+  }
+  async resolverNecesidad(req, res) {
+    try {
+      const project = await this.proyectoRepository.obtenerPorId(req.params.id);
+      const requirements = await this.requerimientoRepository.listarPorProyecto(req.params.id);
+      if (requirements.some(item => item.aprobado)) return res.status(409).json({ error: 'Reabre el análisis antes de cambiar necesidades de una especificación aprobada.' });
+      const audit = structuredClone(project.auditoria_requisitos || {});
+      const pending = audit.necesidades_pendientes || [];
+      const entry = pending.find(item => item.id === req.params.necesidadId && item.estado_validacion === 'pendiente');
+      if (!entry) return res.status(404).json({ error: 'Necesidad pendiente no encontrada.' });
+      const { accion, justificacion, evidencias } = req.body;
+      if (typeof justificacion !== 'string' || !justificacion.trim() || !['corregir_evidencia', 'descartar'].includes(accion)) return res.status(400).json({ error: 'Indica una acción válida y su justificación.' });
+      if (accion === 'corregir_evidencia') {
+        const sources = this.fuenteRepository ? await this.fuenteRepository.listarPorProyecto(req.params.id) : [];
+        const content = sources.filter(source => source.texto_transcrito?.trim()).map(source => `[Fuente enriquecida]\nArchivo: ${source.nombre_archivo}\n\n[Contenido extraído]\n${source.texto_transcrito}`).join('\n\n---\n\n') || project.insumo_bruto || '';
+        if (!Array.isArray(evidencias) || !evidencias.length) return res.status(400).json({ error: 'Indica los fragmentos de evidencia.' });
+        const Coverage = require('../../infrastructure/services/RequirementCoverageService');
+        const result = new Coverage().inspectInventory([{ ...entry.elemento, ...pick(req.body.cambios, ['tipo', 'necesidad', 'estado', 'objetivo_id']), evidencias }], content);
+        if (result.invalid.length) return res.status(400).json({ error: 'La corrección no es válida.', diagnostico: result.invalid });
+        if ((audit.inventario || []).some(item => item.id === entry.id)) return res.status(409).json({ error: 'El identificador ya está en el inventario validado.' });
+        audit.inventario = [...(audit.inventario || []), result.valid[0]];
+        Object.assign(audit, require('../../core/constants/RequirementAnalysisContract').analysisSections(audit.inventario));
+        entry.estado_validacion = 'corregida';
+        entry.elemento_corregido = result.valid[0];
+      } else entry.estado_validacion = 'descartada';
+      entry.historial = [...(entry.historial || []), { accion, justificacion: justificacion.trim(), usuario_id: req.usuario.id, fecha: new Date().toISOString() }];
+      audit.version_analisis = Number(audit.version_analisis || 0) + 1;
+      const { contextOf } = require('../../core/services/RequirementAnalysisContext');
+      if (this.diagramaRepository && JSON.stringify(contextOf(project.auditoria_requisitos)) !== JSON.stringify(contextOf(audit))) {
+        await (this.requirementChangeService || new (require('../../core/services/RequirementChangeService'))({ proyectoRepository: this.proyectoRepository, diagramaRepository: this.diagramaRepository, disenoRepository: this.disenoRepository })).invalidate(req.params.id, 'Cambió una decisión del análisis al resolver una necesidad.');
+      }
+      // Se conserva el diagnóstico original como historial, sin borrar evidencias rechazadas.
+      audit.control_aprobacion = new (require('../../core/services/RequirementApprovalService'))().evaluate(requirements, audit);
+      audit.revision_actual = { fecha: new Date().toISOString(), errores: audit.control_aprobacion.errores_criticos, advertencias: audit.control_aprobacion.advertencias };
+      await this.proyectoRepository.actualizar(req.params.id, { auditoria_requisitos: audit });
+      return res.json({ auditoria_requisitos: audit });
+    } catch (error) {
+      console.error('[ProyectoController] Error al resolver necesidad:', error);
+      return res.status(500).json({ error: 'No se pudo resolver la necesidad pendiente.' });
+    }
+  }
   constructor({
     crearProyectoUseCase,
     procesarConIAUseCase,
@@ -15,7 +103,8 @@ class ProyectoController {
     disenoRepository,
     markdownCompilerService,
     trabajoGeneracionRepository,
-    finalProjectAuditService
+    finalProjectAuditService,
+    requirementChangeService = null
   }) {
     this.crearProyectoUseCase = crearProyectoUseCase;
     this.procesarConIAUseCase = procesarConIAUseCase;
@@ -29,6 +118,7 @@ class ProyectoController {
     this.markdownCompilerService = markdownCompilerService;
     this.trabajoGeneracionRepository = trabajoGeneracionRepository;
     this.finalProjectAuditService = finalProjectAuditService;
+    this.requirementChangeService = requirementChangeService;
     this.diagramWorkflowService = new DiagramWorkflowService();
   }
 
@@ -169,7 +259,7 @@ class ProyectoController {
       res.json(resultado);
     } catch (err) {
       console.error('[ProyectoController] Error en procesarConIA:', err);
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: err.message, ...(err.code ? { codigo: err.code } : {}), ...(err.proveedores ? { proveedores: err.proveedores } : {}), ...(err.metricasEjecucion ? { metricas_ejecucion: err.metricasEjecucion } : {}) });
     }
   }
 
@@ -188,7 +278,9 @@ class ProyectoController {
       });
       res.json(resultado);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: err.message,
+        ...(err.controlRequisitos ? { codigo: err.code, control_requisitos: err.controlRequisitos } : {})
+      });
     }
   }
 
@@ -201,18 +293,19 @@ class ProyectoController {
       const payload = {
         proyectoId: req.params.id,
         tipoDiagrama,
+        regenerar: req.body.regenerar === true,
         insumoBruto: req.body.insumo_bruto || '',
         insumoAdicional: req.body.insumo_adicional || '',
         provider: req.body.provider || req.body.modelo || req.body.proveedor || 'auto',
         specificModel: req.body.specificModel || null
       };
       const resultado = await this.trabajoGeneracionRepository.crearORecuperarActivoDiagrama(payload);
-      if (resultado.creado) void this._ejecutarTrabajoDiagrama(resultado.trabajo.id, payload);
       res.status(resultado.creado ? 202 : 200).json({
         trabajo: resultado.trabajo,
         reutilizado: !resultado.creado,
         reanudado: Boolean(resultado.reanudado)
       });
+      if (resultado.creado) this._lanzarTrabajoDiagrama(resultado.trabajo.id, payload);
     } catch (err) {
       console.error('[ProyectoController] Error iniciando trabajo de diagrama:', err);
       res.status(400).json({ error: err.message });
@@ -259,6 +352,16 @@ class ProyectoController {
     }
   }
 
+  _lanzarTrabajoDiagrama(trabajoId, payload) {
+    // La aceptación HTTP no espera a la IA. Un fallo al persistir el estado
+    // tampoco debe convertirse en un rechazo no manejado que tumbe Node.
+    setImmediate(() => {
+      Promise.resolve().then(() => this._ejecutarTrabajoDiagrama(trabajoId, payload)).catch(error => {
+        console.error(`[ProyectoController] No se pudo finalizar el trabajo ${trabajoId}; se conserva para recuperación:`, error.message);
+      });
+    });
+  }
+
   async _ejecutarTrabajoDiagrama(trabajoId, payload) {
     const heartbeat = setInterval(() => {
       this.trabajoGeneracionRepository.actualizar(trabajoId, {
@@ -277,7 +380,8 @@ class ProyectoController {
         provider: payload.provider,
         specificModel: payload.specificModel,
         objetivo: 'diagramas',
-        tipoDiagrama: payload.tipoDiagrama
+        tipoDiagrama: payload.tipoDiagrama,
+        regenerar: payload.regenerar === true
       });
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'completado', progreso: 100, mensaje: 'Diagrama generado correctamente',
@@ -298,7 +402,7 @@ class ProyectoController {
     const trabajos = await this.trabajoGeneracionRepository.reclamarDiagramasExpirados();
     for (const trabajo of trabajos) {
       const payload = await this.trabajoGeneracionRepository.obtenerPayloadDiagrama(trabajo.id);
-      if (payload) void this._ejecutarTrabajoDiagrama(trabajo.id, payload);
+      if (payload) this._lanzarTrabajoDiagrama(trabajo.id, payload);
     }
     return trabajos.length;
   }

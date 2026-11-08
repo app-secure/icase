@@ -13,7 +13,7 @@ class ArquitecturaSoftwareValidatorService {
    * @param {Array} [params.trazabilidad_rnf] - Mapeo explícito RNF -> elemento
    * @returns {Object} { valido, errores, advertencias, trazabilidad, componentes_detectados }
    */
-  validar({ codigo, rnfList = [], trazabilidad_rnf = [] } = {}) {
+  validar({ codigo, rnfList = [], trazabilidad_rnf = [], requisitos = [], analisisRequisitos = {} } = {}) {
     const errores = [];
     const advertencias = [];
     const componentesDetectados = [];
@@ -39,6 +39,23 @@ class ArquitecturaSoftwareValidatorService {
     }
 
     const lowerCode = trimmed.toLowerCase();
+    for (const match of trimmed.matchAll(/\bContainer(?:Db|Queue)?\s*\(\s*([^,]+),\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"/gim)) {
+      const description = match[4];
+      if (!/\bRF[- ]?\d+/i.test(description)) continue;
+      const meaning = description.replace(/\\[nr]/g, ' ').replace(/\bRF[- ]?\d+\b/gi, '')
+        .replace(/\b(?:a|al|y|de|del|los|realiza|realizar|procesa|procesar|incluye|implementa|cubre|soporta|rf|requisitos?|funcionales?)\b/gi, '')
+        .replace(/[^\p{L}]/gu, '').trim();
+      if (!meaning) errores.push(`Claridad funcional: el contenedor "${match[2]}" (${match[1].trim()}) solo enumera RF. Describe responsabilidades de negocio concretas y conserva los IDs como trazabilidad adicional, sin crear un contenedor por RF.`);
+    }
+    const approvedText = [
+      ...(Array.isArray(requisitos) ? requisitos : []).filter(r => r.aprobado !== false).map(r => `${r.nombre || ''} ${r.descripcion || ''}`),
+      ...['restricciones_tecnicas', 'decisiones'].flatMap(section => (analisisRequisitos[section] || [])
+        .filter(item => item.estado === 'confirmado').map(item => item.necesidad || ''))
+    ].join('\n');
+    const visible = trimmed.split(/\r?\n/).filter(line => !/^\s*(?:'|!|title\b)/i.test(line)).join('\n');
+    if (/socket[.]io/i.test(approvedText) && !/socket[.]io/i.test(visible)) {
+      advertencias.push('Tecnología aprobada por verificar: Socket.IO no está identificado en los elementos o relaciones. Puede estar integrado en el backend; no exige un servidor independiente.');
+    }
 
     // 2. Componentes de Software requeridos (aplicaciones, capas, servicios, base de datos, mensajería)
     const tieneContenedores = /container(?:db)?\s*\(|component\s+|rectangle\s+/i.test(trimmed);

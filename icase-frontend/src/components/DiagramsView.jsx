@@ -18,6 +18,7 @@ import {
 import BrainGearsIcon from "./BrainGearsIcon";
 import PlantUMLViewer from "./PlantUMLViewer";
 import MockupsView from "./MockupsView";
+import RegenerateDiagramDialog from "./RegenerateDiagramDialog";
 import { generateMockupsApi } from "../services/api";
 
 export default function DiagramsView({
@@ -55,6 +56,9 @@ export default function DiagramsView({
   const [versionHistory, setVersionHistory] = useState(null);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [restoringVersion, setRestoringVersion] = useState(null);
+  const [regenerateTarget, setRegenerateTarget] = useState(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const regenerationLock = React.useRef(false);
 
   const options = [
     { key: "useCase", type: "casos_de_uso", label: "Casos de Uso", icon: GitBranch },
@@ -169,6 +173,28 @@ export default function DiagramsView({
 
   const contextInfo = getContextInfo();
 
+  const handleRegenerate = async () => {
+    if (!regenerateTarget || regenerationLock.current || isGeneratingDiagram) return;
+    const target = regenerateTarget;
+    regenerationLock.current = true;
+    setIsRegenerating(true);
+    try {
+      const result = await onGenerateDiagram(target.type, { regenerar: true });
+      if (result?.success === false) throw new Error(result.error || 'No se pudo iniciar la regeneración.');
+      setCodeDrafts(drafts => { const next = { ...drafts }; delete next[target.key]; return next; });
+      setShowVersionHistory(false);
+      setVersionHistory(null);
+      setRegenerateTarget(null);
+      setCorrectionFeedback({ type: 'success', message: 'Regeneración iniciada. Revisa la nueva versión antes de aprobarla.' });
+    } catch (error) {
+      setRegenerateTarget(null);
+      setCorrectionFeedback({ type: 'error', message: error.message });
+    } finally {
+      regenerationLock.current = false;
+      setIsRegenerating(false);
+    }
+  };
+
   const handleApproveCurrentStage = async () => {
     setCorrectionFeedback(null);
     let result;
@@ -221,7 +247,7 @@ export default function DiagramsView({
       setReviewComment("");
       setCorrectionFeedback({
         type: "success",
-        message: "Se solicitaron cambios. La próxima regeneración incluirá estas observaciones."
+        message: "Diagrama rechazado con observaciones. La próxima regeneración las incluirá; el diagrama no se modifica automáticamente."
       });
     } finally {
       setIsReviewing(false);
@@ -378,7 +404,7 @@ export default function DiagramsView({
 
           {diagramJob && ['encolado', 'procesando', 'fallido'].includes(diagramJob.estado) && (
             <div className={`mb-3 rounded-lg border px-3 py-2 text-xs flex items-center justify-between gap-3 ${diagramJob.estado === 'fallido' ? 'border-red-200 bg-red-50 text-red-700' : 'border-violet-200 bg-violet-50 text-violet-800'}`}>
-              <span>{diagramJob.mensaje || 'Generando diagrama en segundo plano'}{diagramJob.tipo_diagrama ? ` · ${diagramJob.tipo_diagrama.replaceAll('_', ' ')}` : ''}</span>
+              <div className="min-w-0"><span>{diagramJob.mensaje || 'Generando diagrama en segundo plano'}{diagramJob.tipo_diagrama ? ` · ${diagramJob.tipo_diagrama.replaceAll('_', ' ')}` : ''}</span>{diagramJob.estado === 'fallido' && diagramJob.error && <p role="alert" className="mt-1 whitespace-pre-wrap break-words">{diagramJob.error}</p>}</div>
               <span className="font-semibold shrink-0">{diagramJob.progreso || 0}%</span>
             </div>
           )}
@@ -501,7 +527,7 @@ export default function DiagramsView({
                 }`}>
                   <p className="font-semibold">Control de calidad: {qualityStatus}</p>
                   {validationErrors.map((message) => <p key={message}>• {message}</p>)}
-                  {validationWarnings.map((message) => <p key={message}>• {message}</p>)}
+                  {validationWarnings.map((message) => <p key={message} className="whitespace-pre-line">• {String(message).replace(/\\n/g, '\n')}</p>)}
                 </div>
               )}
               {Array.isArray(currentDiagram?.trazabilidad_rnf) && currentDiagram.trazabilidad_rnf.length > 0 && (
@@ -608,6 +634,7 @@ export default function DiagramsView({
           {showReviewPanel && selectedKey !== "mockups" && (
             <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
               <label className="mb-1 block text-xs font-semibold text-violet-900">Observaciones para la siguiente versión</label>
+              <p className="mb-2 text-xs text-violet-800">Registra el rechazo sin modificar el diagrama. Después usa «Regenerar diagrama» para aplicar las observaciones. Para un ajuste directo, utiliza el chat con IA.</p>
               <textarea
                 value={reviewComment}
                 onChange={(event) => setReviewComment(event.target.value)}
@@ -623,7 +650,7 @@ export default function DiagramsView({
                   disabled={reviewComment.trim().length < 5 || isReviewing}
                   className="rounded-full bg-violet-700 px-3 py-1.5 text-xs font-semibold text-white disabled:bg-slate-300"
                 >
-                  {isReviewing ? "Guardando..." : "Solicitar cambios"}
+                  {isReviewing ? "Guardando..." : "Confirmar rechazo"}
                 </button>
               </div>
             </div>
@@ -687,9 +714,20 @@ export default function DiagramsView({
               <button
                 type="button"
                 onClick={() => setShowReviewPanel((visible) => !visible)}
+                aria-expanded={showReviewPanel}
+                title="Registrar un rechazo para la siguiente generación, sin modificar el diagrama ahora"
                 className="rounded-full border border-violet-200 px-4 py-2.5 text-xs font-semibold text-violet-700 hover:bg-violet-50"
               >
-                Solicitar cambios
+                Rechazar con observaciones
+              </button>
+            )}
+
+            {selectedKey !== "mockups" && currentDiagram && (
+              <button type="button"
+                disabled={!onGenerateDiagram || isGeneratingDiagram || isRegenerating || isFixing || isSavingCode || isReviewing || restoringVersion !== null || currentState === "bloqueado"}
+                onClick={() => setRegenerateTarget({ ...currentOption, unsaved: hasUnsavedCode })}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-violet-200 px-4 py-2.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                <RefreshCw size={14} /> Regenerar diagrama
               </button>
             )}
 
@@ -699,7 +737,7 @@ export default function DiagramsView({
               onClick={handleApproveCurrentStage}
               disabled={isGeneratingDiagram || currentState === "bloqueado" || (selectedKey !== "mockups" && currentState === "aprobado") || (selectedKey === "mockups" && mockupTraceability?.valido === false)}
               title={selectedKey === "mockups" && mockupTraceability?.valido === false
-                ? "Corrige la cobertura del árbol y requisitos antes de aprobar"
+                ? `No se puede aprobar: ${(mockupTraceability.errores || []).join(' ') || 'Revisa los errores de trazabilidad.'}`
                 : undefined}
               className="px-5 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed shrink-0"
             >
@@ -717,6 +755,8 @@ export default function DiagramsView({
           </div>
         </div>
       </div>
+      <RegenerateDiagramDialog target={regenerateTarget} busy={isRegenerating}
+        onCancel={() => setRegenerateTarget(null)} onConfirm={handleRegenerate} />
     </div>
   );
 }

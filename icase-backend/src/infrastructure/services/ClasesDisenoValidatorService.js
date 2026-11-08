@@ -5,6 +5,16 @@ class ClasesDisenoValidatorService {
     }
 
     const trimmed = codigo.trim();
+    const advertencias = [];
+    const dtos = [...trimmed.matchAll(/class\s+\w+DTO\b[^\n{]*\{([^}]+)}/gi)];
+    const placeholders = dtos.filter(match => {
+      const fields = match[1].split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      return fields.length === 1 && /^[+\-#~]?\s*(?:datos|resultado)\s*:\s*String\s*$/i.test(fields[0]);
+    });
+    if (placeholders.length) {
+      const names = placeholders.map(match => match[0].match(/class\s+(\w+DTO)/i)?.[1]).filter(Boolean);
+      advertencias.push(`Diseño por verificar: DTO genéricos con datos/resultado: String en ${names.join(', ')}. Define campos tipados derivados de las operaciones aprobadas; si el dato es legítimamente opaco, explica su finalidad. No crees un módulo CRUD por entidad o rol.`);
+    }
 
     if (!trimmed.startsWith('@start')) {
       return {
@@ -21,6 +31,23 @@ class ClasesDisenoValidatorService {
     }
 
     const lineas = trimmed.split(/\r?\n/);
+    // Una asociación con cardinalidad pero sin segundo extremo no compila.
+    // No completar por proximidad: el destino debe venir del modelo aprobado.
+    let inBlockComment = false;
+    let inNote = false;
+    for (const [index, raw] of lineas.entries()) {
+      const line = raw.trim();
+      if (line.startsWith("/'")) { inBlockComment = !line.includes("'/"); continue; }
+      if (inBlockComment) { if (line.includes("'/")) inBlockComment = false; continue; }
+      if (/^end\s+note\b/i.test(line)) { inNote = false; continue; }
+      if (/^note\b/i.test(line)) { inNote = !line.includes(':'); continue; }
+      if (inNote || line.startsWith("'")) continue;
+      const incomplete = line.match(/^(?:[\w.]+|"[^"]+")\s*(?:"[^"]*"\s*)?(?:[<|*o+.#{}-]*[-.]{2,}[>|*o+.#{}-]*)(?:\[[^\]]*\])?\s*(?:"[^"]*"\s*)?(?::.*)?$/);
+      if (incomplete) return {
+        valido: false,
+        error: `Relación PlantUML incompleta en línea ${index + 1}: ${line}. Falta la clase destino después de la flecha y cardinalidad. Recupera el extremo del dominio aprobado; conserva las demás clases y operaciones.`
+      };
+    }
     if (lineas.some((linea) => linea.length > 320)) {
       return { valido: false, error: 'El diagrama contiene líneas excesivamente largas que afectan su renderizado.' };
     }
@@ -101,7 +128,14 @@ class ClasesDisenoValidatorService {
       return { valido: false, error: 'El diagrama de clases de diseño debe incluir trazabilidad hacia requisitos (RF/RNF) u objetos de origen.' };
     }
 
-    return { valido: true, error: null };
+    const outgoing = new Set([...trimmed.matchAll(/^\s*(\w+)\s+(?:\.\.>|-->)\s*\w+/gm)].map(match => match[1]));
+    for (const match of trimmed.matchAll(/^\s*class\s+(\w+)(?:\s+<<([^>]+)>>)?/gim)) {
+      if (/(?:UseCase|CasoUso)$/i.test(match[1]) || /UseCase|CasoUso/i.test(match[2] || '')) {
+        if (!outgoing.has(match[1])) advertencias.push(`Diseño por verificar: ${match[1]} no declara dependencias de salida hacia entidades, puertos u otros servicios. Comprueba cómo realiza la operación; si es pura, explica que no necesita dependencias. No inventes un repositorio por clase.`);
+      }
+    }
+
+    return { valido: true, error: null, advertencias };
   }
 }
 

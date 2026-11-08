@@ -1,0 +1,29 @@
+[
+  {
+    "id": "archivo-clinico",
+    "input": "Reunión de una clínica. Coordinadora: La recepcionista debe consultar expedientes por nombre y fecha, viendo su estado, y registrar citas para pacientes con un profesional y una fecha disponible. El médico debe autorizar solicitudes de estudios. Administrador: Necesito gestionar las cuentas del personal. Analista: Proponemos autenticar usuarios y limitar las operaciones por rol. Coordinadora: Confirmado. Analista: El backend será NestJS, la web React y los datos PostgreSQL. Coordinadora: Sí. Los médicos usarán tabletas; eso no agrega una función distinta. Las contraseñas deben protegerse y las pantallas deben tener etiquetas claras y mensajes de error comprensibles. No hemos acordado cifras de usabilidad. Queremos respaldar y recuperar los datos; la frecuencia de respaldo está pendiente. No incluiremos pagos ni alta disponibilidad en esta versión. No se deben inventar servicios adicionales.",
+    "objectives": [
+      { "id": "consulta", "type": "RF", "terms": [["consult"], ["expedient"]] },
+      { "id": "citas", "type": "RF", "terms": [["registr", "reserv", "program"], ["cita"]] },
+      { "id": "autorizacion", "type": "RF", "terms": [["autoriza"], ["estudio", "solicitud"]] },
+      { "id": "cuentas", "type": "RF", "terms": [["gestion", "administr"], ["cuenta", "usuario"]] },
+      { "id": "autenticacion", "type": "RF", "terms": [["autentic", "sesion"]] }
+    ],
+    "exclusions": ["pagos", "alta disponibilidad"],
+    "scope": "Texto sintético; no contiene datos de pacientes. No se exige un número fijo de requisitos."
+  },
+  {
+    "id": "biblioteca-comunitaria",
+    "input": "Bibliotecaria: Queremos consultar el catálogo de libros por título y autor, mostrando si están disponibles. También registrar préstamos a socios y registrar devoluciones. El administrador puede modificar los datos de los libros. Analista: ¿Confirmas que solamente el administrador gestiona usuarios y el personal debe iniciar sesión? Bibliotecaria: Sí, queda confirmado. No definimos multas ni fórmulas de penalización y no queremos cobros. Analista: Usaremos React en web, NestJS y PostgreSQL. Bibliotecaria: De acuerdo. Los voluntarios usarán computadoras; no hace falta una aplicación móvil. Las contraseñas deben estar protegidas. Las pantallas tendrán controles etiquetados y mensajes claros; todavía no acordamos una métrica de usabilidad. El catálogo debe responder en menos de dos segundos bajo uso normal. En campañas hay alrededor de sesenta usuarios conectados, pero no hemos acordado el tiempo de respuesta para esa carga. Necesitamos respaldo y recuperación; falta decidir frecuencia y tiempo de recuperación. No necesitamos réplicas ni balanceadores.",
+    "objectives": [
+      { "id": "catalogo", "type": "RF", "terms": [["consult"], ["catalog", "libro"]] },
+      { "id": "prestamos", "type": "RF", "terms": [["registr"], ["prestam"]] },
+      { "id": "devoluciones", "type": "RF", "terms": [["registr"], ["devolu"]] },
+      { "id": "usuarios", "type": "RF", "terms": [["gestion", "administr"], ["usuario", "cuenta"]] },
+      { "id": "sesion", "type": "RF", "terms": [["sesion", "autentic"]] },
+      { "id": "rendimiento", "type": "RNF", "terms": [["catalog"], ["segundo", "respuesta"]] }
+    ],
+    "exclusions": ["cobros", "réplicas", "balanceadores"],
+    "scope": "Texto sintético; ninguna fórmula de multas está autorizada. Carga y latencia no se vinculan automáticamente."
+  }
+]

@@ -13,7 +13,11 @@ class Requerimiento {
     metrica_medible = '', // RNF: métrica sustentada o Por confirmar con el usuario.
     origen = 'explicito',
     evidencia = '',
+    evidencias = [],
     fuentes_origen = [],
+    necesidades_origen = [],
+    criterios_aceptacion = [],
+    reglas_relacionadas = [],
     requiere_confirmacion = false,
     estado_decision = 'confirmado',
     restricciones_excluidas = [],
@@ -34,7 +38,11 @@ class Requerimiento {
     this.metrica_medible = metrica_medible;
     this.origen = ['explicito', 'inferido', 'manual'].includes(origen) ? origen : 'inferido';
     this.evidencia = evidencia;
+    this.evidencias = Array.isArray(evidencias) ? evidencias : [];
     this.fuentes_origen = Array.isArray(fuentes_origen) ? fuentes_origen : [fuentes_origen].filter(Boolean);
+    this.necesidades_origen = Array.isArray(necesidades_origen) ? necesidades_origen : [];
+    this.criterios_aceptacion = Array.isArray(criterios_aceptacion) ? criterios_aceptacion : [];
+    this.reglas_relacionadas = Array.isArray(reglas_relacionadas) ? reglas_relacionadas : [];
     this.requiere_confirmacion = Boolean(requiere_confirmacion);
     this.estado_decision = ['confirmado', 'pendiente', 'rechazado', 'fuera_de_alcance'].includes(estado_decision)
       ? estado_decision

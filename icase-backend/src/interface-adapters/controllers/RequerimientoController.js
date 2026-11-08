@@ -67,11 +67,25 @@ class RequerimientoController {
           metrica_medible: r.metrica_medible || r.metric || '',
           origen: r.origen || r.origin || 'manual',
           evidencia: r.evidencia || r.evidence || '',
+          evidencias: r.evidencias || r.evidences || [],
           fuentes_origen: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : (Array.isArray(r.sourceNames) ? r.sourceNames : []),
+          necesidades_origen: Array.isArray(r.necesidades_origen) ? r.necesidades_origen : (r.needIds || []),
+          criterios_aceptacion: Array.isArray(r.criterios_aceptacion) ? r.criterios_aceptacion : (r.acceptanceCriteria || []),
+          reglas_relacionadas: Array.isArray(r.reglas_relacionadas) ? r.reglas_relacionadas : (r.ruleIds || []),
+          estado_decision: r.estado_decision || r.decisionStatus || 'confirmado',
+          restricciones_excluidas: r.restricciones_excluidas || r.excludedConstraints || [],
           requiere_confirmacion: Boolean(r.requiere_confirmacion ?? r.requiresConfirmation)
         }));
         if (!this.requirementChangeService.changed(existentes, normalizados)) {
-          return res.json({ success: true, changed: false, count: existentes.length, requerimientos: existentes });
+          // Una corrección de cita no invalida los diagramas, pero sí debe guardarse.
+          const guardados = await Promise.all(existentes.map(async existente => {
+            const next = normalizados.find(item => item.identificador === existente.identificador && item.tipo === existente.tipo);
+            if (!next) return existente;
+            const trace = { evidencia: next.evidencia, evidencias: next.evidencias, fuentes_origen: next.fuentes_origen };
+            const before = { evidencia: existente.evidencia, evidencias: existente.evidencias || [], fuentes_origen: existente.fuentes_origen || [] };
+            return JSON.stringify(trace) === JSON.stringify(before) ? existente : this.requerimientoRepository.actualizar(existente.id, trace);
+          }));
+          return res.json({ success: true, changed: false, count: guardados.length, requerimientos: guardados });
         }
         await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
         const docs = normalizados.map((r) => ({

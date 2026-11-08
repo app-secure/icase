@@ -75,6 +75,7 @@ export default function SourcesPanel({
   onToggleCollapsed
 }) {
   const [uploadingItem, setUploadingItem] = useState(null);
+  const [uploadError, setUploadError] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [localProvider, setLocalProvider] = useState("auto");
@@ -168,6 +169,7 @@ export default function SourcesPanel({
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadError("");
 
     // Normalizar caracteres especiales UTF-8 del nombre del archivo (tildes, ñ, etc.)
     const rawName = file.name || "archivo";
@@ -233,6 +235,7 @@ export default function SourcesPanel({
       if (savedSource?.id && !savedSource.isUploading) setActiveSourceId(savedSource.id);
     } catch (err) {
       console.warn("Error cargando fuente:", err);
+      setUploadError(err.message || "No se pudo cargar la fuente. Vuelve a intentarlo.");
     } finally {
       setUploadingItem(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -349,6 +352,7 @@ export default function SourcesPanel({
           />
         ) : <>
         {/* Efecto de Carga del Archivo en Proceso idéntico a NotebookLM */}
+        {uploadError && <p role="alert" className="mx-2 mb-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{uploadError}</p>}
         {uploadingItem && (
           <div className="px-3 py-2.5 rounded-xl bg-[#F2EDFF] border border-[#DDD2F5] flex items-center justify-between gap-3 font-inter transition-all">
             <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -417,6 +421,7 @@ export default function SourcesPanel({
                         )}
                       </div>
                       {src.transcriptionVerified && (src.type === "audio" || src.category === "videos") && <div className="mt-1.5 flex items-center gap-1 pl-8 text-[10px] font-medium text-emerald-700"><CheckCircle2 size={11} />Transcripción revisada</div>}
+                      {src.uploadError && <p className="mt-1 text-xs text-red-700">No guardada. Vuelve a subir el archivo.</p>}
                     </div>
                   ))}
                 </div>

@@ -2,6 +2,7 @@ const { CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
 const AccessControlService = require('./AccessControlService');
 const ModuleService = require('./ModuleService');
 const NestRuntimePolicy = require('./NestRuntimePolicy');
+const { contextOf } = require('./RequirementAnalysisContext');
 
 const CODE_DECISION_PHASES = Object.values(CODE_PHASE_DEFINITIONS)
   .filter((item) => item.tipo === 'decision')
@@ -35,13 +36,17 @@ class CodePlanningProposalService {
     const diagramasAprobados = diagramas.filter((item) =>
       item.aprobado === true && item.estado === 'aprobado' && !item.desactualizado
     );
-    const texto = this._textoDe(requisitosAprobados, diagramasAprobados);
-    const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto };
+    const analysis = contextOf(proyecto?.auditoria_requisitos);
+    const analysisDecisions = [...analysis.restricciones_tecnicas, ...analysis.reglas_negocio]
+      .filter((item) => item.estado === 'confirmado');
+    const texto = [this._textoDe(requisitosAprobados, diagramasAprobados), ...analysisDecisions.map((item) => `${item.necesidad}\n${item.evidencia || ''}`)].join('\n');
+    const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto, analisis: analysis };
     const propuesta = this[`_${etapa}`](contexto);
     const construir = (resultado) => ({
       etapa,
-      propuesta: resultado.valor,
-      evidencias: this._evidencias(requisitosAprobados, diagramasAprobados),
+      propuesta: Object.values(analysis).some(entries => entries.length) ? { ...resultado.valor, contexto_analisis: analysis } : resultado.valor,
+      contexto_analisis: analysis,
+      evidencias: [...this._evidencias(requisitosAprobados, diagramasAprobados), ...analysisDecisions.map((item) => ({ tipo: item.tipo, identificador: item.id, nombre: item.necesidad }))],
       advertencias: resultado.advertencias
     });
     // La etapa de reglas de negocio consulta a la IA, por lo que responde de forma asíncrona.
@@ -56,7 +61,7 @@ class CodePlanningProposalService {
     return new AccessControlService().proponer({ requerimientos: requisitosAprobados });
   }
 
-  async _reglas_negocio({ requisitosAprobados, diagramasAprobados, plan }) {
+  async _reglas_negocio({ requisitosAprobados, diagramasAprobados, plan, analisis }) {
     const anterior = plan?.etapas?.find((item) => item.etapa === 'reglas_negocio');
     if (!this.ruleInferenceService) {
       return { valor: { reglas: [], notas: 'Sin inferencia automática: redacta las reglas manualmente.' }, advertencias: ['El servicio de inferencia de reglas no está configurado.'] };
@@ -64,6 +69,7 @@ class CodePlanningProposalService {
     const { reglas, advertencias } = await this.ruleInferenceService.inferir({
       requerimientos: requisitosAprobados,
       diagramas: diagramasAprobados,
+      analisis,
       retroalimentacion: anterior?.estado === 'rechazada' ? anterior.observaciones : ''
     });
     const pendientes = reglas.filter((item) => item.estado_decision === 'pendiente').length;

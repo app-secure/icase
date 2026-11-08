@@ -103,7 +103,7 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
     expect(result.valido).toBe(false);
     expect(result.errores.join(' ')).toContain('Formulario de reserva');
     expect(result.errores.join(' ')).toContain('Pantalla inventada');
-    expect(result.errores.join(' ')).toContain('RF-02');
+    expect(result.advertencias.join(' ')).toContain('RF-02');
     expect(result.metricas.cobertura_rf_altos_porcentaje).toBe(50);
   });
 
@@ -141,11 +141,11 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
       mockups: [{ pantalla_id: 'pedido', nombre_pantalla: 'pedido', rf_trazabilidad: ['RF-10'] }]
     });
 
-    expect(result.valido).toBe(false);
-    expect(result.errores.join(' ')).toContain('roles');
-    expect(result.errores.join(' ')).toContain('campos de entrada');
-    expect(result.errores.join(' ')).toContain('acciones');
-    expect(result.errores.join(' ')).toContain('estados');
+    expect(result.valido).toBe(true);
+    expect(result.advertencias.join(' ')).toContain('roles');
+    expect(result.advertencias.join(' ')).toContain('campos de entrada');
+    expect(result.advertencias.join(' ')).toContain('acciones');
+    expect(result.advertencias.join(' ')).toContain('estados');
   });
 
   test('AprobarFase bloquea mockups con cobertura incompleta', async () => {

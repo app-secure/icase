@@ -1,11 +1,13 @@
-const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
-const ClasesDisenoSynthesizer = require('./ClasesDisenoSynthesizer');
 const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const AiModelConfig = require('./AiModelConfig');
 const RequirementSemanticsService = require('./RequirementSemanticsService');
+const RequirementCoverageService = require('./RequirementCoverageService');
+const { unwrapEvidence, inspectEvidence } = require('./SourceEvidence');
+const AiRequestBudget = require('./AiRequestBudget');
+const RequirementApprovalService = require('../../core/services/RequirementApprovalService');
 const { normalizeDiagramType, DIAGRAM_DEFINITIONS } = require('../../core/constants/DiagramTypes');
 
 function normalizarCodigoPlantUML(value) {
@@ -53,10 +55,12 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
   const semantics = new RequirementSemanticsService();
 
   return (requerimientos || []).map((requisito) => {
-    const evidencia = String(requisito.evidencia || requisito.evidencia_fuente || '').trim();
+    const evidenceReport = inspectEvidence(requisito, insumo);
+    const multi = Array.isArray(requisito.evidencias) && requisito.evidencias.length > 0;
+    const evidencia = multi ? (evidenceReport.valid[0]?.texto || '') : unwrapEvidence(requisito.evidencia || requisito.evidencia_fuente || '');
     const evidenciaComparable = textoComparable(evidencia);
-    const evidenciaValida = evidenciaComparable.length >= 8 && insumoComparable.includes(evidenciaComparable);
-    const numerosEvidencia = new Set(evidenciaValida ? numerosDe(evidencia) : []);
+    const evidenciaValida = multi ? evidenceReport.valido : evidenciaComparable.length >= 8 && insumoComparable.includes(evidenciaComparable);
+    const numerosEvidencia = new Set(evidenciaValida ? numerosDe(multi ? evidenceReport.valid.map(item => item.texto).join(' ') : evidencia) : []);
     const tipo = String(requisito.tipo || 'RF').toUpperCase();
     let metricaMedible = String(requisito.metrica_medible || '').trim();
     const numerosNoSustentados = numerosDe(metricaMedible).filter((numero) => !numerosEvidencia.has(numero));
@@ -66,7 +70,7 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
       ? 'explicito'
       : 'inferido';
     const requiereConfirmacion = Boolean(requisito.requiere_confirmacion) || origen === 'inferido' ||
-      (tipo === 'RNF' && !metricaMedible);
+      (tipo === 'RNF' && (!metricaMedible || /por confirmar con el usuario/i.test(metricaMedible)));
 
     if (tipo === 'RNF' && (!metricaMedible || metricaNoSustentada)) {
       metricaMedible = 'Por confirmar con el usuario';
@@ -78,7 +82,8 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
       metrica_medible: metricaMedible,
       origen,
       evidencia: evidenciaValida ? evidencia : '',
-      fuentes_origen: Array.isArray(requisito.fuentes_origen)
+      evidencias: multi ? evidenceReport.valid : [],
+      fuentes_origen: multi ? [...new Set(evidenceReport.valid.map(item => item.fuente).filter(item => item !== 'insumo_directo'))] : Array.isArray(requisito.fuentes_origen)
         ? requisito.fuentes_origen.map(String).filter(Boolean)
         : [],
       requiere_confirmacion: requiereConfirmacion
@@ -88,6 +93,7 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
 
 class ModelosIaService {
   constructor() {
+    this.requestBudget = new AiRequestBudget();
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
     this.deepseekApiKey = process.env.DEEPSEEK_API_KEY || '';
@@ -104,6 +110,7 @@ class ModelosIaService {
     this.providerOrder = AiModelConfig.analysis.providerOrder();
     this.modelosDeshabilitados = new Set();
     this.circuitos = new Map();
+    this.erroresModelo = new Map();
     this.circuitCooldownMs = Number(process.env.AI_CIRCUIT_COOLDOWN_MS || 300000);
   }
 
@@ -130,8 +137,8 @@ class ModelosIaService {
         this.leerPrompt('auditor_requisitos.md')
       ]
       : [
-        this.leerPrompt('analista_iso29148.md'),
-        this.leerPrompt('disenador_arquitectura.md'),
+        ...(objetivo === 'diagramas' ? [] : [this.leerPrompt('analista_iso29148.md')]),
+        tipoDiagrama ? require('./DiagramPromptContext').diagramDirectives(this.leerPrompt('disenador_arquitectura.md'), tipoDiagrama) : this.leerPrompt('disenador_arquitectura.md'),
         tipoDiagrama && promptsEspecializados[tipoDiagrama]
           ? this.leerPrompt(promptsEspecializados[tipoDiagrama])
           : '',
@@ -161,7 +168,7 @@ class ModelosIaService {
   async verificarSaldoDeepSeek() {
     if (!this.deepseekApiKey) return { tieneSaldo: false, disponible: false, razon: 'No hay API Key configurada para DeepSeek' };
     try {
-      const res = await axios.get('https://api.deepseek.com/user/balance', {
+      const res = await this.requestBudget.get('https://api.deepseek.com/user/balance', {
         headers: { Authorization: `Bearer ${this.deepseekApiKey}` },
         timeout: 5000
       });
@@ -276,11 +283,21 @@ class ModelosIaService {
             `  Precondición: ${r.precondiciones || r.precondicion || 'No especificada'}`,
             `  Poscondición: ${r.poscondiciones || r.poscondicion || 'No especificada'}`,
             `  Métrica: ${r.metrica_medible || 'No especificada'}`,
-            `  Origen: ${r.origen || 'No especificado'}`
+            `  Origen: ${r.origen || 'No especificado'}`,
+            `  Criterios de aceptación: ${JSON.stringify(r.criterios_aceptacion || [])}`
           ].join('\n');
         }).join('\n');
     }
 
+    const analysis = payload.contexto_proyecto?.analisis_requisitos;
+    if (analysis && (objetivo === 'diagramas' || esRefinamientoExplicito)) {
+      contextoActualTexto += `\n\nDECISIONES Y REGLAS DEL ANÁLISIS DEL MISMO PROYECTO (no son funciones adicionales; respeta estados y preguntas pendientes):\n${JSON.stringify(objetivo === 'diagramas' && tipoDiagrama ? require('./DiagramPromptContext').selectAnalysis(analysis, tipoDiagrama) : {
+        restricciones_tecnicas: analysis.restricciones_tecnicas || [],
+        reglas_negocio: analysis.reglas_negocio || [],
+        decisiones: analysis.decisiones || [],
+        preguntas_pendientes: analysis.preguntas_pendientes || []
+      })}`;
+    }
     if (tipoDiagrama) {
       const dependencies = DIAGRAM_DEFINITIONS[tipoDiagrama]?.dependencies || [];
       const approvedDiagrams = payload.contexto_proyecto?.diagramas_aprobados || [];
@@ -290,25 +307,40 @@ class ModelosIaService {
           .sort((a, b) => Number(b.version || 1) - Number(a.version || 1));
         const diagram = candidates[0];
         if (!diagram) return '';
-        const code = String(diagram.codigo_plantuml || diagram.codigo_mermaid || '').slice(0, 6000);
-        return `[ARTEFACTO APROBADO: ${dependencyType} v${diagram.version || 1}]\n${diagram.descripcion || ''}\n${code}`;
+        const code = String(diagram.codigo_plantuml || diagram.codigo_mermaid || '');
+        const requiredEntities = tipoDiagrama === 'clases_diseno' && dependencyType === 'clases_dominio'
+          ? `\nLISTA DE CONTROL DE ENTIDADES DE ORIGEN (conservar o documentar realización; no confundir con DTO): ${new (require('./DomainModelExtractor'))().extract(code).entities.map(entity => entity.name).join(', ')}\n`
+          : '';
+        return `[ARTEFACTO APROBADO: ${dependencyType} v${diagram.version || 1}]\n${diagram.descripcion || ''}\n${code}${requiredEntities}`;
       }).filter(Boolean);
       if (dependencyBlocks.length) {
         contextoActualTexto += `\n\nDIAGRAMAS APROBADOS QUE DEBEN RESPETARSE:\n${dependencyBlocks.join('\n\n')}`;
       }
       const feedback = String(payload.contexto_proyecto?.retroalimentacion_diagrama || '').trim();
-      if (feedback) {
+      if (feedback && !String(insumoAdicional || '').includes(feedback)) {
         contextoActualTexto += `\n\nOBSERVACIONES DE LA REVISIÓN MANUAL QUE DEBES CORREGIR:\n${feedback}`;
       }
     }
 
+    if (objetivo === 'diagramas' && tipoDiagrama === 'casos_de_uso') {
+      const limits = require('../../core/constants/UseCaseDiagramPolicy').useCaseLimits(reqsContexto);
+      contextoActualTexto += `\nCASOS DE USO: alcance de ${limits.rf} RF, límite de ${limits.min} a ${limits.max} casos. No elimines funciones para cumplir una cuota menor. Agrupa por módulos y conserva trazabilidad visible por caso.`;
+    }
+    if (objetivo === 'diagramas' && tipoDiagrama === 'clases_diseno') {
+      contextoActualTexto += new (require('./DesignGenerationPolicy'))().checklist(reqsContexto);
+    }
     console.log(`[ModelosIaService] Procesando ${insumo.length} caracteres de insumo (Proveedor solicitado: ${requestedProvider})...`);
 
-    const promptCompleto = this.construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo, tipoDiagrama });
+    const insumoPrompt = objetivo === 'diagramas' && tipoDiagrama && reqsAprobados.length && analysis && Object.values(analysis).some(items => Array.isArray(items) && items.length)
+      ? 'El alcance vigente está en los requisitos y el análisis clasificado aprobados del contexto. No reinterpretes los insumos originales para añadir obligaciones. Las decisiones pendientes no son requisitos confirmados.'
+      : insumo;
+    const promptCompleto = this.construirPrompt({ insumo: insumoPrompt, contextoActualTexto, insumoAdicional, objetivo, tipoDiagrama });
 
+    let preferredProvider = null;
+    const solicitar = async (promptCompleto, { etapa = 'generacion', promptGroq = null } = {}) => this.requestBudget.logical(etapa, async () => {
     let respuestaData = null;
     if (requestedProvider === 'groq') {
-      respuestaData = await this.generarConGroq(promptCompleto, specificModel, { allowFallback: false });
+      respuestaData = await this.generarConGroq(promptGroq || promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider === 'gemini') {
       respuestaData = await this.generarConGemini(promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider.includes('deep')) {
@@ -324,14 +356,28 @@ class ModelosIaService {
     } else if (requestedProvider === 'openai') {
       respuestaData = await this.generarConOpenAI(promptCompleto, specificModel, { allowFallback: false });
     } else {
-      const orden = promptCompleto.length > 22000
+      const baseOrder = promptCompleto.length > 22000
         ? ['gemini', ...this.providerOrder.filter(p => p !== 'gemini')]
         : this.providerOrder;
+      const orden = preferredProvider ? [preferredProvider, ...baseOrder.filter((provider) => provider !== preferredProvider)] : baseOrder;
       for (const proveedor of orden) {
-        respuestaData = await this._ejecutarProveedor(proveedor, promptCompleto, specificModel);
-        if (respuestaData) break;
+        if (this.requestBudget.exhausted()) break;
+        respuestaData = await this._ejecutarProveedor(proveedor, proveedor === 'groq' ? (promptGroq || promptCompleto) : promptCompleto, specificModel);
+        if (respuestaData) { preferredProvider = proveedor; break; }
       }
     }
+
+    return respuestaData;
+    });
+    let respuestaData = objetivo === 'requisitos'
+      ? await this.requestBudget.run(() => new RequirementCoverageService().generate({
+        semanticReview: true,
+        groqInputBudget: this.groqApiKey && (requestedProvider === 'auto' || requestedProvider === 'groq') ? Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000) : null,
+        input: [insumo, insumoAdicional].filter(Boolean).join('\n\n'),
+        prompt: promptCompleto,
+        request: solicitar
+      }))
+      : await solicitar(promptCompleto);
 
     if (!respuestaData) {
       if (objetivo === 'requisitos') {
@@ -373,6 +419,8 @@ class ModelosIaService {
   }
 
   async _ejecutarProveedor(proveedor, prompt, specificModel) {
+    const key = { gemini: 'geminiApiKey', groq: 'groqApiKey', deepseek: 'deepseekApiKey', openai: 'openaiApiKey', openrouter: 'openrouterApiKey' }[proveedor];
+    if (key && !this[key]) this.requestBudget.reportProviderFailure(proveedor, 'sin_credencial');
     if (proveedor === 'gemini') return this.generarConGemini(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'groq') return this.generarConGroq(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'deepseek') return this.generarConDeepSeek(prompt, specificModel, { allowFallback: true });
@@ -395,6 +443,7 @@ class ModelosIaService {
     const tokensEntrada = Math.ceil(prompt.length / 4);
     const presupuestoEntrada = Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000);
     if (tokensEntrada > presupuestoEntrada) {
+      this.requestBudget.reportProviderFailure('groq', 'limite_entrada_proveedor', { tokens_estimados: tokensEntrada, limite_tokens: presupuestoEntrada });
       const mensaje = `Prompt estimado en ${tokensEntrada} tokens; supera el presupuesto Groq de ${presupuestoEntrada}.`;
       if (!options.allowFallback) throw new Error(mensaje);
       console.warn(`[ModelosIaService] ${mensaje} Proveedor omitido.`);
@@ -405,7 +454,7 @@ class ModelosIaService {
       if (!this._modeloDisponible(`groq:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con Groq Cloud (${modelName})...`);
-        const res = await axios.post(
+        const res = await this.requestBudget.post(
           'https://api.groq.com/openai/v1/chat/completions',
           {
             model: modelName,
@@ -433,14 +482,23 @@ class ModelosIaService {
         );
 
         const rawText = res.data?.choices?.[0]?.message?.content;
+        if (res.data?.choices?.[0]?.finish_reason === 'length') throw new Error('Respuesta JSON truncada por límite de salida; el lote no se considera generado.');
         if (rawText) {
+          const parsed = this.limpiarYParsearJson(rawText);
           console.log(`[ModelosIaService] Generación exitosa con Groq Cloud (${modelName})`);
-          return this.limpiarYParsearJson(rawText);
+          return parsed;
         }
       } catch (err) {
         const errorMsg = err.response?.data?.error?.message || err.message;
         console.warn(`[ModelosIaService] Groq Cloud (${modelName}) falló:`, errorMsg);
         this._registrarErrorModelo(`groq:${modelName}`, err);
+        const retryHeader = Number.parseFloat(err.response?.headers?.['retry-after']);
+        const retryText = /try again in\s+([\d.]+)\s*s/i.exec(errorMsg);
+        const retrySeconds = Number.isFinite(retryHeader) ? retryHeader : Number.parseFloat(retryText?.[1]);
+        if (err.response?.status === 429 && options.retryRateLimit !== false && await this.requestBudget.waitForRetry(Math.ceil(retrySeconds * 1000) + 250)) {
+          this.circuitos.delete(`groq:${modelName}`);
+          return this.generarConGroq(prompt, modelName, { ...options, retryRateLimit: false });
+        }
         if (!options.allowFallback && modelName === modelosGroq[modelosGroq.length - 1]) {
           throw new Error(`El proveedor Groq Cloud no pudo completar la solicitud: ${errorMsg}`);
         }
@@ -468,11 +526,12 @@ class ModelosIaService {
       if (!this._modeloDisponible(`gemini:${modelName}`)) continue;
       const maxIntentos = Number(process.env.AI_TRANSIENT_RETRIES || 1);
       for (let intento = 1; intento <= maxIntentos; intento++) {
+        if (this.requestBudget.exhausted()) break;
         try {
           console.log(`[ModelosIaService] Procesando con Google Gemini (${modelName}) [Intento ${intento}]...`);
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.geminiApiKey}`;
 
-          const res = await axios.post(
+          const res = await this.requestBudget.post(
             url,
             {
               contents: [{ parts: [{ text: prompt }] }],
@@ -485,10 +544,16 @@ class ModelosIaService {
             { timeout: 60000 }
           );
 
-          const rawText = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          const candidate = res.data?.candidates?.[0];
+          if (candidate?.finishReason === 'MAX_TOKENS') {
+            throw new Error('La salida JSON de Gemini se truncó por límite de tokens (MAX_TOKENS).');
+          }
+          const rawText = candidate?.content?.parts?.filter((part) => !part.thought && typeof part.text === 'string')
+            .map((part) => part.text).join('');
           if (rawText) {
+            const parsed = this.limpiarYParsearJson(rawText);
             console.log(`[ModelosIaService] Generación exitosa con Google Gemini (${modelName})`);
-            return this.limpiarYParsearJson(rawText);
+            return parsed;
           }
         } catch (err) {
           const msg = err.response?.data?.error?.message || err.message;
@@ -520,7 +585,7 @@ class ModelosIaService {
     if (this.deepseekApiKey) {
       try {
         console.log(`[ModelosIaService] Procesando con DeepSeek API directa (${modelName})...`);
-        const res = await axios.post(
+        const res = await this.requestBudget.post(
           'https://api.deepseek.com/v1/chat/completions',
           {
             model: modelName,
@@ -581,7 +646,7 @@ class ModelosIaService {
       if (!this._modeloDisponible(`openrouter:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con OpenRouter Cloud (${modelName})...`);
-        const res = await axios.post(
+        const res = await this.requestBudget.post(
           'https://openrouter.ai/api/v1/chat/completions',
           {
             model: modelName,
@@ -638,7 +703,7 @@ class ModelosIaService {
       if (!this._modeloDisponible(`openai:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con OpenAI (${modelName})...`);
-        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+        const response = await this.requestBudget.post('https://api.openai.com/v1/chat/completions', {
           model: modelName,
           messages: [
             { role: 'system', content: 'Responde exclusivamente con un objeto JSON válido según la plantilla solicitada.' },
@@ -674,6 +739,8 @@ class ModelosIaService {
     if (this._esModeloNoDisponible(error)) return 'modelo_no_disponible';
     const status = error.response?.status;
     const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    if (status === 402 || /insufficient balance|saldo insuficiente/.test(mensaje)) return 'sin_saldo';
+    if (/high demand|experiencing high|overloaded/.test(mensaje) || status === 503) return 'saturacion';
     if (status === 401 || status === 403) return 'autenticacion';
     if (status === 429 || /quota|rate limit|high demand|resource exhausted|insufficient balance/.test(mensaje)) return 'cuota';
     if (/request too large|context|tokens per minute|tpm/.test(mensaje)) return 'limite_contexto';
@@ -682,19 +749,22 @@ class ModelosIaService {
 
   _registrarErrorModelo(clave, error) {
     const tipo = this._clasificarError(error);
+    this.erroresModelo.set(clave, tipo);
+    this.requestBudget.reportProviderFailure(clave.split(':')[0], tipo);
     if (tipo === 'modelo_no_disponible' || tipo === 'autenticacion') {
       this.modelosDeshabilitados.add(clave);
-    } else if (tipo === 'cuota') {
-      this.circuitos.set(clave, Date.now() + this.circuitCooldownMs);
+    } else if (['cuota', 'sin_saldo', 'saturacion'].includes(tipo)) {
+      this.circuitos.set(clave, Date.now() + (tipo === 'saturacion' ? Math.min(this.circuitCooldownMs, 15000) : this.circuitCooldownMs));
     }
     return tipo;
   }
 
   _modeloDisponible(clave) {
-    if (this.modelosDeshabilitados.has(clave)) return false;
+    if (this.requestBudget.exhausted()) return false;
+    if (this.modelosDeshabilitados.has(clave)) { this.requestBudget.reportProviderFailure(clave.split(':')[0], this.erroresModelo.get(clave) || 'modelo_no_disponible'); return false; }
     const hasta = this.circuitos.get(clave);
     if (!hasta) return true;
-    if (hasta > Date.now()) return false;
+    if (hasta > Date.now()) { this.requestBudget.reportProviderFailure(clave.split(':')[0], this.erroresModelo.get(clave) || 'cuota', { reintentar_en_ms: hasta - Date.now() }); return false; }
     this.circuitos.delete(clave);
     return true;
   }
@@ -723,7 +793,7 @@ class ModelosIaService {
   normalizarResultado(data, objetivo = 'completo', tipoDiagrama = null, contexto = {}) {
     const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
     const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
-    const requerimientos = objetivo === 'diagramas'
+    let requerimientos = objetivo === 'diagramas'
       ? []
       : normalizarTrazabilidadRequerimientos(
         Array.isArray(data?.requerimientos) ? data.requerimientos : [],
@@ -784,35 +854,9 @@ class ModelosIaService {
           const validacion = validator.validar(codigo, tipoDiagrama);
 
           if (!validacion.valido) {
-            console.warn(`[ModelosIaService] Corrigiendo clases_diseno incompleto: ${validacion.error}`);
-            const aprobados = Array.isArray(contexto.diagramasAprobados) ? contexto.diagramasAprobados : [];
-            const obtenerAprobado = (tipo) => aprobados
-              .filter((diagrama) => normalizeDiagramType(diagrama.tipo) === tipo)
-              .sort((a, b) => Number(b.version || 1) - Number(a.version || 1))[0];
-            const dominio = obtenerAprobado('clases_dominio');
-            const arquitectura = obtenerAprobado('arquitectura_software');
-            const codigoDominio = String(dominio?.codigo_plantuml || '');
-            const entidades = [...codigoDominio.matchAll(/^\s*(?:abstract\s+)?class\s+(?:"[^"]+"\s+as\s+)?([A-Za-z_][\w]*)/gim)]
-              .map((match) => match[1])
-              .filter((nombre) => !/(?:Controller|Service|UseCase|Repository|DTO)$/i.test(nombre))
-              .slice(0, 10)
-              .map((nombre) => ({ nombre }));
-            const codigoArquitectura = String(arquitectura?.codigo_plantuml || '');
-            const database = /postgres/i.test(codigoArquitectura)
-              ? 'PostgreSQL'
-              : (/sql/i.test(codigoArquitectura) ? 'SQL' : 'MongoDB');
-            const versionesOrigen = Object.fromEntries(['casos_de_uso', 'clases_dominio', 'arquitectura_software'].map((tipo) => [
-              tipo,
-              Number(obtenerAprobado(tipo)?.version || 1)
-            ]));
-
-            diagramas = [ClasesDisenoSynthesizer.sintetizar({
-              casosDeUsoAprobados: (contexto.requerimientos || []).filter((req) => String(req.tipo || '').toUpperCase() === 'RF'),
-              clasesDominio: entidades,
-              arquitecturaSoftware: codigoArquitectura,
-              tecnologiasSeleccionadas: { database },
-              versionesOrigen
-            })];
+            // Conservar la respuesta para la reparación acotada de ProcesarConIA.
+            // Nunca sustituirla por CRUD inventado ni asociar RF por posición.
+            console.warn(`[ModelosIaService] clases_diseno requiere reparación controlada: ${validacion.error}`);
           }
         }
       } else {
@@ -836,6 +880,9 @@ class ModelosIaService {
       objetivos: data?.objetivos || { general: '', especificos: [] },
       alcance_sistema: data?.alcance_sistema || '',
       palabras_clave: palabrasClave,
+      auditoria_requisitos: data?.auditoria_requisitos ? { ...data.auditoria_requisitos,
+        control_aprobacion: new RequirementApprovalService().evaluate(requerimientos, data.auditoria_requisitos)
+      } : null,
       requerimientos,
       diagramas
     };

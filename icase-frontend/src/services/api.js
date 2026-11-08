@@ -1,4 +1,6 @@
-const API_URL = 'http://localhost:5000';
+// En desarrollo Vite reenvía estas peticiones al backend desde el mismo origen.
+// Así cambiar de puerto del frontend no rompe CORS ni la sesión.
+const API_URL = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/icase-api' : 'http://localhost:5000')).replace(/\/$/, '');
 
 // Gestión local de token de autenticación
 export function getAuthToken() {
@@ -110,11 +112,14 @@ export async function fetchProjects() {
     const res = await apiFetch(`${API_URL}/proyectos`, {
       headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error('Error al listar proyectos');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Error al listar proyectos (${res.status})`);
+    }
     return await res.json();
   } catch (err) {
     console.warn('[API] Backend no disponible o error:', err.message);
-    return null;
+    throw new Error(`No se pudieron cargar los proyectos: ${err.message}. Comprueba que el backend esté disponible y que tu sesión sea válida.`);
   }
 }
 
@@ -138,11 +143,14 @@ export async function createProjectApi(data) {
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data)
     });
-    if (!res.ok) throw new Error('Error al crear proyecto');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Error al crear proyecto (${res.status})`);
+    }
     return await res.json();
   } catch (err) {
     console.warn('[API] Error al crear proyecto:', err.message);
-    return null;
+    throw err;
   }
 }
 
@@ -193,7 +201,7 @@ export async function uploadFuenteApi(projectId, file) {
     return await res.json();
   } catch (err) {
     console.warn('[API] Error al subir fuente:', err.message);
-    return null;
+    throw err;
   }
 }
 
@@ -300,6 +308,20 @@ export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicio
 }
 
 // === FASES Y DOCUMENTO ===
+export async function reviewRequirementsApi(projectId, data = { accion: 'validar' }) {
+  const response = await apiFetch(`${API_URL}/proyectos/${projectId}/revision-requisitos`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(data) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'No se pudo guardar la revisión.');
+  return result;
+}
+
+export async function resolveRequirementNeedApi(projectId, needId, data) {
+  const response = await apiFetch(`${API_URL}/proyectos/${projectId}/necesidades/${encodeURIComponent(needId)}/resolver`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(data) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'No se pudo resolver la necesidad.');
+  return result;
+}
+
 export async function approvePhaseApi(projectId, fase) {
   const res = await apiFetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
     method: 'POST',
@@ -308,17 +330,30 @@ export async function approvePhaseApi(projectId, fase) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Error al aprobar fase');
+    throw Object.assign(new Error(data.error || 'Error al aprobar fase'), { controlRequisitos: data.control_requisitos });
   }
   return await res.json();
 }
 
-export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null) {
-  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
+export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, regenerar = false) {
+  const recover = async () => {
+    try {
+      const recovered = await fetchLatestDiagramJobApi(projectId, diagramType);
+      if (recovered.trabajo?.tipo_diagrama === diagramType && ['encolado', 'procesando'].includes(recovered.trabajo.estado)) return { ...recovered, reutilizado: true, recuperado_tras_desconexion: true };
+    } catch { /* No reenviar POST: podría duplicar un trabajo ya aceptado. */ }
+    return null;
+  };
+  let res;
+  try { res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ tipo_diagrama: diagramType, insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional, provider, specificModel })
-  });
+    body: JSON.stringify({ tipo_diagrama: diagramType, insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional, provider, specificModel, regenerar: regenerar === true })
+  }); } catch {
+    const recovered = await recover();
+    if (recovered) return recovered;
+    throw new Error('Se interrumpió la conexión al iniciar el diagrama. Comprueba el backend; al reintentar se recuperará un trabajo activo si ya fue aceptado.');
+  }
+  if ([502, 503, 504].includes(res.status)) { const recovered = await recover(); if (recovered) return recovered; }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo iniciar la generación del diagrama.');
   return data;
@@ -331,8 +366,8 @@ export async function fetchDiagramJobApi(jobId) {
   return data;
 }
 
-export async function fetchLatestDiagramJobApi(projectId) {
-  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo`, { headers: getAuthHeaders() });
+export async function fetchLatestDiagramJobApi(projectId, diagramType = null) {
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo${diagramType ? `?tipo_diagrama=${encodeURIComponent(diagramType)}` : ''}`, { headers: getAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo recuperar la generación del diagrama.');
   return data;

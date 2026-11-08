@@ -17,6 +17,8 @@ import {
   fetchDiagramJobApi,
   fetchLatestDiagramJobApi,
   approvePhaseApi,
+  reviewRequirementsApi,
+  resolveRequirementNeedApi,
   approveDiagramApi,
   rejectDiagramApi,
   updateDiagramApi,
@@ -197,7 +199,13 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
         postcondition: r.poscondiciones || "",
         origin: r.origen || "inferido",
         evidence: r.evidencia || "",
+        evidences: r.evidencias || [],
+        decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
+        excludedConstraints: r.restricciones_excluidas || [],
         sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+        needIds: r.necesidades_origen || [],
+        acceptanceCriteria: r.criterios_aceptacion || [],
+        ruleIds: r.reglas_relacionadas || [],
         requiresConfirmation: Boolean(r.requiere_confirmacion),
         approved: Boolean(r.aprobado)
       }));
@@ -214,7 +222,13 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
         compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
         origin: r.origen || "inferido",
         evidence: r.evidencia || "",
+        evidences: r.evidencias || [],
+        decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
+        excludedConstraints: r.restricciones_excluidas || [],
         sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+        needIds: r.necesidades_origen || [],
+        acceptanceCriteria: r.criterios_aceptacion || [],
+        ruleIds: r.reglas_relacionadas || [],
         requiresConfirmation: Boolean(r.requiere_confirmacion),
         approved: Boolean(r.aprobado)
       }));
@@ -421,6 +435,7 @@ export default function ProjectWorkspace({
       sources: updatedSources
     });
 
+    let uploadError = null;
     // 2. Si no existe ID en backend, crearlo para poder asociar y procesar fuentes de inmediato
     if (!backendId) {
       try {
@@ -441,6 +456,7 @@ export default function ProjectWorkspace({
         }
       } catch (errCreate) {
         console.warn("[Workspace] Error inicializando proyecto en backend:", errCreate);
+        uploadError = errCreate;
       }
     }
 
@@ -449,12 +465,14 @@ export default function ProjectWorkspace({
       try {
         const uploaded = await uploadFuenteApi(backendId, newSource.rawFile);
         if (uploaded) {
+          if (!(uploaded.id || uploaded._id)) throw new Error("El servidor no confirmó el guardado de la fuente.");
           const finalSources = updatedSources.map((s) => {
             if (s.name === newSource.name || s.id === newSource.id) {
               return {
                 ...s,
                 id: uploaded.id || uploaded._id || s.id,
                 uploaded: true,
+                uploadError: null,
                 isUploading: false,
                 rawFile: null,
                 contentSnippet: uploaded.texto_transcrito || s.contentSnippet,
@@ -479,15 +497,18 @@ export default function ProjectWorkspace({
           });
           return finalSources.find((source) => source.name === newSource.name || source.id === newSource.id);
         }
+        uploadError = new Error("El servidor no confirmó el guardado de la fuente.");
       } catch (err) {
         console.warn("[Workspace] Error subiendo fuente al backend:", err);
+        uploadError = err;
       }
     }
 
-    // En caso de que no requiera upload de archivo o falle, quitar bandera isUploading
+    const failureMessage = (uploadError || new Error("No se pudo guardar la fuente en el servidor. Vuelve a subir el archivo.")).message;
+    // Conservar el archivo para reintentar, pero nunca presentarlo como persistido.
     const finalizedSources = updatedSources.map((s) =>
       s.name === newSource.name || s.id === newSource.id
-        ? { ...s, isUploading: false }
+        ? { ...s, isUploading: false, uploaded: false, uploadError: failureMessage }
         : s
     );
     onUpdateProject({
@@ -497,7 +518,7 @@ export default function ProjectWorkspace({
       name: updatedName,
       sources: finalizedSources
     });
-    return finalizedSources.find((source) => source.name === newSource.name || source.id === newSource.id);
+    throw new Error(failureMessage);
   };
 
   const handleDeleteSource = async (sourceId) => {
@@ -666,6 +687,7 @@ export default function ProjectWorkspace({
         isDiagramsApproved: false,
         isMockupsApproved: false,
         requirements: reqs,
+        requirementAudit: aiResult?.auditoria_requisitos || null,
         diagrams: {},
         mockups: []
       });
@@ -675,6 +697,21 @@ export default function ProjectWorkspace({
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleRequirementReview = async (payload) => {
+    const backendId = project.backendId || (project.id?.length === 24 ? project.id : null);
+    if (!backendId) throw new Error('El proyecto todavía no está guardado.');
+    const list = [
+      ...(project.requirements?.functional || []).map(item => ({ ...item, tipo: 'RF', identificador: item.identificador || item.id })),
+      ...(project.requirements?.nonFunctional || []).map(item => ({ ...item, tipo: 'RNF', identificador: item.identificador || item.id }))
+    ];
+    if (!project.isAnalysisApproved) await syncProjectRequirementsApi(backendId, list);
+    const result = payload.scope === 'necesidad'
+      ? await resolveRequirementNeedApi(backendId, payload.id, payload.data)
+      : await reviewRequirementsApi(backendId, payload);
+    onUpdateProject({ ...project, requirementAudit: result.auditoria_requisitos });
+    return result;
   };
 
   const handleApproveAnalysis = async () => {
@@ -714,13 +751,15 @@ export default function ProjectWorkspace({
     } catch (e) {
       setIsGeneratingDiagrams(false);
       console.warn("[Workspace] Error generando diagramas después de aprobar requisitos:", e);
-      onUpdateProject({ ...project, isAnalysisApproved: approvalCompleted, currentPhase: 1, diagrams: {} });
+      onUpdateProject({ ...project, isAnalysisApproved: approvalCompleted, currentPhase: 1, diagrams: project.diagrams || {},
+        requirementAudit: e.controlRequisitos ? { ...project.requirementAudit, control_aprobacion: e.controlRequisitos } : project.requirementAudit
+      });
       alert(`${approvalCompleted ? "Los requisitos fueron aprobados, pero no se pudieron generar los diagramas." : "No se pudieron aprobar los requisitos."} Puedes reintentar desde esta pantalla.\n\n${e.message}`);
       return { success: false, error: e.message };
     }
   };
 
-  const handleGenerateDiagram = async (diagramType) => {
+  const handleGenerateDiagram = async (diagramType, { regenerar = false } = {}) => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
     if (!backendId) return { success: false, error: "Proyecto no persistido" };
     setIsGeneratingDiagrams(true);
@@ -731,7 +770,8 @@ export default function ProjectWorkspace({
         '',
         '',
         selectedAiProvider || 'auto',
-        null
+        null,
+        regenerar
       );
       applyDiagramJobResponse(response);
       return {
@@ -828,6 +868,7 @@ export default function ProjectWorkspace({
     const source = (project.sources || []).find((item) => item.id === sourceId);
     if (!source) throw new Error("No se encontró la fuente que deseas actualizar.");
     const backendSourceId = source.backendId || source.id;
+    if (source.uploadError) throw new Error(`La fuente no se guardó: ${source.uploadError} Vuelve a subir el archivo.`);
     if (!backendSourceId || backendSourceId.startsWith("src-")) {
       throw new Error("Espera a que la fuente termine de cargarse antes de guardar sus detalles.");
     }
@@ -863,6 +904,7 @@ export default function ProjectWorkspace({
   const handleSuggestSourceMetadata = async (sourceId) => {
     const source = (project.sources || []).find((item) => item.id === sourceId);
     const backendSourceId = source?.backendId || source?.id;
+    if (source?.uploadError) throw new Error(`La fuente no se guardó: ${source.uploadError} Vuelve a subir el archivo.`);
     if (!backendSourceId || backendSourceId.startsWith("src-")) {
       throw new Error("Espera a que la fuente termine de cargarse para usar el rellenado con IA.");
     }
@@ -992,6 +1034,7 @@ export default function ProjectWorkspace({
             },
             diagrams: phase === "diagrams" ? (diags || project.diagrams) : {},
             diagramFlow: phase === "diagrams" ? (aiResult.flujoDiagramas || project.diagramFlow) : null,
+            requirementAudit: phase === "diagrams" ? project.requirementAudit : (aiResult.auditoria_requisitos || null),
             ...(phase === "diagrams" ? {} : {
               isAnalysisApproved: false,
               isDiagramsApproved: false,
@@ -1131,6 +1174,8 @@ export default function ProjectWorkspace({
         ) : isReviewingRequirements ? (
           <RequirementsView
             requirements={project.requirements}
+            audit={project.requirementAudit}
+            onReview={handleRequirementReview}
             isApproved={project.isAnalysisApproved}
             readOnly
             onBackToDesign={() => setIsReviewingRequirements(false)}
@@ -1139,6 +1184,8 @@ export default function ProjectWorkspace({
           /* FASE 1: Análisis (Requerimientos en texto estructurado limpio) */
           <RequirementsView
             requirements={project.requirements}
+            audit={project.requirementAudit}
+            onReview={handleRequirementReview}
             onUpdateRequirements={(newReqs) => {
               const staleDiagrams = Object.fromEntries(Object.entries(project.diagrams || {}).map(([key, diagram]) => [
                 key,

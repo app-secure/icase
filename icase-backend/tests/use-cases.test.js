@@ -16,11 +16,15 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     let promptEnviado = '';
     service.generarConGemini = jest.fn().mockImplementation(async (prompt) => {
       promptEnviado = prompt;
+      if (prompt.includes('SIN redactar requisitos todavía')) return { inventario_necesidades: [{
+        id: 'N-01', tipo: 'RNF', necesidad: 'Tiempo real', evidencia: 'pedidos en tiempo real', estado: 'confirmado'
+      }] };
       return {
         nombre_proyecto: 'Demo',
         requerimientos: [{
           tipo: 'RNF',
           identificador: 'RNF-01',
+          necesidades_origen: ['N-01'],
           nombre: 'Tiempo real',
           descripcion: 'El sistema DEBE sincronizar pedidos en tiempo real.',
           metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
@@ -58,11 +62,14 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
   test('la generación conserva una métrica cuando aparece literalmente en el insumo', async () => {
     const service = new ModelosIaService();
     service.geminiApiKey = 'test-key';
-    service.generarConGemini = jest.fn().mockResolvedValue({
+    service.generarConGemini = jest.fn().mockResolvedValueOnce({ inventario_necesidades: [{
+      id: 'N-01', tipo: 'RNF', necesidad: 'Latencia', evidencia: 'latencia <= 0.8 segundos para 150 conexiones', estado: 'confirmado'
+    }] }).mockResolvedValue({
       nombre_proyecto: 'Demo',
       requerimientos: [{
         tipo: 'RNF',
         identificador: 'RNF-01',
+        necesidades_origen: ['N-01'],
         nombre: 'Latencia',
         descripcion: 'El sistema DEBE propagar eventos con la latencia indicada.',
         metrica_medible: 'Latencia <= 0.8 segundos para 150 conexiones',
@@ -306,8 +313,8 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     };
     const mockReqRepo = {
       listarPorProyecto: jest.fn().mockResolvedValue([
-        { id: 'r1', aprobado: false },
-        { id: 'r2', aprobado: false }
+        { id: 'r1', identificador: 'RF-01', tipo: 'RF', nombre: 'Consultar', descripcion: 'El sistema permite consultar registros.', aprobado: false },
+        { id: 'r2', identificador: 'RF-02', tipo: 'RF', nombre: 'Registrar', descripcion: 'El sistema permite registrar solicitudes.', aprobado: false }
       ]),
       actualizar: jest.fn().mockResolvedValue(true)
     };
@@ -701,6 +708,11 @@ describe('I-CASE Clean Architecture Use-Cases Unit Tests', () => {
     expect(result.flujoDiagramas.siguiente).toBe('casos_de_uso');
     expect(cachedResult.cache_hit).toBe(true);
     expect(aiOrchestratorService.procesar).toHaveBeenCalledTimes(1);
+    await useCase.ejecutar({ proyectoId: 'p1', objetivo: 'diagramas', tipoDiagrama: 'casos_de_uso', regenerar: true });
+    expect(aiOrchestratorService.procesar).toHaveBeenCalledTimes(2);
+    expect(creados).toHaveLength(2);
+    expect(creados[1]).toEqual(expect.objectContaining({ version: 3, aprobado: false, estado: 'pendiente_revision' }));
+    expect(diagramaRepository.eliminarPorProyecto).not.toHaveBeenCalled();
   });
 
   test('ProcesarConIA rechaza diagramas antes de aprobar los requisitos', async () => {

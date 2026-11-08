@@ -331,6 +331,9 @@ class GenerarMockups {
     return `SISTEMA / PROYECTO: "${proyecto.nombre || 'Sistema de Información'}"
 DESCRIPCIÓN DEL NEGOCIO: ${this._limitarTexto(proyecto.descripcion || 'Sin descripción', 500)}
 
+REGLAS, RESTRICCIONES, EXCLUSIONES Y PREGUNTAS DEL PROYECTO (respeta sus estados; una pregunta no es una obligación):
+${JSON.stringify(require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos))}
+
 SISTEMA VISUAL OBLIGATORIO (idéntico en todas las pantallas):
 - Color primario: ${diseno.colores.primario}; primario oscuro: ${diseno.colores.primario_oscuro}
 - Fondo: ${diseno.colores.fondo}; superficie: ${diseno.colores.superficie}; texto: ${diseno.colores.texto}
@@ -342,6 +345,9 @@ ${bloquePantallas}
 
 REQUERIMIENTOS FUNCIONALES (ISO/IEC/IEEE 29148:2018):
 ${rfList || 'Sin requerimientos funcionales'}
+
+CRITERIOS DE ACEPTACIÓN APROBADOS (representa los aplicables a cada pantalla):
+${JSON.stringify(requerimientos.filter(r => r.aprobado !== false).map(r => ({ identificador: r.identificador, criterios: r.criterios_aceptacion || [] })))}
 
 REQUERIMIENTOS NO FUNCIONALES:
 ${rnfList || 'Sin requerimientos no funcionales'}

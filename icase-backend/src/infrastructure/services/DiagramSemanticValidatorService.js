@@ -120,6 +120,7 @@ class DiagramSemanticValidatorService {
       metricas: {
         rf_evaluados: requisitos.length,
         rf_cubiertos: cubiertos.length,
+        rf_cubiertos_ids: cubiertos,
         cobertura_rf_porcentaje: Math.round((cubiertos.length / requisitos.length) * 100),
         rf_omitidos: [...omitidosAltos, ...omitidosRevisables],
         trazabilidad_sin_evidencia: trazabilidadSinEvidencia
@@ -132,8 +133,25 @@ class DiagramSemanticValidatorService {
     const advertencias = [];
     const clases = extraerClases(codigo);
     const tecnicas = clases.filter((nombre) => /(?:controller|controlador|dto|repository|repositorio|service|servicio|usecase|caso.*uso|gateway|adapter|adaptador)$/i.test(nombre));
-    const tokensClases = new Set(clases.flatMap(tokens));
+    // Solo elementos UML: las notas y listas de RF no acreditan cobertura.
+    const elementos = [];
+    let enClase = false;
+    for (const linea of String(codigo || '').split(/\r?\n/)) {
+      if (/^\s*(?:abstract\s+)?(?:class|interface|enum)\s+/i.test(linea)) {
+        enClase = linea.includes('{');
+        elementos.push(linea.replace(/<<.*?>>/g, ''));
+      } else if (enClase) {
+        if (/^\s*}/.test(linea)) enClase = false;
+        else elementos.push(linea);
+      } else if (/^\s*[\w.]+\s+(?:"[^"]*"\s+)?[.*o<|>-]{2,}/.test(linea)) {
+        elementos.push(linea);
+      }
+    }
+    const tokensClases = new Set([...clases.flatMap(tokens), ...elementos.flatMap(tokens)]);
+    const transversales = requisitos.filter(requisito =>
+      /autentic|autoriza|control de acceso|copia.*seguridad|backup|despliegue|monitoreo|infraestructura/i.test(sinAcentos(requisito.nombre)));
     const evaluables = requisitos
+      .filter(requisito => !transversales.includes(requisito))
       .map((requisito) => ({ requisito, conceptos: tokens(requisito.nombre || requisito.descripcion) }))
       .filter(({ conceptos }) => conceptos.length > 0);
     const cubiertos = evaluables.filter(({ conceptos }) => conceptos.some((token) => tokensClases.has(token)));
@@ -143,10 +161,11 @@ class DiagramSemanticValidatorService {
     const cobertura = evaluables.length ? cubiertos.length / evaluables.length : 1;
 
     if (tecnicas.length) errores.push(`Clases de dominio contiene elementos técnicos que pertenecen al diseño: ${tecnicas.join(', ')}.`);
-    if (evaluables.length >= 2 && cobertura < 0.5) {
-      errores.push('El modelo de dominio no representa al menos la mitad de los conceptos funcionales aprobados.');
-    } else if (omitidosAltos.length) {
-      advertencias.push(`Revisa si faltan conceptos del dominio para: ${omitidosAltos.join(', ')}.`);
+    // El parecido léxico no demuestra corrección semántica ni justifica bloquear.
+    if (omitidosAltos.length) {
+      for (const { requisito, conceptos } of evaluables.filter(({ requisito }) => omitidosAltos.includes(idRequisito(requisito) || requisito.nombre))) {
+        advertencias.push(`Cobertura de dominio por verificar: ${idRequisito(requisito)} — ${requisito.nombre || requisito.descripcion}. No se encontró correspondencia léxica en clases, atributos, operaciones o asociaciones (conceptos: ${conceptos.join(', ')}). Es una comprobación heurística, no prueba de omisión; representa el concepto solo si lo exige el negocio.`);
+      }
     }
 
     return {
@@ -156,6 +175,7 @@ class DiagramSemanticValidatorService {
       metricas: {
         clases_dominio: clases.length,
         clases_tecnicas: tecnicas,
+        rf_transversales_no_exigen_entidad: transversales.map(idRequisito),
         rf_evaluados_semanticamente: evaluables.length,
         rf_con_concepto_representado: cubiertos.length,
         cobertura_conceptos_porcentaje: Math.round(cobertura * 100),

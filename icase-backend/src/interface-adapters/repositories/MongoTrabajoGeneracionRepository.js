@@ -51,7 +51,7 @@ class MongoTrabajoGeneracionRepository {
     }
   }
 
-  async crearORecuperarActivoDiagrama({ proyectoId, tipoDiagrama, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null }) {
+  async crearORecuperarActivoDiagrama({ proyectoId, tipoDiagrama, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, regenerar = false }) {
     const claveActiva = `diagrama:${proyectoId}:${tipoDiagrama}`;
     const existente = await TrabajoGeneracionModel.findOne({ clave_activa: claveActiva });
     if (existente && existente.lease_expires_at && existente.lease_expires_at > new Date()) {
@@ -64,7 +64,7 @@ class MongoTrabajoGeneracionRepository {
           estado: 'encolado', progreso: 0, mensaje: 'Reanudando generación de diagrama', error: null,
           ejecutor_id: this.ejecutorId, lease_expires_at: this.leaseUntil(),
           insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional,
-          provider, specific_model: specificModel, objetivo: 'diagramas', tipo_diagrama: tipoDiagrama
+          provider, specific_model: specificModel, regenerar: regenerar === true, objetivo: 'diagramas', tipo_diagrama: tipoDiagrama
         } },
         { new: true }
       );
@@ -79,6 +79,7 @@ class MongoTrabajoGeneracionRepository {
         insumo_adicional: insumoAdicional,
         provider,
         specific_model: specificModel,
+        regenerar: regenerar === true,
         objetivo: 'diagramas',
         ejecutor_id: this.ejecutorId,
         lease_expires_at: this.leaseUntil(),
@@ -115,7 +116,8 @@ class MongoTrabajoGeneracionRepository {
       insumoBruto: trabajo.insumo_bruto || '',
       insumoAdicional: trabajo.insumo_adicional || '',
       provider: trabajo.provider || 'auto',
-      specificModel: trabajo.specific_model || null
+      specificModel: trabajo.specific_model || null,
+      regenerar: trabajo.regenerar === true
     };
   }
 

@@ -35,8 +35,10 @@ class MockupFunctionalCoverageService {
     const normalized = normalize(source);
     const choices = new Map();
     const actors = new Set((Array.isArray(requirement.actores) ? requirement.actores : [requirement.actores]).flatMap(words));
-    for (const match of normalized.matchAll(/\b([a-z]{3,})\s+o\s+([a-z]{3,})\b/g)) {
+    for (const match of normalized.matchAll(/\b([a-z]{3,})\s+o\s+(?:(?:por|una?|el|la|los|las)\s+)?([a-z]{3,})\b/g)) {
       const options = match.slice(1, 3);
+      // No convertir conectores o calificadores gramaticales en opciones UI.
+      if (options.some(value => /^(?:completa|completo|una|uno|por|para|que|con|sin|bien|sea)$/.test(value))) continue;
       if (options.some(value => actions.includes(value) || actors.has(value))) continue;
       const key = options.join('|');
       const previous = normalized.slice(Math.max(0, match.index - 80), match.index);

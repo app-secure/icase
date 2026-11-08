@@ -6,6 +6,7 @@ import AuthView from "./components/AuthView";
 import LoadingOverlay from "./components/LoadingOverlay";
 import { fetchProjects, fetchProjectById, deleteProjectApi, getAuthToken, getStoredUser, clearAuth, logoutApi } from "./services/api";
 import { sanitizePlantUML } from "./utils/plantumlEncoder";
+import { upsertProject } from "./utils/projectState";
 
 export default function App() {
   const [user, setUser] = useState(getStoredUser());
@@ -13,6 +14,7 @@ export default function App() {
   const [sessionExpired, setSessionExpired] = useState(false);
 
   const [projects, setProjects] = useState([]);
+  const [projectsError, setProjectsError] = useState("");
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [view, setView] = useState("dashboard"); // "dashboard" | "workspace"
   const [loadingOverlay, setLoadingOverlay] = useState({ visible: false, message: "" });
@@ -178,6 +180,7 @@ export default function App() {
       backendId: p.id || p._id,
       name: finalCleanName,
       description: p.descripcion || "",
+      requirementAudit: p.auditoria_requisitos || null,
       resumen: p.resumen || "",
       introduccion: p.introduccion || "",
       objetivo_general: p.objetivo_general || "",
@@ -210,7 +213,11 @@ export default function App() {
             postcondition: r.poscondiciones,
             origin: r.origen || "inferido",
             evidence: r.evidencia || "",
+            evidences: r.evidencias || [],
             sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+            needIds: r.necesidades_origen || [],
+            acceptanceCriteria: r.criterios_aceptacion || [],
+            ruleIds: r.reglas_relacionadas || [],
             requiresConfirmation: Boolean(r.requiere_confirmacion),
             decisionStatus: r.estado_decision || (r.requiere_confirmacion ? "pendiente" : "confirmado"),
             excludedConstraints: r.restricciones_excluidas || [],
@@ -231,7 +238,11 @@ export default function App() {
             compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
             origin: r.origen || "inferido",
             evidence: r.evidencia || "",
+            evidences: r.evidencias || [],
             sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+            needIds: r.necesidades_origen || [],
+            acceptanceCriteria: r.criterios_aceptacion || [],
+            ruleIds: r.reglas_relacionadas || [],
             requiresConfirmation: Boolean(r.requiere_confirmacion),
             decisionStatus: r.estado_decision || (r.requiere_confirmacion ? "pendiente" : "confirmado"),
             excludedConstraints: r.restricciones_excluidas || [],
@@ -273,7 +284,10 @@ export default function App() {
   // Carga los proyectos reales desde MongoDB
   const loadBackendProjects = useCallback(async () => {
     if (!token) return;
+    try {
     const data = await fetchProjects();
+    if (!Array.isArray(data)) throw new Error("El servidor devolvió una lista de proyectos inválida.");
+    setProjectsError("");
     if (data && Array.isArray(data)) {
       const mapped = data.map(mapBackendProject);
       setProjects((prev) => {
@@ -282,8 +296,10 @@ export default function App() {
         return [...mapped, ...drafts];
       });
       setActiveProjectId((curr) => curr || (mapped.length > 0 ? mapped[0].id : null));
-    } else {
-      setProjects((prev) => prev.filter((p) => p.id && p.id.startsWith("draft-")));
+    }
+    } catch (error) {
+      // Un fallo de conexión no significa que los proyectos se hayan eliminado.
+      setProjectsError(error.message);
     }
   }, [token, mapBackendProject]);
 
@@ -299,6 +315,7 @@ export default function App() {
       setUser(null);
       setToken(null);
       setProjects([]);
+      setProjectsError("");
       setActiveProjectId(null);
       setView('dashboard');
       setSessionExpired(true);
@@ -424,31 +441,7 @@ export default function App() {
 
   const handleUpdateProject = (updatedProject) => {
     const targetId = updatedProject.backendId || updatedProject.id;
-    const normalizedProject = {
-      ...updatedProject,
-      id: targetId,
-      backendId: updatedProject.backendId || (targetId && targetId.length === 24 ? targetId : undefined)
-    };
-
-    setProjects((prev) => {
-      const index = prev.findIndex(
-        (p) =>
-          p.id === targetId ||
-          p.id === updatedProject.id ||
-          (normalizedProject.backendId && (p.backendId === normalizedProject.backendId || p.id === normalizedProject.backendId)) ||
-          (activeProjectId && (p.id === activeProjectId || p.backendId === activeProjectId))
-      );
-
-      if (index >= 0) {
-        const next = [...prev];
-        next[index] = {
-          ...next[index],
-          ...normalizedProject
-        };
-        return next;
-      }
-      return [normalizedProject, ...prev];
-    });
+    setProjects((prev) => upsertProject(prev, updatedProject, activeProjectId));
 
     if (targetId) {
       setActiveProjectId(targetId);
@@ -464,6 +457,12 @@ export default function App() {
     <div className="flex flex-col h-screen w-screen bg-[#f8fafd] text-slate-900 overflow-hidden font-sans select-text">
       {/* Overlay de carga global */}
       <LoadingOverlay visible={loadingOverlay.visible} message={loadingOverlay.message} />
+      {projectsError && view === "dashboard" && token && (
+        <div role="alert" className="bg-red-50 px-5 py-3 text-sm text-red-700">
+          {projectsError}
+          <button type="button" onClick={loadBackendProjects} className="ml-3 underline">Reintentar</button>
+        </div>
+      )}
       {view === "dashboard" && (
         <Header
           activeView={view}

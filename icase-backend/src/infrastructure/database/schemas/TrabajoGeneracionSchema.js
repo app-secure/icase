@@ -34,6 +34,7 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
   insumo_bruto: { type: String, default: '' },
   provider: { type: String, default: 'auto' },
   specific_model: { type: String, default: null },
+  regenerar: { type: Boolean, default: false },
   objetivo: { type: String, default: null },
   proveedor_usado: { type: String, default: null },
   advertencias: [String],

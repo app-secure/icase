@@ -59,6 +59,20 @@ class MarkdownCompilerService {
     md += `## 1. Título del Proyecto\n${proyecto.nombre}\n\n`;
     md += `**Estado del Proyecto:** ${proyecto.estado_fase?.replace(/_/g, ' ').toUpperCase() || 'ANALISIS APROBADO'}\n\n`;
     md += `**Fecha de Emisión:** ${fecha}\n\n`;
+    const analysis = proyecto.auditoria_requisitos;
+    if (analysis) {
+      md += `### Trazabilidad del análisis · versión ${analysis.version_analisis || 1}\n\n`;
+      const sections = require('../../core/services/RequirementAnalysisContext').contextOf(analysis);
+      for (const [name, entries] of Object.entries(sections)) {
+        if (entries.length) md += `**${name.replace(/_/g, ' ')}**\n\n${entries.map(item => `- ${item.id}: ${item.necesidad} (${item.estado})`).join('\n')}\n\n`;
+      }
+      md += `**Revisión semántica:** ${analysis.revision_semantica?.estado || 'no registrada'}. No certifica exhaustividad.\n\n`;
+      for (const finding of analysis.revision_semantica?.hallazgos || []) md += `- ${finding.id}: ${finding.descripcion} · ${finding.estado}\n`;
+      for (const req of requerimientos) {
+        if (req.evidencias?.length) md += `\n**Evidencias de ${req.identificador}:**\n${req.evidencias.map(item => `- ${item.fuente}, caracteres ${item.inicio}–${item.fin}: «${item.texto}»`).join('\n')}\n`;
+      }
+      md += '\n';
+    }
 
     // 2. Objetivos
     md += `## 2. Objetivos\n\n`;

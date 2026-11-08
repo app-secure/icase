@@ -38,6 +38,7 @@ nav:
       - Tiempo real e integraciones: desarrollo/contratos/tiempo-real-integraciones.md
       - Procesos de negocio: desarrollo/contratos/procesos-negocio.md
   - Pruebas:
+      - Evaluación de requisitos: pruebas/evaluacion-requisitos.md
       - Plan y ejecución: pruebas/plan-y-ejecucion.md
       - Resultados y pendientes: pruebas/resultados.md
   - Despliegue: despliegue/guia.md

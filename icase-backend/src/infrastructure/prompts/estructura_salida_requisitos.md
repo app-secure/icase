@@ -17,25 +17,33 @@ La forma requerida es:
   "palabras_clave": ["Concepto del dominio"],
   "requerimientos": [
     {
-      "tipo": "RF o RNF",
-      "identificador": "RF-01 o RNF-01",
+      "tipo": "RF",
+      "identificador": "RF-01",
       "nombre": "Nombre conciso",
       "descripcion": "Declaración normativa sustentada",
       "dependencias": "Ninguna o identificadores realmente relacionados",
-      "prioridad": "Alta, Media o Baja",
+      "prioridad": "Media",
       "actores": [],
       "precondiciones": "",
       "poscondiciones": "",
       "metrica_medible": "Solo para RNF: cifra literal del insumo o Por confirmar con el usuario",
-      "origen": "explicito o inferido",
+      "origen": "explicito",
       "evidencia": "Fragmento literal del insumo",
       "fuentes_origen": [],
+      "necesidades_origen": ["N-01"],
+      "criterios_aceptacion": [{ "descripcion": "Resultado observable sustentado por el insumo", "necesidades_origen": ["N-01"] }],
+      "reglas_relacionadas": [],
       "requiere_confirmacion": false,
-      "estado_decision": "confirmado, pendiente, rechazado o fuera_de_alcance",
+      "estado_decision": "confirmado",
       "restricciones_excluidas": []
     }
   ],
+  "auditoria_requisitos": { "decisiones": [], "preguntas_pendientes": [] },
   "diagramas": []
 }
 
 No agregues elementos solamente para completar el ejemplo. Si el insumo no sustenta ningún RNF, devuelve únicamente RF. Para un RNF cualitativo sin umbral, usa `Por confirmar con el usuario` sin proponer números.
+
+El ejemplo ilustra la forma, no valores obligatorios. tipo admite RF o RNF; origen admite explicito o inferido; prioridad admite Alta, Media o Baja; estado_decision admite confirmado, pendiente, rechazado o fuera_de_alcance. Escoge un único valor válido en cada campo, nunca una cadena con todas las alternativas.
+
+Varias necesidades del mismo objetivo pueden corresponder a un requisito; sus detalles se preservan como criterios de aceptación. No generes un requisito por frase ni cantidades prefijadas. Las restricciones técnicas, plataformas, reglas, contexto, exclusiones y preguntas se conservan en el análisis separado; no se fuerzan como RF/RNF. Un detalle pendiente no invalida el origen explícito de una necesidad confirmada.

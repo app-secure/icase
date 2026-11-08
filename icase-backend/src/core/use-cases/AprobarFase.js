@@ -1,5 +1,6 @@
 const { normalizeDiagramType, isValidDiagramType } = require('../constants/DiagramTypes');
 const { DiagramWorkflowService, DIAGRAM_STATES } = require('../services/DiagramWorkflowService');
+const RequirementApprovalService = require('../services/RequirementApprovalService');
 
 class AprobarFase {
   constructor({ proyectoRepository, requerimientoRepository, diagramaRepository, disenoRepository, plantumlValidatorService = null, mockupTraceabilityService = null }) {
@@ -21,9 +22,22 @@ class AprobarFase {
     let nuevoEstado = proyecto.estado_fase;
 
     if (fase === 'analisis') {
+      const reqs = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      const control = new RequirementApprovalService().evaluate(reqs, proyecto.auditoria_requisitos);
+      if (control.bloqueado) {
+        throw Object.assign(new Error(`No se puede aprobar el análisis: ${control.errores_criticos.map((item) => item.mensaje).join(' ')}`), {
+          code: 'REQUIREMENTS_COVERAGE_BLOCKED', controlRequisitos: control
+        });
+      }
       nuevoEstado = 'analisis_aprobado';
+      if (typeof this.proyectoRepository.actualizar === 'function') {
+        await this.proyectoRepository.actualizar(proyectoId, { auditoria_requisitos: { ...(proyecto.auditoria_requisitos || {}), control_aprobacion: control,
+          revision_actual: { fecha: new Date().toISOString(), errores: control.errores_criticos, advertencias: control.advertencias },
+          analisis_aprobado: { fecha: new Date().toISOString(), usuario_id: aprobadoPor, version: proyecto.auditoria_requisitos?.version_analisis || 1,
+            contexto: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos) }
+        } });
+      }
       if (aprobarTodosLosElementos) {
-        const reqs = await this.requerimientoRepository.listarPorProyecto(proyectoId);
         for (const r of reqs) {
           await this.requerimientoRepository.actualizar(r.id, { aprobado: true });
         }

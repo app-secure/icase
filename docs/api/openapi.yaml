@@ -996,13 +996,57 @@
         }
       }
     },
+    "/proyectos/{id}/revision-requisitos": {
+      "post": {
+        "tags": ["Proyectos"], "summary": "Recalcular revisión o registrar una decisión puntual",
+        "description": "Valida los requisitos guardados sin llamar a IA. Permite reclasificar elementos con evidencia existente o confirmar, resolver, descartar y aceptar hallazgos con justificación. Solo los críticos confirmados por el usuario bloquean el pase además de errores estructurales. Exige propiedad del proyecto. Las modificaciones no se permiten con requisitos aprobados; validar sí está permitido. Los cambios semánticos del contexto invalidan derivados, no las evidencias ni las decisiones de revisión por sí solas.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["accion"], "properties": {
+            "accion": { "type": "string", "enum": ["validar", "editar_analisis", "confirmar", "resolver", "descartar", "aceptar"] },
+            "id": { "type": "string" }, "justificacion": { "type": "string" },
+            "severidad": { "type": "string", "enum": ["advertencia", "critico"] },
+            "cambios": { "type": "object", "properties": { "tipo": { "type": "string" }, "necesidad": { "type": "string" }, "estado": { "type": "string" }, "objetivo_id": { "type": "string" } } }
+          }
+        } } } },
+        "responses": { "200": { "description": "Auditoría, control e historial actualizados" }, "400": { "description": "Decisión, evidencia o estructura inválida" }, "401": { "description": "Sesión requerida" }, "404": { "description": "Proyecto no accesible o elemento inexistente" }, "409": { "description": "Análisis aprobado" }, "500": { "description": "Error interno sanitizado" } }
+      }
+    },
+    "/proyectos/{id}/necesidades/{necesidadId}/resolver": {
+      "post": {
+        "tags": ["Proyectos"],
+        "summary": "Corregir evidencia o descartar justificadamente una necesidad pendiente",
+        "description": "Exige sesión y propiedad del proyecto. No permite modificar análisis con requisitos aprobados. Conserva historial y recalcula el control de aprobación. Corregir la evidencia no crea ni aprueba un requisito. Las ubicaciones se recalculan sobre los insumos procesados actuales.",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "necesidadId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": {
+          "type": "object", "required": ["accion", "justificacion"], "properties": {
+            "accion": { "type": "string", "enum": ["corregir_evidencia", "descartar"] },
+            "justificacion": { "type": "string" },
+            "evidencias": { "type": "array", "items": { "type": "object", "required": ["texto"], "properties": { "texto": { "type": "string" }, "fuente": { "type": "string" } } } }
+          }
+        } } } },
+        "responses": {
+          "200": { "description": "Auditoría actualizada con historial" },
+          "400": { "description": "Acción, justificación o evidencia inválida" },
+          "401": { "description": "Sesión requerida" },
+          "404": { "description": "Proyecto no accesible o necesidad inexistente" },
+          "409": { "description": "Análisis aprobado o identificador en conflicto" },
+          "500": { "description": "Error interno sanitizado" }
+        }
+      }
+    },
     "/proyectos/{id}/aprobar-fase": {
       "post": {
         "tags": [
           "Proyectos"
         ],
         "summary": "Aprobar fase o revisar diagrama",
-        "description": "Aprobar fase o revisar diagrama",
+        "description": "Aprobar fase o revisar diagrama. En análisis se recalcula la cobertura de los requisitos guardados. Un bloqueo comprobable devuelve 400 con codigo REQUIREMENTS_COVERAGE_BLOCKED y control_requisitos (bloqueado, errores_criticos, advertencias); no aprueba parcialmente los elementos. Las métricas pendientes no bloquean por sí solas.",
         "operationId": "post_proyectos_id_aprobar_fase",
         "security": [
           {
@@ -5171,6 +5215,11 @@
       "TrabajoDiagramaEntrada": {
         "type": "object",
         "properties": {
+          "regenerar": {
+            "type": "boolean",
+            "default": false,
+            "description": "Genera una nueva versión sin reutilizar la caché. Conserva validaciones, dependencias e historial; no duplica un trabajo activo."
+          },
           "tipo_diagrama": {
             "type": "string"
           },

@@ -7,6 +7,10 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "jest",
+    "test:requirements": "jest tests/requirement-coverage.test.js tests/requirement-analysis-contract.test.js tests/requirement-granularity.test.js tests/requirement-diagnostics.test.js tests/requirement-approval.test.js tests/ai-request-budget.test.js tests/multiple-evidence.test.js tests/pending-need-resolution.test.js tests/requirement-semantic-review.test.js tests/requirement-review-workflow.test.js tests/requirement-review-http.test.js tests/requirement-review-component.test.js tests/requirements-evaluation.test.js --runInBand",
+    "test:requirements:real": "node scripts/evaluate-requirements-real.cjs --run-real",
+    "test:requirements:browser": "node scripts/test-requirements-browser.cjs",
+    "test:browser:install": "node scripts/install-test-browser.cjs",
     "verify:nm": "node scripts/verify-associations-runtime.js",
     "audit:generated": "node scripts/audit-generated-backend.js",
     "test:e2e:real": "env RUN_REAL_AI_E2E=true jest tests/real-model-flow.e2e.test.js --runInBand",
@@ -33,6 +37,7 @@
     "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@seriousme/openapi-schema-validator": "^2.11.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

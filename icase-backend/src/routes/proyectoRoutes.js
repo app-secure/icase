@@ -20,6 +20,8 @@ function buildProyectoRoutes(proyectoController, access) {
   router.post('/:id/trabajos-diagramas', (req, res) => proyectoController.iniciarTrabajoDiagrama(req, res));
   router.get('/:id/trabajos-diagramas/ultimo', (req, res) => proyectoController.obtenerUltimoTrabajoDiagrama(req, res));
   router.post('/:id/aprobar-fase', (req, res) => proyectoController.aprobarFase(req, res));
+  router.post('/:id/necesidades/:necesidadId/resolver', (req, res) => proyectoController.resolverNecesidad(req, res));
+  router.post('/:id/revision-requisitos', (req, res) => proyectoController.revisarRequisitos(req, res));
   router.get('/:id/flujo-diagramas', (req, res) => proyectoController.obtenerFlujoDiagramas(req, res));
   router.get('/:id/exportar-markdown', (req, res) => proyectoController.exportarMarkdown(req, res));
   router.get('/:id/documento-consolidado', (req, res) => proyectoController.documentoConsolidado(req, res));

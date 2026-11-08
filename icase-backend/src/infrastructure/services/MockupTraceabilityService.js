@@ -262,7 +262,7 @@ class MockupTraceabilityService {
       .map((requirement) => requirementId(requirement) || requirement.nombre);
     if (uncoveredHigh.length) {
       const message = `No existe evidencia visible en mockups para RF de prioridad alta: ${uncoveredHigh.join(', ')}.`;
-      errors.push(message);
+      warnings.push(message);
     }
 
     const requirementDetails = functional.map((requirement) => {
@@ -284,8 +284,9 @@ class MockupTraceabilityService {
       if (tracedMockups.length && missing.length) {
         const labels = { roles: 'roles', fields: 'campos de entrada', actions: 'acciones', states: 'estados' };
         const message = `${id || requirement.nombre} no representa: ${missing.map((kind) => labels[kind]).join(', ')}.`;
-        if (isHighPriority(requirement)) errors.push(message);
-        else warnings.push(message);
+        // La detección general por palabras/etiquetas no acredita una omisión.
+        // Los criterios explícitos y controles estructurales se validan aparte.
+        warnings.push(message);
       }
       return {
         requisito: id || requirement.nombre,

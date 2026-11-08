@@ -18,7 +18,7 @@ class BusinessRuleInferenceService {
     this.extractor = extractor;
   }
 
-  async inferir({ requerimientos = [], diagramas = [], retroalimentacion = '' }) {
+  async inferir({ requerimientos = [], diagramas = [], retroalimentacion = '', analisis = null }) {
     const rf = requerimientos.filter((item) => item.aprobado && item.tipo === 'RF');
     const modelo = this.extractor.fromDiagrams(diagramas);
     if (!modelo || !modelo.entities.length) {
@@ -29,14 +29,14 @@ class BusinessRuleInferenceService {
       return { reglas: [], advertencias: ['El servicio de IA no está configurado; las reglas deben redactarse manualmente.'] };
     }
 
-    const respuesta = await this.modelosIa.generarJson(this.construirPrompt({ rf, modelo, retroalimentacion }));
+    const respuesta = await this.modelosIa.generarJson(this.construirPrompt({ rf, modelo, retroalimentacion, analisis }));
     if (!respuesta) {
       return { reglas: [], advertencias: ['Ningún modelo de IA devolvió una respuesta; las reglas deben redactarse manualmente.'] };
     }
     return this.depurar(respuesta.reglas, { modelo, rf });
   }
 
-  construirPrompt({ rf, modelo, retroalimentacion }) {
+  construirPrompt({ rf, modelo, retroalimentacion, analisis }) {
     const requisitos = rf.map((item) => [
       `- [${item.identificador}] ${item.nombre}`,
       item.descripcion ? `  Declaración: ${item.descripcion}` : '',
@@ -54,6 +54,7 @@ class BusinessRuleInferenceService {
       fs.readFileSync(PROMPT, 'utf8'),
       `# MODELO DE DOMINIO APROBADO\n${entidades}`,
       `# REQUISITOS FUNCIONALES APROBADOS\n${requisitos}`,
+      analisis ? `# REGLAS, RESTRICCIONES, EXCLUSIONES Y PREGUNTAS DEL ANÁLISIS\n${JSON.stringify(analisis)}\nRespeta estados y exclusiones. No conviertas preguntas pendientes en reglas confirmadas ni inventes fórmulas.` : '',
       retroalimentacion ? `# OBSERVACIONES DE LA REVISIÓN ANTERIOR\n${retroalimentacion}` : ''
     ].filter(Boolean).join('\n\n');
   }
