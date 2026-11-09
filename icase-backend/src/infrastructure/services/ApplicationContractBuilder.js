@@ -20,8 +20,15 @@ const tokens = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/
 // "OrdenCompra" -> ["orden", "compra"]
 const entityTokens = (name) => tokens(String(name).replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
 
+const ALL_METHODS = ['GET', 'POST', 'PATCH', 'DELETE'];
+const VERB_METHOD = { consultar: 'GET', crear: 'POST', editar: 'PATCH', eliminar: 'DELETE' };
+
 class ApplicationContractBuilder {
-  build({ proyecto, requerimientos = [], screens = [], domainModel = null, rules = [] }) {
+  /**
+   * `verbosPorRf` ({ 'RF-01': ['consultar', 'crear'] }) son los verbos válidos que declaran los mockups para cada RF.
+   * Sin ellos, o para un RF que no aparece, la operación mantiene el CRUD completo.
+   */
+  build({ proyecto, requerimientos = [], screens = [], domainModel = null, rules = [], verbosPorRf = null }) {
     const approved = requerimientos.filter((item) => item.aprobado === true && item.tipo === 'RF');
     const entities = domainModel?.entities || [];
     const warnings = [];
@@ -39,7 +46,7 @@ class ApplicationContractBuilder {
         actors: Array.isArray(item.actores) ? item.actores : [],
         collectionPath: `/api/operations/${key}`,
         itemPath: `/api/operations/${key}/:id`,
-        methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+        methods: this._methods(id, verbosPorRf),
         entity: match?.primary.key || null,
         relatedEntities: match?.related.map((entity) => entity.key) || [],
         rules: match ? rules.filter((rule) => rule.entidad === match.primary.name) : [],
@@ -50,6 +57,14 @@ class ApplicationContractBuilder {
     // Las relaciones del modelo aprobado se conservan tal cual: si un extremo no tiene RF propio,
     // el generador del backend le crea una operación de soporte en lugar de cambiar el significado de la relación.
     const relations = domainModel?.relations || [];
+    // Siguen con CRUD completo los extremos de una N:M (vinculan con GET y PATCH) y las entidades padre de otra
+    // (las pruebas y los vínculos las crean y las borran).
+    const keyOf = new Map(entities.map((entity) => [entity.name, entity.key]));
+    const fullCrud = new Set([
+      ...relations.filter((rel) => rel.cardinalidad === 'muchos_a_muchos').flatMap((rel) => [rel.from, rel.to]),
+      ...entities.flatMap((entity) => (entity.references || []).map((reference) => reference.entity))
+    ].map((name) => keyOf.get(name)).filter(Boolean));
+    for (const operation of operations) if (fullCrud.has(operation.entity)) operation.methods = [...ALL_METHODS];
     const byRequirement = new Map(operations.map((item) => [item.id, item]));
     const views = screens.map((screen) => {
       const rf = screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || [];
@@ -75,6 +90,13 @@ class ApplicationContractBuilder {
       warnings,
       health: '/health'
     };
+  }
+
+  /** GET más los métodos de los verbos válidos declarados, en orden canónico; sin verbos, CRUD completo. */
+  _methods(id, verbosPorRf) {
+    const wanted = (verbosPorRf?.[String(id).toUpperCase()] || []).map((verb) => VERB_METHOD[verb]).filter(Boolean);
+    if (!wanted.length) return [...ALL_METHODS];
+    return ALL_METHODS.filter((method) => method === 'GET' || wanted.includes(method));
   }
 
   /** Asocia un RF a la entidad cuyo nombre aparece primero y con más peso en su nombre o descripción. */

@@ -16,12 +16,19 @@ const slug = (value) => String(value || 'project').normalize('NFD').replace(/[̀
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
 
 class GenericBackendGenerator {
-  generate({ proyecto, requirements, stack, domainModel = null, rules = [], access = null, modules = null }) {
+  /** Archivos, pagos de prueba y procesos usan PATCH sobre las operaciones: con ellos activos no se estrechan los métodos. */
+  _moduleNeedsFullCrud(modules) {
+    const active = new (require('../../core/services/ModuleService'))().activos(modules);
+    return ['archivos_imagenes', 'pagos_prueba', 'procesos_negocio'].some((id) => active.includes(id));
+  }
+
+  generate({ proyecto, requirements, stack, domainModel = null, rules = [], access = null, modules = null, verbosPorRf = null }) {
     if(modules?.modo==='personalizado'&&modules.modulos?.some(item=>item.id==='procesos_negocio'&&item.activo)){
       const result=new (require('../../core/services/ModuleService'))().validar(modules);
       if(result.errores.length)throw new Error('Procesos de negocio: '+result.errores.join(' '));
     }
-    const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules });
+    const verbs = verbosPorRf && !this._moduleNeedsFullCrud(modules) ? verbosPorRf : null;
+    const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules, verbosPorRf: verbs });
     this._ensureAssociationOperations(contract, rules);
     const policy = new AccessControlService().politica(access, contract.operations);
     this._syncSupportPermissions(contract, policy);

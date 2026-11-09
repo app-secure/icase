@@ -164,26 +164,43 @@ class GestionarArtefactosCodigo {
       .map((item) => [item.etapa, item.version || 1]));
     if (diagramaDominio) versionesOrigen.clases_dominio = diagramaDominio.version || 1;
     const dominio = diagramaDominio ? { version: diagramaDominio.version || 1, codigo: diagramaDominio.codigo_plantuml } : undefined;
-    return { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio };
+    const verbosPorRf = await this._verbosPorRf(proyecto, proyectoId);
+    return { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio, verbosPorRf };
+  }
+
+  /**
+   * Verbos válidos que declaran los mockups aprobados para cada RF ({ 'RF-01': ['consultar'] }); determinan los métodos de
+   * su operación. Sin mockups aprobados, sin repositorio de diseño o sin enlaces válidos el resultado es vacío: CRUD completo.
+   */
+  async _verbosPorRf(proyecto, proyectoId) {
+    if (!this.disenoRepository || !['mockups_aprobados', 'diseno_aprobado', 'finalizado'].includes(proyecto.estado_fase)) return {};
+    const diseno = await this.disenoRepository.obtenerPorProyecto(proyectoId);
+    const verbs = {};
+    for (const link of (diseno?.mockups || []).flatMap((item) => item.enlaces || [])) {
+      if (link.estado !== 'valido' || !link.rf || !link.verbo) continue;
+      const key = String(link.rf).toUpperCase();
+      verbs[key] = [...new Set([...(verbs[key] || []), link.verbo])];
+    }
+    return Object.fromEntries(Object.keys(verbs).sort().map((key) => [key, verbs[key].sort()]));
   }
 
   /** Qué se generaría de cada requisito, sin guardar nada. Falla igual que la generación si algo no es coherente. */
   async informeGeneracion(proyectoId) {
-    const { proyecto, requerimientos, diagramaDominio, decisiones, versionesOrigen } = await this._insumosBackend(proyectoId);
-    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio }, versionesOrigen });
+    const { proyecto, requerimientos, diagramaDominio, decisiones, versionesOrigen, verbosPorRf } = await this._insumosBackend(proyectoId);
+    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio, verbosPorRf }, versionesOrigen });
     const informe = generado.archivos.find((item) => item.ruta === 'backend/GENERATION-REPORT.json');
     if (!informe) throw new Error('El generador de backend no produjo un informe de generación.');
     return JSON.parse(informe.contenido);
   }
 
   async generarBackend(proyectoId) {
-    const { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio } = await this._insumosBackend(proyectoId);
+    const { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio, verbosPorRf } = await this._insumosBackend(proyectoId);
     const semanticRequirements = new (require('../services/RequirementChangeService'))({}).normalize(requerimientos.filter(item => item.aprobado));
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'capacidades-v17-nm-endpoints', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, requerimientos: semanticRequirements, dominio })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'capacidades-v17-nm-endpoints', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, requerimientos: semanticRequirements, dominio, ...(Object.keys(verbosPorRf).length ? { verbos: verbosPorRf } : {}) })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
 
-    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio, backendAnterior: ultimo?.aprobado ? ultimo : null }, versionesOrigen });
+    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio, verbosPorRf, backendAnterior: ultimo?.aprobado ? ultimo : null }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({
       proyecto_id: proyectoId, tipo: 'codigo_backend', version: (ultimo?.version || 0) + 1,
       estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, ...generado

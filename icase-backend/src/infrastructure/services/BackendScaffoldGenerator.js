@@ -13,7 +13,7 @@ const slug = (value) => String(value || '')
 
 class BackendScaffoldGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
-    const { decisiones, requerimientos, diagramaDominio } = insumos;
+    const { decisiones, requerimientos, diagramaDominio, verbosPorRf = null } = insumos;
     const stack = decisiones.stack_tecnologico || {};
     const arquitectura = decisiones.arquitectura_codigo || {};
     const rf = requerimientos.filter((item) => item.aprobado && item.tipo === 'RF');
@@ -21,7 +21,7 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
     const { reglas, descartadas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf);
     const access = this._acceso(decisiones.control_acceso, rf);
-    const fresh = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos });
+    const fresh = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos, verbosPorRf });
     const generados = new (require('./IncrementalMigrationGenerator'))().apply(fresh,insumos.backendAnterior);
     const informe = this._informe({ proyecto, insumos, decisiones, archivos: generados });
     const archivos = [
@@ -42,12 +42,22 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
         access?.autenticacion?.metodo === 'jwt'
           ? `Autenticación JWT con ${access.roles.filter((rol) => rol.incluir).length} roles de negocio más el administrador; define JWT_SECRET, ADMIN_EMAIL y ADMIN_PASSWORD antes de producción.`
           : 'La API se generó SIN autenticación, por decisión aprobada en la etapa de control de acceso.',
+        ...this._operacionesReducidas(archivos),
         `Reglas de negocio aplicadas: ${reglas.length}${descartadas ? `; ${descartadas} rechazadas por el usuario no se generaron` : ''}.`,
         `Informe de generación: ${informe.resumen.completo} con CRUD tipado, ${informe.resumen.solo_datos} solo con datos y ${informe.resumen.no_soportado} no soportados (ver backend/GENERATION-REPORT.md).`
       ],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_backend_generico_v2'
     };
+  }
+
+  /** Avisa qué operaciones quedaron sin el CRUD completo porque los mockups aprobados solo declaran algunos verbos. */
+  _operacionesReducidas(archivos) {
+    const manifest = JSON.parse(archivos.find((item) => item.ruta === 'backend/icase.manifest.json').contenido);
+    const reducidas = (manifest.operations || []).filter((item) => !item.support && Array.isArray(item.methods) && item.methods.length < 4);
+    return reducidas.length
+      ? [`Operaciones con métodos reducidos por los enlaces de los mockups aprobados: ${reducidas.map((item) => `${item.id} (${item.methods.join(', ')})`).join('; ')}. Regenera los mockups si falta alguna acción.`]
+      : [];
   }
 
   /** Qué se generó de cada RF; sale del contrato que ya viaja en el manifiesto, sin volver a derivarlo. */
