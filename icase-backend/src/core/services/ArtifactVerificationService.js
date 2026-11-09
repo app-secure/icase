@@ -65,7 +65,8 @@ class ArtifactVerificationService {
         if (pages.some(([, content]) => /dangerouslySetInnerHTML/.test(content))) {
           errores.push('Las pantallas solo incrustan HTML de mockups; no son componentes interactivos conectados al backend.');
         }
-        if (![...files].some(([path, content]) => /^frontend\/src\//.test(path) && /\bfetch\s*\(|\baxios\b|useMutation|useQuery/.test(content))) {
+        // El archivo de sesión siempre contiene un fetch (login): no prueba que ninguna pantalla consuma la API.
+        if (![...files].some(([path, content]) => /^frontend\/src\//.test(path) && path !== 'frontend/src/session.jsx' && /\bapi\s*\(|\bfetch\s*\(|\baxios\b|useMutation|useQuery/.test(content))) {
           errores.push('Ninguna pantalla consume una API del backend.');
         }
         try {
@@ -73,6 +74,24 @@ class ArtifactVerificationService {
           const isAuthScreen = (item) => /inicio.*sesion|login|autentic/i.test(item.id || item.name || item.nombre || item.route || '');
           const disconnected = (manifest.pantallas || []).filter((screen) => !(screen.operations || []).length && !isAuthScreen(screen));
           if (disconnected.length) errores.push(`Hay pantallas sin operaciones RF conectadas: ${disconnected.map((item) => item.name || item.nombre || item.id).join(', ')}.`);
+          // Enlaces de la vista diseñada: las inconsistencias son un error; lo que quedó sin conectar, un aviso por pantalla.
+          for (const screen of manifest.pantallas || []) {
+            const links = screen.enlaces;
+            if (!links) continue;
+            const label = screen.name || screen.nombre || screen.id;
+            if (links.cableados > 0 && !(files.get(`frontend/src/pages/${screen.id}.jsx`) || '').includes('handleAction(')) {
+              errores.push(`La pantalla «${label}» declara enlaces cableados, pero su página no los ejecuta.`);
+            }
+            const unlinked = links.sin_enlace_total ?? (links.sin_enlace || []).length;
+            const names = (links.sin_enlace || []).slice(0, 5).join(', ');
+            const unlinkedText = `${unlinked} control${unlinked === 1 ? '' : 'es'} sin enlace${names ? ` (${names})` : ''}`;
+            if (!links.cableados && (unlinked || links.invalidos)) {
+              advertencias.push(`La vista diseñada de «${label}» no ejecuta ninguna acción del backend${unlinked ? `: ${unlinkedText}` : ''}.`);
+            } else if (links.cableados && unlinked) {
+              advertencias.push(`La vista diseñada de «${label}» tiene ${unlinkedText}.`);
+            }
+            if (links.invalidos) advertencias.push(`La vista diseñada de «${label}» tiene ${links.invalidos} enlace${links.invalidos === 1 ? '' : 's'} inválido${links.invalidos === 1 ? '' : 's'}.`);
+          }
           if ((manifest.plataformas_solicitadas || []).some((item) => /m[oó]vil|android|ios|react native/i.test(item)) && !files.has('mobile/package.json')) {
             errores.push('El alcance aprobado incluye una aplicación móvil, pero no se generó un proyecto React Native.');
           }

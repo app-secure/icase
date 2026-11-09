@@ -6,6 +6,7 @@ const ModuleService = require('../../core/services/ModuleService');
 const MobileRuntime = require('../../core/constants/MobileRuntime');
 
 const HtmlToJsxTransformer = require('./HtmlToJsxTransformer');
+const MockupBindingValidator = require('./MockupBindingValidator');
 
 const TEMPLATES = path.join(__dirname, '..', 'templates', 'frontend');
 const template = (name) => fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
@@ -58,6 +59,7 @@ class GenericFrontendGenerator {
     const routeSet = new Set(views.map((view) => view.route));
     const standalone = []; // rutas cuyo mockup trae su propio menú
     const tailwindConfigs = [];
+    const linkSummaries = new Map(); // resumen de enlaces de cada pantalla con mockup, para el manifiesto
     for (const view of views) {
       if (auth && (view.route === '/usuarios' || view.id === 'usuarios' || view.name?.toLowerCase() === 'usuarios')) continue;
       const name = component(view.id);
@@ -78,6 +80,18 @@ class GenericFrontendGenerator {
       const bodyClass = analysis ? analysis.bodyClassName.replace(/[^\w\s:/.\-[\]%#,()!@=]/g, '').replace(/\s+/g, ' ').trim() : '';
       const bodyStyle = analysis && Object.keys(analysis.bodyStyle).length ? analysis.bodyStyle : null;
       if (css.trim()) files.push({ ruta: `frontend/src/pages/${view.id}.css`, lenguaje: 'css', contenido: `${css}\n` });
+      if (analysis) {
+        const check = new MockupBindingValidator().validar({ html: mockupCode, requerimientos });
+        const unlinked = check.advertencias.filter((item) => item.startsWith('sin enlace: ')).map((item) => item.slice('sin enlace: '.length));
+        const count = (state) => check.enlaces.filter((item) => item.estado === state).length;
+        linkSummaries.set(view.id, {
+          validos: count('valido'), invalidos: count('invalido'), ui: count('ui'),
+          sin_enlace: unlinked.slice(0, 10), sin_enlace_total: unlinked.length,
+          cableados: (jsxBody.match(/handleAction\(/g) || []).length,
+          acciones: check.enlaces.filter((item) => item.estado === 'valido' && allowedOperations.has(item.rf.toLowerCase()))
+            .slice(0, 20).map((item) => ({ operacion: item.rf.toLowerCase(), verbo: item.verbo, control: item.control }))
+        });
+      }
 
       files.push({
         ruta: `frontend/src/pages/${view.id}.jsx`,
@@ -91,6 +105,12 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/mockupActions.js', lenguaje: 'javascript', contenido: template('mockup-actions.js') },
         { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') }
       );
+    }
+    if (linkSummaries.size) {
+      const manifestFile = files.find((file) => file.ruta === 'frontend/icase.manifest.json');
+      const manifest = JSON.parse(manifestFile.contenido);
+      manifest.pantallas = manifest.pantallas.map((screen) => (linkSummaries.has(screen.id) ? { ...screen, enlaces: linkSummaries.get(screen.id) } : screen));
+      manifestFile.contenido = JSON.stringify(manifest, null, 2);
     }
     const tailwind = this._tailwindConfig(tailwindConfigs, colors);
     if (tailwind) {
