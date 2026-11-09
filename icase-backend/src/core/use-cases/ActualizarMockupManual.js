@@ -1,9 +1,24 @@
 const MockupValidatorService = require('../../infrastructure/services/MockupValidatorService');
+const MockupBindingService = require('../../infrastructure/services/MockupBindingService');
 
 class ActualizarMockupManual {
-  constructor({ disenoRepository }) {
+  /** Con `requerimientoRepository` y `diagramaRepository` también valida los enlaces del HTML editado; sin ellos los deja como estaban. */
+  constructor({ disenoRepository, requerimientoRepository = null, diagramaRepository = null }) {
     this.disenoRepository = disenoRepository;
+    this.requerimientoRepository = requerimientoRepository;
+    this.diagramaRepository = diagramaRepository;
     this.validator = new MockupValidatorService();
+    this.bindingService = new MockupBindingService();
+  }
+
+  async _enlaces(proyectoId, html) {
+    if (!this.requerimientoRepository?.listarPorProyecto || !this.diagramaRepository?.listarPorProyecto) return null;
+    const [requerimientos, diagramas] = await Promise.all([
+      this.requerimientoRepository.listarPorProyecto(proyectoId),
+      this.diagramaRepository.listarPorProyecto(proyectoId)
+    ]);
+    const contrato = this.bindingService.contrato({ requerimientos, diagramas });
+    return this.bindingService.evaluar({ html, requerimientos, contrato });
   }
 
   async ejecutar({ proyectoId, nombrePantalla, previewCode }) {
@@ -30,15 +45,18 @@ class ActualizarMockupManual {
     }
 
     const mockupActual = mockups[index];
+    const enlazado = await this._enlaces(proyectoId, validacion.html);
+    const advertencias = [...new Set([...calidad.advertencias, ...(enlazado?.advertencias || [])])];
     const mockupActualizado = {
       ...mockupActual,
       preview_code: validacion.html,
       estado: 'editado',
       version: (mockupActual.version || 0) + 1,
       ajustes_sanitizacion: [...new Set(validacion.advertencias)],
-      advertencias_validacion: [...new Set(calidad.advertencias)],
+      advertencias_validacion: advertencias,
       errores_validacion: [],
-      estado_calidad: calidad.estado
+      estado_calidad: calidad.estado === 'valido' && advertencias.length ? 'advertencia' : calidad.estado,
+      ...(enlazado ? { enlaces: enlazado.enlaces } : {})
     };
 
     mockups[index] = mockupActualizado;

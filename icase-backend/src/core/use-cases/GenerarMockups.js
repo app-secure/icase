@@ -1,6 +1,7 @@
 const MockupValidatorService = require('../../infrastructure/services/MockupValidatorService');
 const MockupTraceabilityService = require('../../infrastructure/services/MockupTraceabilityService');
 const MockupRepairService = require('../../infrastructure/services/MockupRepairService');
+const MockupBindingService = require('../../infrastructure/services/MockupBindingService');
 
 class GenerarMockups {
   constructor({
@@ -17,6 +18,7 @@ class GenerarMockups {
     this.mockupIaService = mockupIaService;
     this.validator = new MockupValidatorService();
     this.traceabilityService = new MockupTraceabilityService();
+    this.bindingService = new MockupBindingService();
     this.repairService = new MockupRepairService({ validator: this.validator, traceability: this.traceabilityService });
   }
 
@@ -199,10 +201,12 @@ class GenerarMockups {
     }
 
     const manifiestoPorSlug = new Map(pantallasArbol.map(p => [p.slug, p]));
+    const contratoEnlaces = this.bindingService.contrato({ proyecto, requerimientos, diagramas });
     const mockupsSanitizados = [...unicosPorNombre.values()].map(mockup => {
       const sanitizado = this.validator.sanitizar(mockup.preview_code);
       const htmlConSistemaDiseno = this.validator.aplicarSistemaDiseno(sanitizado.html, sistemaDiseno);
       const validacion = this.validator.validar(htmlConSistemaDiseno);
+      const enlazado = this.bindingService.evaluar({ html: htmlConSistemaDiseno, requerimientos, contrato: contratoEnlaces });
       const pantalla = manifiestoPorSlug.get(mockup.nombre_pantalla);
       const rfTrazabilidad = this.traceabilityService.enrichMockup(mockup, pantalla, requerimientos);
       const erroresTrazabilidad = pantalla
@@ -217,7 +221,7 @@ class GenerarMockups {
       // Los elementos que el sanitizador ya eliminó son ajustes informativos,
       // no problemas que sigan presentes en el mockup final.
       const ajustesSanitizacion = [...new Set(sanitizado.advertencias)];
-      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad])];
+      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias])];
       return {
         ...mockup,
         pantalla_id: pantalla?.pantalla_id || mockup.nombre_pantalla,
@@ -229,6 +233,7 @@ class GenerarMockups {
         roles: pantalla?.roles || ['Usuario'],
         shell: pantalla?.shell || 'web-general',
         rf_trazabilidad: rfTrazabilidad,
+        enlaces: enlazado.enlaces,
         preview_code: htmlConSistemaDiseno,
         ajustes_sanitizacion: ajustesSanitizacion,
         advertencias_validacion: advertenciasValidacion,

@@ -176,7 +176,9 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     mockupIaService
   });
   const actualizarMockupManualUseCase = new ActualizarMockupManual({
-    disenoRepository: disenoRepo
+    disenoRepository: disenoRepo,
+    requerimientoRepository: requerimientoRepo,
+    diagramaRepository: diagramaRepo
   });
   const gestionarPlanCodificacion = new GestionarPlanCodificacion({
     proyectoRepository: proyectoRepo,

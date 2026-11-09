@@ -39,6 +39,22 @@ const DisenoSchema = new mongoose.Schema({
     }],
     acciones_principales: [String],
     rf_trazabilidad: [String],
+    // Enlaces control -> operación declarados con data-accion y comprobados por MockupBindingValidator.
+    // `default: undefined` evita que los mockups antiguos ganen un `enlaces: []` al leerlos,
+    // lo que cambiaría la huella de reutilización del frontend.
+    enlaces: {
+      type: [{
+        _id: false,
+        control: String,
+        rf: String,
+        verbo: String,
+        estado: { type: String, enum: ['valido', 'invalido', 'ui'] },
+        motivo: String,
+        campos: [String],
+        campos_desconocidos: [String]
+      }],
+      default: undefined
+    },
     preview_code: { type: String, default: '' },
     imagen_url: String,
     estado: { type: String, enum: ['generado', 'editado', 'aprobado'], default: 'generado' },
