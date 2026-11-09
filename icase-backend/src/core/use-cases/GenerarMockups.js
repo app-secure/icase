@@ -348,6 +348,12 @@ class GenerarMockups {
       ? this._construirBloquePantallas(pantallas)
       : `No se pudo derivar el listado de pantallas del Árbol de Navegación. En este caso, deriva las pantallas de los Requerimientos Funcionales de prioridad Alta, empezando por las de acceso y el panel principal.`;
 
+    const operacionesEnlaces = this.bindingService.describirOperaciones({
+      requerimientos,
+      contrato: this.bindingService.contrato({ proyecto, requerimientos, diagramas }),
+      max: GenerarMockups.MAX_RF_CONTEXTO
+    }) || 'Sin operaciones disponibles: marca los controles solo visuales con data-accion="ui" y no inventes enlaces.';
+
     const diseno = this._normalizarSistemaDiseno(sistemaDiseno);
     return `SISTEMA / PROYECTO: "${proyecto.nombre || 'Sistema de Información'}"
 DESCRIPCIÓN DEL NEGOCIO: ${this._limitarTexto(proyecto.descripcion || 'Sin descripción', 500)}
@@ -363,6 +369,9 @@ SISTEMA VISUAL OBLIGATORIO (idéntico en todas las pantallas):
 
 ÁRBOL DE NAVEGACIÓN (FUENTE PRINCIPAL DE LOS MOCKUPS):
 ${bloquePantallas}
+
+OPERACIONES DISPONIBLES PARA data-accion (verbos: consultar, crear, editar, eliminar; usa solo estos RF y estos nombres de campo en \`name\`):
+${operacionesEnlaces}
 
 REQUERIMIENTOS FUNCIONALES (ISO/IEC/IEEE 29148:2018):
 ${rfList || 'Sin requerimientos funcionales'}

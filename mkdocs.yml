@@ -33,6 +33,7 @@ nav:
       - Instalación: desarrollo/instalacion.md
       - Arquitectura: desarrollo/arquitectura.md
       - Contrato de diagramas: desarrollo/contratos/diagram-generation-contract.md
+      - Contrato de enlaces de mockups: desarrollo/contratos/mockup-binding-contract.md
       - Contrato de codificación: desarrollo/contratos/code-generation-contract.md
       - Módulos y actualización segura: desarrollo/contratos/modulos-y-actualizacion.md
       - Tiempo real e integraciones: desarrollo/contratos/tiempo-real-integraciones.md

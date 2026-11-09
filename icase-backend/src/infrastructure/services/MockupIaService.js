@@ -277,6 +277,7 @@ class MockupIaService {
     const cabecera = [
       'Diseña mockups HTML5 + Tailwind CSS completos y autocontenidos.',
       'Devuelve SOLO JSON estricto: {"mockups":[{"nombre_pantalla":"slug","tipo":"...","descripcion":"...","rf_trazabilidad":["RF-01"],"preview_code":"<!DOCTYPE html><html lang=\\"es\\">...</html>"}]}',
+      'Botones/formularios que ejecutan un RF llevan data-accion="RF-xx.verbo" (consultar|crear|editar|eliminar) con las OPERACIONES DISPONIBLES y name de campo del backend; los solo visuales, data-accion="ui".',
       pantallas.length ? `PANTALLAS A GENERAR (exactamente este nombre_pantalla): ${pantallas.join(', ')}` : ''
     ].filter(Boolean).join('\n');
     const instruccion = insumoAdicional ? `\nINSTRUCCIÓN DEL USUARIO:\n${String(insumoAdicional).slice(0, Math.floor(maxChars * 0.55))}` : '';

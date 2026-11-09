@@ -29,6 +29,12 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
    - Cada mockup debe incluir los enlaces de navegación hacia sus pantallas hermanas y su pantalla padre, respetando el árbol.
    - Si el listado marca "componentes que DEBEN aparecer dentro de esta misma pantalla", esos elementos (botones, campos, indicadores, teclados, displays, etc.) son PARTE de esa pantalla: dibújalos dentro de su propio mockup, nunca como pantallas independientes.
 
+2b. **ENLACES CON EL BACKEND (`data-accion`)**:
+   - Todo botón o formulario que ejecuta un RF lleva `data-accion="RF-xx.verbo"` con un RF del bloque OPERACIONES DISPONIBLES y un verbo `consultar`, `crear`, `editar` o `eliminar`.
+   - Los campos de ese formulario usan en `name` los nombres indicados en el bloque OPERACIONES DISPONIBLES para ese RF.
+   - Un control solo visual (cancelar, cerrar, abrir menú, cambiar pestaña) lleva `data-accion="ui"`.
+   - No inventes RF, verbos ni campos. No uses `onclick` ni scripts: el enlace es solo el atributo.
+
 3. **SISTEMA DE DISEÑO OBLIGATORIO (todas las pantallas del proyecto comparten el mismo lenguaje visual)**:
 
    3.1 **Shell de la aplicación (idéntico en todas las pantallas, salvo Login y Recoverer Contraseña, que son centradas)**:
@@ -172,11 +178,11 @@ Este esqueleto define el shell y los tokens que TODAS las pantallas deben compar
             placeholder="[Placeholder real]" value="[Valor de ejemplo del dominio]">
         </div>
         <div class="flex gap-3 pt-2">
-          <button type="submit"
+          <button type="submit" data-accion="RF-xx.crear"
             class="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-colors">
             [Acción principal del RF]
           </button>
-          <button type="button"
+          <button type="button" data-accion="ui"
             class="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
             Cancelar
           </button>
@@ -197,6 +203,7 @@ Este esqueleto define el shell y los tokens que TODAS las pantallas deben compar
 - [ ] Cero pantallas inventadas fuera del listado del Árbol de Navegación
 - [ ] Los "componentes que DEBEN aparecer" están dibujados dentro de su pantalla, no como pantallas aparte
 - [ ] Cada pantalla refleja los campos y validaciones de los RF y del Diagrama de Clases asociados a esa pantalla
+- [ ] Cada botón o formulario que ejecuta un RF lleva `data-accion="RF-xx.verbo"`, los solo visuales llevan `data-accion="ui"` y los `name` coinciden con OPERACIONES DISPONIBLES
 - [ ] El número de mockups generados coincide exactamente con el número de pantallas del listado, empezando por acceso y panel principal
 - [ ] Todas las pantallas comparten el mismo shell: barra lateral con la navegación del árbol, topbar con breadcrumb y encabezado con título, descripción y acciones
 - [ ] La pantalla actual aparece resaltada en la barra lateral

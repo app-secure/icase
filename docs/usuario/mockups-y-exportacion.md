@@ -21,6 +21,8 @@ Ejemplo: «En Registrar préstamo, RF-02 requiere ejemplar, lector y fecha de de
 
 El mockup es una propuesta visual. Un botón en HTML no demuestra que exista una operación real de backend, y un contraste aprobado no certifica toda la accesibilidad.
 
+Los botones y formularios pueden declarar la operación que ejecutan (`data-accion="RF-03.crear"`). En los detalles de cada pantalla aparecen avisos como «sin enlace: Confirmar reserva» o «enlace inválido». No impiden aprobar el mockup; indican qué controles quedaron sin conectar. Detalle en el [contrato de enlaces](../desarrollo/contratos/mockup-binding-contract.md).
+
 ## Versiones y fallos
 
 **Reparar pendientes** revisa los mockups existentes y solicita a la IA corregir solo HTML inválido o criterios UI omitidos. Hace un intento por pantalla y como máximo cinco pantallas por trabajo; no repara automáticamente vínculos o roles ambiguos. Las ediciones manuales se protegen de la selección automática.

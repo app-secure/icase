@@ -5401,6 +5401,55 @@
               "type": "string"
             }
           },
+          "enlaces": {
+            "type": "array",
+            "description": "Enlaces control-operación declarados con data-accion y comprobados por el validador. Ausente en mockups anteriores al contrato.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "control": {
+                  "type": "string"
+                },
+                "rf": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "verbo": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    "consultar",
+                    "crear",
+                    "editar",
+                    "eliminar"
+                  ]
+                },
+                "estado": {
+                  "type": "string",
+                  "enum": [
+                    "valido",
+                    "invalido",
+                    "ui"
+                  ]
+                },
+                "motivo": {
+                  "type": "string"
+                },
+                "campos": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "campos_desconocidos": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
           "estado_calidad": {
             "type": "string"
           }

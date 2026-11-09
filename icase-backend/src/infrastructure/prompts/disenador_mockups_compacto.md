@@ -14,6 +14,7 @@ Genera exclusivamente las pantallas solicitadas usando el contexto entregado. Re
 - No devuelvas HTML sin estilos. El documento debe cerrar `body` y `html`, incluir Tailwind CDN y contener una composición visible completa.
 - Usa datos realistas del dominio. No uses lorem ipsum, emojis, scripts de navegación ni recursos pesados.
 - Refleja campos, validaciones, actores y estados indicados en los RF y clases.
+- Enlaces con el backend: todo botón o formulario que ejecuta un RF lleva `data-accion="RF-xx.verbo"` con un RF del bloque OPERACIONES DISPONIBLES y un verbo `consultar`, `crear`, `editar` o `eliminar`. Los campos de ese formulario usan en `name` los nombres indicados en ese bloque. Un control solo visual (cancelar, cerrar, abrir menú) lleva `data-accion="ui"`. No inventes RF, verbos ni campos.
 - Para `list`: filtros, tabla, estados y paginación. Para `form`: labels, validaciones y acciones. Para `dashboard`: KPIs y paneles. Para `detail`: resumen e historial.
 - La primera entrada de `descripcion_jerarquica` debe ser `Ruta: ... | Módulo: ...`.
 
