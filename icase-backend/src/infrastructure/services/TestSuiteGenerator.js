@@ -432,6 +432,8 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
       "  test.skip(!strict, 'ninguna pantalla tiene campos obligatorios');",
       "  const required = strict.operation.rules.find((rule) => rule.tipo === 'requerido' && strict.operation.schema.properties[rule.campo]);",
       '  await page.goto(strict.route);',
+      '  const apiToggle = page.getByRole("button", { name: /Gestión de Datos/i });',
+      '  if (await apiToggle.count()) await apiToggle.click();',
       "  const form = page.getByRole('form', { name: 'Formulario de registro' });",
       "  await form.getByRole('button', { name: 'Crear' }).click();",
       "  await expect(page.getByRole('alert')).toContainText('Revisa los campos marcados');",
