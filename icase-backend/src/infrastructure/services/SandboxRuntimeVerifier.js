@@ -224,7 +224,7 @@ networks:
       auth: manifest.auth || { habilitada: false },
       map: manifest.storage?.operations || {},
       tables: (manifest.storage?.tables || []).map((table) => ({ name: table.name, references: table.references || [] })),
-      operations: operations.map((item) => ({ id: item.id, key: item.key, collectionPath: item.collectionPath, schema: item.schema, rules: item.rules || [] }))
+      operations: operations.map((item) => ({ id: item.id, key: item.key, collectionPath: item.collectionPath, schema: item.schema, rules: item.rules || [], methods: item.methods }))
     };
     const smoke = renderTemplate(await fs.readFile(path.join(__dirname, '..', 'templates', 'verification', 'smoke.mjs'), 'utf8'), { CONFIG: JSON.stringify(config), SAMPLE: samplePayload.runtimeSource() });
     await Promise.all([

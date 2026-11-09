@@ -32,7 +32,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/integration/extensions.test.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.integration.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled))}] : []),
       { ruta: 'tests/e2e/navigation.spec.js', lenguaje: 'javascript', contenido: this._e2eTest(routes, auth) },
       ...((contract.associations || []).length ? [{ ruta: 'tests/e2e/associations.spec.js', lenguaje: 'javascript', contenido: this._associationsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
-      ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth) }] : []),
+      ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth, { screens: this._frontendScreens(frontend), contract }) }] : []),
       ...(functional && typedForms ? [{ ruta: 'tests/e2e/typed-forms.spec.js', lenguaje: 'javascript', contenido: this._typedFormsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)))}] : []),
@@ -322,8 +322,16 @@ if (auth.habilitada) {
 `;
   }
 
-  _contractE2eTest(routes, auth = { habilitada: false }) {
-    const firstRoute = routes[0] || '/';
+  _contractE2eTest(routes, auth = { habilitada: false }, { screens = [], contract = {} } = {}) {
+    let firstRoute = routes[0] || '/';
+    // Con operaciones de métodos reducidos, la prueba crea un registro solo en una pantalla cuya operación admite crear.
+    const operations = contract.operations || [];
+    if (operations.some((operation) => operation.methods && !['GET', 'POST', 'PATCH', 'DELETE'].every((method) => operation.methods.includes(method)))) {
+      // El editor JSON de la pantalla corresponde a su primera operación existente.
+      const screen = screens.find((item) => { const first = (item.operations || []).map((key) => operations.find((operation) => operation.key === key)).find(Boolean); return first && (!first.methods || first.methods.includes('POST')); });
+      if (!screen) return "import { test } from '@playwright/test';\ntest.skip('ninguna pantalla tiene una operación que admita crear', () => {});\n";
+      firstRoute = screen.route || screen.ruta || firstRoute;
+    }
     return `import { test, expect } from '@playwright/test';
 ${this._e2eSession(auth)}
 test('una pantalla ejecuta una operación declarada en el contrato', async ({ page }) => {
@@ -344,11 +352,18 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
    */
   _typedFormsE2eTest({ screens, contract, auth }) {
     const operations = contract.operations || [];
-    const screen = screens.find((item) => (item.operations || []).some((key) => operations.some((operation) => operation.key === key)));
-    const operation = screen && operations.find((item) => item.key === screen.operations.find((key) => operations.some((candidate) => candidate.key === key)));
-    if (!operation) return "import { test } from '@playwright/test';\ntest.skip('el contrato no tiene una pantalla con operación', () => {});\n";
+    // El formulario crea, edita y elimina: solo sirve una operación con el ciclo completo; la de errores solo necesita crear.
+    const methodsAll = ['POST', 'PATCH', 'DELETE'];
+    const fullCycle = (item) => !item.methods || methodsAll.every((method) => item.methods.includes(method));
+    const canCreate = (item) => !item.methods || item.methods.includes('POST');
+    const withOperation = (item) => (item.operations || []).some((key) => operations.some((operation) => operation.key === key));
+    // La pantalla muestra el formulario de su primera operación existente: solo sirve si esa admite el ciclo completo.
+    const pick = (item) => { const first = (item.operations || []).map((key) => operations.find((operation) => operation.key === key)).find(Boolean); return first && fullCycle(first) ? first : undefined; };
+    const screen = screens.find((item) => pick(item));
+    const operation = screen && pick(screen);
+    if (!operation) return `import { test } from '@playwright/test';\ntest.skip('${screens.some(withOperation) ? 'ninguna pantalla tiene una operación con el ciclo completo' : 'el contrato no tiene una pantalla con operación'}', () => {});\n`;
     const strict = screens.map((item) => ({ route: item.route, operation: operations.find((candidate) => candidate.key === (item.operations || [])[0]) }))
-      .find((item) => item.operation && (item.operation.rules || []).some((rule) => rule.tipo === 'requerido' && (item.operation.schema?.properties || {})[rule.campo]));
+      .find((item) => item.operation && canCreate(item.operation) && (item.operation.rules || []).some((rule) => rule.tipo === 'requerido' && (item.operation.schema?.properties || {})[rule.campo]));
     const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
     return [
       "import { test, expect } from '@playwright/test';",

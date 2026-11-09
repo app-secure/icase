@@ -139,7 +139,7 @@ async function createValidRecord(api, operations, target, cleanups, depth) {
   if (response.status !== 201) fail('crear respondió ' + response.status + ' (se esperaba 201): ' + JSON.stringify(response.data));
   const id = response.data.id || response.data._id;
   if (!id) fail('la creación no devolvió identificador');
-  cleanups.unshift(() => api(target.collectionPath + '/' + id, 'DELETE'));
+  if (!target.methods || target.methods.includes('DELETE')) cleanups.unshift(() => api(target.collectionPath + '/' + id, 'DELETE'));
   return { sample, body, response, id };
 }
 
@@ -155,8 +155,20 @@ async function exerciseOperation(api, operations, operation) {
   };
   const same = (expected, actual, format) => (format === 'date-time' ? Date.parse(expected) === Date.parse(actual) : JSON.stringify(expected) === JSON.stringify(actual));
   const cleanups = [];
+  // Solo se ejercen los métodos que la operación declara; sin `methods` se ejerce el ciclo completo.
+  const declared = (method) => !operation.methods || operation.methods.includes(method);
 
   try {
+    if (!declared('POST')) {
+      const listing = expectStatus(await api(operation.collectionPath), 200, 'listar');
+      if (!Array.isArray(listing.data) && !Array.isArray((listing.data || {}).data)) fail('el listado no devolvió una colección');
+      const limited = await api(operation.collectionPath + '?page=1&limit=1');
+      if (limited.status === 200) {
+        const limitedRecords = Array.isArray(limited.data) ? limited.data : (limited.data.data || []);
+        if (limitedRecords.length > 1) fail('la paginación con limit=1 devolvió más de un registro');
+      }
+      return;
+    }
     const main = await createValidRecord(api, operations, operation, cleanups, 0);
     const stored = main.response.data.data;
     for (const field of main.sample.typed) {
@@ -188,14 +200,17 @@ async function exerciseOperation(api, operations, operation) {
       }
     }
 
-    const updated = expectStatus(await api(operation.collectionPath + '/' + main.id, 'PATCH', { verification: 'updated' }), 200, 'modificar');
-    if (updated.data.data.verification !== 'updated') fail('la modificación no se aplicó');
-    if (Object.keys(stored).some((key) => updated.data.data[key] === undefined)) fail('la modificación parcial perdió datos');
+    if (declared('PATCH')) {
+      const updated = expectStatus(await api(operation.collectionPath + '/' + main.id, 'PATCH', { verification: 'updated' }), 200, 'modificar');
+      if (updated.data.data.verification !== 'updated') fail('la modificación no se aplicó');
+      if (Object.keys(stored).some((key) => updated.data.data[key] === undefined)) fail('la modificación parcial perdió datos');
+    }
 
     const wrong = main.sample.typed.find((field) => ['integer', 'number', 'boolean'].includes(field.type));
     if (wrong) expectStatus(await api(operation.collectionPath, 'POST', { ...main.body, [wrong.name]: 'valor-que-no-corresponde' }), 400, 'rechazar un tipo incorrecto');
 
     for (const item of main.sample.cases) {
+      if (item.accion === 'modificar' && !declared('PATCH')) continue;
       const label = item.regla + ' (' + item.tipo + ')';
       let response;
       if (item.accion === 'modificar') {
@@ -204,14 +219,16 @@ async function exerciseOperation(api, operations, operation) {
         const body = item.accion === 'duplicar' ? { ...main.body } : { ...main.body, ...(item.cuerpo || {}) };
         for (const field of item.omitir || []) delete body[field];
         response = await api(operation.collectionPath, 'POST', body);
-        if (response.status === 201) cleanups.unshift(() => api(operation.collectionPath + '/' + (response.data.id || response.data._id), 'DELETE'));
+        if (response.status === 201 && declared('DELETE')) cleanups.unshift(() => api(operation.collectionPath + '/' + (response.data.id || response.data._id), 'DELETE'));
       }
       if (response.status !== item.esperado) fail('regla ' + label + ' respondió ' + response.status + ' (se esperaba ' + item.esperado + '): ' + JSON.stringify(response.data));
       if (item.esperado === 422 && !(response.data.details || []).some((detail) => detail.regla === item.regla)) fail('regla ' + label + ' fue rechazada por otra causa: ' + JSON.stringify(response.data));
     }
 
-    expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 200, 'eliminar');
-    expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 404, 'eliminar dos veces');
+    if (declared('DELETE')) {
+      expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 200, 'eliminar');
+      expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 404, 'eliminar dos veces');
+    }
   } finally {
     for (const cleanup of cleanups) { try { await cleanup(); } catch (error) { /* limpieza de mejor esfuerzo */ } }
   }
@@ -376,9 +393,13 @@ async function exerciseOpenApi(api, operations, auth) {
   for (const operation of operations) {
     const collection = doc.paths[operation.collectionPath];
     const item = doc.paths[operation.collectionPath + '/{id}'];
-    if (!collection || !collection.get || !collection.post) fail('falta documentar listar y crear en ' + operation.collectionPath);
-    if (!item || !item.patch || !item.delete) fail('falta documentar modificar y eliminar en ' + operation.collectionPath + '/{id}');
-    const required = ((((collection.post.requestBody || {}).content || {})['application/json'] || {}).schema || {}).$ref;
+    // Se exige documentar exactamente los métodos que la operación declara (sin `methods`, el CRUD completo).
+    const declared = (method) => !operation.methods || operation.methods.includes(method);
+    if (!collection || !collection.get) fail('falta documentar listar en ' + operation.collectionPath);
+    if (declared('POST') !== Boolean(collection.post)) fail(declared('POST') ? 'falta documentar crear en ' + operation.collectionPath : 'se documenta crear en ' + operation.collectionPath + ' pero la operación no lo declara');
+    if (declared('PATCH') !== Boolean(item && item.patch)) fail(declared('PATCH') ? 'falta documentar modificar en ' + operation.collectionPath + '/{id}' : 'se documenta modificar en ' + operation.collectionPath + '/{id} pero la operación no lo declara');
+    if (declared('DELETE') !== Boolean(item && item.delete)) fail(declared('DELETE') ? 'falta documentar eliminar en ' + operation.collectionPath + '/{id}' : 'se documenta eliminar en ' + operation.collectionPath + '/{id} pero la operación no lo declara');
+    const required = collection.post ? ((((collection.post.requestBody || {}).content || {})['application/json'] || {}).schema || {}).$ref : undefined;
     const schema = required ? doc.components.schemas[required.split('/').pop()] : null;
     for (const rule of operation.rules || []) {
       if (rule.tipo === 'requerido' && schema && !(schema.required || []).includes(rule.campo)) fail(operation.id + ': la regla ' + rule.id + ' no figura como campo obligatorio');
@@ -497,7 +518,10 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
       const keyOf = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const reference = Object.entries(candidate.schema?.properties || {}).find(([, schema]) => schema && keyOf(schema['x-references']) === String(operation.entity || ''));
       if (!reference) continue;
-      if (permissionScope((config.auth?.operaciones || {})[candidate.key]?.[role]) !== 'propios') continue;
+      const candidateEntry = (config.auth?.operaciones || {})[candidate.key]?.[role];
+      if (permissionScope(candidateEntry) !== 'propios') continue;
+      // Una operación reducida pierde POST en la política: el rol recibiría 403 al crear.
+      if (!permissionMethods(candidateEntry).includes('POST') || (candidate.methods && !candidate.methods.includes('POST'))) continue;
       const payload = await createValidRecord(first.api, operations, candidate, cleanups, 0);
       const conflict = await first.api(candidate.collectionPath, 'POST', { ...payload.body, [reference[0]]: theirs.id });
       if (conflict.status !== 409) fail('referencia cruzada respondió ' + conflict.status);
@@ -510,7 +534,9 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
       if (!sourceKeys.includes(operation.key)) continue;
       const targetOp = operations.find((item) => targetKeys.includes(item.key));
       if (!targetOp) continue;
-      if (permissionScope((config.auth?.operaciones || {})[targetOp.key]?.[role]) !== 'propios') continue;
+      const targetEntry = (config.auth?.operaciones || {})[targetOp.key]?.[role];
+      if (permissionScope(targetEntry) !== 'propios') continue;
+      if (!permissionMethods(targetEntry).includes('POST') || (targetOp.methods && !targetOp.methods.includes('POST'))) continue;
       const myTarget = await createValidRecord(first.api, operations, targetOp, cleanups, 0);
       const theirTarget = await createValidRecord(second.api, operations, targetOp, cleanups, 0);
       // Extremo ajeno: 404 (mismo contrato CRUD), nunca 403 de “N:M prohibido”.

@@ -61,6 +61,21 @@ Los permisos se aplican con la sesión: si el rol no tiene el método, el contro
 
 La página solo importa el runtime (`mockupActions.js` y `MockupResult.jsx`) cuando tiene enlaces válidos. El panel «Gestión de Datos» se conserva como herramienta auxiliar.
 
+## De los enlaces a los métodos del backend
+
+Al generar el backend, los verbos válidos que declaran los mockups aprobados para un RF determinan los `methods` de su operación: siempre `GET` más los métodos de esos verbos, en el orden GET, POST, PATCH, DELETE. «Consultar reportes» con un único control `consultar` queda solo con `GET`.
+
+- Se unen los verbos de todos los mockups del mismo RF. Los enlaces inválidos y los `ui` no cuentan.
+- Sin mockups aprobados, o sin enlaces válidos para un RF, la operación mantiene el CRUD completo. Los proyectos anteriores no cambian.
+- Mantienen CRUD completo: las operaciones de soporte, las de entidades en una relación N:M, las entidades padre de otra operación (las pruebas y los vínculos las crean y las borran) y todas las operaciones si hay activo un módulo que usa PATCH (archivos, pagos de prueba, procesos).
+- El contrato, el manifiesto y el OpenAPI declaran solo esos métodos. Las pruebas generadas y el smoke ejercen únicamente lo declarado.
+- Los permisos se recortan: un rol nunca recibe un método que la operación no declara, así que un rol no administrador recibe 403 al intentarlo.
+- La huella del backend incluye los verbos solo cuando existen. Cambiar los mockups regenera el backend.
+- El artefacto del backend avisa qué RF quedaron con métodos reducidos («Operaciones con métodos reducidos por los enlaces de los mockups aprobados: RF-05 (GET)…»). Un solo mockup que enlace únicamente `consultar` basta para quitar POST, PATCH y DELETE a ese RF: si falta una acción, hay que declararla en el mockup y regenerar.
+- Las pruebas de propiedad de registros y de integridad referencial omiten las operaciones que ya no admiten POST o DELETE.
+
+**Límites:** los enlaces solo se revalidan al generar o editar un mockup, así que un cambio posterior en los requisitos puede dejar enlaces desactualizados hasta regenerarlos. La propuesta de permisos aprobada en la etapa de control de acceso no se recorta: puede mostrar métodos que, en el backend generado, la operación no declara y por eso no tienen efecto. Además, el administrador conserva acceso total a todas las rutas generadas, como en el resto del sistema, y las rutas no comprueban el método de la operación. Un administrador podría hacer POST sobre una operación que solo declara GET. Impedirlo exige un bloqueo en las rutas de Express, NestJS y Spring.
+
 ## Límites
 
 - Un enlace válido no certifica que la regla de negocio del RF esté implementada: el backend sigue ofreciendo las operaciones genéricas por RF.

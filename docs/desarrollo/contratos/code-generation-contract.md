@@ -10,7 +10,7 @@ Este contrato es la base común de los módulos de código, pruebas, infraestruc
 - Base de datos: MongoDB, PostgreSQL o MySQL según selección compatible.
 - Gestor de paquetes: npm.
 - El andamiaje, las configuraciones y los pipelines salen de plantillas deterministas.
-- La implementación actual genera CRUD por RF mediante reglas locales. La síntesis de reglas específicas del dominio mediante IA es una mejora pendiente, no una capacidad certificada.
+- La implementación actual genera CRUD por RF mediante reglas locales. Si los mockups aprobados declaran enlaces `data-accion` válidos para un RF, sus `methods` se reducen a `GET` más los verbos declarados (ver [contrato de enlaces](mockup-binding-contract.md)); sin enlaces, el RF mantiene el CRUD completo. La síntesis de reglas específicas del dominio mediante IA es una mejora pendiente, no una capacidad certificada.
 
 El stack se propone por proyecto y requiere aprobación antes de avanzar. Estos valores son la propuesta predeterminada, no una aprobación automática.
 
@@ -82,7 +82,7 @@ La verificación estructural no habilita la aprobación por sí sola. Para backe
 2. construye backend, frontend y, si aplica, el bundle móvil;
 3. levanta la base de datos seleccionada, backend y frontend en una red Docker interna;
 4. espera los `healthcheck`;
-5. ejecuta CRUD para las operaciones del contrato, la suite de integración y las pruebas de navegador;
+5. ejecuta, para cada operación del contrato, los métodos que declara (el ciclo CRUD completo si declara los cuatro), la suite de integración y las pruebas de navegador;
 6. destruye contenedores, volúmenes e imágenes temporales.
 
 Si Docker no está disponible o cualquiera de esos pasos falla, el artefacto queda `fallida` y no se puede aprobar ni exportar.

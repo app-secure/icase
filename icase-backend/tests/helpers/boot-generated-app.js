@@ -12,10 +12,10 @@ function useEnvironment() {
   afterEach(() => { for (const key of Object.keys(ENV)) { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; } });
 }
 
-async function boot({ decisiones, requerimientos, plantuml, cleanups, mutate = (file) => file.contenido }) {
+async function boot({ decisiones, requerimientos, plantuml, cleanups, verbosPorRf = null, mutate = (file) => file.contenido }) {
   const generated = await new BackendScaffoldGenerator().generar({
     proyecto: { nombre: 'Demo' },
-    insumos: { decisiones: { stack_tecnologico: { backend: 'Express', base_datos: 'PostgreSQL' }, ...decisiones }, requerimientos, diagramaDominio: plantuml ? { codigo_plantuml: plantuml } : null },
+    insumos: { decisiones: { stack_tecnologico: { backend: 'Express', base_datos: 'PostgreSQL' }, ...decisiones }, requerimientos, verbosPorRf, diagramaDominio: plantuml ? { codigo_plantuml: plantuml } : null },
     versionesOrigen: {}
   });
   const dir = fs.mkdtempSync(path.join(__dirname, '..', '.generated-'));

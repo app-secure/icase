@@ -61,6 +61,9 @@ try {
       const child = CONFIG.operations.find((item) => CONFIG.map[item.key] === table.name);
       const parent = CONFIG.operations.find((item) => CONFIG.map[item.key] === reference.table);
       if (!child || !parent) continue;
+      // Solo se ejercen los métodos que cada operación declara: una hija o un padre reducidos no se crean ni se borran.
+      const allows = (operation, ...methods) => !operation.methods || methods.every((method) => operation.methods.includes(method));
+      if (!allows(child, 'POST', 'DELETE') || !allows(parent, 'POST', 'DELETE')) continue;
       const salt = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const childSample = samplePayload(child.schema, child.rules, salt());
       const parentSample = samplePayload(parent.schema, parent.rules, salt());
