@@ -27,4 +27,16 @@ describe('generación de infraestructura', () => {
     const ha = await new InfrastructureGenerator().generar({ ...base, insumos: { ...base.insumos, requerimientos: [{ aprobado: true, tipo: 'RNF', nombre: 'Alta disponibilidad', descripcion: 'Dos réplicas y failover' }] } });
     expect(ha.archivos.some((item) => item.ruta === 'ops/docker-compose.ha.yml')).toBe(true);
   });
+
+  test('el healthcheck de MongoDB escapa sus comillas y deja un YAML válido', async () => {
+    const mongo = { ...base, insumos: { ...base.insumos,
+      decisiones: { stack_tecnologico: { backend: 'Node.js + Express', base_datos: 'MongoDB' } },
+      diagramas: [{ aprobado: true, estado: 'aprobado', tipo: 'arquitectura_sistema', version: 1, descripcion: 'Servidor de aplicación y MongoDB' }] } };
+    const result = await new InfrastructureGenerator().generar(mongo);
+    const compose = result.archivos.find((item) => item.ruta === 'ops/docker-compose.yml').contenido;
+    const line = compose.split('\n').find((item) => item.includes('CMD-SHELL'));
+    // Una secuencia de flujo YAML con cadenas entre comillas dobles admite los mismos escapes que JSON.
+    const [, command] = JSON.parse(line.trim().replace(/^test:\s*/, ''));
+    expect(command).toContain('mongosh');
+  });
 });

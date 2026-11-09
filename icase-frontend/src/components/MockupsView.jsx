@@ -9,6 +9,7 @@ import {
   startMockupJobApi, suggestMockupDesignSystemApi, updateMockupDesignSystemApi
 } from "../services/api";
 import { DEFAULT_DESIGN_SYSTEM, prepareMockupHtml } from "../utils/mockupHtml";
+import DiagramProgressModal from "./DiagramProgressModal";
 
 const formatName = (value = "") => value.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const SANITIZATION_NOTICES = /script peligroso|script no autorizado|manejadores inline|enlaces javascript|etiqueta potencialmente insegura|referencia a archivo local/i;
@@ -32,7 +33,7 @@ const platformIcon = (platform, size = 13) => platform === "mobile"
 
 export default function MockupsView({
   mockups = [], onUpdateMockup, projectId, selectedScreen = 0, onSelectScreen, requirements = null,
-  onTraceabilityChange
+  onTraceabilityChange, onActiveScreenChange, isFixing = false, fixingPrompt = null, onNotify = null
 }) {
   const [viewMode, setViewMode] = useState("visual");
   const [activeId, setActiveId] = useState(mockups[selectedScreen]?.nombre_pantalla || "");
@@ -43,13 +44,19 @@ export default function MockupsView({
   const [showPalette, setShowPalette] = useState(false);
   const [showCatalog, setShowCatalog] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
+  const [isModalDismissed, setIsModalDismissed] = useState(false);
   const [activeJob, setActiveJob] = useState(null);
-  const [feedback, setFeedback] = useState(null);
   const [savingPalette, setSavingPalette] = useState(false);
   const [suggestingPalette, setSuggestingPalette] = useState(false);
   const [traceability, setTraceability] = useState(null);
   const handledJobRef = useRef(null);
   const initializedSelection = useRef(false);
+
+  const notify = (payload) => {
+    if (payload && onNotify) {
+      onNotify(payload);
+    }
+  };
 
   const loadCatalog = async () => {
     if (!projectId) return;
@@ -72,23 +79,28 @@ export default function MockupsView({
     if (!activeId && catalog[0]) setActiveId(catalog[0].slug);
   };
 
-  const applyJobResponse = (response) => {
+  const applyJobResponse = (response, isInitialLoad = false) => {
     const job = response?.trabajo;
     if (!job) return;
     setActiveJob(job);
+    if (["encolado", "procesando"].includes(job.estado)) {
+      setIsModalDismissed(false);
+    }
     if (job.estado === "completado" && handledJobRef.current !== job.id) {
       handledJobRef.current = job.id;
       if (response.mockups?.length && onUpdateMockup) onUpdateMockup(response.mockups);
-      const repairWarnings = (job.advertencias || []).filter(message => /reparaci[oó]n no aplicada|reparables autom[aá]ticamente|quedan pendientes/i.test(message));
-      setFeedback({
-        type: job.solo_reparar && !job.total_generados ? "error" : "success",
-        message: job.solo_reparar
-          ? `Reparación terminada: ${job.total_generados || 0} pantallas modificadas. ${repairWarnings.length ? repairWarnings.join(' ') : 'Revisa los controles antes de aprobar.'}`
-          : `Generación completada: ${job.total_generados || 0} mockups disponibles.`
-      });
+      if (!isInitialLoad) {
+        const repairWarnings = (job.advertencias || []).filter(message => /reparaci[oó]n no aplicada|reparables autom[aá]ticamente|quedan pendientes/i.test(message));
+        notify({
+          type: job.solo_reparar && !job.total_generados ? "error" : "success",
+          message: job.solo_reparar
+            ? `Reparación terminada: ${job.total_generados || 0} pantallas modificadas. ${repairWarnings.length ? repairWarnings.join(' ') : 'Revisa los controles antes de aprobar.'}`
+            : `Generación completada: ${job.total_generados || 0} mockups disponibles.`
+        });
+      }
       loadCatalog().catch(() => {});
-    } else if (job.estado === "fallido") {
-      setFeedback({ type: "error", message: job.error || "La generación falló." });
+    } else if (job.estado === "fallido" && !isInitialLoad) {
+      notify({ type: "error", message: job.error || "La generación falló." });
     }
   };
 
@@ -98,12 +110,12 @@ export default function MockupsView({
   useEffect(() => {
     if (!projectId) return undefined;
     let cancelled = false;
-    fetchLatestMockupJobApi(projectId).then(r => { if (!cancelled) applyJobResponse(r); }).catch(() => {});
+    fetchLatestMockupJobApi(projectId).then(r => { if (!cancelled) applyJobResponse(r, true); }).catch(() => {});
     return () => { cancelled = true; };
   }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!activeJob || !["encolado", "procesando"].includes(activeJob.estado)) return undefined;
-    const timer = window.setInterval(() => fetchMockupJobApi(activeJob.id).then(applyJobResponse).catch(e => setFeedback({ type: "error", message: e.message })), 2000);
+    const timer = window.setInterval(() => fetchMockupJobApi(activeJob.id).then(r => applyJobResponse(r, false)).catch(e => notify({ type: "error", message: e.message })), 2000);
     return () => window.clearInterval(timer);
   }, [activeJob?.id, activeJob?.estado]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -129,8 +141,21 @@ export default function MockupsView({
   const currentPosition = currentEntry ? screens.findIndex(p => p.slug === currentEntry.slug) : -1;
   const busy = ["encolado", "procesando"].includes(activeJob?.estado);
 
+  useEffect(() => {
+    if (currentEntry) {
+      onActiveScreenChange?.(currentEntry);
+    }
+  }, [currentEntry?.slug, currentEntry?.nombre]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isFixing && projectId && initializedSelection.current) {
+      loadCatalog().catch(() => {});
+    }
+  }, [isFixing]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectScreen = (entry) => {
     setActiveId(entry.slug);
+    onActiveScreenChange?.(entry);
     const generated = mockupMap.get(entry.slug);
     if (generated && onSelectScreen) onSelectScreen(generated.index);
     if (generated && quality(generated) !== "valido") setShowDetails(true);
@@ -143,12 +168,11 @@ export default function MockupsView({
   const startGeneration = async (ids, label, soloReparar = false) => {
     if (!projectId || busy || (!ids.length && !soloReparar)) return;
     try {
-      setFeedback(null);
+      setIsModalDismissed(false);
       const response = await startMockupJobApi(projectId, ids, "", requirements, soloReparar);
-      applyJobResponse(response);
-      setFeedback({ type: "success", message: response.reutilizado ? "Se recuperó el trabajo activo." : `${label} iniciada. Puedes cambiar de pestaña.` });
+      applyJobResponse(response, false);
     } catch (error) {
-      setFeedback({ type: "error", message: error.message });
+      notify({ type: "error", message: error.message });
     }
   };
   const savePalette = async () => {
@@ -156,8 +180,8 @@ export default function MockupsView({
       setSavingPalette(true);
       const response = await updateMockupDesignSystemApi(projectId, designSystem);
       setDesignSystem(response.sistemaDiseno);
-      setFeedback({ type: "success", message: "Paleta guardada. Regenera solo las pantallas que quieras actualizar." });
-    } catch (error) { setFeedback({ type: "error", message: error.message }); }
+      notify({ type: "success", message: "Paleta guardada. Regenera solo las pantallas que quieras actualizar." });
+    } catch (error) { notify({ type: "error", message: error.message }); }
     finally { setSavingPalette(false); }
   };
   const applyPalette = async () => {
@@ -168,7 +192,7 @@ export default function MockupsView({
       setDesignSystem(response.sistemaDiseno);
       setShowPalette(false);
       await startGeneration([...selectedIds], "Aplicación de paleta");
-    } catch (error) { setFeedback({ type: "error", message: error.message }); }
+    } catch (error) { notify({ type: "error", message: error.message }); }
     finally { setSavingPalette(false); }
   };
   const suggestPalette = async () => {
@@ -176,16 +200,13 @@ export default function MockupsView({
       setSuggestingPalette(true);
       const response = await suggestMockupDesignSystemApi(projectId);
       setDesignSystem(response.sistemaDiseno);
-      setFeedback({ type: "success", message: "La IA propuso una paleta. Revísala y guárdala si deseas aplicarla." });
-    } catch (error) { setFeedback({ type: "error", message: error.message }); }
+      notify({ type: "success", message: "La IA propuso una paleta. Revísala y guárdala si deseas aplicarla." });
+    } catch (error) { notify({ type: "error", message: error.message }); }
     finally { setSuggestingPalette(false); }
   };
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col gap-3">
-      {feedback && <div className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${feedback.type === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}><span>{feedback.message}</span><button onClick={() => setFeedback(null)}>×</button></div>}
-      {busy && <div className="rounded-xl border border-[#DDD2F5] bg-[#F2EDFF] px-3 py-2"><div className="mb-1.5 flex justify-between text-xs text-[#5B21B6]"><span className="flex items-center gap-2"><Loader2 size={13} className="animate-spin" />{activeJob.mensaje}</span><span>{activeJob.progreso || 0}%</span></div><div className="h-1.5 rounded bg-[#E4D8FA]"><div className="h-full rounded bg-[#7C3AED] transition-all" style={{ width: `${activeJob.progreso || 0}%` }} /></div></div>}
-
       {traceability && (
         <div className={`rounded-xl border px-3 py-2 text-xs ${traceability.valido ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -228,13 +249,40 @@ export default function MockupsView({
               {validationIssues(currentMockup).map((message, index) => <p key={index} className="mt-1 pl-5">• {message}</p>)}
             </div>
           )}
-          <div className="flex min-w-0 flex-1 items-start justify-center overflow-auto p-3">
-            {currentMockup ? viewMode === "visual" ? <ScaledMockupPreview html={prepareMockupHtml(currentMockup.preview_code, designSystem)} platform={currentEntry?.plataforma} title={`Mockup ${currentMockup.nombre_pantalla}`} /> : <textarea value={currentMockup.preview_code} onChange={e => onUpdateMockup?.(currentMockup.nombre_pantalla, e.target.value)} className="h-full min-h-[540px] w-full resize-none rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs" spellCheck="false" /> : <div className="m-auto max-w-sm text-center"><Layout className="mx-auto mb-3 text-slate-300" size={36} /><p className="text-sm font-semibold text-slate-700">Mockup pendiente</p><p className="mt-1 text-xs text-slate-500">Marca esta pantalla y usa “Generar seleccionadas”.</p></div>}
+          <div className="relative flex min-w-0 flex-1 items-start justify-center overflow-auto p-3">
+            {isFixing && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-white/80 backdrop-blur-[2px] p-6 text-center">
+                <div className="flex flex-col items-center rounded-2xl border border-violet-200 bg-white px-6 py-5 shadow-lg max-w-md">
+                  <Loader2 size={28} className="animate-spin text-[#7C3AED] mb-2.5" />
+                  <p className="text-sm font-semibold text-slate-900">
+                    Procesando ajuste con IA en “{currentEntry?.nombre || currentEntry?.slug || "Mockup"}”...
+                  </p>
+                  {fixingPrompt && (
+                    <p className="mt-1.5 text-xs text-slate-600 line-clamp-2">
+                      “{fixingPrompt}”
+                    </p>
+                  )}
+                  <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-[11px] font-medium text-violet-700 border border-violet-200">
+                    Actualizando vista previa HTML...
+                  </span>
+                </div>
+              </div>
+            )}
+            {currentMockup ? viewMode === "visual" ? <ScaledMockupPreview html={prepareMockupHtml(currentMockup.preview_code, designSystem)} platform={currentEntry?.plataforma} title={`Mockup ${currentMockup.nombre_pantalla}`} /> : <textarea value={currentMockup.preview_code} onChange={e => onUpdateMockup?.(currentMockup.nombre_pantalla, e.target.value)} className="h-full min-h-[540px] w-full resize-none rounded-xl border border-slate-200 bg-white p-3 font-mono text-xs" spellCheck="false" /> : <div className="m-auto max-w-sm text-center"><Layout className="mx-auto mb-3 text-slate-300" size={36} /><p className="text-sm font-semibold text-slate-700">Mockup pendiente</p><p className="mt-1 text-xs text-slate-500">Marca esta pantalla y usa “Generar seleccionadas” o escribe en el chat inferior para generarla con IA.</p></div>}
           </div>
         </main>
 
         {showDetails && <aside className="w-60 shrink-0 overflow-y-auto border-l border-slate-200 p-3"><div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-slate-800">Detalles de pantalla</p><button onClick={() => setShowDetails(false)} className="text-lg leading-none text-slate-400">×</button></div>{currentEntry && <div className="space-y-3 text-[11px]"><Info label="Plataforma" value={currentEntry.plataforma} icon={platformIcon(currentEntry.plataforma, 12)} /><Info label="Flujo" value={currentEntry.flujo} /><Info label="Módulo" value={currentEntry.modulo} /><Info label="Tipo" value={currentEntry.tipo} /><Info label="Roles" value={(currentEntry.roles || []).join(', ')} /><Info label="Shell compartido" value={currentEntry.shell} />{currentMockup && <><Info label="Estado" value={`${currentMockup.estado || 'generado'} · v${currentMockup.version || 1}`} /><div className={`rounded-lg border p-2 ${quality(currentMockup) === 'invalido' ? 'border-red-200 bg-red-50 text-red-700' : quality(currentMockup) === 'advertencia' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><p className="font-semibold">Calidad: {quality(currentMockup)}</p>{validationIssues(currentMockup).map((warning, i) => <p key={i} className="mt-1">• {warning}</p>)}</div>{sanitizationNotices(currentMockup).length > 0 && <div className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-sky-700"><p className="font-semibold">Ajustes de seguridad aplicados</p>{sanitizationNotices(currentMockup).map((notice, i) => <p key={i} className="mt-1">• {notice}</p>)}</div>}<div className="flex flex-wrap gap-1"><button disabled={busy} onClick={() => startGeneration([currentEntry.slug], 'Regeneración')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5"><RotateCcw size={11} />Regenerar</button><button onClick={() => navigator.clipboard.writeText(currentMockup.preview_code)} className="rounded-lg border border-slate-200 p-1.5" title="Copiar HTML"><Copy size={12} /></button><button onClick={() => { const url = URL.createObjectURL(new Blob([currentMockup.preview_code], { type: 'text/html' })); const a = document.createElement('a'); a.href = url; a.download = `${currentEntry.slug}.html`; a.click(); URL.revokeObjectURL(url); }} className="rounded-lg border border-slate-200 p-1.5" title="Descargar HTML"><Download size={12} /></button></div></>}</div>}</aside>}
       </div>
+
+      <DiagramProgressModal
+        isOpen={Boolean(busy && !isModalDismissed)}
+        title="Generando wireframes y mockups"
+        statusMessage={activeJob?.mensaje || ""}
+        progress={activeJob?.progreso || 0}
+        error={activeJob?.estado === "fallido" ? (activeJob.error || "La generación falló.") : null}
+        onClose={() => setIsModalDismissed(true)}
+      />
     </div>
   );
 }

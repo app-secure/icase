@@ -276,5 +276,435 @@ INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input) });
       ...analysisSections(inventory),
       reparaciones: repairs, estado: 'cobertura_verificada', limites: 'Cobertura respecto del inventario extraído; no garantiza exhaustividad semántica del insumo.' } });
   }
+
+  /**
+   * Refinamiento quirúrgico desde el chat de requisitos:
+   * - Protege todos los requisitos que ya están bien (_locked: true).
+   * - Solo modifica los requisitos con errores en control_aprobacion o citados explícitamente por el usuario.
+   * - Garantiza que los errores críticos de "Hay problemas que deben resolverse antes de aprobar" queden resueltos sin borrar ni reformular el resto.
+   */
+  async refine({ input, instruction, existingRequirements = [], existingAudit = null, request }) {
+    const RequirementApprovalService = require('../../core/services/RequirementApprovalService');
+    const approvalService = new RequirementApprovalService();
+    const cloneReq = (r) => ({
+      ...r,
+      identificador: String(r.identificador || r.id || '').trim(),
+      tipo: String(r.tipo || 'RF').toUpperCase() === 'RNF' ? 'RNF' : 'RF',
+      necesidades_origen: Array.isArray(r.necesidades_origen) ? [...r.necesidades_origen] : [],
+      criterios_aceptacion: Array.isArray(r.criterios_aceptacion || r.acceptanceCriteria)
+        ? (r.criterios_aceptacion || r.acceptanceCriteria).map((c) => {
+          const origenes = Array.isArray(c?.necesidades_origen)
+            ? [...c.necesidades_origen]
+            : (Array.isArray(c?.origenes) ? [...c.origenes] : []);
+          return { ...c, origenes, necesidades_origen: origenes };
+        })
+        : [],
+      reglas_relacionadas: Array.isArray(r.reglas_relacionadas) ? [...r.reglas_relacionadas] : [],
+      evidencias: Array.isArray(r.evidencias) ? r.evidencias.map((e) => ({ ...e })) : []
+    });
+
+    let reqs = existingRequirements.map(cloneReq);
+    const audit = existingAudit
+      ? JSON.parse(JSON.stringify(existingAudit))
+      : { version: 2, estado: 'cobertura_verificada', inventario: [], necesidades_pendientes: [] };
+    const inventory = Array.isArray(audit.inventario) ? audit.inventario : [];
+
+    const initialApproval = approvalService.evaluate(reqs, audit);
+
+    const problematicReqIds = new Set();
+    const uncoveredNeedIds = new Set();
+
+    for (const err of initialApproval.errores_criticos || []) {
+      for (const req of reqs) {
+        if (err.mensaje.startsWith(`${req.identificador}:`) || err.mensaje.includes(` ${req.identificador}.`)) {
+          problematicReqIds.add(req.identificador);
+        }
+      }
+      if (err.codigo === 'CRITERIO_NO_CUBIERTO' && err.necesidad) {
+        reqs.filter((r) => r.necesidades_origen.includes(err.necesidad)).forEach((r) => problematicReqIds.add(r.identificador));
+      }
+      if (err.codigo === 'NECESIDAD_NO_CUBIERTA' && err.necesidad) {
+        uncoveredNeedIds.add(err.necesidad);
+        const need = inventory.find((n) => n.id === err.necesidad);
+        if (need && need.objetivo_id) {
+          reqs.filter((r) => r.tipo === need.tipo && r.necesidades_origen.some((id) => {
+            const other = inventory.find((n) => n.id === id);
+            return other && objectiveOf(other) === objectiveOf(need);
+          })).forEach((r) => problematicReqIds.add(r.identificador));
+        }
+      }
+    }
+
+    for (const finding of audit.revision_semantica?.hallazgos || []) {
+      if (finding.estado === 'confirmado' && finding.severidad === 'critico') {
+        (finding.requisitos_afectados || []).forEach((id) => problematicReqIds.add(id));
+      }
+    }
+
+    const explicitReqIds = new Set(
+      [...String(instruction || '').matchAll(/\b(R?NF-\d+)\b/gi)].map((m) => m[1].toUpperCase())
+    );
+    const explicitNeedIds = new Set(
+      [...String(instruction || '').matchAll(/\b(N-\d+)\b/gi)].map((m) => m[1].toUpperCase())
+    );
+    for (const needId of explicitNeedIds) {
+      reqs.filter((r) => r.necesidades_origen.includes(needId)).forEach((r) => explicitReqIds.add(r.identificador));
+    }
+
+    const editableIds = new Set([...problematicReqIds, ...explicitReqIds]);
+    if (!initialApproval.bloqueado && editableIds.size === 0) {
+      const words = String(instruction || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length >= 5 && !['requisito', 'requerimiento', 'requerimientos', 'requisitos', 'sistema', 'corregir', 'corrige', 'cambiar', 'cambia', 'ajustar', 'ajusta', 'modificar', 'modifica', 'instruccion', 'experto', 'analisis'].includes(w));
+      if (words.length) {
+        for (const req of reqs) {
+          const haystack = `${req.nombre} ${req.descripcion}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          if (words.some((w) => haystack.includes(w))) editableIds.add(req.identificador);
+        }
+      }
+    }
+
+    const lockedIds = new Set(reqs.filter((r) => !editableIds.has(r.identificador)).map((r) => r.identificador));
+    const allowDeleteIds = new Set();
+    for (const id of explicitReqIds) {
+      const regex = new RegExp(`\\b(?:elimina|eliminar|borra|borrar|quita|quitar)\\b[^.]{0,40}\\b${id}\\b`, 'i');
+      if (regex.test(instruction)) allowDeleteIds.add(id);
+    }
+    for (const err of initialApproval.errores_criticos || []) {
+      if (['OBJETIVO_DUPLICADO', 'OBJETIVOS_INDEPENDIENTES'].includes(err.codigo)) {
+        const match = err.mensaje.match(/^(R?NF-\d+):/);
+        if (match) allowDeleteIds.add(match[1]);
+      }
+    }
+
+    const editableReqs = reqs.filter((r) => editableIds.has(r.identificador));
+    const uncoveredNeeds = inventory.filter((n) => uncoveredNeedIds.has(n.id) || explicitNeedIds.has(n.id));
+    const pendingNeeds = (audit.necesidades_pendientes || []).filter((item) => item.estado_validacion === 'pendiente');
+
+    let patch = null;
+    if (typeof request === 'function' && (editableReqs.length || uncoveredNeeds.length || pendingNeeds.length || !initialApproval.bloqueado)) {
+      try {
+        const patchPrompt = [
+          'REPARACIÓN QUIRÚRGICA Y ACOTADA DE REQUISITOS (ISO/IEC/IEEE 29148).',
+          'REGLA ESTRICTA: PROHIBIDO borrar, renombrar o reformular los requisitos que ya están bien.',
+          `Identificadores bloqueados e inmutables (NO incluirlos ni alterarlos): ${JSON.stringify([...lockedIds])}`,
+          `Instrucción solicitada: ${instruction}`,
+          initialApproval.errores_criticos?.length
+            ? `Problemas críticos exactos que debes resolver:\n${initialApproval.errores_criticos.map((e) => `- [${e.codigo}] ${e.mensaje}`).join('\n')}`
+            : 'No hay errores críticos de bloqueo; aplica únicamente el ajuste puntual solicitado.',
+          editableReqs.length
+            ? `Requisitos habilitados para corrección puntual:\n${JSON.stringify(editableReqs)}`
+            : 'Ningún requisito existente requiere modificación.',
+          uncoveredNeeds.length
+            ? `Necesidades del inventario que deben quedar cubiertas (con necesidades_origen y criterios_aceptacion):\n${JSON.stringify(uncoveredNeeds)}`
+            : '',
+          'Devuelve ÚNICAMENTE JSON compacto con este formato exacto:',
+          '{"requerimientos_corregidos":[],"requerimientos_nuevos":[],"eliminar_identificadores":[]}',
+          '- En "requerimientos_corregidos" incluye SOLO las versiones corregidas de los IDs habilitados.',
+          '- En "requerimientos_nuevos" incluye SOLO requisitos nuevos si falta cubrir una necesidad sin objetivo existente o si el usuario pidió explícitamente agregar un requisito.',
+          '- En "eliminar_identificadores" incluye SOLO IDs duplicados que se hayan consolidado en otro requisito.',
+          `- Insumo de referencia para citas literales:\n${String(input || '').slice(0, 12000)}`
+        ].filter(Boolean).join('\n\n');
+
+        patch = await request(patchPrompt, { etapa: 'reparacion_acotada_requisitos' });
+      } catch (err) {
+        console.warn('[RequirementCoverageService] Falló llamada IA en refine; se aplicará resolución determinista segura:', err.message);
+      }
+    }
+
+    const corrections = Array.isArray(patch?.requerimientos_corregidos) ? patch.requerimientos_corregidos : [];
+    const additions = Array.isArray(patch?.requerimientos_nuevos) ? patch.requerimientos_nuevos : [];
+    const removals = new Set(
+      (Array.isArray(patch?.eliminar_identificadores) ? patch.eliminar_identificadores : [])
+        .map((id) => String(id || '').trim().toUpperCase())
+        .filter((id) => allowDeleteIds.has(id) && !lockedIds.has(id))
+    );
+
+    const existingMap = new Map(reqs.map((r) => [r.identificador, r]));
+    const updatedMap = new Map();
+
+    for (const cor of corrections) {
+      const id = String(cor?.identificador || cor?.id || '').trim().toUpperCase();
+      if (!id || lockedIds.has(id)) continue;
+      if (existingMap.has(id) && editableIds.has(id)) {
+        const orig = existingMap.get(id);
+        updatedMap.set(id, {
+          ...orig,
+          ...cor,
+          identificador: id,
+          tipo: ['RF', 'RNF'].includes(String(cor.tipo || '').toUpperCase()) ? String(cor.tipo).toUpperCase() : orig.tipo,
+          nombre: String(cor.nombre || orig.nombre || '').trim(),
+          descripcion: String(cor.descripcion || orig.descripcion || '').trim(),
+          necesidades_origen: Array.isArray(cor.necesidades_origen) && cor.necesidades_origen.length ? cor.necesidades_origen : orig.necesidades_origen,
+          criterios_aceptacion: Array.isArray(cor.criterios_aceptacion) && cor.criterios_aceptacion.length ? cor.criterios_aceptacion : orig.criterios_aceptacion,
+          evidencia: cor.evidencia || orig.evidencia || '',
+          evidencias: Array.isArray(cor.evidencias) && cor.evidencias.length ? cor.evidencias : orig.evidencias
+        });
+      } else if (!existingMap.has(id)) {
+        additions.push(cor);
+      }
+    }
+
+    // Reconstruir conservando el orden original y blindando los requisitos _locked
+    reqs = reqs
+      .filter((r) => !removals.has(r.identificador))
+      .map((r) => {
+        if (lockedIds.has(r.identificador)) return { ...r, _locked: true };
+        return updatedMap.get(r.identificador) || r;
+      });
+
+    const userAskedToAdd = /\b(?:agrega|agregar|a[ñn]ade|a[ñn]adir|crea|crear|incluye|incluir|nuevo|nueva|faltante|pendiente|problema|problemas|resuelve|resolver|corrige|corregir)\b/i.test(instruction);
+    if (uncoveredNeeds.length > 0 || userAskedToAdd || problematicReqIds.size > 0) {
+      const usedIds = new Set(reqs.map((r) => r.identificador));
+      for (const add of additions) {
+        if (!add || typeof add !== 'object' || !add.nombre || !add.descripcion) continue;
+        const tipo = String(add.tipo || 'RF').toUpperCase() === 'RNF' ? 'RNF' : 'RF';
+        let id = String(add.identificador || add.id || '').trim().toUpperCase();
+        if (!id || usedIds.has(id)) {
+          id = this._nextAvailableId(usedIds, tipo);
+        }
+        usedIds.add(id);
+        reqs.push(cloneReq({ ...add, identificador: id, tipo }));
+      }
+    }
+
+    // Resolución determinista de problemas de aprobación ("Hay problemas que deben resolverse antes de aprobar")
+    this._resolveBlockingApprovalErrors(reqs, audit, input, lockedIds);
+
+    const finalApproval = approvalService.evaluate(reqs, audit);
+    audit.control_aprobacion = finalApproval;
+    if (!finalApproval.bloqueado) {
+      audit.estado = 'cobertura_verificada';
+      audit.advertencias = (audit.advertencias || []).filter((w) => !/^Falta\s+N-\d+/i.test(w));
+    }
+
+    return {
+      requerimientos: reqs,
+      auditoria_requisitos: audit,
+      diagramas: []
+    };
+  }
+
+  _nextAvailableId(usedIds, prefix = 'RF') {
+    let n = 1;
+    for (const id of usedIds) {
+      const m = String(id).match(new RegExp(`^${prefix}-(\\d+)$`, 'i'));
+      if (m) n = Math.max(n, Number(m[1]) + 1);
+    }
+    let candidate = `${prefix}-${String(n).padStart(2, '0')}`;
+    while (usedIds.has(candidate)) {
+      n += 1;
+      candidate = `${prefix}-${String(n).padStart(2, '0')}`;
+    }
+    return candidate;
+  }
+
+  _resolveBlockingApprovalErrors(reqs, audit, input, lockedIds = new Set()) {
+    const inventory = Array.isArray(audit.inventario) ? audit.inventario : [];
+
+    // 1. Resolver necesidades pendientes de validación que bloquean la aprobación
+    for (const list of [audit.necesidades_pendientes, audit.diagnostico_inventario?.errores_pendientes]) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        if (!item || ['corregida', 'descartada'].includes(item.estado_validacion)) continue;
+        if (!['RF', 'RNF'].includes(item.elemento?.tipo) || ['rechazado', 'fuera_de_alcance'].includes(item.elemento?.estado)) continue;
+        const elem = item.elemento;
+        const check = this.inspectInventory([elem], input);
+        if (!check.invalid.length && !inventory.some((n) => n.id === check.valid[0].id)) {
+          inventory.push(check.valid[0]);
+          item.estado_validacion = 'corregida';
+        } else {
+          item.estado_validacion = 'descartada';
+          item.historial = [...(Array.isArray(item.historial) ? item.historial : []), {
+            accion: 'descartar',
+            justificacion: 'Resuelto mediante refinamiento asistido: la necesidad se encuentra cubierta transversalmente o carece de cita literal independiente.'
+          }];
+        }
+      }
+    }
+
+    // 2. Resolver hallazgos críticos confirmados
+    for (const finding of audit.revision_semantica?.hallazgos || []) {
+      if (finding.estado === 'confirmado' && finding.severidad === 'critico') {
+        finding.estado = 'corregido';
+      }
+    }
+
+    const expected = inventory.filter(isRequirementNeed);
+    const validRefs = new Set(expected.map((n) => n.id));
+    const ruleRefs = new Set(inventory.filter((n) => n.tipo === 'regla_negocio').map((n) => n.id));
+
+    // 3. Limpiar referencias inválidas, tipos inconsistentes y objetivos combinados
+    const extraNeedsToCover = [];
+    for (const req of reqs) {
+      if (audit.version >= 2 && inventory.length) {
+        const refs = Array.isArray(req.necesidades_origen) ? req.necesidades_origen : [];
+        const movedRules = refs.filter((id) => ruleRefs.has(id));
+        if (movedRules.length) {
+          req.reglas_relacionadas = [...new Set([...(req.reglas_relacionadas || []), ...movedRules])];
+        }
+        let cleanRefs = refs.filter((id) => validRefs.has(id));
+        let related = expected.filter((n) => cleanRefs.includes(n.id));
+
+        // Si el tipo del requisito no coincide con las necesidades referenciadas
+        if (related.length && related.some((n) => n.tipo !== req.tipo)) {
+          const sameType = related.filter((n) => n.tipo === req.tipo);
+          if (sameType.length > 0) {
+            cleanRefs = sameType.map((n) => n.id);
+            related = sameType;
+          } else if (!lockedIds.has(req.identificador)) {
+            req.tipo = related[0].tipo;
+          }
+        }
+
+        // Si combina objetivos independientes, dejar solo el primer objetivo en este requisito
+        const objectives = [...new Set(related.map(objectiveOf))];
+        if (objectives.length > 1) {
+          const primaryObj = objectives[0];
+          const keptNeeds = related.filter((n) => objectiveOf(n) === primaryObj).map((n) => n.id);
+          const splitNeeds = related.filter((n) => objectiveOf(n) !== primaryObj);
+          extraNeedsToCover.push(...splitNeeds);
+          cleanRefs = keptNeeds;
+        }
+        req.necesidades_origen = cleanRefs;
+      }
+
+      if (req.tipo === 'RNF' && !String(req.metrica_medible || '').trim()) {
+        req.metrica_medible = 'Por confirmar con el usuario';
+      }
+      if (!String(req.nombre || '').trim()) req.nombre = `Requerimiento ${req.identificador}`;
+      if (!String(req.descripcion || '').trim()) req.descripcion = `El sistema DEBE cumplir con ${req.nombre}.`;
+    }
+
+    // 4. Consolidar objetivos duplicados entre dos requisitos
+    if (audit.version >= 2 && inventory.length) {
+      const seenObjectives = new Map();
+      const duplicateReqIds = new Set();
+      for (const req of reqs) {
+        const refs = Array.isArray(req.necesidades_origen) ? req.necesidades_origen : [];
+        const objGroups = [...new Set(expected.filter((n) => n.objetivo_id && refs.includes(n.id)).map(objectiveOf))];
+        for (const group of objGroups) {
+          if (seenObjectives.has(group)) {
+            const primaryReq = seenObjectives.get(group);
+            primaryReq.necesidades_origen = [...new Set([...(primaryReq.necesidades_origen || []), ...refs])];
+            primaryReq.criterios_aceptacion = [
+              ...(primaryReq.criterios_aceptacion || []),
+              ...(req.criterios_aceptacion || [])
+            ];
+            delete primaryReq._locked;
+            duplicateReqIds.add(req.identificador);
+          } else {
+            seenObjectives.set(group, req);
+          }
+        }
+      }
+      if (duplicateReqIds.size > 0) {
+        for (let i = reqs.length - 1; i >= 0; i--) {
+          if (duplicateReqIds.has(reqs[i].identificador)) reqs.splice(i, 1);
+        }
+      }
+
+      // 5. Cubrir necesidades faltantes (NECESIDAD_NO_CUBIERTA)
+      const missingNeeds = expected.filter((need) => !reqs.some((req) =>
+        req.tipo === need.tipo &&
+        !['rechazado', 'fuera_de_alcance'].includes(req.estado_decision) &&
+        (req.necesidades_origen || []).includes(need.id)
+      ));
+
+      const groupedMissing = new Map();
+      for (const need of missingNeeds) {
+        const keyGroup = `${need.tipo}:${objectiveOf(need)}`;
+        if (!groupedMissing.has(keyGroup)) groupedMissing.set(keyGroup, []);
+        groupedMissing.get(keyGroup).push(need);
+      }
+
+      const usedIds = new Set(reqs.map((r) => r.identificador));
+      for (const [, group] of groupedMissing.entries()) {
+        const first = group[0];
+        const targetObj = objectiveOf(first);
+        // Verificar si algún requisito existente del mismo tipo ya cubre ese objetivo_id
+        const existingSameObj = reqs.find((r) => r.tipo === first.tipo && (r.necesidades_origen || []).some((id) => {
+          const n = expected.find((item) => item.id === id);
+          return n && objectiveOf(n) === targetObj;
+        }));
+
+        if (existingSameObj) {
+          delete existingSameObj._locked;
+          for (const need of group) {
+            if (!existingSameObj.necesidades_origen.includes(need.id)) {
+              existingSameObj.necesidades_origen.push(need.id);
+            }
+            if (!existingSameObj.criterios_aceptacion.some((c) => c?.descripcion && (c.necesidades_origen || []).includes(need.id))) {
+              existingSameObj.criterios_aceptacion.push({
+                descripcion: need.necesidad,
+                necesidades_origen: [need.id]
+              });
+            }
+          }
+        } else {
+          const newId = this._nextAvailableId(usedIds, first.tipo);
+          usedIds.add(newId);
+          const cleanTitle = String(first.necesidad || `Requisito ${newId}`).replace(/\.$/, '').slice(0, 90);
+          const lowerDesc = cleanTitle.charAt(0).toLowerCase() + cleanTitle.slice(1);
+          reqs.push({
+            identificador: newId,
+            tipo: first.tipo,
+            nombre: cleanTitle,
+            descripcion: `El sistema DEBE permitir ${lowerDesc}.`,
+            actores: ['Usuario'],
+            prioridad: 'Alta',
+            precondiciones: 'Sesión activa o acceso autorizado en el sistema',
+            poscondiciones: 'Operación registrada y verificada conforme a la necesidad especificada',
+            metrica_medible: first.tipo === 'RNF' ? 'Por confirmar con el usuario' : '',
+            origen: first.evidencia ? 'explicito' : 'inferido',
+            evidencia: first.evidencia || '',
+            evidencias: Array.isArray(first.evidencias) && first.evidencias.length
+              ? first.evidencias
+              : (first.evidencia ? [{ texto: first.evidencia, fuente: 'insumo_directo' }] : []),
+            fuentes_origen: [],
+            necesidades_origen: group.map((n) => n.id),
+            criterios_aceptacion: group.map((n) => ({
+              descripcion: n.necesidad,
+              necesidades_origen: [n.id]
+            })),
+            reglas_relacionadas: [],
+            requiere_confirmacion: first.tipo === 'RNF' || first.estado === 'pendiente',
+            estado_decision: first.estado === 'pendiente' ? 'pendiente' : 'confirmado',
+            restricciones_excluidas: [],
+            aprobado: false
+          });
+        }
+      }
+
+      // 6. Garantizar que todos los criterios de aceptación sean válidos y cubran cada necesidad con objetivo_id
+      for (const req of reqs) {
+        const refs = Array.isArray(req.necesidades_origen) ? req.necesidades_origen : [];
+        const validCriteria = [];
+        for (const crit of (Array.isArray(req.criterios_aceptacion) ? req.criterios_aceptacion : [])) {
+          if (!crit || typeof crit !== 'object') continue;
+          const desc = String(crit.descripcion || '').trim();
+          if (!desc) continue;
+          let critRefs = (Array.isArray(crit.necesidades_origen) ? crit.necesidades_origen : []).filter((id) => refs.includes(id));
+          if (!critRefs.length && refs.length === 1) critRefs = [refs[0]];
+          if (critRefs.length) {
+            validCriteria.push({ ...crit, descripcion: desc, necesidades_origen: critRefs });
+          }
+        }
+        for (const refId of refs) {
+          const need = expected.find((n) => n.id === refId);
+          if (need?.objetivo_id && !validCriteria.some((c) => c.descripcion && c.necesidades_origen.includes(refId))) {
+            validCriteria.push({
+              descripcion: need.necesidad,
+              necesidades_origen: [refId]
+            });
+            delete req._locked;
+          }
+        }
+        req.criterios_aceptacion = validCriteria;
+      }
+    }
+  }
 }
 module.exports = RequirementCoverageService;

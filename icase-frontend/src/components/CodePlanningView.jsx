@@ -13,6 +13,7 @@ import {
   executeOneClickModeApi, startArtifactVerificationJobApi, fetchArtifactVerificationJobApi, fetchLatestArtifactVerificationJobApi
 } from '../services/api';
 import GenerationReport from './GenerationReport';
+import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'];
 // Etapas que se pueden editar y aprobar pero no bloquean la generación (si no se aprueban rige el modo automático).
@@ -76,7 +77,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
   const [selected, setSelected] = useState('alcance_plataforma');
   const [drafts, setDrafts] = useState(DEFAULTS);
   const [notes, setNotes] = useState('');
-  const [feedback, setFeedback] = useState(null);
+  const { toasts, addToast, removeToast } = useToasts();
   const [suggestionMeta, setSuggestionMeta] = useState(null);
   const [backendArtifact, setBackendArtifact] = useState(null);
   const [frontendArtifact, setFrontendArtifact] = useState(null);
@@ -99,7 +100,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
         }
         setDrafts(loaded);
       })
-      .catch((error) => !cancelled && setFeedback({ type: 'error', message: error.message }))
+      .catch((error) => !cancelled && addToast({ type: 'error', message: error.message }))
       .finally(() => !cancelled && setBusy(false));
     fetchGeneratedArtifactsApi(projectId, 'codigo_backend')
       .then((items) => !cancelled && setBackendArtifact(items[0] || null))
@@ -135,7 +136,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
       return;
     }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const result = await executeOneClickModeApi(projectId);
       setPlan(await fetchCodePlanApi(projectId));
       const loaded = { ...drafts };
@@ -146,425 +147,621 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
       }
       setDrafts(loaded);
       setShowOneClickReport(true);
-      setFeedback({
+      addToast({
         type: 'success',
         message: '¡Modo de un clic completado! Todas las etapas han sido configuradas y aprobadas con valores seguros.'
       });
     } catch (error) {
-      setFeedback({ type: 'error', message: error.message });
+      addToast({ type: 'error', message: error.message });
     } finally {
       setBusy(false);
     }
   };
 
-  const visibleFeedback = feedback || (!projectId
-    ? { type: 'error', message: 'El proyecto debe estar guardado antes de planificar la codificación.' }
-    : null);
-
   const saveProposal = async () => {
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const updated = await proposeCodePhaseApi(projectId, selected, drafts[selected], notes);
       setPlan((previous) => ({ ...updated, modulos: { ...updated.modulos, requisitos: previous?.modulos?.requisitos || [] } }));
-      setFeedback({ type: 'success', message: 'Propuesta guardada. Ahora debe aprobarse explícitamente.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: 'Propuesta guardada. Ahora debe aprobarse explícitamente.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const generateSuggestion = async () => {
     try {
-      setBusy(true); setFeedback(null); setSuggestionMeta(null);
+      setBusy(true); setSuggestionMeta(null);
       const result = await suggestCodePhaseApi(projectId, selected);
       setDrafts((old) => ({ ...old, [selected]: result.propuesta }));
       setSuggestionMeta({ evidencias: result.evidencias || [], advertencias: result.advertencias || [] });
-      setFeedback({ type: 'success', message: 'Propuesta preparada con artefactos aprobados. Revísala antes de guardarla.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: 'Propuesta preparada con artefactos aprobados. Revísala antes de guardarla.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const review = async (decision) => {
     const rejection = decision === 'rechazar' ? notes.trim() : notes;
     if (decision === 'rechazar' && !rejection) {
-      setFeedback({ type: 'error', message: 'Indica el motivo del rechazo en observaciones.' });
+      addToast({ type: 'error', message: 'Indica el motivo del rechazo en observaciones.' });
       return;
     }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const updated = await reviewCodePhaseApi(projectId, selected, decision, rejection);
       setPlan((previous) => ({ ...updated, modulos: { ...updated.modulos, requisitos: previous?.modulos?.requisitos || [] } }));
       setNotes('');
       const next = updated.etapas?.find((item) => DECISION_PHASES.includes(item.etapa) && item.estado === 'pendiente');
-      if (decision === 'aprobar' && next) setSelected(next.etapa);
-      setFeedback({ type: 'success', message: decision === 'aprobar' ? 'Decisión aprobada.' : 'Propuesta rechazada para corrección.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      const allDecisionsApproved = (updated.etapas || []).filter((item) => DECISION_PHASES.includes(item.etapa) && item.estado === 'aprobada').length === DECISION_PHASES.length;
+      if (decision === 'aprobar') {
+        if (next) setSelected(next.etapa);
+        else if (allDecisionsApproved) setSelected('generacion_entrega');
+      }
+      addToast({ type: 'success', message: decision === 'aprobar' ? 'Decisión aprobada.' : 'Propuesta rechazada para corrección.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const generateBackend = async () => {
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const result = await generateBackendArtifactApi(projectId);
       setBackendArtifact(result.artefacto);
       setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: result.reutilizado ? 'La entrada no cambió; se reutilizó la versión existente.' : 'Backend generado. Verifica su funcionalidad antes de aprobar.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: result.reutilizado ? 'La entrada no cambió; se reutilizó la versión existente.' : 'Backend generado. Verifica su funcionalidad antes de aprobar.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const reviewBackend = async (decision) => {
     if (decision === 'rechazar' && !notes.trim()) {
-      setFeedback({ type: 'error', message: 'Indica en observaciones qué debe corregirse en el backend.' });
+      addToast({ type: 'error', message: 'Indica en observaciones qué debe corregirse en el backend.' });
       return;
     }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const artifact = await reviewBackendArtifactApi(projectId, backendArtifact.id, decision, notes);
       setBackendArtifact(artifact);
       setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: decision === 'aprobar' ? 'Backend aprobado.' : 'Backend rechazado; puedes generar una nueva versión tras ajustar las decisiones.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: decision === 'aprobar' ? 'Backend aprobado.' : 'Backend rechazado; puedes generar una nueva versión tras ajustar las decisiones.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const generateFrontend = async () => {
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const result = await generateFrontendArtifactApi(projectId);
       setFrontendArtifact(result.artefacto);
       setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: result.reutilizado ? 'La entrada no cambió; se reutilizó el frontend existente.' : 'Frontend generado. Verifica sus interacciones antes de aprobar.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: result.reutilizado ? 'La entrada no cambió; se reutilizó el frontend existente.' : 'Frontend generado. Verifica sus interacciones antes de aprobar.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const reviewFrontend = async (decision) => {
     if (decision === 'rechazar' && !notes.trim()) {
-      setFeedback({ type: 'error', message: 'Indica en observaciones qué debe corregirse en el frontend.' }); return;
+      addToast({ type: 'error', message: 'Indica en observaciones qué debe corregirse en el frontend.' }); return;
     }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const artifact = await reviewFrontendArtifactApi(projectId, frontendArtifact.id, decision, notes);
       setFrontendArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: decision === 'aprobar' ? 'Frontend aprobado.' : 'Frontend rechazado para corrección.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: decision === 'aprobar' ? 'Frontend aprobado.' : 'Frontend rechazado para corrección.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const generateTests = async () => {
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const result = await generateTestArtifactApi(projectId);
       setTestArtifact(result.artefacto); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: result.reutilizado ? 'Las entradas no cambiaron; se reutilizó la suite existente.' : 'Pruebas generadas y listas para revisión.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: result.reutilizado ? 'Las entradas no cambiaron; se reutilizó la suite existente.' : 'Pruebas generadas y listas para revisión.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const reviewTests = async (decision) => {
-    if (decision === 'rechazar' && !notes.trim()) { setFeedback({ type: 'error', message: 'Indica qué debe corregirse en las pruebas.' }); return; }
+    if (decision === 'rechazar' && !notes.trim()) { addToast({ type: 'error', message: 'Indica qué debe corregirse en las pruebas.' }); return; }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const artifact = await reviewTestArtifactApi(projectId, testArtifact.id, decision, notes);
       setTestArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: decision === 'aprobar' ? 'Suite de pruebas aprobada.' : 'Suite rechazada para corrección.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: decision === 'aprobar' ? 'Suite de pruebas aprobada.' : 'Suite rechazada para corrección.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const generateInfrastructure = async () => {
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const result = await generateInfrastructureArtifactApi(projectId);
       setInfrastructureArtifact(result.artefacto); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: result.reutilizado ? 'Las entradas no cambiaron; se reutilizó la infraestructura existente.' : 'Infraestructura generada y lista para revisión.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: result.reutilizado ? 'Las entradas no cambiaron; se reutilizó la infraestructura existente.' : 'Infraestructura generada y lista para revisión.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const reviewInfrastructure = async (decision) => {
-    if (decision === 'rechazar' && !notes.trim()) { setFeedback({ type: 'error', message: 'Indica qué debe corregirse en la infraestructura.' }); return; }
+    if (decision === 'rechazar' && !notes.trim()) { addToast({ type: 'error', message: 'Indica qué debe corregirse en la infraestructura.' }); return; }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const artifact = await reviewInfrastructureArtifactApi(projectId, infrastructureArtifact.id, decision, notes);
       setInfrastructureArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: decision === 'aprobar' ? 'Infraestructura aprobada.' : 'Infraestructura rechazada para corrección.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: decision === 'aprobar' ? 'Infraestructura aprobada.' : 'Infraestructura rechazada para corrección.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const generatePipeline = async () => {
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const result = await generatePipelineArtifactApi(projectId);
       setPipelineArtifact(result.artefacto); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: result.reutilizado ? 'Las entradas no cambiaron; se reutilizó el pipeline existente.' : 'Pipeline CI/CD generado y listo para revisión.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: result.reutilizado ? 'Las entradas no cambiaron; se reutilizó el pipeline existente.' : 'Pipeline CI/CD generado y listo para revisión.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const reviewPipeline = async (decision) => {
-    if (decision === 'rechazar' && !notes.trim()) { setFeedback({ type: 'error', message: 'Indica qué debe corregirse en el pipeline.' }); return; }
+    if (decision === 'rechazar' && !notes.trim()) { addToast({ type: 'error', message: 'Indica qué debe corregirse en el pipeline.' }); return; }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const artifact = await reviewPipelineArtifactApi(projectId, pipelineArtifact.id, decision, notes);
       setPipelineArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: decision === 'aprobar' ? 'Pipeline CI/CD aprobado.' : 'Pipeline rechazado para corrección.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: decision === 'aprobar' ? 'Pipeline CI/CD aprobado.' : 'Pipeline rechazado para corrección.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const generateDelivery = async () => {
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const result = await generateDeliveryArtifactApi(projectId);
       setDeliveryArtifact(result.artefacto); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: result.reutilizado ? 'Las versiones no cambiaron; se reutilizó el paquete existente.' : 'Paquete final consolidado y listo para revisión.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: result.reutilizado ? 'Las versiones no cambiaron; se reutilizó el paquete existente.' : 'Paquete final consolidado y listo para revisión.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const reviewDelivery = async (decision) => {
-    if (decision === 'rechazar' && !notes.trim()) { setFeedback({ type: 'error', message: 'Indica qué debe corregirse en el paquete final.' }); return; }
+    if (decision === 'rechazar' && !notes.trim()) { addToast({ type: 'error', message: 'Indica qué debe corregirse en el paquete final.' }); return; }
     try {
-      setBusy(true); setFeedback(null);
+      setBusy(true);
       const artifact = await reviewDeliveryArtifactApi(projectId, deliveryArtifact.id, decision, notes);
       setDeliveryArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
-      setFeedback({ type: 'success', message: decision === 'aprobar' ? 'Entrega aprobada y proyecto finalizado. Ya puedes descargar el ZIP.' : 'Paquete rechazado para corrección.' });
-    } catch (error) { setFeedback({ type: 'error', message: error.message }); }
+      addToast({ type: 'success', message: decision === 'aprobar' ? 'Entrega aprobada y proyecto finalizado. Ya puedes descargar el ZIP.' : 'Paquete rechazado para corrección.' });
+    } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   const downloadDelivery = async () => {
-    try { setBusy(true); setFeedback(null); await downloadDeliveryArtifactApi(projectId, deliveryArtifact.id); }
-    catch (error) { setFeedback({ type: 'error', message: error.message }); }
+    try { setBusy(true); await downloadDeliveryArtifactApi(projectId, deliveryArtifact.id); }
+    catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50">
-      <header className="border-b border-slate-200 bg-white px-6 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-violet-600">Fase 3 · Planificación de la codificación</p>
-            <h1 className="mt-1 text-xl font-semibold text-slate-950">Decisiones técnicas de {projectName || 'proyecto'}</h1>
-            <p className="mt-1 text-sm text-slate-500">Aprueba cada decisión antes de habilitar la generación del código.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleOneClickMode}
-              disabled={busy}
-              title="Configura y aprueba todas las etapas con valores seguros (JWT, sin autoregistro, solo reglas con evidencia literal)"
-              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 transition cursor-pointer"
-            >
-              <WandSparkles size={14} className={busy ? 'animate-spin' : ''} />
-              Modo de un clic
-            </button>
-            <button onClick={onBackToDiagrams} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600">← Diagramas y mockups</button>
-            <button onClick={onOpenDocument} className="rounded-lg border border-violet-200 px-3 py-2 text-xs font-medium text-violet-700">Ver documento actual</button>
-          </div>
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-white">
+      {/* SIDEBAR IZQUIERDO DELGADO TIPO ROADMAP: Compuertas de decisión */}
+      <aside className="w-64 shrink-0 border-r border-slate-100 bg-white flex flex-col overflow-y-auto select-none">
+        <div className="px-5 pt-6 pb-3">
+          <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            Compuertas de decisión
+          </h2>
         </div>
-        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-violet-600 transition-all" style={{ width: `${(approvedCount / DECISION_PHASES.length) * 100}%` }} /></div>
-        <p className="mt-1 text-right text-[11px] text-slate-500">{approvedCount}/{DECISION_PHASES.length} decisiones aprobadas</p>
-      </header>
 
-      {visibleFeedback && <div className={`mx-6 mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${visibleFeedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><AlertCircle size={14} />{visibleFeedback.message}</div>}
+        <nav className="flex-1 flex flex-col pb-4">
+          {(() => {
+            const decisionItems = (plan?.etapas || []).filter((item) => DECISION_PHASES.includes(item.etapa));
+            const generationGate = {
+              etapa: 'generacion_entrega',
+              titulo: 'Generación y entrega',
+              estado: deliveryArtifact?.aprobado
+                ? 'aprobada'
+                : approvedCount === DECISION_PHASES.length
+                  ? 'en_revision'
+                  : 'bloqueada'
+            };
+            const roadmapItems = [...decisionItems, generationGate];
 
-      {plan?.modo_un_clic && (
-        <div className="mx-6 mt-4 rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50/70 to-indigo-50/50 p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white shadow-sm">
-                <CheckCircle2 size={18} />
-              </div>
-              <div>
-                <h3 className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                  Planificación completada en Modo de un clic
-                  <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-800">
-                    Valores seguros aplicados
-                  </span>
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  {plan.modo_un_clic.resumen} {plan.modo_un_clic.ejecutado_en ? `· ${new Date(plan.modo_un_clic.ejecutado_en).toLocaleTimeString()}` : ''}
-                </p>
-              </div>
+            return roadmapItems.map((item, idx) => {
+              const isSelected = selected === item.etapa;
+              const isApproved = item.estado === 'aprobada';
+              const isBlocked = item.estado === 'bloqueada';
+              const nextItem = roadmapItems[idx + 1];
+              const isNextApproved = nextItem?.estado === 'aprobada';
+              const showConnector = idx < roadmapItems.length - 1;
+
+              return (
+                <React.Fragment key={item.etapa}>
+                  <button
+                    disabled={isBlocked}
+                    onClick={() => { if (!isBlocked) { setSelected(item.etapa); setSuggestionMeta(null); } }}
+                    className={`group w-full flex items-center gap-3 px-5 py-2.5 text-left text-[13px] transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#F8F4FF] text-[#6D28D9] font-bold'
+                        : isApproved
+                        ? 'text-slate-800 font-semibold hover:bg-slate-50/80'
+                        : isBlocked
+                        ? 'text-slate-400 cursor-not-allowed opacity-65'
+                        : 'text-slate-500 font-medium hover:bg-slate-50/80'
+                    }`}
+                    title={
+                      item.etapa === 'generacion_entrega' && isBlocked
+                        ? 'Aprueba las 6 decisiones anteriores para habilitar la generación y entrega'
+                        : `${item.titulo} (${item.estado?.replace('_', ' ')})`
+                    }
+                  >
+                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                      isApproved
+                        ? 'bg-emerald-500 text-white'
+                        : isSelected
+                        ? 'border border-violet-500 bg-violet-100 text-violet-700'
+                        : 'border border-slate-300 bg-white text-slate-500'
+                    }`}>
+                      {isApproved ? <Check size={12} strokeWidth={3} /> : idx + 1}
+                    </span>
+                    <span className="truncate">{item.titulo}</span>
+                    {isBlocked && <LockKeyhole size={12} className="ml-auto shrink-0 text-slate-400" />}
+                  </button>
+
+                  {showConnector && (
+                    <div className="flex items-center px-5 pointer-events-none" aria-hidden="true">
+                      <div className="w-5 flex justify-center">
+                        <span
+                          className={`block w-[2px] h-2.5 rounded-full ${
+                            isApproved && isNextApproved ? 'bg-emerald-500' : 'bg-slate-200'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            });
+          })()}
+
+          {(plan?.etapas || []).some((item) => OPTIONAL_PHASES.includes(item.etapa)) && (
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <p className="px-5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Opcional
+              </p>
+              {(plan?.etapas || []).filter((item) => OPTIONAL_PHASES.includes(item.etapa)).map((item) => {
+                const Icon = ICONS[item.etapa] || Puzzle;
+                const isSelected = selected === item.etapa;
+                const isApproved = item.estado === 'aprobada';
+                return (
+                  <button
+                    key={item.etapa}
+                    onClick={() => { setSelected(item.etapa); setSuggestionMeta(null); }}
+                    className={`w-full flex items-center gap-3 px-5 py-2.5 text-left text-[13px] transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#F8F4FF] text-[#6D28D9] font-bold'
+                        : isApproved
+                        ? 'text-slate-800 font-semibold hover:bg-slate-50/80'
+                        : 'text-slate-500 font-medium hover:bg-slate-50/80'
+                    }`}
+                    title={`${item.titulo} (Opcional)`}
+                  >
+                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                      isApproved
+                        ? 'bg-emerald-500 text-white'
+                        : 'border border-slate-300 bg-white text-slate-500'
+                    }`}>
+                      {isApproved ? <Check size={12} strokeWidth={3} /> : <Icon size={11} />}
+                    </span>
+                    <span className="truncate">{item.titulo}</span>
+                  </button>
+                );
+              })}
             </div>
+          )}
+        </nav>
+      </aside>
+
+      {/* SECCIÓN DERECHA: Misma altura y estructura de cabecera que la Fase 2 */}
+      <div className="w-full flex-1 overflow-y-auto min-h-0 pt-6 pb-10 px-6 md:px-12 flex flex-col bg-white">
+        <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col min-h-0">
+          {/* Cabecera superior unificada de Fase 3 (idéntica en altura a Fase 2) */}
+          <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
+            <div>
+              <span className="text-[11px] font-semibold text-[#7C3AED] uppercase tracking-wider block">
+                Fase 3: Planificación de la Codificación
+              </span>
+              <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
+                Decisiones técnicas de {projectName || 'proyecto'}
+              </h2>
+            </div>
+
             <button
-              onClick={() => setShowOneClickReport((prev) => !prev)}
-              className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 transition shadow-xs"
+              onClick={onBackToDiagrams}
+              className="text-xs text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
             >
-              {showOneClickReport ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              {showOneClickReport ? 'Ocultar informe' : 'Ver informe de lo dudoso'}
+              ← Volver a Diagramas y Mockups
             </button>
           </div>
 
-          {showOneClickReport && (
-            <div className="mt-3.5 space-y-3 border-t border-violet-200/70 pt-3 text-xs">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
-                  <span className="text-[10px] font-semibold uppercase text-slate-400">Autenticación</span>
-                  <p className="mt-0.5 font-medium text-slate-800">{String(plan.modo_un_clic.valores_seguros?.autenticacion || 'jwt').toUpperCase()}</p>
+          {/* Barra compacta de acción y progreso (en el mismo nivel donde Fase 2 ubica sus tabs) */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4 shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleOneClickMode}
+                disabled={busy}
+                title="Configura y aprueba todas las etapas con valores seguros (JWT, sin autoregistro, solo reglas con evidencia literal)"
+                className="flex items-center gap-2 rounded-lg bg-violet-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-violet-700 disabled:opacity-50 transition cursor-pointer"
+              >
+                <WandSparkles size={13} className={busy ? 'animate-spin' : ''} />
+                Modo de un clic
+              </button>
+              <span className="text-xs text-slate-500 hidden sm:inline">
+                Aprueba cada decisión antes de habilitar la generación del código.
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 min-w-[200px] sm:min-w-[240px]">
+              <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-violet-600 transition-all"
+                  style={{ width: `${(approvedCount / DECISION_PHASES.length) * 100}%` }}
+                />
+              </div>
+              <span className="text-[11px] font-medium text-slate-500 whitespace-nowrap">
+                {approvedCount}/{DECISION_PHASES.length} decisiones aprobadas
+              </span>
+            </div>
+          </div>
+
+          {plan?.modo_un_clic && (
+            <div className="mb-5 rounded-xl border border-violet-200 bg-gradient-to-r from-violet-50/70 to-indigo-50/50 p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white shadow-sm">
+                    <CheckCircle2 size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                      Planificación completada en Modo de un clic
+                      <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-800">
+                        Valores seguros aplicados
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      {plan.modo_un_clic.resumen} {plan.modo_un_clic.ejecutado_en ? `· ${new Date(plan.modo_un_clic.ejecutado_en).toLocaleTimeString()}` : ''}
+                    </p>
+                  </div>
                 </div>
-                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
-                  <span className="text-[10px] font-semibold uppercase text-slate-400">Autoregistro</span>
-                  <p className="mt-0.5 font-medium text-slate-800">Cerrado (sin registro libre)</p>
+                <button
+                  onClick={() => setShowOneClickReport((prev) => !prev)}
+                  className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 transition shadow-xs"
+                >
+                  {showOneClickReport ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  {showOneClickReport ? 'Ocultar informe' : 'Ver informe de lo dudoso'}
+                </button>
+              </div>
+
+              {showOneClickReport && (
+                <div className="mt-3.5 space-y-3 border-t border-violet-200/70 pt-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                      <span className="text-[10px] font-semibold uppercase text-slate-400">Autenticación</span>
+                      <p className="mt-0.5 font-medium text-slate-800">{String(plan.modo_un_clic.valores_seguros?.autenticacion || 'jwt').toUpperCase()}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                      <span className="text-[10px] font-semibold uppercase text-slate-400">Autoregistro</span>
+                      <p className="mt-0.5 font-medium text-slate-800">Cerrado (sin registro libre)</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                      <span className="text-[10px] font-semibold uppercase text-slate-400">Reglas con evidencia</span>
+                      <p className="mt-0.5 font-medium text-emerald-700">{plan.modo_un_clic.valores_seguros?.reglas_confirmadas || 0} confirmadas</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
+                      <span className="text-[10px] font-semibold uppercase text-slate-400">Reglas descartadas</span>
+                      <p className="mt-0.5 font-medium text-amber-700">{plan.modo_un_clic.valores_seguros?.reglas_descartadas || 0} sin evidencia literal</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] font-bold text-slate-700 mb-1">
+                      Aspectos dudosos y advertencias detectadas ({plan.modo_un_clic.dudas?.length || 0}):
+                    </p>
+                    {(!plan.modo_un_clic.dudas || plan.modo_un_clic.dudas.length === 0) ? (
+                      <p className="text-[11px] text-emerald-700 bg-emerald-50/70 border border-emerald-200 rounded-lg p-2.5">
+                        ✓ No se detectaron aspectos dudosos; todas las decisiones se basaron en evidencia explícita de los requisitos.
+                      </p>
+                    ) : (
+                      <ul className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-[11px] text-amber-950">
+                        {plan.modo_un_clic.dudas.map((duda, idx) => (
+                          <li key={idx} className="flex items-start gap-1.5">
+                            <AlertTriangle size={13} className="shrink-0 text-amber-600 mt-0.5" />
+                            <span>
+                              <strong className="font-semibold capitalize">[{duda.etapa?.replace('_', ' ')}]:</strong>{' '}
+                              {duda.detalle || duda.descripcion}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
-                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
-                  <span className="text-[10px] font-semibold uppercase text-slate-400">Reglas con evidencia</span>
-                  <p className="mt-0.5 font-medium text-emerald-700">{plan.modo_un_clic.valores_seguros?.reglas_confirmadas || 0} confirmadas</p>
-                </div>
-                <div className="rounded-lg border border-slate-200/80 bg-white p-2.5 shadow-xs">
-                  <span className="text-[10px] font-semibold uppercase text-slate-400">Reglas descartadas</span>
-                  <p className="mt-0.5 font-medium text-amber-700">{plan.modo_un_clic.valores_seguros?.reglas_descartadas || 0} sin evidencia literal</p>
+              )}
+            </div>
+          )}
+
+          {busy && !plan ? (
+            <div className="flex py-16 items-center justify-center gap-2 text-sm text-slate-500">
+              <Loader2 className="animate-spin" size={18} />
+              Cargando plan de codificación…
+            </div>
+          ) : selected === 'generacion_entrega' ? (
+            /* PANEL EXCLUSIVO PARA GENERACIÓN Y ENTREGA DE ARTEFACTOS */
+            <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-xs">
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-wider text-violet-600">
+                      Compuerta de generación activa
+                    </span>
+                    <span className={`inline-flex rounded-full border px-3 py-0.5 text-xs font-semibold ${deliveryArtifact?.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>
+                      {deliveryArtifact?.aprobado ? 'aprobada' : 'habilitada'}
+                    </span>
+                  </div>
+                  <h2 className="mt-1.5 text-2xl font-bold text-slate-900">Generación y entrega del sistema</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Genera, verifica y aprueba secuencialmente el backend, frontend, pruebas, infraestructura, pipeline CI/CD y paquete final.
+                  </p>
                 </div>
               </div>
 
-              <div>
-                <p className="text-[11px] font-bold text-slate-700 mb-1">
-                  Aspectos dudosos y advertencias detectadas ({plan.modo_un_clic.dudas?.length || 0}):
-                </p>
-                {(!plan.modo_un_clic.dudas || plan.modo_un_clic.dudas.length === 0) ? (
-                  <p className="text-[11px] text-emerald-700 bg-emerald-50/70 border border-emerald-200 rounded-lg p-2.5">
-                    ✓ No se detectaron aspectos dudosos; todas las decisiones se basaron en evidencia explícita de los requisitos.
-                  </p>
-                ) : (
-                  <ul className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-[11px] text-amber-950">
-                    {plan.modo_un_clic.dudas.map((duda, idx) => (
-                      <li key={idx} className="flex items-start gap-1.5">
-                        <AlertTriangle size={13} className="shrink-0 text-amber-600 mt-0.5" />
-                        <span>
-                          <strong className="font-semibold capitalize">[{duda.etapa?.replace('_', ' ')}]:</strong>{' '}
-                          {duda.detalle || duda.descripcion}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+              <label className="mb-6 block">
+                <span className="mb-1 block text-xs font-semibold text-slate-700">Observaciones de revisión (para rechazos o ajustes)</span>
+                <textarea
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  rows={2}
+                  className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-violet-500"
+                  placeholder="Indica observaciones si deseas rechazar o solicitar cambios en algún artefacto generado…"
+                />
+              </label>
+
+              <section className="space-y-7">
+                <div>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h3 className="font-semibold text-slate-900">Generación del backend</h3><p className="mt-1 text-xs text-slate-500">Código propuesto desde las decisiones y RF aprobados. La verificación detecta módulos pendientes antes de aprobar.</p></div>
+                    <button disabled={busy} onClick={generateBackend} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 cursor-pointer"><Code2 size={15} />{backendArtifact ? 'Regenerar backend' : 'Generar backend'}</button>
+                  </div>
+                  {!backendArtifact && <GenerationReport projectId={projectId} artifact={null} />}
+                  {backendArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {backendArtifact.version} · {backendArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${backendArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{backendArtifact.estado}</span></div>
+                    {backendArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{backendArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+                    <GenerationReport projectId={projectId} artifact={backendArtifact} />
+                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(backendArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
+                    <ArtifactVerification key={backendArtifact.id} projectId={projectId} artifact={backendArtifact} onArtifactChange={setBackendArtifact} />
+                    {backendArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewBackend('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewBackend('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar backend</button></div>}
+                  </div>}
+                </div>
+
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h3 className="font-semibold text-slate-900">Generación del frontend</h3><p className="mt-1 text-xs text-slate-500">Aplicación React/Vite con rutas y vistas derivadas del árbol y mockups aprobados.</p></div>
+                    <button disabled={busy} onClick={generateFrontend} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 cursor-pointer"><Code2 size={15} />{frontendArtifact ? 'Regenerar frontend' : 'Generar frontend'}</button>
+                  </div>
+                  {frontendArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {frontendArtifact.version} · {frontendArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${frontendArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{frontendArtifact.estado}</span></div>
+                    {frontendArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{frontendArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(frontendArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
+                    <ArtifactVerification key={frontendArtifact.id} projectId={projectId} artifact={frontendArtifact} onArtifactChange={setFrontendArtifact} />
+                    {frontendArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewFrontend('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewFrontend('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar frontend</button></div>}
+                  </div>}
+                </div>
+
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h3 className="font-semibold text-slate-900">Generación de pruebas</h3><p className="mt-1 text-xs text-slate-500">Pruebas de trazabilidad, integración del API y navegación E2E vinculadas a versiones aprobadas.</p>{!testsEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba backend y frontend.</p>}</div>
+                    <button disabled={busy || !testsEnabled} onClick={generateTests} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><Code2 size={15} />{testArtifact ? 'Regenerar pruebas' : 'Generar pruebas'}</button>
+                  </div>
+                  {testArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {testArtifact.version} · {testArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${testArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{testArtifact.estado}</span></div>
+                    {testArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{testArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(testArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
+                    <ArtifactVerification key={testArtifact.id} projectId={projectId} artifact={testArtifact} onArtifactChange={setTestArtifact} />
+                    {testArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewTests('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewTests('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pruebas</button></div>}
+                  </div>}
+                </div>
+
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h3 className="font-semibold text-slate-900">Infraestructura y puesta en marcha</h3><p className="mt-1 text-xs text-slate-500">Docker, Compose, proxy, persistencia y despliegue derivados de arquitectura y RNF aprobados.</p>{!infrastructureEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba backend y frontend.</p>}</div>
+                    <button disabled={busy || !infrastructureEnabled} onClick={generateInfrastructure} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><Settings2 size={15} />{infrastructureArtifact ? 'Regenerar infraestructura' : 'Generar infraestructura'}</button>
+                  </div>
+                  {infrastructureArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {infrastructureArtifact.version} · {infrastructureArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${infrastructureArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{infrastructureArtifact.estado}</span></div>
+                    {infrastructureArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{infrastructureArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(infrastructureArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
+                    <ArtifactVerification key={infrastructureArtifact.id} projectId={projectId} artifact={infrastructureArtifact} onArtifactChange={setInfrastructureArtifact} />
+                    {infrastructureArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewInfrastructure('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewInfrastructure('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar infraestructura</button></div>}
+                  </div>}
+                </div>
+
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h3 className="font-semibold text-slate-900">Pipeline CI/CD</h3><p className="mt-1 text-xs text-slate-500">Validación, compilación, pruebas, contenedores y paquete de entrega mediante GitHub Actions.</p>{!pipelineEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba pruebas e infraestructura.</p>}</div>
+                    <button disabled={busy || !pipelineEnabled} onClick={generatePipeline} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><Settings2 size={15} />{pipelineArtifact ? 'Regenerar pipeline' : 'Generar pipeline'}</button>
+                  </div>
+                  {pipelineArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {pipelineArtifact.version} · {pipelineArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${pipelineArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{pipelineArtifact.estado}</span></div>
+                    {pipelineArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{pipelineArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(pipelineArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
+                    <ArtifactVerification key={pipelineArtifact.id} projectId={projectId} artifact={pipelineArtifact} onArtifactChange={setPipelineArtifact} />
+                    {pipelineArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewPipeline('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewPipeline('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pipeline</button></div>}
+                  </div>}
+                </div>
+
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h3 className="font-semibold text-slate-900">Paquete final de entrega</h3><p className="mt-1 text-xs text-slate-500">Consolida código, pruebas, infraestructura, CI/CD, manifiesto de versiones y huellas.</p>{!deliveryEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba el pipeline CI/CD.</p>}</div>
+                    <button disabled={busy || !deliveryEnabled} onClick={generateDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><FolderTree size={15} />{deliveryArtifact ? 'Regenerar paquete' : 'Generar paquete final'}</button>
+                  </div>
+                  {deliveryArtifact && <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50/50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Entrega v{deliveryArtifact.version} · {deliveryArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${deliveryArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{deliveryArtifact.estado}</span></div>
+                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(deliveryArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
+                    <ArtifactVerification key={deliveryArtifact.id} projectId={projectId} artifact={deliveryArtifact} onArtifactChange={setDeliveryArtifact} />
+                    <div className="mt-3 flex flex-wrap justify-end gap-2">
+                      {deliveryArtifact.estado === 'en_revision' && <><button disabled={busy} onClick={() => reviewDelivery('rechazar')} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewDelivery('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar entrega</button></>}
+                      {deliveryArtifact.aprobado && <button disabled={busy} onClick={downloadDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-xs font-semibold text-white"><Download size={14} />Descargar ZIP</button>}
+                    </div>
+                  </div>}
+                </div>
+              </section>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-xs">
+              {current && <>
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-wider text-violet-600 leading-tight max-w-[180px]">
+                      Compuerta de decisión activa
+                    </span>
+                    <span className={`inline-flex rounded-full border px-3 py-0.5 text-xs font-semibold ${STATUS_STYLE[current.estado]}`}>
+                      {current.estado?.replace('_', ' ')}
+                    </span>
+                  </div>
+                  <button
+                    disabled={busy || current.estado === 'bloqueada'}
+                    onClick={generateSuggestion}
+                    className="flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-2.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 transition shadow-xs disabled:opacity-50 cursor-pointer"
+                  >
+                    <WandSparkles size={15} />
+                    Generar propuesta desde el proyecto
+                  </button>
+                </div>
+
+                <div className="mb-5">
+                  <h2 className="text-2xl font-bold text-slate-900">{current.titulo}</h2>
+                  <p className="mt-1 text-sm text-slate-500">{current.descripcion}</p>
+                </div>
+
+                {/* Formulario principal de decisión */}
+                <div className="rounded-xl border border-slate-100 bg-slate-50/40 p-5">
+                  <PhaseForm phase={selected} modules={plan?.modulos} value={drafts[selected] || {}} disabled={busy || current.estado === 'bloqueada'} onChange={(value) => setDrafts((old) => ({ ...old, [selected]: value }))} />
+                </div>
+                {suggestionMeta && <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                  <p className="font-semibold text-slate-800">Base de la sugerencia: {suggestionMeta.evidencias.length} artefactos aprobados</p>
+                  {suggestionMeta.advertencias.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">{suggestionMeta.advertencias.map((item) => <li key={item}>{item}</li>)}</ul>}
+                  <details className="mt-2"><summary className="cursor-pointer font-medium text-violet-700">Ver evidencias utilizadas</summary><ul className="mt-2 list-disc space-y-1 pl-4">{suggestionMeta.evidencias.map((item, index) => <li key={`${item.tipo}-${item.identificador}-${index}`}>{item.identificador}{item.nombre ? ` · ${item.nombre}` : ''}{item.version ? ` · v${item.version}` : ''}</li>)}</ul></details>
+                </div>}
+                <label className="mt-5 block"><span className="mb-1 block text-xs font-semibold text-slate-700">Observaciones de revisión</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-violet-500" placeholder="Motivo, restricciones o cambios solicitados…" /></label>
+                <div className="mt-5 flex flex-wrap justify-end gap-2">
+                  {current.estado === 'en_revision' && <button disabled={busy} onClick={() => review('rechazar')} className="flex items-center gap-1.5 rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 disabled:opacity-50"><RotateCcw size={14} />Solicitar cambios</button>}
+                  <button disabled={busy || current.estado === 'bloqueada'} onClick={saveProposal} className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50"><Save size={14} />{current.estado === 'aprobada' ? 'Guardar nueva versión' : 'Guardar propuesta'}</button>
+                  {current.estado === 'en_revision' && <button disabled={busy} onClick={() => review('aprobar')} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={14} />Aprobar decisión</button>}
+                </div>
+              </>}
             </div>
           )}
         </div>
-      )}
-
-      {busy && !plan ? <div className="flex flex-1 items-center justify-center gap-2 text-sm text-slate-500"><Loader2 className="animate-spin" size={18} />Cargando plan de codificación…</div> : (
-        <div className="flex min-h-0 flex-1 gap-4 overflow-hidden p-6">
-          <aside className="w-72 shrink-0 overflow-y-auto rounded-xl border border-slate-200 bg-white p-3">
-            <p className="mb-3 px-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Compuertas de decisión</p>
-            {(plan?.etapas || []).filter((item) => DECISION_PHASES.includes(item.etapa)).map((item) => {
-              const Icon = ICONS[item.etapa] || Settings2;
-              return <button key={item.etapa} onClick={() => { if (item.estado !== 'bloqueada') { setSelected(item.etapa); setSuggestionMeta(null); } }} className={`mb-2 w-full rounded-xl border p-3 text-left transition ${selected === item.etapa ? 'border-violet-300 ring-2 ring-violet-100' : 'border-slate-200'} ${item.estado === 'bloqueada' ? 'cursor-not-allowed opacity-60' : 'hover:border-violet-200'}`}>
-                <span className="flex items-center justify-between"><span className="flex items-center gap-2 text-xs font-semibold text-slate-800"><Icon size={15} />{item.titulo}</span>{item.estado === 'aprobada' ? <Check size={14} className="text-emerald-600" /> : item.estado === 'bloqueada' ? <LockKeyhole size={13} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}</span>
-                <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${STATUS_STYLE[item.estado] || STATUS_STYLE.pendiente}`}>{item.estado?.replace('_', ' ')}</span>
-              </button>;
-            })}
-            <p className="mb-2 mt-5 px-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Opcional</p>
-            {(plan?.etapas || []).filter((item) => OPTIONAL_PHASES.includes(item.etapa)).map((item) => {
-              const Icon = ICONS[item.etapa] || Puzzle;
-              return <button key={item.etapa} onClick={() => { if (item.estado !== 'bloqueada') { setSelected(item.etapa); setSuggestionMeta(null); } }} className={`mb-2 w-full rounded-xl border border-dashed p-3 text-left transition ${selected === item.etapa ? 'border-violet-300 ring-2 ring-violet-100' : 'border-slate-300'} ${item.estado === 'bloqueada' ? 'opacity-60' : ''}`}>
-                <span className="flex items-center justify-between"><span className="flex items-center gap-2 text-xs font-semibold text-slate-800"><Icon size={15} />{item.titulo}</span>{item.estado === 'aprobada' ? <Check size={14} className="text-emerald-600" /> : item.estado === 'bloqueada' ? <LockKeyhole size={13} className="text-slate-400" /> : null}</span>
-                <span className="mt-1 block text-[10px] text-slate-500">{item.estado === 'aprobada' ? 'Personalizado o confirmado' : 'Sin aprobar: se usa el modo automático'}</span>
-              </button>;
-            })}
-            <p className="mb-2 mt-5 px-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Generación posterior</p>
-            {(plan?.etapas || []).filter((item) => !EDITABLE_PHASES.includes(item.etapa)).map((item) => <div key={item.etapa} className="mb-1 flex items-center gap-2 rounded-lg px-2 py-2 text-[11px] text-slate-400"><LockKeyhole size={12} />{item.titulo}</div>)}
-          </aside>
-
-          <main className="min-w-0 flex-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-6">
-            {current && <>
-              <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
-                <div><h2 className="text-lg font-semibold text-slate-900">{current.titulo}</h2><p className="mt-1 text-sm text-slate-500">{current.descripcion}</p></div>
-                <span className={`rounded-full border px-2.5 py-1 text-xs ${STATUS_STYLE[current.estado]}`}>{current.estado?.replace('_', ' ')}</span>
-              </div>
-              <div className="mb-4 flex justify-end">
-                <button disabled={busy || current.estado === 'bloqueada'} onClick={generateSuggestion} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50"><WandSparkles size={15} />Generar propuesta desde el proyecto</button>
-              </div>
-              <PhaseForm phase={selected} modules={plan?.modulos} value={drafts[selected] || {}} disabled={busy || current.estado === 'bloqueada'} onChange={(value) => setDrafts((old) => ({ ...old, [selected]: value }))} />
-              {suggestionMeta && <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                <p className="font-semibold text-slate-800">Base de la sugerencia: {suggestionMeta.evidencias.length} artefactos aprobados</p>
-                {suggestionMeta.advertencias.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">{suggestionMeta.advertencias.map((item) => <li key={item}>{item}</li>)}</ul>}
-                <details className="mt-2"><summary className="cursor-pointer font-medium text-violet-700">Ver evidencias utilizadas</summary><ul className="mt-2 list-disc space-y-1 pl-4">{suggestionMeta.evidencias.map((item, index) => <li key={`${item.tipo}-${item.identificador}-${index}`}>{item.identificador}{item.nombre ? ` · ${item.nombre}` : ''}{item.version ? ` · v${item.version}` : ''}</li>)}</ul></details>
-              </div>}
-              <label className="mt-5 block"><span className="mb-1 block text-xs font-semibold text-slate-700">Observaciones de revisión</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-violet-500" placeholder="Motivo, restricciones o cambios solicitados…" /></label>
-              <div className="mt-5 flex flex-wrap justify-end gap-2">
-                {current.estado === 'en_revision' && <button disabled={busy} onClick={() => review('rechazar')} className="flex items-center gap-1.5 rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 disabled:opacity-50"><RotateCcw size={14} />Solicitar cambios</button>}
-                <button disabled={busy || current.estado === 'bloqueada'} onClick={saveProposal} className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50"><Save size={14} />{current.estado === 'aprobada' ? 'Guardar nueva versión' : 'Guardar propuesta'}</button>
-                {current.estado === 'en_revision' && <button disabled={busy} onClick={() => review('aprobar')} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={14} />Aprobar decisión</button>}
-              </div>
-              {approvedCount === DECISION_PHASES.length && <section className="mt-8 border-t border-slate-200 pt-6">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div><h3 className="font-semibold text-slate-900">Generación del backend</h3><p className="mt-1 text-xs text-slate-500">Código propuesto desde las decisiones y RF aprobados. La verificación detecta módulos pendientes antes de aprobar.</p></div>
-                  <button disabled={busy} onClick={generateBackend} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Code2 size={15} />{backendArtifact ? 'Regenerar backend' : 'Generar backend'}</button>
-                </div>
-                {!backendArtifact && <GenerationReport projectId={projectId} artifact={null} />}
-                {backendArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {backendArtifact.version} · {backendArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${backendArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{backendArtifact.estado}</span></div>
-                  {backendArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{backendArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                  <GenerationReport projectId={projectId} artifact={backendArtifact} />
-                  <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(backendArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                  <ArtifactVerification key={backendArtifact.id} projectId={projectId} artifact={backendArtifact} onArtifactChange={setBackendArtifact} />
-                  {backendArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewBackend('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewBackend('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar backend</button></div>}
-                </div>}
-                <div className="mt-7 flex flex-wrap items-start justify-between gap-3 border-t border-slate-200 pt-6">
-                  <div><h3 className="font-semibold text-slate-900">Generación del frontend</h3><p className="mt-1 text-xs text-slate-500">Aplicación React/Vite con rutas y vistas derivadas del árbol y mockups aprobados.</p></div>
-                  <button disabled={busy} onClick={generateFrontend} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Code2 size={15} />{frontendArtifact ? 'Regenerar frontend' : 'Generar frontend'}</button>
-                </div>
-                {frontendArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {frontendArtifact.version} · {frontendArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${frontendArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{frontendArtifact.estado}</span></div>
-                  {frontendArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{frontendArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                  <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(frontendArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                  <ArtifactVerification key={frontendArtifact.id} projectId={projectId} artifact={frontendArtifact} onArtifactChange={setFrontendArtifact} />
-                  {frontendArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewFrontend('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewFrontend('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar frontend</button></div>}
-                </div>}
-                <div className="mt-7 flex flex-wrap items-start justify-between gap-3 border-t border-slate-200 pt-6">
-                  <div><h3 className="font-semibold text-slate-900">Generación de pruebas</h3><p className="mt-1 text-xs text-slate-500">Pruebas de trazabilidad, integración del API y navegación E2E vinculadas a versiones aprobadas.</p>{!testsEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba backend y frontend.</p>}</div>
-                  <button disabled={busy || !testsEnabled} onClick={generateTests} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><Code2 size={15} />{testArtifact ? 'Regenerar pruebas' : 'Generar pruebas'}</button>
-                </div>
-                {testArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {testArtifact.version} · {testArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${testArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{testArtifact.estado}</span></div>
-                  {testArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{testArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                  <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(testArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                  <ArtifactVerification key={testArtifact.id} projectId={projectId} artifact={testArtifact} onArtifactChange={setTestArtifact} />
-                  {testArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewTests('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewTests('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pruebas</button></div>}
-                </div>}
-                <div className="mt-7 flex flex-wrap items-start justify-between gap-3 border-t border-slate-200 pt-6">
-                  <div><h3 className="font-semibold text-slate-900">Infraestructura y puesta en marcha</h3><p className="mt-1 text-xs text-slate-500">Docker, Compose, proxy, persistencia y despliegue derivados de arquitectura y RNF aprobados.</p>{!infrastructureEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba backend y frontend.</p>}</div>
-                  <button disabled={busy || !infrastructureEnabled} onClick={generateInfrastructure} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><Settings2 size={15} />{infrastructureArtifact ? 'Regenerar infraestructura' : 'Generar infraestructura'}</button>
-                </div>
-                {infrastructureArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {infrastructureArtifact.version} · {infrastructureArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${infrastructureArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{infrastructureArtifact.estado}</span></div>
-                  {infrastructureArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{infrastructureArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                  <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(infrastructureArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                  <ArtifactVerification key={infrastructureArtifact.id} projectId={projectId} artifact={infrastructureArtifact} onArtifactChange={setInfrastructureArtifact} />
-                  {infrastructureArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewInfrastructure('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewInfrastructure('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar infraestructura</button></div>}
-                </div>}
-                <div className="mt-7 flex flex-wrap items-start justify-between gap-3 border-t border-slate-200 pt-6">
-                  <div><h3 className="font-semibold text-slate-900">Pipeline CI/CD</h3><p className="mt-1 text-xs text-slate-500">Validación, compilación, pruebas, contenedores y paquete de entrega mediante GitHub Actions.</p>{!pipelineEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba pruebas e infraestructura.</p>}</div>
-                  <button disabled={busy || !pipelineEnabled} onClick={generatePipeline} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><Settings2 size={15} />{pipelineArtifact ? 'Regenerar pipeline' : 'Generar pipeline'}</button>
-                </div>
-                {pipelineArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {pipelineArtifact.version} · {pipelineArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${pipelineArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{pipelineArtifact.estado}</span></div>
-                  {pipelineArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{pipelineArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                  <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(pipelineArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                  <ArtifactVerification key={pipelineArtifact.id} projectId={projectId} artifact={pipelineArtifact} onArtifactChange={setPipelineArtifact} />
-                  {pipelineArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewPipeline('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewPipeline('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pipeline</button></div>}
-                </div>}
-                <div className="mt-7 flex flex-wrap items-start justify-between gap-3 border-t border-slate-200 pt-6">
-                  <div><h3 className="font-semibold text-slate-900">Paquete final de entrega</h3><p className="mt-1 text-xs text-slate-500">Consolida código, pruebas, infraestructura, CI/CD, manifiesto de versiones y huellas.</p>{!deliveryEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba el pipeline CI/CD.</p>}</div>
-                  <button disabled={busy || !deliveryEnabled} onClick={generateDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><FolderTree size={15} />{deliveryArtifact ? 'Regenerar paquete' : 'Generar paquete final'}</button>
-                </div>
-                {deliveryArtifact && <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50/50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Entrega v{deliveryArtifact.version} · {deliveryArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${deliveryArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{deliveryArtifact.estado}</span></div>
-                  <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(deliveryArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                  <ArtifactVerification key={deliveryArtifact.id} projectId={projectId} artifact={deliveryArtifact} onArtifactChange={setDeliveryArtifact} />
-                  <div className="mt-3 flex flex-wrap justify-end gap-2">
-                    {deliveryArtifact.estado === 'en_revision' && <><button disabled={busy} onClick={() => reviewDelivery('rechazar')} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewDelivery('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar entrega</button></>}
-                    {deliveryArtifact.aprobado && <button disabled={busy} onClick={downloadDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-xs font-semibold text-white"><Download size={14} />Descargar ZIP</button>}
-                  </div>
-                </div>}
-              </section>}
-            </>}
-          </main>
-        </div>
-      )}
+      </div>
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }
@@ -923,7 +1120,7 @@ function CoverageEditor({ value, onChange, disabled, modules }) {
       </select>
     </label>
     {(value.modo_entrega || 'parcial') === 'parcial' && <label className="flex gap-2 text-xs">
-      <input disabled={disabled} type="checkbox" checked={value.aceptar_pendientes === true} onChange={(event) => onChange({ ...value, aceptar_pendientes: event.target.checked })} />
+      <input disabled={disabled} type="checkbox" checked={value.aceptar_pendientes !== false} onChange={(event) => onChange({ ...value, aceptar_pendientes: event.target.checked })} />
       Reconozco que la entrega puede tener funciones pendientes; revisaré su informe antes de aprobarla.
     </label>}
     {requirements.map((rf) => {

@@ -257,6 +257,7 @@ class ProcesarConIA {
       diagramas_aprobados: diagramasAprobados,
       requerimientos_actuales: requerimientosPrevios,
       analisis_requisitos: contextOf(proyecto.auditoria_requisitos, { includeContext: true }),
+      auditoria_requisitos: proyecto.auditoria_requisitos || null,
       diagramas_actuales: diagramasPrevios,
       retroalimentacion_diagrama: retroalimentacionAplicable
     };
@@ -474,7 +475,10 @@ class ProcesarConIA {
       // Reemplazamos requerimientos no aprobados previos o anexamos
       await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
 
-      let idx = 1;
+      const seenIdentifiers = new Set();
+      let rfCounter = 1;
+      let rnfCounter = 1;
+
       for (const reqData of resultadoIA.requerimientos) {
         let tipo = String(reqData.tipo || 'RF').toUpperCase();
         if (tipo !== 'RF' && tipo !== 'RNF') {
@@ -486,13 +490,22 @@ class ProcesarConIA {
         else if (prioridad.includes('baj') || prioridad.includes('low')) prioridad = 'Baja';
         else prioridad = 'Media';
 
-        const defaultId = `${tipo}-${String(idx++).padStart(2, '0')}`;
+        let id = String(reqData.identificador || '').trim();
+        if (!id || seenIdentifiers.has(id)) {
+          const counter = tipo === 'RF' ? rfCounter++ : rnfCounter++;
+          id = `${tipo}-${String(counter).padStart(2, '0')}`;
+          while (seenIdentifiers.has(id)) {
+            const next = tipo === 'RF' ? rfCounter++ : rnfCounter++;
+            id = `${tipo}-${String(next).padStart(2, '0')}`;
+          }
+        }
+        seenIdentifiers.add(id);
 
         const reqEntity = new Requerimiento({
           proyecto_id: proyectoId,
           tipo,
-          identificador: reqData.identificador || defaultId,
-          nombre: reqData.nombre || `Requerimiento ${defaultId}`,
+          identificador: id,
+          nombre: reqData.nombre || `Requerimiento ${id}`,
           descripcion: reqData.descripcion || '',
           prioridad,
           actores: Array.isArray(reqData.actores) ? reqData.actores : (reqData.actores ? [String(reqData.actores)] : []),
@@ -514,6 +527,13 @@ class ProcesarConIA {
         requerimientosGenerados.push(reqEntity);
       }
       await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
+      if (resultadoIA.auditoria_requisitos) {
+        const RequirementApprovalService = require('../services/RequirementApprovalService');
+        resultadoIA.auditoria_requisitos = {
+          ...resultadoIA.auditoria_requisitos,
+          control_aprobacion: new RequirementApprovalService().evaluate(requerimientosGenerados, resultadoIA.auditoria_requisitos)
+        };
+      }
       // Cualquier modelado anterior queda obsoleto al regenerar los requisitos.
       await this.diagramaRepository.eliminarPorProyecto(proyectoId);
       if (this.disenoRepository && typeof this.disenoRepository.invalidarDerivados === 'function') {

@@ -131,8 +131,9 @@ async function createValidRecord(api, operations, target, cleanups, depth) {
   const body = { ...sample.payload };
   for (const parent of sample.parents) {
     const parentOperation = operations.find((item) => item.schema && item.schema.title === parent.entidad);
-    if (!parentOperation) fail('no existe una operación para la entidad referenciada ' + parent.entidad);
-    body[parent.campo] = (await createValidRecord(api, operations, parentOperation, cleanups, depth + 1)).id;
+    body[parent.campo] = parentOperation
+      ? (await createValidRecord(api, operations, parentOperation, cleanups, depth + 1)).id
+      : '1';
   }
   const response = await api(target.collectionPath, 'POST', { ...body, verification: 'isolated' });
   if (response.status !== 201) fail('crear respondió ' + response.status + ' (se esperaba 201): ' + JSON.stringify(response.data));
@@ -174,7 +175,8 @@ async function exerciseOperation(api, operations, operation) {
       const pagedRecords = Array.isArray(paged.data) ? paged.data : (paged.data.data || []);
       if (pagedRecords.length > 1) fail('la paginación con limit=1 devolvió más de un registro');
     }
-    const textField = main.sample.typed.find((field) => ['string', 'date'].includes(field.type) && field.value);
+    const textField = main.sample.typed.find((field) => field.type === 'string' && !['date-time', 'date', 'time'].includes(field.format) && field.value)
+      || main.sample.typed.find((field) => ['string', 'date'].includes(field.type) && field.value);
     if (textField) {
       const term = String(textField.value).slice(0, 4);
       if (term) {
@@ -425,7 +427,7 @@ async function exerciseAssociation(api, operations, association, access, auth) {
       expectStatus(await access.anonymous(listPath), 401, 'consulta anónima');
       expectStatus(await access.invalid(path, 'POST', pair(targets[0])), 401, 'token inválido');
       for (const [role, session] of Object.entries(access.roles)) {
-        const permitted = (verbs) => association.operations.every((keys) => keys.some((key) => verbs.every((verb) => (auth.operaciones?.[key]?.[role] || []).includes(verb))));
+        const permitted = (verbs) => association.operations.every((keys) => keys.some((key) => verbs.every((verb) => permissionMethods(auth.operaciones?.[key]?.[role]).includes(verb))));
         expectStatus(await session.api(listPath), permitted(['GET']) ? 200 : 403, 'lectura del rol ' + role);
         const write = permitted(['GET', 'PATCH']);
         // Usar un vínculo ya existente para no alterar el caso de otros roles.

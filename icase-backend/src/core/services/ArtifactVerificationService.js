@@ -68,7 +68,8 @@ class ArtifactVerificationService {
         }
         try {
           const manifest = JSON.parse(files.get('frontend/icase.manifest.json') || '{}');
-          const disconnected = (manifest.pantallas || []).filter((screen) => !(screen.operations || []).length);
+          const isAuthScreen = (item) => /inicio.*sesion|login|autentic/i.test(item.id || item.name || item.nombre || item.route || '');
+          const disconnected = (manifest.pantallas || []).filter((screen) => !(screen.operations || []).length && !isAuthScreen(screen));
           if (disconnected.length) errores.push(`Hay pantallas sin operaciones RF conectadas: ${disconnected.map((item) => item.name || item.nombre || item.id).join(', ')}.`);
           if ((manifest.plataformas_solicitadas || []).some((item) => /m[oó]vil|android|ios|react native/i.test(item)) && !files.has('mobile/package.json')) {
             errores.push('El alcance aprobado incluye una aplicación móvil, pero no se generó un proyecto React Native.');

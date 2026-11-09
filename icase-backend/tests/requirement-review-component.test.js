@@ -12,7 +12,17 @@ beforeAll(() => {
   global.window = dom.window; global.document = dom.window.document; global.navigator = dom.window.navigator;
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const filename = path.resolve(__dirname, '../../icase-frontend/src/components/RequirementReviewPanel.jsx');
-  const sandbox = { module: { exports: {} }, exports: {}, require };
+  const MockIcon = () => null;
+  const customRequire = (id) => {
+    if (id === 'lucide-react') {
+      return { __esModule: true, X: MockIcon, Check: MockIcon, FileText: MockIcon, ArrowRight: MockIcon, default: MockIcon };
+    }
+    if (id === './BrainGearsIcon') {
+      return { __esModule: true, default: MockIcon };
+    }
+    return require(id);
+  };
+  const sandbox = { module: { exports: {} }, exports: {}, require: customRequire };
   vm.runInNewContext(transformSync(fs.readFileSync(filename, 'utf8'), { loader: 'jsx', format: 'cjs' }).code, sandbox);
   Component = sandbox.module.exports.default;
 });

@@ -117,10 +117,11 @@ class GestionarArtefactosCodigo {
   }
 
   async generarFrontend(proyectoId) {
-    const [proyecto, plan, diseno] = await Promise.all([
+    const [proyecto, plan, diseno, requerimientos] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId),
       this.planRepository.obtenerPorProyecto(proyectoId),
-      this.disenoRepository.obtenerPorProyecto(proyectoId)
+      this.disenoRepository.obtenerPorProyecto(proyectoId),
+      this.requerimientoRepository ? this.requerimientoRepository.listarPorProyecto(proyectoId) : []
     ]);
     if (!proyecto || !plan || !diseno) throw new Error('Proyecto, plan o diseño aprobado no encontrado.');
     this.workflow.validarDependencias(plan, 'generacion_frontend');
@@ -132,11 +133,11 @@ class GestionarArtefactosCodigo {
       ...plan.etapas.filter((item) => item.estado === CODE_PHASE_STATES.APPROVED).map((item) => [item.etapa, item.version || 1]),
       ...(diseno.mockups || []).map((item) => [`mockup:${item.nombre_pantalla}`, item.version || 1])
     ]);
-    const input = { contrato_generacion: 'frontend-v9-process-inbox', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
+    const input = { contrato_generacion: 'frontend-v15-clean-usuarios-link', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_frontend');
-    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
-    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones, diseno }, versionesOrigen });
+    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
+    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones, diseno, requerimientos: (requerimientos || []).filter((item) => item.aprobado) }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({ proyecto_id: proyectoId, tipo: 'codigo_frontend', version: (ultimo?.version || 0) + 1, estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, ...generado });
     if (ultimo?.aprobado) await this.artefactoRepository.actualizar(ultimo.id, { estado: 'desactualizado', aprobado: false });
     await this._actualizarEtapa(plan, 'generacion_frontend', CODE_PHASE_STATES.IN_REVIEW, `Artefacto frontend v${artefacto.version} generado.`);
@@ -177,11 +178,11 @@ class GestionarArtefactosCodigo {
   async generarBackend(proyectoId) {
     const { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio } = await this._insumosBackend(proyectoId);
     const semanticRequirements = new (require('../services/RequirementChangeService'))({}).normalize(requerimientos.filter(item => item.aprobado));
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'capacidades-v16-process-outbox', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, requerimientos: semanticRequirements, dominio })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'capacidades-v17-nm-endpoints', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, requerimientos: semanticRequirements, dominio })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
-    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
+    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
 
-    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio, backendAnterior: ultimo }, versionesOrigen });
+    const generado = await this.backendGenerator.generar({ proyecto, insumos: { decisiones, requerimientos, diagramaDominio, backendAnterior: ultimo?.aprobado ? ultimo : null }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({
       proyecto_id: proyectoId, tipo: 'codigo_backend', version: (ultimo?.version || 0) + 1,
       estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, ...generado
@@ -230,7 +231,7 @@ class GestionarArtefactosCodigo {
     this.workflow.validarDependencias(plan, 'generacion_pruebas');
     if (!backend || !frontend) throw new Error('Debes aprobar backend y frontend antes de generar las pruebas.');
     const versionesOrigen = { codigo_backend: backend.version, codigo_frontend: frontend.version };
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pruebas-v7-replicas-provider-fixtures', versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pruebas-v8-resilient-nav-links', versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'pruebas');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
     const generado = await this.testGenerator.generar({ proyecto, insumos: { requerimientos, backend, frontend }, versionesOrigen });
@@ -282,8 +283,11 @@ class GestionarArtefactosCodigo {
     this.workflow.validarDependencias(plan, 'generacion_ci_cd');
     if (!tests || !infrastructure) throw new Error('Debes aprobar pruebas e infraestructura antes de generar CI/CD.');
     const decisiones = Object.fromEntries(plan.etapas.filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta).map((item) => [item.etapa, item.propuesta]));
+    if (!decisiones.stack_tecnologico?.ci_cd) {
+      decisiones.stack_tecnologico = { ...(decisiones.stack_tecnologico || {}), ci_cd: 'GitHub Actions' };
+    }
     const versionesOrigen = { pruebas: tests.version, infraestructura: infrastructure.version };
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pipeline-v5-replica-namespace', versionesOrigen, decisiones })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pipeline-v6-github-actions', versionesOrigen, decisiones })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'pipeline_ci_cd');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
     const generado = await this.pipelineGenerator.generar({ proyecto, insumos: { tests, infrastructure, decisiones }, versionesOrigen });
@@ -310,7 +314,7 @@ class GestionarArtefactosCodigo {
     new GenerationCoverageService().exigirEntrega(artefactos[0]);
     for (const artefacto of artefactos) this._exigirVerificacion(artefacto);
     const versionesOrigen = Object.fromEntries(artefactos.map((item) => [item.tipo, item.version]));
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({contrato_generacion:'entrega-v2-safe-update',versionesOrigen})).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({contrato_generacion:'entrega-v3-resilient-links',versionesOrigen})).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'paquete_entrega');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
     const generado = await this.deliveryGenerator.generar({ proyecto, insumos: { artefactos }, versionesOrigen });

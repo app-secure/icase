@@ -57,9 +57,12 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const plataformas = [...(decisiones.alcance_plataforma?.plataformas || []), ...(decisiones.stack_tecnologico?.plataformas || [])];
     const modules = new ModuleService();
     const activos = modules.activos(decisiones.modulos);
+    const rawCoverage = decisiones.modulos?.cobertura || {};
+    // Igual que en la etapa Módulos: el reconocimiento de pendientes está marcado salvo que el usuario lo desmarque.
+    const declaracion = { modo_entrega: 'parcial', ...rawCoverage, aceptar_pendientes: rawCoverage.aceptar_pendientes ?? true };
     return new GenerationReportService().build({
       proyecto, requisitos: aprobados, contrato: manifest, stack: decisiones.stack_tecnologico || {}, plataformas,
-      declaracion: decisiones.modulos?.cobertura || {},
+      declaracion,
       modulos: {
         modo: decisiones.modulos ? (decisiones.modulos.modo || 'automatico') : 'automatico',
         incluidos: modules.incluidos(decisiones).filter((item) => item.activo),

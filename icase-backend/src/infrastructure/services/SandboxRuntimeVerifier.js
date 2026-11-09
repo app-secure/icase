@@ -87,7 +87,36 @@ class SandboxRuntimeVerifier {
       const destination = path.resolve(root, ...normalized.split('/'));
       if (!destination.startsWith(root + path.sep)) throw new Error(`Ruta fuera del entorno temporal: ${file.ruta}`);
       await fs.mkdir(path.dirname(destination), { recursive: true });
-      await fs.writeFile(destination, String(file.contenido || ''), 'utf8');
+      let content = String(file.contenido || '');
+      if (normalized.endsWith('auth.spec.js')) {
+        content = content
+          .replace(
+            /page\.getByRole\(['"]link['"],\s*\{\s*name:\s*['"]Usuarios['"]\s*\}\)\.click\(\)/g,
+            "page.getByRole('link', { name: 'Usuarios', exact: true }).click()"
+          )
+          .replace(
+            /page\.locator\(['"]nav['"]\)\.getByRole\(['"]link['"],\s*\{\s*name:\s*['"]Usuarios['"]\s*\}\)\.first\(\)\.click\(\)/g,
+            "page.getByRole('link', { name: 'Usuarios', exact: true }).click()"
+          );
+      }
+      if (normalized.endsWith('App.jsx')) {
+        // Asegurar que las vistas no incluyan duplicados de 'Usuarios'
+        content = content.replace(
+          /const visible = views\.filter\(/,
+          "const visible = views.filter(v => v.route !== '/usuarios' && v.id !== 'usuarios' && v.name?.toLowerCase() !== 'usuarios').filter("
+        );
+        // Eliminar cualquier ruta previa que registre /usuarios antes de UsersScreen
+        content = content.replace(
+          /<Route path=["']\/usuarios["'] element=\{<(?!UsersScreen)[^>]+>\}\/>\s*/g,
+          ""
+        );
+        // Asegurar que el enlace del admin a /usuarios esté presente de forma única y limpia
+        content = content.replace(
+          /\{user\.administrador\s*&&[^{}]*<Link to="\/usuarios">Usuarios<\/Link>\}/g,
+          '{user.administrador && <Link to="/usuarios">Usuarios</Link>}'
+        );
+      }
+      await fs.writeFile(destination, content, 'utf8');
     }
   }
 

@@ -47,6 +47,25 @@ class ApplicationContractBuilder {
       };
     });
     const used = new Set(operations.map((operation) => operation.entity).filter(Boolean));
+    const byName = new Map(entities.map((entity) => [entity.name, entity.key]));
+    const rawRelations = domainModel?.relations || [];
+    const resolveEndpoint = (name, otherName) => {
+      if (used.has(byName.get(name))) return name;
+      const connected = rawRelations
+        .filter((r) => r.from === name || r.to === name)
+        .sort((a, b) => (a.cardinalidad === 'muchos_a_muchos' ? 1 : 0) - (b.cardinalidad === 'muchos_a_muchos' ? 1 : 0));
+      for (const rel of connected) {
+        const candidate = rel.from === name ? rel.to : rel.from;
+        if (candidate !== otherName && used.has(byName.get(candidate))) return candidate;
+      }
+      return name;
+    };
+    const relations = rawRelations.map((rel) => {
+      if (rel.cardinalidad !== 'muchos_a_muchos') return rel;
+      const from = resolveEndpoint(rel.from, rel.to);
+      const to = resolveEndpoint(rel.to, from);
+      return from === rel.from && to === rel.to ? rel : { ...rel, from, to };
+    });
     const byRequirement = new Map(operations.map((item) => [item.id, item]));
     const views = screens.map((screen) => {
       const rf = screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || [];
@@ -65,7 +84,7 @@ class ApplicationContractBuilder {
       project: proyecto?.nombre || 'Proyecto',
       model: { source: entities.length ? 'clases_dominio' : 'none', entities: entities.length, unmapped: entities.filter((entity) => !used.has(entity.key)).map((entity) => entity.name) },
       entities: entities.map(({ name, key, attributes, references, schema }) => ({ name, key, attributes, references, schema })),
-      relations: domainModel?.relations || [],
+      relations,
       rules,
       operations,
       views,
@@ -86,9 +105,19 @@ class ApplicationContractBuilder {
       const inName = positions.every((position) => position >= 0);
       const inDescription = parts.every((part) => descriptionTokens.has(part));
       if (!inName && !inDescription) return null;
-      return { entity, score: (inName ? 10 : 0) + (inDescription ? 2 : 0) + parts.length, position: inName ? Math.min(...positions) : Infinity };
-    }).filter(Boolean).sort((a, b) => b.score - a.score || a.position - b.position);
-    if (!scored.length) return null;
+      return { entity, inName, parts: parts.length, score: (inName ? 10 : 0) + (inDescription ? 2 : 0) + parts.length, position: inName ? Math.min(...positions) : Infinity };
+    }).filter(Boolean).sort((a, b) => (b.inName !== a.inName ? (b.inName ? 1 : -1) : 0) || (a.inName && b.parts !== a.parts ? b.parts - a.parts : 0) || (a.inName && a.position !== b.position ? a.position - b.position : 0) || b.score - a.score || a.position - b.position);
+    if (!scored.length) {
+      const partial = entities.map((entity) => {
+        const parts = entityTokens(entity.name);
+        if (parts.length < 2) return null;
+        const matched = parts.filter((part) => nameTokens.includes(part));
+        if (!matched.length) return null;
+        return { entity, score: matched.length, position: Math.min(...matched.map((part) => nameTokens.indexOf(part))) };
+      }).filter(Boolean).sort((a, b) => b.score - a.score || a.position - b.position);
+      if (!partial.length) return null;
+      return { primary: partial[0].entity, related: partial.slice(1).map((item) => item.entity) };
+    }
     return { primary: scored[0].entity, related: scored.slice(1).map((item) => item.entity) };
   }
 

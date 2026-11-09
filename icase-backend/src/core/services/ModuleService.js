@@ -95,6 +95,7 @@ class ModuleService {
       valor: {
         modo: 'automatico',
         modulos: OPTIONAL.map((item) => ({ id: item.id, activo: item.porDefecto, motivo: item.porDefecto ? 'Activado por el modo automático.' : 'Desactivado por el modo automático.' })),
+        cobertura: { modo_entrega: 'parcial', aceptar_pendientes: true, requisitos: [] },
         notas: 'El modo automático usa los módulos recomendados. Cambia a personalizado para activar o desactivar módulos opcionales.'
       },
       advertencias: []
@@ -144,7 +145,9 @@ class ModuleService {
       if (omitted.length) advertencias.push(`Sin elegir, se usa el valor recomendado para: ${omitted.join(', ')}.`);
     }
     let cobertura;
-    try { cobertura = new GenerationCoverageService().validar(propuesta.cobertura || {}); }
+    // En entrega parcial el reconocimiento de pendientes está marcado por defecto; solo se omite si el usuario lo desmarca.
+    const rawCoverage = propuesta.cobertura || {};
+    try { cobertura = new GenerationCoverageService().validar({ ...rawCoverage, aceptar_pendientes: rawCoverage.aceptar_pendientes ?? true }); }
     catch (error) { return { propuesta: null, errores: [error.message], advertencias }; }
     return { propuesta: { ...propuesta, modo, modulos, cobertura }, errores, advertencias };
   }

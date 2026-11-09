@@ -55,6 +55,10 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
   const semantics = new RequirementSemanticsService();
 
   return (requerimientos || []).map((requisito) => {
+    if (requisito && requisito._locked) {
+      const { _locked, ...conserved } = requisito;
+      return conserved;
+    }
     const evidenceReport = inspectEvidence(requisito, insumo);
     const multi = Array.isArray(requisito.evidencias) && requisito.evidencias.length > 0;
     const evidencia = multi ? (evidenceReport.valid[0]?.texto || '') : unwrapEvidence(requisito.evidencia || requisito.evidencia_fuente || '');
@@ -369,14 +373,25 @@ class ModelosIaService {
 
     return respuestaData;
     });
+    const auditoriaPrevia = payload.contexto_proyecto?.auditoria_requisitos || null;
+    const usarRefinamientoAcotado = objetivo === 'requisitos' && esRefinamientoExplicito && reqsActuales.length > 0;
     let respuestaData = objetivo === 'requisitos'
-      ? await this.requestBudget.run(() => new RequirementCoverageService().generate({
-        semanticReview: true,
-        groqInputBudget: this.groqApiKey && (requestedProvider === 'auto' || requestedProvider === 'groq') ? Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000) : null,
-        input: [insumo, insumoAdicional].filter(Boolean).join('\n\n'),
-        prompt: promptCompleto,
-        request: solicitar
-      }))
+      ? await this.requestBudget.run(() => usarRefinamientoAcotado
+        ? new RequirementCoverageService().refine({
+          input: insumo,
+          instruction: insumoAdicional,
+          existingRequirements: reqsActuales,
+          existingAudit: auditoriaPrevia,
+          prompt: promptCompleto,
+          request: solicitar
+        })
+        : new RequirementCoverageService().generate({
+          semanticReview: true,
+          groqInputBudget: this.groqApiKey && (requestedProvider === 'auto' || requestedProvider === 'groq') ? Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000) : null,
+          input: [insumo, insumoAdicional].filter(Boolean).join('\n\n'),
+          prompt: promptCompleto,
+          request: solicitar
+        }))
       : await solicitar(promptCompleto);
 
     if (!respuestaData) {

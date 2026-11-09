@@ -42,10 +42,10 @@ class BusinessProcessGenerator {
   const extensions=files.find(f=>f.ruta==='backend/src/extensions/generated-extensions.js');
   if(extensions&&!extensions.contenido.includes('assertFile')){
     extensions.contenido=extensions.contenido.replace(
-      'await recordExists(req.params.operation,req.params.record,req.fileUser);\n      next();',
+      /await recordExists\(req\.params\.operation,req\.params\.record,req\.fileUser\);\r?\n\s*next\(\);/,
       "await recordExists(req.params.operation,req.params.record,req.fileUser);\n      await require('../processes/business-process-guard').assertFile(store,req.params.operation,req.params.record);\n      next();"
     ).replace(
-      "const user=await access(req,file.operation,'PATCH'); await recordExists(file.operation,file.record,user);\n      await files.remove(file.id);",
+      /const user=await access\(req,file\.operation,'PATCH'\);\s*await recordExists\(file\.operation,file\.record,user\);\r?\n\s*await files\.remove\(file\.id\);/,
       "const user=await access(req,file.operation,'PATCH'); await recordExists(file.operation,file.record,user);\n      await require('../processes/business-process-guard').assertFile(store,file.operation,file.record);\n      await files.remove(file.id);"
     );
   }

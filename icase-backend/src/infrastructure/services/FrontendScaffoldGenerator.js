@@ -9,7 +9,7 @@ const componentName = (value) => slug(value).split('-').map((part) => part.charA
 
 class FrontendScaffoldGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
-    const { decisiones, diseno } = insumos;
+    const { decisiones, diseno, requerimientos = [] } = insumos;
     StackCatalog.resolve(decisiones.stack_tecnologico || {}); // no se sustituye en silencio un stack no soportado
     const manifest = Array.isArray(diseno.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
     const mockups = Array.isArray(diseno.mockups) ? diseno.mockups : [];
@@ -19,7 +19,7 @@ class FrontendScaffoldGenerator extends IGeneradorArtefacto {
       return { ...screen, mockup, rf_trazabilidad: Array.isArray(mockup?.rf_trazabilidad) ? mockup.rf_trazabilidad : (screen.rf_trazabilidad || []) };
     })
       : mockups.map((mockup) => ({ ...mockup, nombre: mockup.nombre_visible, slug: mockup.nombre_pantalla, mockup }));
-    const files = new GenericFrontendGenerator().generate({ proyecto, screens, decisiones, sistemaDiseno: diseno.sistema_diseno || {} });
+    const files = new GenericFrontendGenerator().generate({ proyecto, screens, decisiones, sistemaDiseno: diseno.sistema_diseno || {}, requerimientos });
     const missing = screens.filter((screen) => !screen.mockup).map((screen) => screen.nombre || screen.slug);
     return {
       archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),

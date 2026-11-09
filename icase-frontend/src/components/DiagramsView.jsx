@@ -19,6 +19,8 @@ import BrainGearsIcon from "./BrainGearsIcon";
 import PlantUMLViewer from "./PlantUMLViewer";
 import MockupsView from "./MockupsView";
 import RegenerateDiagramDialog from "./RegenerateDiagramDialog";
+import DiagramProgressModal from "./DiagramProgressModal";
+import { ToastContainer, useToasts } from "./Toast";
 import { generateMockupsApi } from "../services/api";
 
 export default function DiagramsView({
@@ -44,10 +46,14 @@ export default function DiagramsView({
   const [selectedKey, setSelectedKey] = useState(isDiagramsApproved ? "mockups" : "useCase");
   const [viewMode, setViewMode] = useState("visual"); // "visual" | "code"
   const [selectedScreen, setSelectedScreen] = useState(0);
+  const [activeMockupEntry, setActiveMockupEntry] = useState(null);
   const [mockupTraceability, setMockupTraceability] = useState(null);
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
-  const [correctionFeedback, setCorrectionFeedback] = useState(null);
+  const [activeCorrectionPrompt, setActiveCorrectionPrompt] = useState(null);
+  const [correctionProgress, setCorrectionProgress] = useState(0);
+  const [isModalDismissed, setIsModalDismissed] = useState(false);
+  const { toasts, addToast, removeToast } = useToasts();
   const [showReviewPanel, setShowReviewPanel] = useState(false);
   const [reviewComment, setReviewComment] = useState("");
   const [isReviewing, setIsReviewing] = useState(false);
@@ -82,6 +88,10 @@ export default function DiagramsView({
     const jobActive = ["encolado", "procesando"].includes(diagramJob?.estado);
     const jobKey = jobActive ? keyByType[diagramJob?.tipo_diagrama] : null;
 
+    if (jobActive) {
+      setIsModalDismissed(false);
+    }
+
     if (jobKey && selectedKey !== jobKey) {
       setSelectedKey(jobKey);
       setShowVersionHistory(false);
@@ -97,6 +107,10 @@ export default function DiagramsView({
     }
   }, [diagramJob?.estado, diagramJob?.tipo_diagrama, diagramFlow, isDiagramsApproved, selectedKey]);
 
+  const activeCorrectionRef = React.useRef(null);
+  const processingToastIdRef = React.useRef(null);
+  activeCorrectionRef.current = activeCorrectionPrompt;
+
   const currentOption = options.find((option) => option.key === selectedKey);
   const currentDiagram = diagrams?.[selectedKey] || null;
   const currentFlowItem = currentOption?.type
@@ -104,7 +118,7 @@ export default function DiagramsView({
     : null;
   const currentState = selectedKey === "mockups"
     ? (isDiagramsApproved ? "disponible" : "bloqueado")
-    : currentFlowItem?.estado || currentDiagram?.status || (currentDiagram ? "pendiente_revision" : "bloqueado");
+    : currentFlowItem?.estado || currentDiagram?.status || (currentDiagram ? "pendiente_revision" : (selectedKey === "useCase" ? "disponible" : "bloqueado"));
   const originVersions = currentFlowItem?.diagrama?.versiones_origen || currentDiagram?.originVersions || {};
   const staleReasons = currentFlowItem?.motivos_desactualizacion?.length
     ? currentFlowItem.motivos_desactualizacion
@@ -156,13 +170,15 @@ export default function DiagramsView({
           badge: "Árbol de Navegación",
           placeholder: "Pide un ajuste al Árbol de Navegación con IA (ej: 'incluye la pantalla de reportes de cierre')..."
         };
-      case "mockups":
+      case "mockups": {
+        const screenLabel = activeMockupEntry?.nombre || activeMockup?.nombre_visible || activeMockup?.nombre_pantalla;
         return {
-          badge: activeMockup ? `Mockup: ${activeMockup.nombre_pantalla}` : "Mockups UI",
-          placeholder: activeMockup
-            ? `Pide un ajuste a "${activeMockup.nombre_pantalla}" con IA (ej: 'añade modal de pago y filtros')...`
+          badge: screenLabel ? `Mockup: ${screenLabel}` : "Mockups UI",
+          placeholder: screenLabel
+            ? `Pide un ajuste a "${screenLabel}" con IA (ej: 'añade botón de filtro o cambia el estilo')...`
             : "Pide un ajuste a los mockups con IA (ej: 'añade pantalla de comandas')..."
         };
+      }
       default:
         return {
           badge: "Modelado",
@@ -173,9 +189,33 @@ export default function DiagramsView({
 
   const contextInfo = getContextInfo();
 
-  const handleRegenerate = async () => {
-    if (!regenerateTarget || regenerationLock.current || isGeneratingDiagram) return;
-    const target = regenerateTarget;
+  // Al completarse la regeneración con éxito, cerramos el toast de procesamiento sin mostrar el toast largo de confirmación
+  React.useEffect(() => {
+    if (diagramJob?.estado === 'completado' && activeCorrectionRef.current) {
+      if (processingToastIdRef.current) {
+        removeToast(processingToastIdRef.current);
+        processingToastIdRef.current = null;
+      }
+      setActiveCorrectionPrompt(null);
+      setIsFixing(false);
+    } else if (diagramJob?.estado === 'fallido' && activeCorrectionRef.current) {
+      if (processingToastIdRef.current) {
+        removeToast(processingToastIdRef.current);
+        processingToastIdRef.current = null;
+      }
+      setActiveCorrectionPrompt(null);
+      setIsFixing(false);
+      addToast({
+        type: "error",
+        title: "Error al actualizar diagrama",
+        message: diagramJob.error || "Error al regenerar el diagrama."
+      });
+    }
+  }, [diagramJob?.estado, diagramJob?.id, diagramJob?.error, addToast, removeToast]);
+
+  const handleRegenerate = async (targetOption = regenerateTarget) => {
+    const target = targetOption || currentOption;
+    if (!target || regenerationLock.current || isGeneratingDiagram) return;
     regenerationLock.current = true;
     setIsRegenerating(true);
     try {
@@ -185,10 +225,9 @@ export default function DiagramsView({
       setShowVersionHistory(false);
       setVersionHistory(null);
       setRegenerateTarget(null);
-      setCorrectionFeedback({ type: 'success', message: 'Regeneración iniciada. Revisa la nueva versión antes de aprobarla.' });
     } catch (error) {
       setRegenerateTarget(null);
-      setCorrectionFeedback({ type: 'error', message: error.message });
+      addToast({ type: 'error', message: error.message });
     } finally {
       regenerationLock.current = false;
       setIsRegenerating(false);
@@ -196,7 +235,6 @@ export default function DiagramsView({
   };
 
   const handleApproveCurrentStage = async () => {
-    setCorrectionFeedback(null);
     let result;
     if (selectedKey === "mockups") {
       result = await onApproveMockups?.();
@@ -207,7 +245,7 @@ export default function DiagramsView({
     }
 
     if (result?.success === false) {
-      setCorrectionFeedback({ type: "error", message: result.error });
+      addToast({ type: "error", message: result.error });
       return;
     }
     if (selectedKey !== "mockups") {
@@ -220,34 +258,34 @@ export default function DiagramsView({
         setSelectedKey("mockups");
         setShowVersionHistory(false);
       }
-      setCorrectionFeedback({
-        type: "success",
-        message: result?.cacheHit
-          ? "No hubo cambios en las entradas. Se reutilizó la versión existente sin consumir una llamada de IA."
-          : result?.flow?.todos_aprobados
-          ? "Todos los diagramas fueron aprobados. Ya puedes generar los mockups."
-          : currentDiagram && currentState !== "desactualizado"
-            ? "Diagrama aprobado. Se habilitó el siguiente artefacto."
-            : "Diagrama generado. Revísalo antes de aprobarlo."
-      });
+      if (result?.cacheHit) {
+        addToast({
+          type: "info",
+          message: "No hubo cambios en las entradas. Se reutilizó la versión existente sin consumir una llamada de IA."
+        });
+      } else if (result?.flow?.todos_aprobados) {
+        addToast({
+          type: "success",
+          message: "Todos los diagramas fueron aprobados. Ya puedes generar los mockups."
+        });
+      }
     }
   };
 
   const handleRejectCurrentDiagram = async () => {
     if (reviewComment.trim().length < 5 || isReviewing) return;
     setIsReviewing(true);
-    setCorrectionFeedback(null);
     try {
       const result = await onRejectDiagram?.(currentOption?.type, reviewComment.trim());
       if (result?.success === false) {
-        setCorrectionFeedback({ type: "error", message: result.error });
+        addToast({ type: "error", message: result.error });
         return;
       }
       setShowReviewPanel(false);
       setReviewComment("");
-      setCorrectionFeedback({
-        type: "success",
-        message: "Diagrama rechazado con observaciones. La próxima regeneración las incluirá; el diagrama no se modifica automáticamente."
+      addToast({
+        type: "warning",
+        message: "Diagrama rechazado con observaciones para la próxima regeneración."
       });
     } finally {
       setIsReviewing(false);
@@ -269,10 +307,10 @@ export default function DiagramsView({
       });
       setVersionHistory(null);
       setShowVersionHistory(false);
+      addToast({ type: "success", message: "Nueva versión guardada correctamente." });
+    } else {
+      addToast({ type: "error", message: result.error || "No se pudo guardar el código." });
     }
-    setCorrectionFeedback(result?.success === false
-      ? { type: "error", message: result.error || "No se pudo guardar el código." }
-      : { type: "success", message: "Nueva versión guardada. La aprobación anterior fue retirada." });
   };
 
   const handleToggleVersionHistory = async () => {
@@ -283,7 +321,7 @@ export default function DiagramsView({
         const versions = await onLoadDiagramVersions?.(selectedKey);
         setVersionHistory({ ...versions, diagramId: currentDiagram?.id });
       } catch (error) {
-        setCorrectionFeedback({ type: "error", message: error.message });
+        addToast({ type: "error", message: error.message });
         setShowVersionHistory(false);
       }
     }
@@ -294,13 +332,13 @@ export default function DiagramsView({
     const result = await onRestoreDiagramVersion?.(selectedKey, version);
     setRestoringVersion(null);
     if (result?.success === false) {
-      setCorrectionFeedback({ type: "error", message: result.error });
+      addToast({ type: "error", message: result.error });
       return;
     }
     if (result?.pending) {
-      setCorrectionFeedback({
-        type: "success",
-        message: "Generación iniciada en segundo plano. Puedes cambiar de pestaña o recargar; el avance se conservará."
+      addToast({
+        type: "info",
+        message: "Generación iniciada en segundo plano."
       });
       return;
     }
@@ -310,9 +348,9 @@ export default function DiagramsView({
     }
     setShowVersionHistory(false);
     setVersionHistory(null);
-    setCorrectionFeedback({
+    addToast({
       type: "success",
-      message: `Se cargó la versión ${version} como borrador. Guarda solo si deseas crear una nueva versión.`
+      message: `Se cargó la versión ${version} como borrador.`
     });
   };
 
@@ -322,57 +360,115 @@ export default function DiagramsView({
     if (!prompt.trim() || isFixing) return;
 
     const text = prompt;
+    setActiveCorrectionPrompt(text);
     setIsFixing(true);
-    setCorrectionFeedback(null);
+    setCorrectionProgress(18);
 
+    const progressInterval = setInterval(() => {
+      setCorrectionProgress((prev) => {
+        if (prev >= 90) return prev;
+        return prev + Math.floor(Math.random() * 8) + 4;
+      });
+    }, 400);
+
+    let loadingToastId = null;
     try {
       if (selectedKey === "mockups") {
-        // Enrutamiento inteligente a Mockup AI Service
         if (!projectId) {
           throw new Error("No se encontró el ID del proyecto para procesar mockups.");
         }
-        const pantallasTarget = activeMockup ? [activeMockup.nombre_pantalla] : [];
-        const result = await generateMockupsApi(projectId, pantallasTarget, text);
+        const targetSlug = activeMockupEntry?.slug || activeMockup?.nombre_pantalla || "";
+        const targetTitle = activeMockupEntry?.nombre || activeMockup?.nombre_visible || activeMockup?.nombre_pantalla || "la pantalla seleccionada";
+        const pantallasTarget = targetSlug ? [targetSlug] : [];
+        if (processingToastIdRef.current) removeToast(processingToastIdRef.current);
+        loadingToastId = addToast({
+          type: "info",
+          title: "Procesando petición en Mockup",
+          message: `La IA está aplicando tu ajuste en "${targetTitle}"...`,
+          duration: 60000
+        });
+        processingToastIdRef.current = loadingToastId;
+        const result = await generateMockupsApi(projectId, pantallasTarget, text, requirements);
+        clearInterval(progressInterval);
+        if (loadingToastId) {
+          removeToast(loadingToastId);
+          processingToastIdRef.current = null;
+        }
         if (result && result.mockups && result.mockups.length > 0) {
-          setCorrectionFeedback({
-            type: "success",
-            message: `Ajuste aplicado exitosamente al mockup con IA: "${text}"`
-          });
+          setCorrectionProgress(100);
           if (onUpdateMockups) {
             onUpdateMockups(result.mockups);
           }
           setPrompt("");
+          setIsFixing(false);
+          setActiveCorrectionPrompt(null);
+          setCorrectionProgress(0);
+          addToast({
+            type: "success",
+            title: "Mockup actualizado",
+            message: `Se aplicó el ajuste en "${targetTitle}": "${text}"`
+          });
         } else {
-          setCorrectionFeedback({
+          setIsFixing(false);
+          setActiveCorrectionPrompt(null);
+          setCorrectionProgress(0);
+          addToast({
             type: "error",
-            message: "La IA no devolvió mockups para este ajuste. Intenta reformular."
+            title: "No se pudo actualizar el mockup",
+            message: result?.error || "La IA no devolvió mockups para este ajuste. Intenta reformular tu instrucción."
           });
         }
       } else {
-        // Enrutamiento inteligente a Diagramas PlantUML
         if (onApplyAiCorrection) {
+          if (processingToastIdRef.current) removeToast(processingToastIdRef.current);
+          loadingToastId = addToast({
+            type: "info",
+            title: `Procesando ${contextInfo.badge}`,
+            message: `Aplicando instrucción con IA: "${text}"...`,
+            duration: 60000
+          });
+          processingToastIdRef.current = loadingToastId;
+          clearInterval(progressInterval);
           const res = await onApplyAiCorrection(text, selectedKey);
           if (res && res.success === false) {
-            setCorrectionFeedback({
+            if (loadingToastId) {
+              removeToast(loadingToastId);
+              processingToastIdRef.current = null;
+            }
+            setIsFixing(false);
+            setActiveCorrectionPrompt(null);
+            addToast({
               type: "error",
+              title: "No se pudo aplicar el ajuste",
               message: res.error || "No se pudo aplicar el ajuste al diagrama."
             });
           } else {
-            setCorrectionFeedback({
-              type: "success",
-              message: `Ajuste aplicado al diagrama [${contextInfo.badge}]: "${text}"`
-            });
             setPrompt("");
+            if (!res?.pending) {
+              if (loadingToastId) {
+                removeToast(loadingToastId);
+                processingToastIdRef.current = null;
+              }
+              setIsFixing(false);
+              setActiveCorrectionPrompt(null);
+            }
           }
         }
       }
     } catch (err) {
-      setCorrectionFeedback({
+      clearInterval(progressInterval);
+      if (loadingToastId) {
+        removeToast(loadingToastId);
+        processingToastIdRef.current = null;
+      }
+      setIsFixing(false);
+      setActiveCorrectionPrompt(null);
+      setCorrectionProgress(0);
+      addToast({
         type: "error",
+        title: "Error al procesar petición",
         message: err.message || "Error al conectar con la IA."
       });
-    } finally {
-      setIsFixing(false);
     }
   };
 
@@ -402,54 +498,46 @@ export default function DiagramsView({
             </button>
           </div>
 
-          {diagramJob && ['encolado', 'procesando', 'fallido'].includes(diagramJob.estado) && (
-            <div className={`mb-3 rounded-lg border px-3 py-2 text-xs flex items-center justify-between gap-3 ${diagramJob.estado === 'fallido' ? 'border-red-200 bg-red-50 text-red-700' : 'border-violet-200 bg-violet-50 text-violet-800'}`}>
-              <div className="min-w-0"><span>{diagramJob.mensaje || 'Generando diagrama en segundo plano'}{diagramJob.tipo_diagrama ? ` · ${diagramJob.tipo_diagrama.replaceAll('_', ' ')}` : ''}</span>{diagramJob.estado === 'fallido' && diagramJob.error && <p role="alert" className="mt-1 whitespace-pre-wrap break-words">{diagramJob.error}</p>}</div>
-              <span className="font-semibold shrink-0">{diagramJob.progreso || 0}%</span>
-            </div>
-          )}
-
           {/* Fila Superior: Tabs de navegación (Casos de Uso, Arquitectura, Clases, Árbol de Navegación, Mockups) */}
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3 shrink-0">
-            <div className="flex flex-wrap items-center gap-2">
-              {options.map((opt) => {
-                const Icon = opt.icon;
-                const isSelected = selectedKey === opt.key;
-                const flowItem = opt.type ? diagramFlow?.items?.find((item) => item.tipo === opt.type) : null;
-                const optionState = opt.key === "mockups"
-                  ? (isDiagramsApproved ? "disponible" : "bloqueado")
-                  : flowItem?.estado || diagrams?.[opt.key]?.status || (diagrams?.[opt.key] ? "pendiente_revision" : "bloqueado");
-                const isBlocked = optionState === "bloqueado" || (opt.key === "mockups" && !isDiagramsApproved);
-                return (
-                  <button
-                    key={opt.key}
-                    disabled={isBlocked}
-                    title={isBlocked ? `Bloqueado hasta aprobar: ${flowItem?.unmet_dependencies?.join(", ") || "los diagramas anteriores"}` : undefined}
-                    onClick={() => {
-                      if (isBlocked) return;
-                      setSelectedKey(opt.key);
-                      setShowVersionHistory(false);
-                      setCorrectionFeedback(null);
-                    }}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
-                      isSelected
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : isBlocked
-                          ? "bg-slate-50 text-slate-300 cursor-not-allowed"
-                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {isBlocked ? <LockKeyhole size={13} /> : <Icon size={14} />}
-                    <span>{opt.label}</span>
-                    {optionState === "aprobado" && <Check size={12} className="text-emerald-500" />}
-                    {optionState === "desactualizado" && <RefreshCw size={12} className="text-amber-500" />}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="flex flex-wrap items-center gap-2 mb-3 shrink-0">
+            {options.map((opt) => {
+              const Icon = opt.icon;
+              const isSelected = selectedKey === opt.key;
+              const flowItem = opt.type ? diagramFlow?.items?.find((item) => item.tipo === opt.type) : null;
+              const optionState = opt.key === "mockups"
+                ? (isDiagramsApproved ? "disponible" : "bloqueado")
+                : flowItem?.estado || diagrams?.[opt.key]?.status || (diagrams?.[opt.key] ? "pendiente_revision" : (opt.key === "useCase" ? "disponible" : "bloqueado"));
+              const isBlocked = optionState === "bloqueado" || (opt.key === "mockups" && !isDiagramsApproved);
+              return (
+                <button
+                  key={opt.key}
+                  disabled={isBlocked}
+                  title={isBlocked ? `Bloqueado hasta aprobar: ${flowItem?.unmet_dependencies?.join(", ") || "los diagramas anteriores"}` : undefined}
+                  onClick={() => {
+                    if (isBlocked) return;
+                    setSelectedKey(opt.key);
+                    setShowVersionHistory(false);
+                  }}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
+                    isSelected
+                      ? "bg-slate-900 text-white shadow-xs"
+                      : isBlocked
+                        ? "bg-slate-50 text-slate-300 cursor-not-allowed"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {isBlocked ? <LockKeyhole size={13} /> : <Icon size={14} />}
+                  <span>{opt.label}</span>
+                  {optionState === "aprobado" && <Check size={12} className="text-emerald-500" />}
+                  {optionState === "desactualizado" && <RefreshCw size={12} className="text-amber-500" />}
+                </button>
+              );
+            })}
+          </div>
 
-            {/* Selector Vista Gráfica / Código (solo para diagramas PlantUML; Mockups maneja su propio toggle) */}
-            {selectedKey !== "mockups" && (
+          {/* Fila: Selector Vista Gráfica / Código (izquierda) y Control de Calidad (derecha) */}
+          {selectedKey !== "mockups" && (
+            <div className="flex items-center justify-between gap-3 mb-2 shrink-0">
               <div className="flex items-center bg-slate-100 p-0.5 rounded-full shrink-0">
                 <button
                   type="button"
@@ -474,8 +562,30 @@ export default function DiagramsView({
                   Código
                 </button>
               </div>
-            )}
-          </div>
+
+              {qualityStatus && (
+                <span
+                  className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-medium border shrink-0 ${
+                    qualityInvalid
+                      ? "border-red-200 bg-red-50 text-red-700"
+                      : qualityStatus === "advertencia"
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  }`}
+                  title={
+                    validationErrors.length || validationWarnings.length
+                      ? [...validationErrors, ...validationWarnings].join("\n")
+                      : `Control de calidad: ${qualityStatus}`
+                  }
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${
+                    qualityInvalid ? "bg-red-500" : qualityStatus === "advertencia" ? "bg-amber-500" : "bg-emerald-500"
+                  }`} />
+                  Control de calidad: {qualityStatus}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Descripción del Diagrama (para diagramas PlantUML) */}
           {selectedKey !== "mockups" && (
@@ -517,15 +627,10 @@ export default function DiagramsView({
                   </div>
                 </div>
               )}
-              {currentDiagram && qualityStatus && (
+              {currentDiagram && (qualityInvalid || qualityStatus === "advertencia") && (validationErrors.length > 0 || validationWarnings.length > 0) && (
                 <div className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${
-                  qualityInvalid
-                    ? "border-red-200 bg-red-50 text-red-700"
-                    : qualityStatus === "advertencia"
-                      ? "border-amber-200 bg-amber-50 text-amber-800"
-                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  qualityInvalid ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"
                 }`}>
-                  <p className="font-semibold">Control de calidad: {qualityStatus}</p>
                   {validationErrors.map((message) => <p key={message}>• {message}</p>)}
                   {validationWarnings.map((message) => <p key={message} className="whitespace-pre-line">• {String(message).replace(/\\n/g, '\n')}</p>)}
                 </div>
@@ -558,8 +663,12 @@ export default function DiagramsView({
                 projectId={projectId}
                 selectedScreen={selectedScreen}
                 onSelectScreen={setSelectedScreen}
+                onActiveScreenChange={setActiveMockupEntry}
+                isFixing={isFixing}
+                fixingPrompt={activeCorrectionPrompt}
                 requirements={requirements}
                 onTraceabilityChange={setMockupTraceability}
+                onNotify={addToast}
               />
             ) : !currentDiagram ? (
               <div className="flex-1 min-h-[460px] border border-dashed border-slate-300 rounded-2xl bg-slate-50 flex flex-col items-center justify-center text-center p-8">
@@ -568,6 +677,15 @@ export default function DiagramsView({
                     <Workflow size={32} className="text-violet-500 mb-3" />
                     <p className="text-sm font-semibold text-slate-800">{currentOption?.label} está disponible</p>
                     <p className="text-xs text-slate-500 mt-1 max-w-md">Se generará usando exclusivamente los requisitos y diagramas anteriores que ya aprobaste.</p>
+                    <button
+                      type="button"
+                      onClick={() => onGenerateDiagram?.(currentOption?.type)}
+                      disabled={isGeneratingDiagram}
+                      className="mt-4 px-5 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isGeneratingDiagram ? <RefreshCw size={14} className="animate-spin" /> : <Workflow size={14} />}
+                      <span>{isGeneratingDiagram ? "Generando diagrama..." : `Generar ${currentOption?.label}`}</span>
+                    </button>
                   </>
                 ) : (
                   <>
@@ -655,24 +773,6 @@ export default function DiagramsView({
               </div>
             </div>
           )}
-          {correctionFeedback && (
-            <div
-              className={`text-xs px-3 py-1.5 rounded-lg flex items-center justify-between gap-2 ${
-                correctionFeedback.type === "success"
-                  ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                  : "bg-red-50 text-red-700 border border-red-200"
-              }`}
-            >
-              <span className="truncate">{correctionFeedback.message}</span>
-              <button
-                type="button"
-                onClick={() => setCorrectionFeedback(null)}
-                className="text-slate-400 hover:text-slate-600 font-bold ml-2 text-xs cursor-pointer"
-              >
-                ×
-              </button>
-            </div>
-          )}
 
           <div className="flex items-center gap-3">
             {/* Input de Ajustes IA Inteligente y Contextual */}
@@ -698,12 +798,12 @@ export default function DiagramsView({
 
               <button
                 type="submit"
-                disabled={!prompt.trim() || isFixing || (selectedKey !== "mockups" && !currentDiagram)}
+                disabled={(isFixing || (selectedKey !== "mockups" && isGeneratingDiagram)) || !prompt.trim() || (selectedKey !== "mockups" && !currentDiagram)}
                 className="p-1 text-blue-600 hover:text-blue-700 disabled:text-slate-300 transition-colors cursor-pointer shrink-0 ml-1"
                 title={`Aplicar ajuste con IA a ${contextInfo.badge}`}
               >
-                {isFixing ? (
-                  <div className="w-3.5 h-3.5 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
+                {isFixing || (selectedKey !== "mockups" && isGeneratingDiagram) ? (
+                  <div className="w-3.5 h-3.5 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
                 ) : (
                   <Send size={14} />
                 )}
@@ -725,7 +825,7 @@ export default function DiagramsView({
             {selectedKey !== "mockups" && currentDiagram && (
               <button type="button"
                 disabled={!onGenerateDiagram || isGeneratingDiagram || isRegenerating || isFixing || isSavingCode || isReviewing || restoringVersion !== null || currentState === "bloqueado"}
-                onClick={() => setRegenerateTarget({ ...currentOption, unsaved: hasUnsavedCode })}
+                onClick={() => handleRegenerate(currentOption)}
                 className="flex shrink-0 items-center gap-1.5 rounded-full border border-violet-200 px-4 py-2.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed">
                 <RefreshCw size={14} /> Regenerar diagrama
               </button>
@@ -757,6 +857,41 @@ export default function DiagramsView({
       </div>
       <RegenerateDiagramDialog target={regenerateTarget} busy={isRegenerating}
         onCancel={() => setRegenerateTarget(null)} onConfirm={handleRegenerate} />
+
+      {/* Modal interactivo de progreso para generación con IA o regeneración por chat */}
+      <DiagramProgressModal
+        isOpen={Boolean(
+          (selectedKey !== "mockups" && isFixing) ||
+          (diagramJob && ['encolado', 'procesando', 'fallido'].includes(diagramJob.estado) && !isModalDismissed)
+        )}
+        title={
+          selectedKey === "mockups" && activeCorrectionPrompt
+            ? `Actualizando ${contextInfo.badge || "Mockup"} con IA`
+            : null
+        }
+        isCorrection={Boolean(activeCorrectionPrompt)}
+        diagramLabel={
+          activeCorrectionPrompt
+            ? (contextInfo.badge || currentOption?.label)
+            : (diagramJob?.tipo_diagrama
+                ? diagramJob.tipo_diagrama.replaceAll('_', ' ')
+                : (contextInfo.badge || currentOption?.label || "artefacto"))
+        }
+        progress={isFixing ? correctionProgress : (diagramJob?.progreso || 0)}
+        statusMessage={selectedKey === "mockups" && activeCorrectionPrompt ? "Procesando tu instrucción y regenerando el HTML de la pantalla..." : ""}
+        correctionPrompt={activeCorrectionPrompt}
+        error={diagramJob?.estado === 'fallido' ? diagramJob.error : null}
+        onClose={() => {
+          setIsModalDismissed(true);
+          if (isFixing) {
+            setIsFixing(false);
+            setActiveCorrectionPrompt(null);
+          }
+        }}
+      />
+
+      {/* Toast container flotante en la esquina superior derecha */}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

@@ -1,86 +1,129 @@
 import React, { useRef, useState } from "react";
 import {
-  Upload,
-  Trash2,
-  ArrowLeft,
-  Cpu,
   ChevronDown,
-  Files,
-  PanelLeftOpen,
-  PanelLeftClose,
   Pencil,
   Sparkles,
+  WandSparkles,
   X,
   Save,
-  CheckCircle2
+  CheckCircle2,
+  ArrowLeft
 } from "lucide-react";
-import RbixLogo from "./RbixLogo";
-import BrainGearsIcon from "./BrainGearsIcon";
 
-// Icono estilo NotebookLM: PDF rojo con texto PDF
-function NotebookPdfIcon({ size = 22, className = "" }) {
+function CloudUploadFileIllustration() {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={`shrink-0 ${className}`}>
-      <rect x="3.5" y="3.5" width="17" height="17" rx="3.5" stroke="#E53935" strokeWidth="2" fill="white" />
-      <text x="12" y="14.8" textAnchor="middle" fontSize="6.8" fontWeight="bold" fill="#E53935" fontFamily="Inter, Arial, sans-serif" letterSpacing="0.2px">
-        PDF
-      </text>
-    </svg>
-  );
-}
-
-// Icono estilo NotebookLM: Documento de texto azul de Google Docs con líneas
-function NotebookDocIcon({ size = 22, className = "" }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={`shrink-0 ${className}`}>
+    <svg width="68" height="76" viewBox="0 0 68 76" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+      {/* Document Base */}
       <path
-        d="M6 3.5C4.9 3.5 4 4.4 4 5.5v13c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V9.5L14 3.5H6z"
-        fill="#7C3AED"
+        d="M10 12C10 7.58172 13.5817 4 18 4H43.3726C45.4943 4 47.5291 4.84285 49.0294 6.34315L55.6569 12.9706C57.1571 14.4709 58 16.5057 58 18.6274V64C58 68.4183 54.4183 72 50 72H18C13.5817 72 10 68.4183 10 64V12Z"
+        fill="#DCE4FF"
       />
-      <path d="M14 3.5V9h5.5L14 3.5z" fill="#90CAF9" />
-      <path d="M8 12.5h8M8 15.5h5" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+      {/* Folded Corner */}
+      <path
+        d="M44 4.5V14C44 17.3137 46.6863 20 50 20H57.5L44 4.5Z"
+        fill="#BCCBFF"
+      />
+      {/* Cloud inside Document */}
+      <path
+        d="M25.5 49H43C46.5899 49 49.5 46.0899 49.5 42.5C49.5 39.2111 47.0548 36.4926 43.8819 36.0604C42.9056 31.4648 38.8247 28 33.95 28C28.3443 28 23.8 32.5443 23.8 38.15C23.8 38.4981 23.8175 38.8422 23.8517 39.1812C21.3774 39.8825 19.5 42.1552 19.5 44.85C19.5 47.142 21.358 49 23.65 49H25.5Z"
+        fill="#7B96FF"
+      />
+      {/* Upward Arrow inside Cloud */}
+      <path
+        d="M34 45V36M34 36L30.5 39.5M34 36L37.5 39.5"
+        stroke="white"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-// Icono estilo NotebookLM: Onda de audio con 3 barras redondeadas
-function NotebookAudioIcon({ size = 22, className = "" }) {
+function FileTypeBadge({ type }) {
+  if (type === "audio") {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-[#5850EC] flex items-center justify-center shrink-0 shadow-2xs">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <rect x="4" y="10" width="2.2" height="4" rx="1.1" fill="white" />
+          <rect x="7.5" y="7" width="2.2" height="10" rx="1.1" fill="white" />
+          <rect x="11" y="4" width="2.2" height="16" rx="1.1" fill="white" />
+          <rect x="14.5" y="8" width="2.2" height="8" rx="1.1" fill="white" />
+          <rect x="18" y="10" width="2.2" height="4" rx="1.1" fill="white" />
+        </svg>
+      </div>
+    );
+  }
+  if (type === "pdf") {
+    return (
+      <div className="w-10 h-10 rounded-xl bg-[#E05246] flex items-center justify-center shrink-0 shadow-2xs">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M12 4.5C10.5 4.5 9.8 7.5 11.2 11.5C9.5 13.8 6.5 16.2 5.5 17.5C4.8 18.4 5.6 19.5 6.8 19C8.2 18.4 10.5 15.8 12.2 13.8C14.8 13.2 17.8 13.4 18.8 14.2C19.6 14.8 19.8 13.5 18.8 12.6C17.6 11.6 14.8 11.5 13 11.8C12.2 8.8 13.2 4.5 12 4.5Z"
+            stroke="white"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+    );
+  }
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={`shrink-0 ${className}`}>
-      <rect x="4.5" y="9.5" width="3" height="6" rx="1.5" fill="#7C3AED" />
-      <rect x="10.5" y="5" width="3" height="14" rx="1.5" fill="#7C3AED" />
-      <rect x="16.5" y="9.5" width="3" height="6" rx="1.5" fill="#7C3AED" />
+    <div className="w-10 h-10 rounded-xl bg-[#3B82F6] flex items-center justify-center shrink-0 shadow-2xs">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <path
+          d="M7 4.5H14L18 8.5V19.5H7V4.5Z"
+          stroke="white"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+        <path d="M9.5 11.5H15.5M9.5 14.5H15.5M9.5 17.2H13" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    </div>
+  );
+}
+
+function AiBrainModelIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-slate-500 shrink-0">
+      <path
+        d="M9.5 4C7.567 4 6 5.567 6 7.5C6 7.89 6.064 8.265 6.182 8.615C4.896 9.188 4 10.488 4 12C4 13.765 5.236 15.242 6.889 15.612C7.283 17.545 8.994 19 11.045 19H11.5V4H9.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14.5 4C16.433 4 18 5.567 18 7.5C18 7.89 17.936 8.265 17.818 8.615C19.104 9.188 20 10.488 20 12C20 13.765 18.764 15.242 17.111 15.612C16.717 17.545 15.006 19 12.955 19H12.5V4H14.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 export default function SourcesPanel({
-  sources,
-  requirements = { functional: [], nonFunctional: [] },
-  referenceMode = false,
+  sources = [],
   onAddSource,
   onUpdateSource,
   onSuggestSourceMetadata,
   onDeleteSource,
   onProcess,
-  isProcessing,
-  isProcessed,
-  projectName,
-  onUpdateProjectName,
-  onBackToDashboard,
+  isProcessing = false,
+  isProcessed = false,
   selectedProvider,
   onSelectProvider,
   availableProviders = [],
-  collapsed = false,
-  onToggleCollapsed
+  onContinueToProject = null
 }) {
-  const [uploadingItem, setUploadingItem] = useState(null);
+  const [uploadingItems, setUploadingItems] = useState([]);
   const [uploadError, setUploadError] = useState("");
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [editedName, setEditedName] = useState("");
   const [localProvider, setLocalProvider] = useState("auto");
   const [activeSourceId, setActiveSourceId] = useState(null);
-  const [activeRequirementId, setActiveRequirementId] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
 
   const currentProvider = selectedProvider !== undefined ? selectedProvider : localProvider;
@@ -92,28 +135,6 @@ export default function SourcesPanel({
     }
   };
 
-  const cleanProjectTitle = (name) => {
-    if (!name || name === "Proyecto sin nombre") return "Nuevo Proyecto";
-    const cleaned = name
-      .replace(/^(Sistema de|Sistema para|Sistema|Software de|Software para|Aplicación de|Plataforma de)\s+/i, "")
-      .trim();
-    return cleaned ? (cleaned.charAt(0).toUpperCase() + cleaned.slice(1)) : name;
-  };
-
-  const handleStartEdit = () => {
-    setEditedName(cleanProjectTitle(projectName));
-    setIsEditingName(true);
-  };
-
-  const handleSaveEdit = () => {
-    const trimmed = editedName.trim();
-    if (trimmed && onUpdateProjectName && trimmed !== projectName) {
-      onUpdateProjectName(trimmed);
-    }
-    setIsEditingName(false);
-  };
-
-  // Garantizar que no existan fuentes duplicadas en el panel visual
   const uniqueSources = React.useMemo(() => {
     const seen = new Set();
     return (sources || []).filter((src) => {
@@ -124,394 +145,357 @@ export default function SourcesPanel({
     });
   }, [sources]);
 
-  // Si uploadingItem está activo, no duplicarlo en la lista si ya fue agregado al estado del proyecto
-  const displayedSources = React.useMemo(() => {
-    if (!uploadingItem) return uniqueSources;
-    return uniqueSources.filter((s) => s.name !== uploadingItem.name);
-  }, [uniqueSources, uploadingItem]);
+  const pendingUploading = React.useMemo(() => {
+    const existingNames = new Set(uniqueSources.map((s) => s.name));
+    return uploadingItems.filter((item) => !existingNames.has(item.name));
+  }, [uniqueSources, uploadingItems]);
 
-  const totalSourcesCount = uniqueSources.length + (uploadingItem && !uniqueSources.some((s) => s.name === uploadingItem.name) ? 1 : 0);
-  const isAnySourceLoading = Boolean(uploadingItem) || uniqueSources.some((s) => s.isUploading);
+  const allDisplayedFiles = React.useMemo(() => {
+    return [...uniqueSources, ...pendingUploading];
+  }, [uniqueSources, pendingUploading]);
+
+  const isAnySourceLoading = pendingUploading.length > 0 || uniqueSources.some((s) => s.isUploading);
   const activeSource = uniqueSources.find((source) => source.id === activeSourceId) || null;
-  const functionalRequirements = Array.isArray(requirements?.functional) ? requirements.functional : [];
-  const nonFunctionalRequirements = Array.isArray(requirements?.nonFunctional) ? requirements.nonFunctional : [];
-  const totalRequirements = functionalRequirements.length + nonFunctionalRequirements.length;
 
-  const sourceGroups = React.useMemo(() => {
-    const labels = {
-      textos: "Textos",
-      documentos: "Documentos",
-      audios: "Audios",
-      videos: "Videos",
-      otros: "Otros"
-    };
-    const groups = {};
-    for (const source of displayedSources) {
-      const category = source.category || (source.type === "audio" ? "audios" : source.type === "pdf" ? "documentos" : "textos");
-      if (!groups[category]) groups[category] = { label: labels[category] || labels.otros, items: [] };
-      groups[category].items.push(source);
+  const formatFileSize = (bytes) => {
+    if (!bytes && bytes !== 0) return "";
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     }
-    return Object.entries(groups);
-  }, [displayedSources]);
-
-  const getFileIcon = (type) => {
-    switch (type) {
-      case "audio":
-        return <NotebookAudioIcon size={22} />;
-      case "pdf":
-        return <NotebookPdfIcon size={22} />;
-      case "txt":
-      default:
-        return <NotebookDocIcon size={22} />;
-    }
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
     setUploadError("");
 
-    // Normalizar caracteres especiales UTF-8 del nombre del archivo (tildes, ñ, etc.)
-    const rawName = file.name || "archivo";
-    const normalizedName = Array.from(rawName.normalize("NFC"))
-      .filter((character) => {
-        const code = character.charCodeAt(0);
-        return code > 31 && !(code >= 127 && code <= 159);
-      })
-      .join("")
-      .trim();
+    for (const file of files) {
+      const rawName = file.name || "archivo";
+      const normalizedName = Array.from(rawName.normalize("NFC"))
+        .filter((character) => {
+          const code = character.charCodeAt(0);
+          return code > 31 && !(code >= 127 && code <= 159);
+        })
+        .join("")
+        .trim();
 
-    const ext = normalizedName.split('.').pop().toLowerCase();
-    const mime = (file.type || '').toLowerCase();
-    const audioExts = ['mp3', 'wav', 'm4a', 'mp4', 'aac', 'ogg', 'opus', 'webm', 'flac', 'wma'];
-    const isAudio = mime.startsWith('audio/') || mime === 'video/mp4' || audioExts.includes(ext);
-    const isPdf = mime.includes('pdf') || ext === 'pdf';
+      const ext = normalizedName.split(".").pop().toLowerCase();
+      const mime = (file.type || "").toLowerCase();
+      const audioExts = ["mp3", "wav", "m4a", "mp4", "aac", "ogg", "opus", "webm", "flac", "wma"];
+      const isAudio = mime.startsWith("audio/") || mime === "video/mp4" || audioExts.includes(ext);
+      const isPdf = mime.includes("pdf") || ext === "pdf";
 
-    let type = "txt";
-    if (isAudio) {
-      type = "audio";
-    } else if (isPdf) {
-      type = "pdf";
-    }
-    const category = isAudio ? (['mp4', 'webm'].includes(ext) || mime.startsWith('video/') ? "videos" : "audios") : isPdf ? "documentos" : "textos";
+      let type = "txt";
+      if (isAudio) {
+        type = "audio";
+      } else if (isPdf) {
+        type = "pdf";
+      }
+      const category = isAudio
+        ? ["mp4", "webm"].includes(ext) || mime.startsWith("video/")
+          ? "videos"
+          : "audios"
+        : isPdf
+          ? "documentos"
+          : "textos";
 
-    const formattedSize = (file.size / 1024).toFixed(1) + " KB";
+      const formattedSize = formatFileSize(file.size);
+      const tempId = "src-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
 
-    setUploadingItem({
-      name: normalizedName,
-      type,
-      size: formattedSize
-    });
+      setUploadingItems((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          name: normalizedName,
+          type,
+          size: formattedSize,
+          isUploading: true
+        }
+      ]);
 
-    let textContent = "";
-    if (type === "txt") {
+      let textContent = "";
+      if (type === "txt") {
+        try {
+          textContent = await file.text();
+        } catch (err) {
+          console.warn("Error leyendo texto del archivo:", err);
+        }
+      }
+
+      const newSource = {
+        id: tempId,
+        name: normalizedName,
+        type,
+        category,
+        size: formattedSize,
+        date: new Date().toLocaleDateString("es-ES"),
+        rawFile: file,
+        contentSnippet: textContent,
+        contentType: "",
+        description: "",
+        authorOrigin: "",
+        documentDate: "",
+        tags: [],
+        transcriptionVerified: false,
+        isUploading: true
+      };
+
       try {
-        textContent = await file.text();
+        await onAddSource(newSource);
       } catch (err) {
-        console.warn("Error leyendo texto del archivo:", err);
+        console.warn("Error cargando fuente:", err);
+        setUploadError(err.message || "No se pudo cargar la fuente. Vuelve a intentarlo.");
+      } finally {
+        setUploadingItems((prev) => prev.filter((item) => item.id !== tempId));
       }
     }
 
-    const newSource = {
-      id: "src-" + Date.now(),
-      name: normalizedName,
-      type,
-      category,
-      size: formattedSize,
-      date: new Date().toLocaleDateString("es-ES"),
-      rawFile: file,
-      contentSnippet: textContent,
-      contentType: "",
-      description: "",
-      authorOrigin: "",
-      documentDate: "",
-      tags: [],
-      transcriptionVerified: false,
-      isUploading: true
-    };
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
-    try {
-      const savedSource = await onAddSource(newSource);
-      if (savedSource?.id && !savedSource.isUploading) setActiveSourceId(savedSource.id);
-    } catch (err) {
-      console.warn("Error cargando fuente:", err);
-      setUploadError(err.message || "No se pudo cargar la fuente. Vuelve a intentarlo.");
-    } finally {
-      setUploadingItem(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  const handleFileUpload = async (e) => {
+    await processFiles(e.target.files);
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (isAnySourceLoading || isProcessing) return;
+    if (e.dataTransfer?.files?.length) {
+      await processFiles(e.dataTransfer.files);
     }
   };
 
-  if (collapsed) {
-    return (
-      <aside className="w-14 bg-[#171425] border-r border-[#29243B] flex h-full shrink-0 flex-col items-center py-3 text-white shadow-sm">
-        <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".txt,.pdf,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.opus,.docx" className="hidden" />
-        <button type="button" onClick={onBackToDashboard} className="mb-3 rounded-lg p-2 text-slate-300 hover:bg-white/10 hover:text-white" title="Volver a proyectos"><ArrowLeft size={17} /></button>
-        <button type="button" onClick={onToggleCollapsed} className="rounded-lg bg-white/10 p-2 text-white hover:bg-white/20" title={referenceMode ? "Mostrar requisitos" : "Mostrar fuentes"}><PanelLeftOpen size={18} /></button>
-        <div className="my-3 h-px w-7 bg-white/15" />
-        {referenceMode ? (
-          <button type="button" onClick={onToggleCollapsed} className="relative rounded-lg p-2 text-slate-200 hover:bg-white/10" title={`Requisitos aprobados (${totalRequirements})`}><CheckCircle2 size={18} />{totalRequirements > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[#A3FF12] px-1 text-[9px] font-bold leading-4 text-[#171425]">{totalRequirements}</span>}</button>
-        ) : (
-          <button type="button" disabled={isAnySourceLoading} onClick={() => fileInputRef.current?.click()} className="relative rounded-lg p-2 text-slate-200 hover:bg-white/10 disabled:opacity-40" title={`Fuentes (${totalSourcesCount})`}><Files size={18} />{totalSourcesCount > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[#A3FF12] px-1 text-[9px] font-bold leading-4 text-[#171425]">{totalSourcesCount}</span>}</button>
-        )}
-        <div className="mt-auto flex w-full items-center justify-center">
-          <RbixLogo size="sm" showText={false} isDark={true} />
-        </div>
-      </aside>
-    );
-  }
-
   return (
-    <aside className="w-64 md:w-72 bg-white border-r border-[#E7E3EE] flex flex-col h-full shrink-0 select-none overflow-hidden font-inter relative shadow-xs">
-
-      {/* Hidden File Input */}
-      {!referenceMode && <input
+    <div className="flex-1 w-full h-full overflow-y-auto bg-[#F8F9FB] px-4 py-8 md:py-12 flex flex-col items-center">
+      <input
         type="file"
+        multiple
         ref={fileInputRef}
         onChange={handleFileUpload}
         accept=".txt,.pdf,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.opus,.docx"
         className="hidden"
-      />}
+      />
 
-      {/* 1. PROJECT TITLE HEADER: Título blanco grande con fondo #1F1D30 */}
-      <div className="p-4 border-b border-[#29243B] bg-[#171425] text-white shrink-0 z-10 relative shadow-sm">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onBackToDashboard}
-            className="p-1.5 -ml-1 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer shrink-0"
-            title="Volver a lista de proyectos"
-          >
-            <ArrowLeft size={16} />
-          </button>
-
-          <div className="flex items-center border-l border-white/20 pl-2.5 ml-0.5 min-w-0 flex-1">
-            {isEditingName ? (
-              <input
-                type="text"
-                autoFocus
-                value={editedName}
-                onChange={(e) => setEditedName(e.target.value)}
-                onBlur={handleSaveEdit}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveEdit();
-                  if (e.key === "Escape") setIsEditingName(false);
-                }}
-                className="w-full text-sm font-bold text-white bg-white/15 border border-white/30 rounded px-2 py-0.5 outline-hidden ring-1 ring-white/50 font-inter"
-              />
-            ) : (
-              <span
-                onClick={handleStartEdit}
-                className="text-sm font-bold text-white truncate block cursor-pointer hover:text-slate-200 transition-colors font-inter tracking-tight"
-                title={`${cleanProjectTitle(projectName)} (Clic para editar nombre)`}
-              >
-                {cleanProjectTitle(projectName)}
-              </span>
-            )}
-          </div>
-          <button type="button" onClick={onToggleCollapsed} className="rounded-lg p-1.5 text-slate-300 hover:bg-white/10 hover:text-white" title="Ocultar fuentes"><PanelLeftClose size={17} /></button>
-        </div>
-      </div>
-
-      {/* 2. SOURCES HEADER */}
-      <div className="p-4 border-b border-[#E7E3EE] bg-white z-10 relative">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-slate-800 font-inter">{referenceMode ? "Requisitos aprobados" : "Fuentes"}</h3>
-          {/* Texto neutral sin pintar como solicitó el usuario */}
-          <span className="text-xs font-normal text-slate-500 font-inter">
-            {referenceMode
-              ? `${totalRequirements} ${totalRequirements === 1 ? "requisito" : "requisitos"}`
-              : `${totalSourcesCount} ${totalSourcesCount === 1 ? "cargada" : "cargadas"}`}
-          </span>
-        </div>
-
-        {/* Action Button: Cargar Insumos con altura reducida e icono de adjuntar */}
-        {referenceMode ? (
-          <p className="rounded-xl border border-[#DDD2F5] bg-[#F8F5FF] px-3 py-2 text-[11px] leading-relaxed text-[#5B21B6]">
-            Referencia de solo lectura para mantener la trazabilidad durante el diseño.
-          </p>
-        ) : <button
-          type="button"
-          disabled={isAnySourceLoading}
-          onClick={() => fileInputRef.current?.click()}
-          className="w-full py-2 px-4 bg-white hover:bg-[#FAF9FC] border border-[#D8D1E3] hover:border-[#7C3AED] rounded-xl text-[15px] font-bold text-slate-800 hover:text-[#5B21B6] flex items-center justify-center gap-2.5 transition-all shadow-2xs hover:shadow-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed font-inter group"
-        >
-          <Upload size={17} className="text-[#7C3AED] group-hover:-translate-y-0.5 transition-transform duration-200 shrink-0" />
-          <span className="text-[15px] font-bold tracking-tight">Subir Insumos</span>
-        </button>}
-      </div>
-
-      {/* 3. UPLOADED DOCUMENTS LIST: Diseño limpio y sin bordes estilo NotebookLM */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-1 z-10 relative bg-white">
-        {referenceMode ? (
-          <RequirementsReferenceList
-            functional={functionalRequirements}
-            nonFunctional={nonFunctionalRequirements}
-            activeId={activeRequirementId}
-            onToggle={setActiveRequirementId}
-          />
-        ) : <>
-        {/* Efecto de Carga del Archivo en Proceso idéntico a NotebookLM */}
-        {uploadError && <p role="alert" className="mx-2 mb-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{uploadError}</p>}
-        {uploadingItem && (
-          <div className="px-3 py-2.5 rounded-xl bg-[#F2EDFF] border border-[#DDD2F5] flex items-center justify-between gap-3 font-inter transition-all">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              {getFileIcon(uploadingItem.type)}
-              <span className="text-[13.5px] font-medium text-slate-700 truncate font-inter tracking-tight">
-                {uploadingItem.name}
-              </span>
-            </div>
-            {/* Spinner circular azul estilo Google idéntico a la imagen adjunta */}
-            <svg
-              className="w-[22px] h-[22px] animate-spin text-[#7C3AED] shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
+      <div className="w-full max-w-2xl my-auto">
+        {/* Cabecera de sección "Cargar Insumos" */}
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+            Cargar Insumos
+          </h1>
+          {isProcessed && onContinueToProject && (
+            <button
+              type="button"
+              onClick={onContinueToProject}
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors cursor-pointer"
             >
-              <circle
-                cx="12"
-                cy="12"
-                r="9.5"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeDasharray="44 20"
-              />
-            </svg>
-          </div>
-        )}
+              <ArrowLeft size={13} />
+              <span>Volver al análisis</span>
+            </button>
+          )}
+        </div>
 
-        {displayedSources.length === 0 && !uploadingItem ? (
-          <div className="py-12 px-4 text-center">
-            <p className="text-xs font-bold text-slate-700 font-inter">Sin fuentes todavía</p>
-            <p className="text-xs font-normal text-slate-500 mt-1 max-w-[200px] mx-auto font-inter">
-              Sube audios, actas o especificaciones para comenzar el análisis.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {sourceGroups.map(([category, group]) => (
-              <section key={category}>
-                <div className="mb-1.5 flex items-center justify-between px-2">
-                  <h4 className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{group.label}</h4>
-                  <span className="text-[10px] text-slate-400">{group.items.length}</span>
+        {/* Contenedor principal de carga estilo tarjeta limpia */}
+        <div className="rounded-2xl border border-slate-200/90 bg-white shadow-[0_4px_24px_rgba(15,23,42,0.04)] overflow-hidden">
+          <div className="p-6">
+            {/* Zona Drag & Drop */}
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => !isAnySourceLoading && !isProcessing && fileInputRef.current?.click()}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === " ") && !isAnySourceLoading && !isProcessing) {
+                  e.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!isDragging) setIsDragging(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDragging(false);
+              }}
+              onDrop={handleDrop}
+              className={`rounded-2xl border-2 border-dashed px-6 py-10 flex flex-col items-center justify-center text-center transition-all cursor-pointer select-none ${
+                isDragging
+                  ? "border-[#4349C6] bg-[#EEF2FF]"
+                  : "border-[#C7D2FE] bg-[#F5F7FF]/80 hover:bg-[#EEF2FF]/75 hover:border-[#818CF8]"
+              } ${isAnySourceLoading || isProcessing ? "opacity-60 cursor-not-allowed" : ""}`}
+            >
+              <CloudUploadFileIllustration />
+              <p className="mt-4 text-[16px] font-medium text-slate-800 tracking-tight">
+                Arrastra o selecciona tus archivos
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                .mp3, .wav, .txt, .pdf
+              </p>
+            </div>
+
+            {uploadError && (
+              <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
+                {uploadError}
+              </p>
+            )}
+
+            {/* Lista de Archivos */}
+            <div className="mt-6">
+              <h2 className="text-sm font-medium text-slate-700 mb-2">
+                Archivos
+              </h2>
+
+              {allDisplayedFiles.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200/80 py-7 px-4 text-center">
+                  <p className="text-xs text-slate-400">
+                    Aún no has seleccionado ningún archivo. Sube entrevistas, actas o documentos para iniciar.
+                  </p>
                 </div>
-                <div className="space-y-1">
-                  {group.items.map((src) => (
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {allDisplayedFiles.map((src) => (
                     <div
-                      key={src.id}
+                      key={src.id || src.name}
                       onClick={() => !src.isUploading && setActiveSourceId(src.id)}
-                      className="group cursor-pointer rounded-xl border border-transparent px-2.5 py-2.5 transition-colors hover:border-[#E7E3EE] hover:bg-[#FAF9FC]"
-                      title={`${src.name} (${src.size})`}
+                      className="group flex items-center justify-between gap-3 py-3 px-1 transition-colors hover:bg-slate-50/70 rounded-xl cursor-pointer"
+                      title={src.isUploading ? "Subiendo archivo..." : "Clic para revisar transcripción o contexto del archivo"}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                          {getFileIcon(src.type)}
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13px] font-medium tracking-tight text-[#202124]">{src.name}</p>
-                            <p className="truncate text-[10px] text-slate-500">{src.contentType || "Añadir contexto"}</p>
+                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                        <FileTypeBadge type={src.type} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-slate-800 truncate">
+                            {src.name}
+                          </p>
+                          <div className="mt-0.5 flex items-center gap-1.5">
+                            {src.isUploading ? (
+                              <>
+                                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-[#4349C6]" />
+                                <span className="text-[11px] text-slate-400">Subiendo...</span>
+                              </>
+                            ) : src.uploadError ? (
+                              <span className="text-[11px] text-red-600">Error al subir</span>
+                            ) : (
+                              <>
+                                <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+                                {src.contentType && (
+                                  <span className="text-[11px] text-slate-400 truncate">
+                                    {src.contentType}
+                                  </span>
+                                )}
+                              </>
+                            )}
                           </div>
                         </div>
-                        {src.isUploading ? (
-                          <svg className="h-5 w-5 shrink-0 animate-spin text-[#7C3AED]" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="44 20" /></svg>
-                        ) : (
-                          <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
-                            <button type="button" onClick={(event) => { event.stopPropagation(); setActiveSourceId(src.id); }} className="rounded-md p-1 text-slate-400 hover:bg-[#F2EDFF] hover:text-[#7C3AED]" title="Editar detalles"><Pencil size={13} /></button>
-                            <button type="button" onClick={(event) => { event.stopPropagation(); onDeleteSource(src.id); }} className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Quitar fuente"><Trash2 size={13} /></button>
-                          </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        {src.size && (
+                          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">
+                            {src.size}
+                          </span>
+                        )}
+                        {!src.isUploading && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setActiveSourceId(src.id);
+                              }}
+                              className="p-1 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                              title="Editar contexto o transcripción"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onDeleteSource(src.id);
+                              }}
+                              className="p-1 text-slate-400 hover:text-slate-700 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+                              title="Quitar archivo"
+                            >
+                              <X size={15} />
+                            </button>
+                          </>
                         )}
                       </div>
-                      {src.transcriptionVerified && (src.type === "audio" || src.category === "videos") && <div className="mt-1.5 flex items-center gap-1 pl-8 text-[10px] font-medium text-emerald-700"><CheckCircle2 size={11} />Transcripción revisada</div>}
-                      {src.uploadError && <p className="mt-1 text-xs text-red-700">No guardada. Vuelve a subir el archivo.</p>}
                     </div>
                   ))}
                 </div>
-              </section>
-            ))}
+              )}
+            </div>
           </div>
-        )}
-        </>}
-      </div>
 
-      {/* 4. ACTION BAR: Selector de IA / Modelo + Botón de Procesar / Reprocesar */}
-      <div className="p-3 border-t border-slate-200/80 bg-white/90 backdrop-blur-xs mt-auto shrink-0 z-10 relative space-y-2.5">
-        {/* Selector de IA / Modelo */}
-        <div>
-          <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1 font-inter flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <Cpu size={13} className="text-[#7C3AED]" />
-              Proveedor
-            </span>
-            {currentProvider !== 'auto' && (
-              <span className="text-[10px] text-[#5B21B6] font-semibold bg-[#F2EDFF] px-1.5 py-0.2 rounded border border-[#DDD2F5]">
-                Seleccionado
-              </span>
-            )}
-          </label>
-          <div className="relative">
-            <select
-              value={currentProvider}
-              onChange={(e) => handleProviderChange(e.target.value)}
-              className="w-full text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:border-[#7C3AED] rounded-xl px-3 py-2 pr-8 outline-hidden focus:ring-2 focus:ring-[#7C3AED]/15 focus:border-[#7C3AED] transition-all cursor-pointer shadow-2xs font-inter appearance-none"
+          {/* Barra inferior: Botón Procesar (izquierda) + Selector Elegir modelo (derecha) */}
+          <div className="border-t border-slate-100 bg-[#FAFAFC] px-6 py-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5">
+            <button
+              type="button"
+              onClick={() => onProcess(currentProvider)}
+              disabled={uniqueSources.length === 0 || isProcessing || isAnySourceLoading}
+              className="flex-1 h-11 px-6 rounded-xl bg-[#4349C6] hover:bg-[#373CB3] disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed"
             >
-              {Array.isArray(availableProviders) && availableProviders.length > 0 ? (
-                availableProviders.map((p) => {
-                  const cleanName = (p.nombre || '').replace(/\s*\([^)]*\)/g, '').trim();
-                  return (
-                    <option key={p.id} value={p.id} disabled={p.disponible === false}>
-                      {cleanName || p.nombre}{!p.disponible ? ' — Sin API Key' : ''}
-                    </option>
-                  );
-                })
+              {isProcessing ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  <span>Procesando...</span>
+                </>
               ) : (
                 <>
-                  <option value="auto">Automático</option>
-                  <option value="groq">Groq Cloud</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="deepseek">DeepSeek API</option>
-                  <option value="openrouter">OpenRouter Fast</option>
+                  <WandSparkles size={16} className="shrink-0" />
+                  <span>{isProcessed ? "Reprocesar" : "Procesar"}</span>
                 </>
               )}
-            </select>
-            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-              <ChevronDown size={14} />
+            </button>
+
+            <div className="relative sm:w-64 shrink-0">
+              <span className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-medium text-slate-400 z-10 leading-none">
+                Elegir modelo
+              </span>
+              <div className="relative flex items-center h-11 rounded-xl border border-slate-200 bg-white px-3 shadow-2xs hover:border-slate-300 focus-within:border-[#4349C6]">
+                <AiBrainModelIcon />
+                <select
+                  value={currentProvider}
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                  aria-label="Elegir modelo"
+                  className="w-full h-full pl-2 pr-6 text-xs font-medium text-slate-700 bg-transparent outline-none appearance-none cursor-pointer truncate"
+                >
+                  {Array.isArray(availableProviders) && availableProviders.length > 0 ? (
+                    availableProviders.map((p) => {
+                      const cleanName = (p.nombre || "").replace(/\s*\([^)]*\)/g, "").trim();
+                      const label = p.id === "auto"
+                        ? "Modelo: Whisper + Auto IA"
+                        : `Modelo: ${cleanName || p.nombre}`;
+                      return (
+                        <option key={p.id} value={p.id} disabled={p.disponible === false}>
+                          {label}{!p.disponible ? " — Sin API Key" : ""}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <>
+                      <option value="auto">Modelo: Whisper + Auto IA</option>
+                      <option value="gemini">Modelo: Whisper + Gemini</option>
+                      <option value="groq">Modelo: Whisper + Groq</option>
+                      <option value="openai">Modelo: Whisper + GPT-4</option>
+                      <option value="deepseek">Modelo: Whisper + DeepSeek</option>
+                      <option value="openrouter">Modelo: Whisper + OpenRouter</option>
+                    </>
+                  )}
+                </select>
+                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
+              </div>
             </div>
           </div>
         </div>
-
-        {!referenceMode && <button
-          type="button"
-          onClick={() => onProcess(currentProvider)}
-          disabled={sources.length === 0 || isProcessing || isAnySourceLoading}
-          className="w-full py-3 px-6 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-sm font-bold flex items-center justify-center gap-2.5 transition-all shadow-md shadow-violet-900/10 hover:shadow-lg cursor-pointer disabled:cursor-not-allowed font-inter hover:scale-[1.01] active:scale-[0.99]"
-        >
-          {isProcessing ? (
-            <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-              <span>Analizando con IA...</span>
-            </>
-          ) : isProcessed ? (
-            <>
-              <BrainGearsIcon size={20} className="shrink-0" />
-              <span>Reprocesar</span>
-            </>
-          ) : (
-            <>
-              <BrainGearsIcon size={20} className="shrink-0" />
-              <span>Procesar</span>
-            </>
-          )}
-        </button>}
       </div>
 
-      {/* 5. BRAND FOOTER DOCK: Solo en la parte inferior donde está el logo */}
-      <div
-        className="py-2 px-4 bg-[#171425] border-t border-[#29243B] flex items-center justify-center cursor-pointer hover:bg-[#211C34] transition-colors shrink-0 z-10 relative shadow-inner"
-        onClick={onBackToDashboard}
-        title="RBIX - Volver a Proyectos"
-      >
-        <RbixLogo size="sm" isDark={true} />
-      </div>
-      {!referenceMode && activeSource && (
+      {activeSource && (
         <SourceDetailsModal
           source={activeSource}
           onClose={() => setActiveSourceId(null)}
@@ -519,75 +503,6 @@ export default function SourcesPanel({
           onSuggest={onSuggestSourceMetadata}
         />
       )}
-    </aside>
-  );
-}
-
-function RequirementsReferenceList({ functional, nonFunctional, activeId, onToggle }) {
-  const sections = [
-    { key: "functional", label: "Requisitos funcionales", prefix: "RF", items: functional },
-    { key: "non-functional", label: "Requisitos no funcionales", prefix: "RNF", items: nonFunctional }
-  ];
-
-  if (!functional.length && !nonFunctional.length) {
-    return (
-      <div className="px-3 py-12 text-center">
-        <p className="text-xs font-semibold text-slate-700">No hay requisitos disponibles</p>
-        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">Regresa a la fase de requisitos para revisar el estado del proyecto.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      {sections.map((section) => section.items.length > 0 && (
-        <section key={section.key}>
-          <div className="mb-2 flex items-center justify-between px-1">
-            <h4 className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">{section.label}</h4>
-            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">{section.items.length}</span>
-          </div>
-          <div className="space-y-2">
-            {section.items.map((requirement, index) => {
-              const id = requirement.id || requirement.identificador || `${section.prefix}-${String(index + 1).padStart(2, "0")}`;
-              const title = requirement.name || requirement.nombre || requirement.category || "Requisito";
-              const description = requirement.description || requirement.descripcion || "";
-              const priority = requirement.priority || requirement.prioridad || "Media";
-              const actors = requirement.actors || requirement.actores || [];
-              const metric = requirement.metric || requirement.metrica_medible || "";
-              const expanded = activeId === id;
-
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => onToggle(expanded ? null : id)}
-                  className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${expanded ? "border-[#CFC0F1] bg-[#F8F5FF]" : "border-slate-200 bg-white hover:border-[#D8D1E3] hover:bg-[#FCFBFE]"}`}
-                  aria-expanded={expanded}
-                >
-                  <div className="flex items-start gap-2">
-                    <span className={`mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-bold ${section.prefix === "RF" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"}`}>{id}</span>
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-[11px] font-semibold leading-snug text-slate-800 ${expanded ? "" : "line-clamp-2"}`}>{title}</p>
-                      <div className="mt-1 flex items-center gap-1.5 text-[9px] text-slate-500">
-                        <span>{priority}</span>
-                        {requirement.approved !== false && <span className="text-emerald-600">Aprobado</span>}
-                      </div>
-                    </div>
-                  </div>
-                  {expanded && (
-                    <div className="mt-2.5 space-y-2 border-t border-violet-100 pt-2.5 text-[10px] leading-relaxed text-slate-600">
-                      {description && <p>{description}</p>}
-                      {Array.isArray(actors) && actors.length > 0 && <p><strong className="text-slate-700">Actores:</strong> {actors.join(", ")}</p>}
-                      {metric && <p><strong className="text-slate-700">Métrica:</strong> {metric}</p>}
-                      {requirement.requiresConfirmation && <p className="font-medium text-amber-700">Pendiente de confirmación</p>}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ))}
     </div>
   );
 }
@@ -656,13 +571,13 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
     }
   };
 
-  const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-[#7C3AED] focus:ring-2 focus:ring-violet-100";
+  const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-[#4349C6] focus:ring-2 focus:ring-indigo-100";
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#171425]/45 p-4 backdrop-blur-[2px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form onSubmit={handleSave} className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#E7E3EE] bg-white shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7C3AED]">Contexto de la fuente</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#4349C6]">Contexto de la fuente</p>
             <h3 className="truncate text-lg font-semibold text-slate-900">{source.name}</h3>
             <p className="mt-0.5 text-xs text-slate-500">Estos datos acompañarán el contenido cuando la IA analice el proyecto.</p>
           </div>
@@ -671,8 +586,8 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <div className="flex justify-end">
-            <button type="button" onClick={handleSuggest} disabled={isSuggesting || isSaving} className="flex items-center gap-2 rounded-full border border-[#CFC0F1] bg-[#F2EDFF] px-3.5 py-2 text-xs font-semibold text-[#6D28D9] hover:bg-[#E9DDFE] disabled:opacity-50">
-              {isSuggesting ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-[#7C3AED]" /> : <Sparkles size={14} />}
+            <button type="button" onClick={handleSuggest} disabled={isSuggesting || isSaving} className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-xs font-semibold text-[#4349C6] hover:bg-indigo-100 disabled:opacity-50">
+              {isSuggesting ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-[#4349C6]" /> : <Sparkles size={14} />}
               {isSuggesting ? "Analizando fuente..." : "Rellenar campos con IA"}
             </button>
           </div>
@@ -689,7 +604,7 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
           </div>
 
           {hasTranscription && (
-            <section className="rounded-2xl border border-[#DDD2F5] bg-[#FCFBFE] p-4">
+            <section className="rounded-2xl border border-indigo-100 bg-[#FCFBFE] p-4">
               <div className="mb-3">
                 <h4 className="text-sm font-semibold text-slate-900">Revisión de transcripción</h4>
                 <p className="text-xs text-slate-500">Corrige nombres, cifras o reglas mal interpretadas antes de procesar el proyecto.</p>
@@ -705,7 +620,7 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
 
         <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
           <button type="button" onClick={onClose} disabled={isSaving} className="rounded-full px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button>
-          <button type="submit" disabled={isSaving || isSuggesting} className="flex items-center gap-2 rounded-full bg-[#7C3AED] px-5 py-2 text-xs font-semibold text-white hover:bg-[#6D28D9] disabled:opacity-50">{isSaving ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Save size={14} />}Guardar contexto</button>
+          <button type="submit" disabled={isSaving || isSuggesting} className="flex items-center gap-2 rounded-full bg-[#4349C6] px-5 py-2 text-xs font-semibold text-white hover:bg-[#373CB3] disabled:opacity-50">{isSaving ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Save size={14} />}Guardar contexto</button>
         </footer>
       </form>
     </div>

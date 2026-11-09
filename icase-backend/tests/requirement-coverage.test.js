@@ -192,3 +192,89 @@ test('integra el flujo en el proveedor seleccionado sin llamadas externas y mant
   expect(result.auditoria_requisitos.inventario).toEqual(inventory);
   expect(result.requerimientos[1]).toMatchObject({ origen: 'explicito', requiere_confirmacion: true });
 });
+
+test('el refinamiento con el chat de IA solo corrige problemas críticos sin borrar ni modificar los requerimientos ya listos', async () => {
+  const service = new ModelosIaService();
+  const validRf = {
+    identificador: 'RF-01',
+    nombre: 'Registro de usuarios',
+    tipo: 'RF',
+    descripcion: 'El sistema debe permitir al Administrador gestionar usuarios.',
+    actores: ['Administrador'],
+    prioridad: 'Alta',
+    dependencias: 'Ninguna',
+    precondiciones: 'Acceso al módulo de usuarios.',
+    poscondiciones: 'Usuario gestionado correctamente.',
+    origen: 'explicito',
+    evidencia: inventory[0].evidencia,
+    evidencias: [{ fuente: 'Entrevista', texto: inventory[0].evidencia }],
+    fuentes_origen: ['Entrevista'],
+    necesidades_origen: ['N-01'],
+    reglas_relacionadas: [],
+    criterios_aceptacion: [{ id: 'RF-01-CA-01', descripcion: 'Cuando el Administrador solicita gestionar usuarios, el sistema registra los cambios.', origenes: ['N-01'], necesidades_origen: ['N-01'], verificable: true }],
+    requiere_confirmacion: false,
+    estado_decision: 'confirmado'
+  };
+  const brokenRnf = {
+    identificador: 'RNF-01',
+    nombre: 'Seguridad de contraseñas',
+    tipo: 'RNF',
+    descripcion: 'El sistema debe proteger las contraseñas almacenadas.',
+    actores: ['Sistema'],
+    prioridad: 'Alta',
+    dependencias: 'Ninguna',
+    metrica_medible: '',
+    origen: 'explicito',
+    evidencia: inventory[1].evidencia,
+    evidencias: [{ fuente: 'Entrevista', texto: inventory[1].evidencia }],
+    fuentes_origen: ['Entrevista'],
+    necesidades_origen: [],
+    reglas_relacionadas: [],
+    criterios_aceptacion: [],
+    requiere_confirmacion: true,
+    estado_decision: 'pendiente'
+  };
+  const existingAudit = {
+    version: 2,
+    estado: 'revision_requerida',
+    inventario: inventory.map((entry) => ({
+      ...entry,
+      evidencias: [{ fuente: 'Entrevista', texto: entry.evidencia }],
+      fuentes_origen: ['Entrevista'],
+      criterios_esperados: [entry.necesidad]
+    })),
+    necesidades_funcionales: [{ ...inventory[0], evidencias: [{ fuente: 'Entrevista', texto: inventory[0].evidencia }], criterios_esperados: [inventory[0].necesidad] }],
+    cualidades: [{ ...inventory[1], evidencias: [{ fuente: 'Entrevista', texto: inventory[1].evidencia }], criterios_esperados: [inventory[1].necesidad] }],
+    reglas_negocio: [],
+    decisiones: [{ ...inventory[2], evidencias: [{ fuente: 'Entrevista', texto: inventory[2].evidencia }], criterios_esperados: [inventory[2].necesidad] }],
+    necesidades_pendientes: []
+  };
+
+  // Incluso si la IA intenta alterar RF-01 o devolver eliminar_identificadores: ['RF-01'], RF-01 está bloqueado y permanece intacto
+  service.generarConGemini = jest.fn().mockResolvedValueOnce({
+    requerimientos_corregidos: [
+      { ...validRf, nombre: 'NOMBRE BORRADO POR IA LOCA', descripcion: 'Texto inventado que no debería aplicarse' }
+    ],
+    eliminar_identificadores: ['RF-01']
+  });
+
+  const result = await service.procesar({
+    objetivo: 'requisitos',
+    provider: 'gemini',
+    insumo_bruto: input,
+    insumo_adicional: '[INSTRUCCIÓN DEL EXPERTO EN ANÁLISIS DE REQUERIMIENTOS]:\nResuelve únicamente los problemas críticos pendientes antes de aprobar',
+    contexto_proyecto: {
+      nombre_proyecto: 'Sistema Demo',
+      requerimientos_actuales: [validRf, brokenRnf],
+      auditoria_requisitos: existingAudit
+    }
+  });
+
+  expect(service.generarConGemini).toHaveBeenCalledTimes(1);
+  const rf01Final = result.requerimientos.find((r) => r.identificador === 'RF-01');
+  expect(rf01Final).toBeDefined();
+  expect(rf01Final.nombre).toBe('Registro de usuarios');
+  expect(rf01Final.descripcion).toBe('El sistema debe permitir al Administrador gestionar usuarios.');
+  expect(result.auditoria_requisitos.control_aprobacion.bloqueado).toBe(false);
+  expect(result.auditoria_requisitos.control_aprobacion.errores_criticos).toEqual([]);
+});

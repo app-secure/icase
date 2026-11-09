@@ -9,6 +9,8 @@ node_modules/
 **/.env
 **/.env.*
 !**/.env.example
+env
+**/env
 
 # Archivos subidos en tiempo de ejecución (audios, PDFs procesados)
 icase-backend/uploads/*

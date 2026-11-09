@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Check, CheckCircle2, Pencil, Plus, Save, Send, Trash2, X } from "lucide-react";
 import BrainGearsIcon from "./BrainGearsIcon";
 import RequirementReviewPanel from './RequirementReviewPanel';
+import { ToastContainer, useToasts } from "./Toast";
 
 const emptyRequirement = (type) => type === "rf" ? {
   name: "", description: "", actors: ["Usuario"], priority: "Alta",
@@ -27,7 +28,7 @@ export default function RequirementsView({
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
-  const [correctionFeedback, setCorrectionFeedback] = useState(null);
+  const { toasts, addToast, removeToast } = useToasts();
   const [editing, setEditing] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [formError, setFormError] = useState("");
@@ -69,10 +70,27 @@ export default function RequirementsView({
 
     const updatedFunctional = [...functional];
     const updatedNonFunctional = [...nonFunctional];
+    const prefix = type === "rf" ? "RF" : "RNF";
+    let chosenId = String(draft.id || "").trim();
+    if (!chosenId) {
+      chosenId = nextId(type === "rf" ? updatedFunctional : updatedNonFunctional, prefix);
+    }
+
+    // Comprobar colisión de ID en el resto de requisitos
+    const otherReqs = [
+      ...updatedFunctional.filter((_, i) => !(type === "rf" && !isNew && i === index)),
+      ...updatedNonFunctional.filter((_, i) => !(type === "rnf" && !isNew && i === index))
+    ];
+    if (otherReqs.some(r => (r.id || r.identificador) === chosenId)) {
+      setFormError(`El identificador "${chosenId}" ya está en uso por otro requisito. Introduce un código único.`);
+      return;
+    }
+
     if (type === "rf") {
       const normalized = {
         ...draft,
-        id: draft.id || nextId(updatedFunctional, "RF"),
+        id: chosenId,
+        identificador: chosenId,
         name: draft.name.trim(),
         description: draft.description.trim(),
         actors: (Array.isArray(draft.actors) ? draft.actors : String(draft.actors || "").split(","))
@@ -88,7 +106,8 @@ export default function RequirementsView({
     } else {
       const normalized = {
         ...draft,
-        id: draft.id || nextId(updatedNonFunctional, "RNF"),
+        id: chosenId,
+        identificador: chosenId,
         category: draft.category.trim(),
         description: draft.description.trim(),
         metric: draft.metric.trim(),
@@ -103,9 +122,9 @@ export default function RequirementsView({
     onUpdateRequirements?.({ functional: updatedFunctional, nonFunctional: updatedNonFunctional });
     setEditing(null);
     setFormError("");
-    setCorrectionFeedback({
+    addToast({
       type: "success",
-      message: `${isNew ? "Requisito añadido" : "Requisito actualizado"}. Debes aprobar nuevamente el análisis antes de continuar.`
+      message: `${isNew ? "Requisito añadido" : "Requisito actualizado"} (${chosenId}). Debes aprobar nuevamente el análisis antes de continuar.`
     });
   };
 
@@ -115,7 +134,7 @@ export default function RequirementsView({
     onUpdateRequirements?.({ functional: updatedFunctional, nonFunctional: updatedNonFunctional });
     setPendingDelete(null);
     if (editing?.type === type && editing?.index === index) setEditing(null);
-    setCorrectionFeedback({
+    addToast({
       type: "success",
       message: "Requisito eliminado. Debes aprobar nuevamente el análisis antes de continuar."
     });
@@ -130,17 +149,50 @@ export default function RequirementsView({
     if (!prompt.trim() || isFixing) return;
     const text = prompt;
     setIsFixing(true);
-    setCorrectionFeedback(null);
+    const loadingToastId = addToast({
+      type: "info",
+      title: "Procesando ajuste con IA",
+      message: `Aplicando instrucción sobre los requerimientos: "${text}"...`,
+      duration: 60000
+    });
     try {
       const result = await onApplyAiCorrection?.(text);
+      removeToast(loadingToastId);
       if (result?.success === false) {
-        setCorrectionFeedback({ type: "error", message: result.error || "No se pudo aplicar el ajuste." });
+        addToast({ type: "error", title: "No se pudo aplicar el ajuste", message: result.error || "No se pudo aplicar el ajuste." });
       } else {
-        setCorrectionFeedback({ type: "success", message: `Ajuste aplicado: "${text}"` });
+        addToast({ type: "success", title: "Requerimientos actualizados", message: `Ajuste puntual aplicado respetando los requisitos válidos: "${text}"` });
         setPrompt("");
       }
     } catch (error) {
-      setCorrectionFeedback({ type: "error", message: error.message || "Error al conectar con la IA." });
+      removeToast(loadingToastId);
+      addToast({ type: "error", title: "Error de procesamiento", message: error.message || "Error al conectar con la IA." });
+    } finally {
+      setIsFixing(false);
+    }
+  };
+
+  const handleResolveProblemsWithAi = async () => {
+    if (isFixing || isReviewing || Boolean(editing)) return;
+    setIsFixing(true);
+    const loadingToastId = addToast({
+      type: "info",
+      title: "Resolviendo problemas críticos",
+      message: "La IA está corrigiendo únicamente los requisitos con observaciones pendientes...",
+      duration: 60000
+    });
+    try {
+      const instruction = "Resuelve únicamente los problemas críticos pendientes antes de aprobar, conservando intactos todos los demás requerimientos que ya están correctos.";
+      const result = await onApplyAiCorrection?.(instruction);
+      removeToast(loadingToastId);
+      if (result?.success === false) {
+        addToast({ type: "error", title: "No se pudieron resolver los problemas", message: result.error || "No se pudieron resolver los problemas pendientes." });
+      } else {
+        addToast({ type: "success", title: "Problemas resueltos", message: "Se corrigieron los problemas críticos sin modificar los requisitos que ya estaban listos." });
+      }
+    } catch (error) {
+      removeToast(loadingToastId);
+      addToast({ type: "error", title: "Error de procesamiento", message: error.message || "Error al conectar con la IA." });
     } finally {
       setIsFixing(false);
     }
@@ -161,9 +213,68 @@ export default function RequirementsView({
           </div>
 
           <div className="flex-1 space-y-8 text-[15px] leading-relaxed text-slate-800">
+            {/* SECCIÓN PRIMERO: Requerimientos Funcionales y No Funcionales (Punto 3) */}
+            <RequirementSection
+              title="Requerimientos Funcionales del Sistema"
+              type="rf"
+              items={functional}
+              numberOffset={0}
+              editing={editing}
+              pendingDelete={pendingDelete}
+              formError={formError}
+              onEdit={startEdit}
+              onDeleteRequest={setPendingDelete}
+              onDelete={deleteRequirement}
+              onCancelDelete={() => setPendingDelete(null)}
+              onDraftChange={updateDraft}
+              onSave={saveRequirement}
+              onCancelEdit={cancelEdit}
+              onAdd={() => startAdd("rf")}
+              readOnly={readOnly || isReviewing}
+            />
+            <RequirementSection
+              title="Requerimientos No Funcionales (Criterios de Calidad ISO 25010)"
+              type="rnf"
+              items={nonFunctional}
+              numberOffset={functional.length}
+              editing={editing}
+              pendingDelete={pendingDelete}
+              formError={formError}
+              onEdit={startEdit}
+              onDeleteRequest={setPendingDelete}
+              onDelete={deleteRequirement}
+              onCancelDelete={() => setPendingDelete(null)}
+              onDraftChange={updateDraft}
+              onSave={saveRequirement}
+              onCancelEdit={cancelEdit}
+              onAdd={() => startAdd("rnf")}
+              readOnly={readOnly || isReviewing}
+            />
+            {!functional.length && !nonFunctional.length && !editing && <div className="py-8 text-center text-slate-400">No hay requisitos. Puedes añadirlos manualmente desde cada sección.</div>}
+
+            {/* SECCIONES SECUNDARIAS: Paneles de Auditoría, Diagnósticos y Advertencias */}
             <RequirementReviewPanel audit={audit} onReview={onReview} readOnly={readOnly || isApproved || Boolean(editing) || isFixing} onBusyChange={setIsReviewing} />
             {audit?.metricas_ejecucion && <p className="text-xs text-slate-500">Generación: {(audit.metricas_ejecucion.duracion_ms / 1000).toFixed(1)} s · {audit.metricas_ejecucion.intentos_http} solicitudes al proveedor · {audit.metricas_ejecucion.presupuesto_agotado ? "presupuesto agotado; revisar cobertura" : "dentro del presupuesto"}</p>}
-            {audit?.control_aprobacion?.bloqueado && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"><p className="font-semibold">Hay problemas que deben resolverse antes de aprobar</p><ul className="mt-2 list-disc pl-5">{audit.control_aprobacion.errores_criticos.map((error, index) => <li key={index}>{error.mensaje}</li>)}</ul><p className="mt-2 text-xs">Completa o corrige los requisitos y sus criterios, manualmente o con IA. Al aprobar se volverá a comprobar la versión guardada; este aviso corresponde a la última validación.</p></div>}
+            {audit?.control_aprobacion?.bloqueado && (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">Hay problemas que deben resolverse antes de aprobar</p>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={handleResolveProblemsWithAi}
+                      disabled={isFixing || isReviewing || Boolean(editing)}
+                      className="flex items-center gap-1.5 rounded-full bg-red-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-2xs transition-colors hover:bg-red-800 disabled:opacity-40"
+                    >
+                      <BrainGearsIcon size={13} className="text-white" />
+                      <span>{isFixing ? "Resolviendo problemas..." : "Resolver solo estos problemas con IA"}</span>
+                    </button>
+                  )}
+                </div>
+                <ul className="mt-2 list-disc pl-5">{audit.control_aprobacion.errores_criticos.map((error, index) => <li key={index}>{error.mensaje}</li>)}</ul>
+                <p className="mt-2 text-xs">Completa o corrige únicamente los requisitos señalados arriba, manualmente o con IA (los requisitos que ya están listos no se tocarán). Al aprobar se volverá a comprobar la versión guardada.</p>
+              </div>
+            )}
             {audit?.version >= 2 && (
               <details className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
                 <summary className="cursor-pointer font-semibold">Reglas, decisiones técnicas y preguntas del análisis</summary>
@@ -214,43 +325,6 @@ export default function RequirementsView({
               <p className="mt-2 text-xs">Corrección automática: {audit.revision_semantica.reparacion.estado}. {audit.revision_semantica.reparacion.motivo || ''}</p>
               {!!audit.revision_semantica.rechazados.length && <p className="mt-1 text-xs">{audit.revision_semantica.rechazados.length} observaciones descartadas del control automático por evidencia o referencias inválidas.</p>}
             </section>}
-            <RequirementSection
-              title="Requerimientos Funcionales del Sistema"
-              type="rf"
-              items={functional}
-              numberOffset={0}
-              editing={editing}
-              pendingDelete={pendingDelete}
-              formError={formError}
-              onEdit={startEdit}
-              onDeleteRequest={setPendingDelete}
-              onDelete={deleteRequirement}
-              onCancelDelete={() => setPendingDelete(null)}
-              onDraftChange={updateDraft}
-              onSave={saveRequirement}
-              onCancelEdit={cancelEdit}
-              onAdd={() => startAdd("rf")}
-              readOnly={readOnly || isReviewing}
-            />
-            <RequirementSection
-              title="Requerimientos No Funcionales (Criterios de Calidad ISO 25010)"
-              type="rnf"
-              items={nonFunctional}
-              numberOffset={functional.length}
-              editing={editing}
-              pendingDelete={pendingDelete}
-              formError={formError}
-              onEdit={startEdit}
-              onDeleteRequest={setPendingDelete}
-              onDelete={deleteRequirement}
-              onCancelDelete={() => setPendingDelete(null)}
-              onDraftChange={updateDraft}
-              onSave={saveRequirement}
-              onCancelEdit={cancelEdit}
-              onAdd={() => startAdd("rnf")}
-              readOnly={readOnly || isReviewing}
-            />
-            {!functional.length && !nonFunctional.length && !editing && <div className="py-8 text-center text-slate-400">No hay requisitos. Puedes añadirlos manualmente desde cada sección.</div>}
           </div>
         </div>
       </div>
@@ -265,7 +339,6 @@ export default function RequirementsView({
         </div>
       ) : <div className="z-10 w-full shrink-0 border-t border-slate-200 bg-white px-6 py-3.5 md:px-12">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-2">
-          {correctionFeedback && <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5 text-xs ${correctionFeedback.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}><span className="truncate">{correctionFeedback.message}</span><button type="button" onClick={() => setCorrectionFeedback(null)} className="ml-2 font-bold text-slate-400 hover:text-slate-600">×</button></div>}
           <div className="flex items-center gap-3">
             <form onSubmit={handleSendCorrection} className="flex flex-1 items-center rounded-full border border-slate-300 bg-slate-50 px-3 py-1.5 shadow-2xs transition-all hover:bg-slate-100/60 focus-within:border-[#7C3AED] focus-within:bg-white">
               <BrainGearsIcon size={16} className="mr-2 shrink-0 text-[#7C3AED]" />
@@ -273,10 +346,11 @@ export default function RequirementsView({
               <input type="text" value={prompt} onChange={event => setPrompt(event.target.value)} disabled={isFixing} placeholder="Pide un ajuste a los requerimientos con IA..." className="min-w-0 flex-1 bg-transparent text-xs text-slate-800 outline-none placeholder:text-slate-400" />
               <button type="submit" disabled={!prompt.trim() || isFixing} className="ml-1 shrink-0 p-1 text-[#7C3AED] hover:text-[#6D28D9] disabled:text-slate-300" title="Aplicar ajuste con IA">{isFixing ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-[#7C3AED]" /> : <Send size={14} />}</button>
             </form>
-            <button type="button" onClick={onApprovePhase} disabled={Boolean(editing) || isReviewing || isFixing} className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#6D28D9] disabled:opacity-40"><Check size={14} /><span>{isApproved ? "Reintentar diagramas" : "Aprobar y generar diagramas"}</span></button>
+            <button type="button" onClick={onApprovePhase} disabled={Boolean(editing) || isReviewing || isFixing} className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#6D28D9] disabled:opacity-40"><Check size={14} /><span>{isApproved ? "Ir a Fase 2 · Modelado" : "Aprobar y pasar a Modelado"}</span></button>
           </div>
         </div>
       </div>}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }
@@ -328,11 +402,29 @@ function RequirementSection({
 }
 
 function FunctionalDisplay({ item }) {
-  return <><p><strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}</p><p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {Array.isArray(item.actors) ? item.actors.join(", ") : item.actors} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>{item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}{item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}<RequirementProvenance item={item} /></>;
+  const reqId = item.identificador || item.id;
+  return <>
+    <p>
+      {reqId && <span className="inline-block px-1.5 py-0.5 mr-1.5 rounded bg-violet-100 text-[#7C3AED] font-mono text-[11px] font-bold">{reqId}</span>}
+      <strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}
+    </p>
+    <p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {Array.isArray(item.actors) ? item.actors.join(", ") : item.actors} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>
+    {item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}
+    {item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}
+    <RequirementProvenance item={item} />
+  </>;
 }
 
 function NonFunctionalDisplay({ item }) {
-  return <><p><strong className="font-semibold text-slate-900">{item.category}</strong>: {item.description}</p><p className="text-xs text-slate-600"><strong className="text-[#6D28D9]">Métrica verificable:</strong> {item.metric}{item.compliance && <> <span>•</span> <span className="text-slate-500">{item.compliance}</span></>}</p><RequirementProvenance item={item} /></>;
+  const reqId = item.identificador || item.id;
+  return <>
+    <p>
+      {reqId && <span className="inline-block px-1.5 py-0.5 mr-1.5 rounded bg-violet-100 text-[#7C3AED] font-mono text-[11px] font-bold">{reqId}</span>}
+      <strong className="font-semibold text-slate-900">{item.category}</strong>: {item.description}
+    </p>
+    <p className="text-xs text-slate-600"><strong className="text-[#6D28D9]">Métrica verificable:</strong> {item.metric}{item.compliance && <> <span>•</span> <span className="text-slate-500">{item.compliance}</span></>}</p>
+    <RequirementProvenance item={item} />
+  </>;
 }
 
 function RequirementProvenance({ item }) {
@@ -354,7 +446,19 @@ function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isN
     <div className="rounded-xl border border-[#CFC0F1] bg-[#FCFBFE] p-4 shadow-sm" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); onSave(); } if (event.key === "Escape") onCancel(); }}>
       <div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-[#6D28D9]">{isNew ? "Nuevo" : "Editar"} {type === "rf" ? "requisito funcional" : "requisito no funcional"}</p><button type="button" onClick={onCancel} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X size={14} /></button></div>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="space-y-1 md:col-span-2"><span className="text-[11px] font-semibold text-slate-600">{type === "rf" ? "Nombre" : "Categoría"} *</span><input autoFocus value={type === "rf" ? draft.name : draft.category} onChange={event => onChange(type === "rf" ? "name" : "category", event.target.value)} className={inputClass} /></label>
+        <label className="space-y-1 md:col-span-1">
+          <span className="text-[11px] font-semibold text-slate-600">Identificador / Código *</span>
+          <input
+            value={draft.id || draft.identificador || ""}
+            onChange={event => onChange("id", event.target.value.toUpperCase().trim())}
+            placeholder={type === "rf" ? "Ej. RF-01" : "Ej. RNF-01"}
+            className={inputClass}
+          />
+        </label>
+        <label className="space-y-1 md:col-span-1">
+          <span className="text-[11px] font-semibold text-slate-600">{type === "rf" ? "Nombre" : "Categoría"} *</span>
+          <input autoFocus value={type === "rf" ? draft.name : draft.category} onChange={event => onChange(type === "rf" ? "name" : "category", event.target.value)} className={inputClass} />
+        </label>
         <label className="space-y-1 md:col-span-2"><span className="text-[11px] font-semibold text-slate-600">Descripción normativa *</span><textarea value={draft.description || ""} onChange={event => onChange("description", event.target.value)} rows={3} className={`${inputClass} resize-y`} /></label>
         {type === "rf" ? <>
           <label className="space-y-1"><span className="text-[11px] font-semibold text-slate-600">Actores, separados por coma</span><input value={Array.isArray(draft.actors) ? draft.actors.join(", ") : draft.actors || ""} onChange={event => onChange("actors", event.target.value.split(","))} className={inputClass} /></label>

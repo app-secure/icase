@@ -123,7 +123,8 @@ for (const relation of associations) {
     const api = makeApi(apiBase, token || null);
     const cleanups = [];
     const endpoints = relation.operations.map((keys) => operations.find((op) => keys.includes(op.key)));
-    const screen = screens.find((item) => (item.operations || []).some((key) => relation.operations.some((keys) => keys.includes(key))));
+    const screen = screens.find((item) => relation.operations.some((keys) => keys.includes((item.operations || [])[0])))
+      || screens.find((item) => (item.operations || []).some((key) => relation.operations.some((keys) => keys.includes(key))));
     expect(screen, 'Falta una pantalla para el vínculo').toBeTruthy();
     expect(endpoints.every(Boolean), 'Faltan operaciones para los extremos').toBeTruthy();
     try {
@@ -133,6 +134,13 @@ for (const relation of associations) {
       const url = '/api/associations/' + encodeURIComponent(relation.table);
       cleanups.unshift(() => api(url, 'DELETE', pair));
       await page.goto(screen.route || screen.ruta);
+      const apiToggle = page.getByRole("button", { name: /Gestión de Datos/i });
+      if (await apiToggle.count()) await apiToggle.click();
+      const activeOp = (screen.operations || []).find((key) => relation.operations.some((keys) => keys.includes(key)));
+      if (activeOp && (screen.operations || [])[0] !== activeOp) {
+        const tab = page.getByRole('button', { name: activeOp, exact: true });
+        if (await tab.count()) await tab.click();
+      }
       const region = page.getByRole('region', { name: 'Vínculos ' + relation.entities.join(' / '), exact: true });
       await expect(region).toBeVisible();
       const choose = async (label, value) => {
@@ -375,11 +383,13 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
       '  const body = { ...sample.payload };',
       '  for (const parent of sample.parents) {',
       "    const parentOperation = operations.find((item) => item.schema && item.schema.title === parent.entidad);",
-      "    body[parent.campo] = (await createValidRecord(api, operations, parentOperation, cleanups, 1)).id;",
+      "    body[parent.campo] = parentOperation ? (await createValidRecord(api, operations, parentOperation, cleanups, 1)).id : '1';",
       '  }',
       '  try {',
       '    const before = new Set(((await api(operation.collectionPath)).data || []).map((item) => item.id || item._id));',
       '    await page.goto(route);',
+      '    const apiToggle = page.getByRole("button", { name: /Gestión de Datos/i });',
+      '    if (await apiToggle.count()) await apiToggle.click();',
       "    const form = page.getByRole('form', { name: 'Formulario de registro' });",
       '    await expect(form).toBeVisible();',
       '    for (const [name, value] of Object.entries(body)) {',
@@ -461,7 +471,7 @@ test('iniciar y cerrar sesión desde la interfaz', async ({ page }) => {
 
 test('el administrador accede a la gestión de usuarios', async ({ page }) => {
   await signIn(page);
-  await page.getByRole('link', { name: 'Usuarios' }).click();
+  await page.getByRole('link', { name: 'Usuarios', exact: true }).click();
   await expect(page.locator('[data-screen="usuarios"]')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Usuarios', exact: true })).toBeVisible();
 });

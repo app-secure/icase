@@ -55,27 +55,45 @@ class RequerimientoController {
       }
       if (Array.isArray(requerimientos)) {
         const existentes = await this.requerimientoRepository.listarPorProyecto(proyectoId);
-        const normalizados = requerimientos.map((r, idx) => ({
-          identificador: r.identificador || r.id || `${(r.tipo || 'RF').toUpperCase()}-${String(idx + 1).padStart(2, '0')}`,
-          tipo: (r.tipo || (r.category ? 'RNF' : 'RF')).toUpperCase(),
-          nombre: r.nombre || r.name || r.category || 'Requerimiento',
-          descripcion: r.descripcion || r.description || '',
-          prioridad: r.prioridad || r.priority || 'Alta',
-          actores: Array.isArray(r.actores) ? r.actores : (r.actors ? (Array.isArray(r.actors) ? r.actors : [r.actors]) : ['Usuario']),
-          precondiciones: r.precondiciones || r.precondition || '',
-          poscondiciones: r.poscondiciones || r.postcondition || '',
-          metrica_medible: r.metrica_medible || r.metric || '',
-          origen: r.origen || r.origin || 'manual',
-          evidencia: r.evidencia || r.evidence || '',
-          evidencias: r.evidencias || r.evidences || [],
-          fuentes_origen: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : (Array.isArray(r.sourceNames) ? r.sourceNames : []),
-          necesidades_origen: Array.isArray(r.necesidades_origen) ? r.necesidades_origen : (r.needIds || []),
-          criterios_aceptacion: Array.isArray(r.criterios_aceptacion) ? r.criterios_aceptacion : (r.acceptanceCriteria || []),
-          reglas_relacionadas: Array.isArray(r.reglas_relacionadas) ? r.reglas_relacionadas : (r.ruleIds || []),
-          estado_decision: r.estado_decision || r.decisionStatus || 'confirmado',
-          restricciones_excluidas: r.restricciones_excluidas || r.excludedConstraints || [],
-          requiere_confirmacion: Boolean(r.requiere_confirmacion ?? r.requiresConfirmation)
-        }));
+        const seenIds = new Set();
+        let rfCount = 1;
+        let rnfCount = 1;
+
+        const normalizados = requerimientos.map((r) => {
+          const tipo = (r.tipo || (r.category ? 'RNF' : 'RF')).toUpperCase();
+          let identificador = String(r.identificador || r.id || '').trim();
+          if (!identificador || seenIds.has(identificador)) {
+            const count = tipo === 'RF' ? rfCount++ : rnfCount++;
+            identificador = `${tipo}-${String(count).padStart(2, '0')}`;
+            while (seenIds.has(identificador)) {
+              const next = tipo === 'RF' ? rfCount++ : rnfCount++;
+              identificador = `${tipo}-${String(next).padStart(2, '0')}`;
+            }
+          }
+          seenIds.add(identificador);
+
+          return {
+            identificador,
+            tipo,
+            nombre: r.nombre || r.name || r.category || 'Requerimiento',
+            descripcion: r.descripcion || r.description || '',
+            prioridad: r.prioridad || r.priority || 'Alta',
+            actores: Array.isArray(r.actores) ? r.actores : (r.actors ? (Array.isArray(r.actors) ? r.actors : [r.actors]) : ['Usuario']),
+            precondiciones: r.precondiciones || r.precondition || '',
+            poscondiciones: r.poscondiciones || r.postcondition || '',
+            metrica_medible: r.metrica_medible || r.metric || '',
+            origen: r.origen || r.origin || 'manual',
+            evidencia: r.evidencia || r.evidence || '',
+            evidencias: r.evidencias || r.evidences || [],
+            fuentes_origen: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : (Array.isArray(r.sourceNames) ? r.sourceNames : []),
+            necesidades_origen: Array.isArray(r.necesidades_origen) ? r.necesidades_origen : (r.needIds || []),
+            criterios_aceptacion: Array.isArray(r.criterios_aceptacion) ? r.criterios_aceptacion : (r.acceptanceCriteria || []),
+            reglas_relacionadas: Array.isArray(r.reglas_relacionadas) ? r.reglas_relacionadas : (r.ruleIds || []),
+            estado_decision: r.estado_decision || r.decisionStatus || 'confirmado',
+            restricciones_excluidas: r.restricciones_excluidas || r.excludedConstraints || [],
+            requiere_confirmacion: Boolean(r.requiere_confirmacion ?? r.requiresConfirmation)
+          };
+        });
         if (!this.requirementChangeService.changed(existentes, normalizados)) {
           // Una corrección de cita no invalida los diagramas, pero sí debe guardarse.
           const guardados = await Promise.all(existentes.map(async existente => {

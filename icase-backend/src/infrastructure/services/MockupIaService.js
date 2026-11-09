@@ -42,12 +42,42 @@ class MockupIaService {
     advertencias.push(`Prompt estimado: ${tokensEstimados} tokens de entrada`);
 
     for (const proveedor of this._ordenProveedores()) {
-      const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados);
+      let promptProveedor = promptCompleto;
+      let tokensProveedor = tokensEstimados;
+      if (proveedor === 'groq') {
+        const presupuestoGroq = Number(process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000);
+        if (tokensProveedor > presupuestoGroq) {
+          promptProveedor = this._construirPromptCompactoGroq(contextoProyecto, pantallas, insumoAdicional, presupuestoGroq);
+          tokensProveedor = this._estimarTokens(promptProveedor);
+        }
+      }
+      const intento = await this._intentarProveedor(proveedor, promptProveedor, tokensProveedor);
       advertencias.push(...intento.advertencias);
       if (intento.texto) {
         resultado = intento.texto;
         proveedorUsado = `${proveedor}:${intento.modelo}`;
         break;
+      }
+    }
+
+    if (!resultado) {
+      let reabiertos = false;
+      for (const [clave, estado] of this.circuitos.entries()) {
+        if (!estado.permanente && estado.tipo !== 'cuota') {
+          this.circuitos.delete(clave);
+          reabiertos = true;
+        }
+      }
+      if (reabiertos) {
+        for (const proveedor of this._ordenProveedores()) {
+          const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados);
+          advertencias.push(...intento.advertencias);
+          if (intento.texto) {
+            resultado = intento.texto;
+            proveedorUsado = `${proveedor}:${intento.modelo}`;
+            break;
+          }
+        }
       }
     }
 
@@ -114,6 +144,7 @@ class MockupIaService {
     this.circuitos.set(clave, {
       fallos,
       permanente,
+      tipo: clasificacion.tipo,
       abiertoHasta: debeAbrir
         ? Date.now() + (clasificacion.reintentarEnMs || this.cooldownMs)
         : 0
@@ -128,7 +159,10 @@ class MockupIaService {
     if (status === 404 || /no longer available|does not exist|not found|unavailable for free/.test(mensaje)) {
       return { tipo: 'modelo_no_disponible', reintentable: false };
     }
-    if (status === 429 || /quota|rate limit|high demand|resource exhausted/.test(mensaje)) {
+    if (status === 503 || /high demand|spikes in demand|temporarily unavailable|overloaded/.test(mensaje)) {
+      return { tipo: 'alta_demanda', reintentable: true, reintentarEnMs: 3000 };
+    }
+    if (status === 429 || /quota|rate limit|resource exhausted/.test(mensaje)) {
       const minutos = mensaje.match(/retry in (\d+)m/);
       return { tipo: 'cuota', reintentable: true, reintentarEnMs: minutos ? Number(minutos[1]) * 60000 : this.cooldownMs };
     }
@@ -236,6 +270,19 @@ class MockupIaService {
     prompt += '\n\nRECUERDA: Devuelve SOLO el JSON estricto con la clave "mockups". Sin texto extra, sin markdown, sin explicaciones.';
 
     return prompt;
+  }
+
+  _construirPromptCompactoGroq(contextoProyecto, pantallas, insumoAdicional, presupuestoTokens = 3000) {
+    const maxChars = Math.max(2400, (presupuestoTokens - 150) * 4);
+    const cabecera = [
+      'Diseña mockups HTML5 + Tailwind CSS completos y autocontenidos.',
+      'Devuelve SOLO JSON estricto: {"mockups":[{"nombre_pantalla":"slug","tipo":"...","descripcion":"...","rf_trazabilidad":["RF-01"],"preview_code":"<!DOCTYPE html><html lang=\\"es\\">...</html>"}]}',
+      pantallas.length ? `PANTALLAS A GENERAR (exactamente este nombre_pantalla): ${pantallas.join(', ')}` : ''
+    ].filter(Boolean).join('\n');
+    const instruccion = insumoAdicional ? `\nINSTRUCCIÓN DEL USUARIO:\n${String(insumoAdicional).slice(0, Math.floor(maxChars * 0.55))}` : '';
+    const espacioContexto = Math.max(600, maxChars - cabecera.length - instruccion.length - 120);
+    const contextoRecortado = String(contextoProyecto || '').slice(0, espacioContexto);
+    return `${cabecera}\nCONTEXTO:\n${contextoRecortado}${instruccion}\nResponde SOLO JSON válido.`;
   }
 
   _parsearTolerante(rawText) {

@@ -22,7 +22,9 @@ class GenericBackendGenerator {
       if(result.errores.length)throw new Error('Procesos de negocio: '+result.errores.join(' '));
     }
     const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules });
+    this._ensureAssociationOperations(contract, rules);
     const policy = new AccessControlService().politica(access, contract.operations);
+    this._syncSupportPermissions(contract, policy);
     contract.auth = policy;
     const resolved = StackCatalog.resolve(stack);
     const ownership = require('../templates/auth/ownership');
@@ -408,6 +410,64 @@ app.use((error,_req,res,_next)=>{const status=Number.isInteger(error.status)&&er
   }
 
   _class(value) { return value.split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(''); }
+
+  _ensureAssociationOperations(contract, rules = []) {
+    const nmRelations = (contract.relations || []).filter((r) => r.cardinalidad === 'muchos_a_muchos');
+    if (!nmRelations.length) return;
+    const neededNames = new Set(nmRelations.flatMap((r) => [r.from, r.to]));
+    for (const entityName of neededNames) {
+      const entity = (contract.entities || []).find((e) => e.name === entityName);
+      if (!entity) continue;
+      if (contract.operations.some((op) => op.entity === entity.key)) continue;
+      const baseKey = `op-${slug(entity.name)}`;
+      let key = baseKey;
+      let suffix = 2;
+      while (contract.operations.some((op) => op.key === key)) key = `${baseKey}-${suffix++}`;
+      contract.operations.push({
+        id: `OP-${slug(entity.name).toUpperCase()}`,
+        key,
+        name: `Gestión de ${entity.name}`,
+        description: `Operación de soporte para la entidad ${entity.name}`,
+        actors: [],
+        collectionPath: `/api/operations/${key}`,
+        itemPath: `/api/operations/${key}/:id`,
+        methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+        entity: entity.key,
+        relatedEntities: [],
+        rules: (rules || []).filter((rule) => rule.entidad === entity.name),
+        schema: entity.schema,
+        support: true
+      });
+      if (contract.model && Array.isArray(contract.model.unmapped)) {
+        contract.model.unmapped = contract.model.unmapped.filter((name) => name !== entity.name);
+      }
+    }
+  }
+
+  _syncSupportPermissions(contract, policy) {
+    if (!policy || !policy.habilitada || !policy.operaciones) return;
+    const nmRelations = (contract.relations || []).filter((r) => r.cardinalidad === 'muchos_a_muchos');
+    for (const op of contract.operations.filter((item) => item.support)) {
+      const entity = (contract.entities || []).find((e) => e.key === op.entity);
+      if (!entity) continue;
+      const peerNames = nmRelations
+        .filter((r) => r.from === entity.name || r.to === entity.name)
+        .map((r) => (r.from === entity.name ? r.to : r.from));
+      const peerOps = contract.operations.filter((item) => !item.support && peerNames.some((peer) => (contract.entities || []).find((e) => e.name === peer)?.key === item.entity));
+      const merged = {};
+      for (const peerOp of peerOps) {
+        for (const [role, entry] of Object.entries(policy.operaciones[peerOp.key] || {})) {
+          merged[role] = entry;
+        }
+      }
+      if (!Object.keys(merged).length) {
+        for (const role of Object.keys(policy.roles || {})) {
+          merged[role] = { metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'todos' };
+        }
+      }
+      policy.operaciones[op.key] = merged;
+    }
+  }
 }
 
 module.exports = GenericBackendGenerator;

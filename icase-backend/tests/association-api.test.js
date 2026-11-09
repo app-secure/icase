@@ -112,4 +112,39 @@ describe('API de asociaciones SQL', () => {
       expect((await response.json()).associated).toBe(true);
     } finally { for (const cleanup of cleanups.reverse()) await cleanup(); }
   });
+  test('resuelve entidades intermedias no mapeadas en N:M y asegura operaciones en ambos extremos', () => {
+    const restaurantDomain = `
+class Comanda
+class DetalleComanda
+class Plato
+Comanda "1" *-- "1..*" DetalleComanda : detalla
+Plato "0..*" -- "0..*" DetalleComanda : incluye
+`;
+    const rfs = [
+      { identificador: 'RF-09', nombre: 'Visualización de Comandas en KDS', tipo: 'RF', aprobado: true },
+      { identificador: 'RF-10', nombre: 'Marcado de Plato Agotado desde Cocina', tipo: 'RF', aprobado: true }
+    ];
+    const files = new Generator().generate({
+      proyecto: { nombre: 'Restaurante' },
+      requirements: rfs,
+      domainModel: new Extractor().extract(restaurantDomain),
+      stack: { backend: 'Express', base_datos: 'PostgreSQL' }
+    });
+    const manifest = JSON.parse(files.find((f) => f.ruta === 'backend/icase.manifest.json').contenido);
+    expect(manifest.associations).toHaveLength(1);
+    expect(manifest.associations[0].entities).toEqual(['Comanda', 'Plato']);
+    expect(manifest.associations[0].operations).toEqual([['rf-09'], ['rf-10']]);
+  });
+  test('aprovisiona operación de soporte si un extremo N:M aislado no tiene RF directo', () => {
+    const files = new Generator().generate({
+      proyecto: { nombre: 'Escuela' },
+      requirements: [{ identificador: 'RF-01', nombre: 'Gestionar alumnos', tipo: 'RF', aprobado: true }],
+      domainModel: new Extractor().extract(domain),
+      stack: { backend: 'Express', base_datos: 'PostgreSQL' }
+    });
+    const manifest = JSON.parse(files.find((f) => f.ruta === 'backend/icase.manifest.json').contenido);
+    expect(manifest.associations).toHaveLength(1);
+    expect(manifest.associations[0].operations[0].length).toBeGreaterThan(0);
+    expect(manifest.associations[0].operations[1].length).toBeGreaterThan(0);
+  });
 });

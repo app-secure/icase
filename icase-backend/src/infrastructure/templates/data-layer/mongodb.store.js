@@ -76,8 +76,19 @@ class RecordStore {
       if (query.search && typeof query.search === 'string' && query.search.trim()) {
         const regex = new RegExp(query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
         const orClauses = publicColumns(table)
-          .filter((col) => ['string', 'date', 'datetime', 'uuid'].includes(col.type))
+          .filter((col) => ['string', 'uuid'].includes(col.type))
           .map((col) => ({ [col.column]: regex }));
+        for (const col of publicColumns(table).filter((col) => ['date', 'datetime'].includes(col.type))) {
+          orClauses.push({
+            $expr: {
+              $regexMatch: {
+                input: { $dateToString: { date: `$${col.column}`, onError: '', onNull: '' } },
+                regex: query.search.trim(),
+                options: 'i'
+              }
+            }
+          });
+        }
         orClauses.push({ extra: regex });
         if (filter.$or) filter.$and = [{ $or: filter.$or }, { $or: orClauses }];
         else filter.$or = orClauses;

@@ -1,9 +1,12 @@
 import React, { useState } from "react";
+import { ArrowLeft, Files, FileText, Pencil } from "lucide-react";
+import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
 import RequirementsView from "./RequirementsView";
 import DiagramsView from "./DiagramsView";
 import DocumentViewer from "./DocumentViewer";
 import CodePlanningView from "./CodePlanningView";
+import { ToastContainer, useToasts } from "./Toast";
 import {
   createProjectApi,
   updateProjectApi,
@@ -186,52 +189,78 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
   let diags = null;
 
   if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
+    const seenIds = new Set();
+    let rfCount = 1;
+    let rnfCount = 1;
+
     const funcReqs = (aiResult.requerimientos || [])
       .filter(r => (r.tipo || "").toUpperCase() === "RF")
-      .map((r, i) => ({
-        id: r.identificador || `RF-${String(i + 1).padStart(2, "0")}`,
-        name: r.nombre || "Requerimiento Funcional",
-        description: r.descripcion || "",
-        dependencies: r.dependencias || "Ninguna",
-        actors: Array.isArray(r.actores) ? r.actores : [],
-        priority: r.prioridad || "Alta",
-        precondition: r.precondiciones || "",
-        postcondition: r.poscondiciones || "",
-        origin: r.origen || "inferido",
-        evidence: r.evidencia || "",
-        evidences: r.evidencias || [],
-        decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
-        excludedConstraints: r.restricciones_excluidas || [],
-        sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
-        needIds: r.necesidades_origen || [],
-        acceptanceCriteria: r.criterios_aceptacion || [],
-        ruleIds: r.reglas_relacionadas || [],
-        requiresConfirmation: Boolean(r.requiere_confirmacion),
-        approved: Boolean(r.aprobado)
-      }));
+      .map((r) => {
+        let id = String(r.identificador || r.id || "").trim();
+        if (!id || seenIds.has(id)) {
+          id = `RF-${String(rfCount++).padStart(2, "0")}`;
+          while (seenIds.has(id)) {
+            id = `RF-${String(rfCount++).padStart(2, "0")}`;
+          }
+        }
+        seenIds.add(id);
+
+        return {
+          id,
+          name: r.nombre || "Requerimiento Funcional",
+          description: r.descripcion || "",
+          dependencies: r.dependencias || "Ninguna",
+          actors: Array.isArray(r.actores) ? r.actores : [],
+          priority: r.prioridad || "Alta",
+          precondition: r.precondiciones || "",
+          postcondition: r.poscondiciones || "",
+          origin: r.origen || "inferido",
+          evidence: r.evidencia || "",
+          evidences: r.evidencias || [],
+          decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
+          excludedConstraints: r.restricciones_excluidas || [],
+          sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+          needIds: r.necesidades_origen || [],
+          acceptanceCriteria: r.criterios_aceptacion || [],
+          ruleIds: r.reglas_relacionadas || [],
+          requiresConfirmation: Boolean(r.requiere_confirmacion),
+          approved: Boolean(r.aprobado)
+        };
+      });
 
     const nonFuncReqs = (aiResult.requerimientos || [])
       .filter(r => (r.tipo || "").toUpperCase() === "RNF")
-      .map((r, i) => ({
-        id: r.identificador || `RNF-${String(i + 1).padStart(2, "0")}`,
-        category: r.nombre || "Requisito No Funcional",
-        description: r.descripcion || "",
-        dependencies: r.dependencias || "Ninguna",
-        priority: r.prioridad || "Alta",
-        metric: r.metrica_medible || "Por confirmar con el usuario",
-        compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
-        origin: r.origen || "inferido",
-        evidence: r.evidencia || "",
-        evidences: r.evidencias || [],
-        decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
-        excludedConstraints: r.restricciones_excluidas || [],
-        sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
-        needIds: r.necesidades_origen || [],
-        acceptanceCriteria: r.criterios_aceptacion || [],
-        ruleIds: r.reglas_relacionadas || [],
-        requiresConfirmation: Boolean(r.requiere_confirmacion),
-        approved: Boolean(r.aprobado)
-      }));
+      .map((r) => {
+        let id = String(r.identificador || r.id || "").trim();
+        if (!id || seenIds.has(id)) {
+          id = `RNF-${String(rnfCount++).padStart(2, "0")}`;
+          while (seenIds.has(id)) {
+            id = `RNF-${String(rnfCount++).padStart(2, "0")}`;
+          }
+        }
+        seenIds.add(id);
+
+        return {
+          id,
+          category: r.nombre || "Requisito No Funcional",
+          description: r.descripcion || "",
+          dependencies: r.dependencias || "Ninguna",
+          priority: r.prioridad || "Alta",
+          metric: r.metrica_medible || "Por confirmar con el usuario",
+          compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
+          origin: r.origen || "inferido",
+          evidence: r.evidencia || "",
+          evidences: r.evidencias || [],
+          decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
+          excludedConstraints: r.restricciones_excluidas || [],
+          sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+          needIds: r.necesidades_origen || [],
+          acceptanceCriteria: r.criterios_aceptacion || [],
+          ruleIds: r.reglas_relacionadas || [],
+          requiresConfirmation: Boolean(r.requiere_confirmacion),
+          approved: Boolean(r.aprobado)
+        };
+      });
 
     reqs = {
       functional: funcReqs,
@@ -329,6 +358,10 @@ export default function ProjectWorkspace({
   const project = rawProject || defaultEmptyProject;
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processProgress, setProcessProgress] = useState(0);
+  const [processStage, setProcessStage] = useState("");
+  const { toasts, addToast, removeToast } = useToasts();
+  const [alertModal, setAlertModal] = useState(null);
   const [isGeneratingDiagrams, setIsGeneratingDiagrams] = useState(false);
   const [diagramJob, setDiagramJob] = useState(null);
   const handledDiagramJobs = React.useRef(new Set());
@@ -336,7 +369,31 @@ export default function ProjectWorkspace({
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
   const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(false);
+  const [isManagingSources, setIsManagingSources] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState("");
   const [isReviewingRequirements, setIsReviewingRequirements] = useState(false);
+
+  const cleanProjectTitle = (name) => {
+    if (!name || name === "Proyecto sin nombre") return "Nuevo Proyecto";
+    const cleaned = name
+      .replace(/^(Sistema de|Sistema para|Sistema|Software de|Software para|Aplicación de|Plataforma de)\s+/i, "")
+      .trim();
+    return cleaned ? (cleaned.charAt(0).toUpperCase() + cleaned.slice(1)) : name;
+  };
+
+  const handleStartEditName = () => {
+    setEditedName(cleanProjectTitle(project.name));
+    setIsEditingName(true);
+  };
+
+  const handleSaveEditName = () => {
+    const trimmed = editedName.trim();
+    if (trimmed && trimmed !== project.name) {
+      handleUpdateProjectName(trimmed);
+    }
+    setIsEditingName(false);
+  };
 
   const applyDiagramJobResponse = React.useCallback((response) => {
     const job = response?.trabajo;
@@ -563,6 +620,14 @@ export default function ProjectWorkspace({
   const handleProcess = async (targetProvider) => {
     const providerToUse = targetProvider || selectedAiProvider || 'auto';
     setIsProcessing(true);
+    setProcessProgress(8);
+    setProcessStage("");
+
+    let progressVal = 8;
+    const progressTimer = setInterval(() => {
+      progressVal = Math.min(95, progressVal + (progressVal < 30 ? 4 : progressVal < 60 ? 3 : progressVal < 85 ? 2 : 1));
+      setProcessProgress(progressVal);
+    }, 600);
 
     try {
       let updatedName = project.name;
@@ -632,7 +697,10 @@ export default function ProjectWorkspace({
           aiResult = await processWithAiApi(backendId, insumoBruto, '', providerToUse, null, 'requisitos');
         } catch (errAi) {
           console.error("[Workspace] Error en procesamiento con IA:", errAi.message);
-          alert(`⚠️ ${errAi.message}`);
+          setAlertModal({
+            title: "Error al procesar con IA",
+            message: errAi.message
+          });
           setIsProcessing(false);
           return;
         }
@@ -675,6 +743,11 @@ export default function ProjectWorkspace({
         return true;
       });
 
+      clearInterval(progressTimer);
+      setProcessProgress(100);
+      setProcessStage("¡Especificación completada con éxito!");
+      await new Promise((r) => setTimeout(r, 450));
+
       onUpdateProject({
         ...project,
         id: backendId,
@@ -691,20 +764,55 @@ export default function ProjectWorkspace({
         diagrams: {},
         mockups: []
       });
+      setIsManagingSources(false);
+
+      addToast({
+        type: "success",
+        title: "Especificación Generada",
+        message: "Los requerimientos funcionales y no funcionales se estructuraron correctamente."
+      });
     } catch (err) {
+      clearInterval(progressTimer);
       console.error("[Workspace] Error procesando con IA:", err);
-      alert(`No se pudo generar una especificación trazable.\n\n${err.message}`);
+      addToast({
+        type: "error",
+        title: "Error de Generación",
+        message: err.message || "No se pudo generar una especificación trazable."
+      });
     } finally {
+      clearInterval(progressTimer);
       setIsProcessing(false);
+      setProcessProgress(0);
+      setProcessStage("");
     }
   };
 
   const handleRequirementReview = async (payload) => {
     const backendId = project.backendId || (project.id?.length === 24 ? project.id : null);
     if (!backendId) throw new Error('El proyecto todavía no está guardado.');
+    const seenIds = new Set();
+    let rfCount = 1;
+    let rnfCount = 1;
+
     const list = [
-      ...(project.requirements?.functional || []).map(item => ({ ...item, tipo: 'RF', identificador: item.identificador || item.id })),
-      ...(project.requirements?.nonFunctional || []).map(item => ({ ...item, tipo: 'RNF', identificador: item.identificador || item.id }))
+      ...(project.requirements?.functional || []).map(item => {
+        let id = String(item.identificador || item.id || '').trim();
+        if (!id || seenIds.has(id)) {
+          id = `RF-${String(rfCount++).padStart(2, '0')}`;
+          while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+        }
+        seenIds.add(id);
+        return { ...item, tipo: 'RF', identificador: id, id };
+      }),
+      ...(project.requirements?.nonFunctional || []).map(item => {
+        let id = String(item.identificador || item.id || '').trim();
+        if (!id || seenIds.has(id)) {
+          id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+          while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+        }
+        seenIds.add(id);
+        return { ...item, tipo: 'RNF', identificador: id, id };
+      })
     ];
     if (!project.isAnalysisApproved) await syncProjectRequirementsApi(backendId, list);
     const result = payload.scope === 'necesidad'
@@ -717,44 +825,73 @@ export default function ProjectWorkspace({
   const handleApproveAnalysis = async () => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
     if (!backendId) {
-      alert("No se encontró el proyecto persistido. Guarda o reprocesa las fuentes antes de aprobar los requisitos.");
+      setAlertModal({
+        title: "Proyecto no persistido",
+        message: "No se encontró el proyecto persistido. Guarda o reprocesa las fuentes antes de aprobar los requisitos."
+      });
       return { success: false, error: "Proyecto no persistido" };
     }
-    setIsGeneratingDiagrams(true);
     let approvalCompleted = Boolean(project.isAnalysisApproved);
     try {
+      const seenIds = new Set();
+      let rfCount = 1;
+      let rnfCount = 1;
       const latestRequirements = [
-        ...(project.requirements?.functional || []).map((requirement, index) => ({
-          ...requirement,
-          tipo: 'RF',
-          identificador: requirement.identificador || requirement.id || `RF-${String(index + 1).padStart(2, '0')}`
-        })),
-        ...(project.requirements?.nonFunctional || []).map((requirement, index) => ({
-          ...requirement,
-          tipo: 'RNF',
-          identificador: requirement.identificador || requirement.id || `RNF-${String(index + 1).padStart(2, '0')}`
-        }))
+        ...(project.requirements?.functional || []).map((requirement) => {
+          let id = String(requirement.identificador || requirement.id || '').trim();
+          if (!id || seenIds.has(id)) {
+            id = `RF-${String(rfCount++).padStart(2, '0')}`;
+            while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+          }
+          seenIds.add(id);
+          return {
+            ...requirement,
+            tipo: 'RF',
+            identificador: id,
+            id
+          };
+        }),
+        ...(project.requirements?.nonFunctional || []).map((requirement) => {
+          let id = String(requirement.identificador || requirement.id || '').trim();
+          if (!id || seenIds.has(id)) {
+            id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+            while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+          }
+          seenIds.add(id);
+          return {
+            ...requirement,
+            tipo: 'RNF',
+            identificador: id,
+            id
+          };
+        })
       ];
       const syncResult = await syncProjectRequirementsApi(backendId, latestRequirements);
-      if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de generar los diagramas.");
-      await approvePhaseApi(backendId, "analisis");
+      if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de aprobar.");
+      const approveResult = await approvePhaseApi(backendId, "analisis");
       approvalCompleted = true;
-      const jobResponse = await startDiagramJobApi(backendId, DIAGRAM_TYPES.USE_CASES, '', '', selectedAiProvider || 'auto');
-      applyDiagramJobResponse(jobResponse);
+      const workflow = approveResult?.flujoDiagramas || await fetchDiagramWorkflowApi(backendId).catch(() => null);
       onUpdateProject({
         ...project,
         isAnalysisApproved: true,
         currentPhase: 2,
+        diagramFlow: workflow || project.diagramFlow,
         diagrams: project.diagrams || {}
       });
-      return { success: true, pending: true, job: jobResponse.trabajo };
+      return { success: true };
     } catch (e) {
-      setIsGeneratingDiagrams(false);
-      console.warn("[Workspace] Error generando diagramas después de aprobar requisitos:", e);
-      onUpdateProject({ ...project, isAnalysisApproved: approvalCompleted, currentPhase: 1, diagrams: project.diagrams || {},
+      console.warn("[Workspace] Error al aprobar requisitos:", e);
+      onUpdateProject({
+        ...project,
+        isAnalysisApproved: approvalCompleted,
+        currentPhase: approvalCompleted ? 2 : 1,
+        diagrams: project.diagrams || {},
         requirementAudit: e.controlRequisitos ? { ...project.requirementAudit, control_aprobacion: e.controlRequisitos } : project.requirementAudit
       });
-      alert(`${approvalCompleted ? "Los requisitos fueron aprobados, pero no se pudieron generar los diagramas." : "No se pudieron aprobar los requisitos."} Puedes reintentar desde esta pantalla.\n\n${e.message}`);
+      setAlertModal({
+        title: approvalCompleted ? "Requisitos aprobados con observaciones" : "No se pudieron aprobar los requisitos",
+        message: `${approvalCompleted ? "Los requisitos fueron aprobados." : "No se pudieron aprobar los requisitos. Puedes reintentar desde esta pantalla."}\n\n${e.message}`
+      });
       return { success: false, error: e.message };
     }
   };
@@ -1015,6 +1152,34 @@ export default function ProjectWorkspace({
           return { success: true, pending: true, job: response.trabajo };
         }
         const objetivo = phase === "diagrams" ? "diagramas" : "requisitos";
+        if (objetivo === "requisitos" && !project.isAnalysisApproved) {
+          const seenIds = new Set();
+          let rfCount = 1;
+          let rnfCount = 1;
+          const currentRequirements = [
+            ...(project.requirements?.functional || []).map((item) => {
+              let id = String(item.identificador || item.id || '').trim();
+              if (!id || seenIds.has(id)) {
+                id = `RF-${String(rfCount++).padStart(2, '0')}`;
+                while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+              }
+              seenIds.add(id);
+              return { ...item, tipo: 'RF', identificador: id, id };
+            }),
+            ...(project.requirements?.nonFunctional || []).map((item) => {
+              let id = String(item.identificador || item.id || '').trim();
+              if (!id || seenIds.has(id)) {
+                id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+                while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+              }
+              seenIds.add(id);
+              return { ...item, tipo: 'RNF', identificador: id, id };
+            })
+          ];
+          if (currentRequirements.length > 0) {
+            await syncProjectRequirementsApi(backendId, currentRequirements);
+          }
+        }
         const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo, phase === "diagrams" ? targetType : null);
         if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
           const { reqs, diags } = transformAiOutput(aiResult, project.name, project.diagrams);
@@ -1108,69 +1273,148 @@ export default function ProjectWorkspace({
   };
 
   return (
-    <div className="flex-1 flex h-full overflow-hidden bg-white">
-      {/* SECCIÓN IZQUIERDA: Fuentes y Chat de Ajustes a la IA */}
-      <SourcesPanel
-        sources={project.sources || []}
-        requirements={project.requirements}
-        referenceMode={project.currentPhase >= 2}
-        onAddSource={handleAddSource}
-        onUpdateSource={handleUpdateSource}
-        onSuggestSourceMetadata={handleSuggestSourceMetadata}
-        onDeleteSource={handleDeleteSource}
-        onProcess={(prov) => handleProcess(prov)}
-        selectedProvider={selectedAiProvider}
-        onSelectProvider={setSelectedAiProvider}
-        availableProviders={availableProviders}
-        collapsed={isSourcesCollapsed}
-        onToggleCollapsed={() => setIsSourcesCollapsed(value => !value)}
-        isProcessing={isProcessing || isGeneratingDiagrams}
-        isProcessed={project.isProcessed}
-        projectName={project.name}
-        onUpdateProjectName={handleUpdateProjectName}
-        onBackToDashboard={onBackToDashboard}
-        user={user}
-        onLogout={onLogout}
-        onApplyAiCorrection={(prompt) => {
-          const activePhase = project.currentPhase === 2 ? "diagrams" : "analysis";
-          return handleApplyAiCorrection(activePhase, prompt);
-        }}
-      />
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
+      {/* HEADER SUPERIOR OSCURO: Izquierda Logo RBIX | Centro Título Grande del Proyecto | Derecha Acciones */}
+      <header className="relative h-14 shrink-0 border-b border-white/10 bg-[#171425] px-6 flex items-center justify-between gap-4 z-20 select-none">
+        {/* Izquierda: Volver + Logo del Equipo */}
+        <div className="flex items-center gap-3 z-10">
+          <button
+            type="button"
+            onClick={onBackToDashboard}
+            className="p-1.5 -ml-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+            title="Volver a Mis Proyectos"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div
+            onClick={onBackToDashboard}
+            className="cursor-pointer flex items-center hover:opacity-90 transition-opacity"
+            title="RBIX - Volver a Mis Proyectos"
+          >
+            <RbixLogo size="sm" isDark={true} />
+          </div>
+        </div>
 
-      {/* SECCIÓN DERECHA: Contenido Organizado con Máximo Espacio de Visualización */}
+        {/* Centro: Título del proyecto grande y centrado */}
+        <div className="absolute inset-x-0 flex justify-center pointer-events-none px-44">
+          <div className="pointer-events-auto max-w-full">
+            {isEditingName ? (
+              <input
+                type="text"
+                autoFocus
+                value={editedName}
+                onChange={(e) => setEditedName(e.target.value)}
+                onBlur={handleSaveEditName}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveEditName();
+                  if (e.key === "Escape") setIsEditingName(false);
+                }}
+                className="text-base sm:text-lg font-bold text-white text-center bg-white/10 border border-violet-400 rounded-lg px-3 py-1 outline-none ring-2 ring-violet-500/40 w-72 sm:w-96"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartEditName}
+                className="group flex items-center justify-center gap-2 rounded-lg px-3 py-1 text-base sm:text-lg font-bold text-white tracking-tight hover:bg-white/10 transition-colors cursor-pointer max-w-[320px] sm:max-w-[480px] md:max-w-[600px]"
+                title="Clic para renombrar el proyecto"
+              >
+                <span className="truncate">{cleanProjectTitle(project.name)}</span>
+                <Pencil size={14} className="text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Derecha: Ver documento actual + Acceso a Insumos cuando el proyecto ya fue procesado */}
+        <div className="flex items-center gap-2.5 min-w-0 z-10">
+          {project.isProcessed && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsManagingSources(false);
+                  setIsReviewingRequirements(false);
+                  onUpdateProject({
+                    ...project,
+                    currentPhase: project.currentPhase === 4 ? 3 : 4
+                  });
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                  project.currentPhase === 4 && !isManagingSources
+                    ? "border-violet-400 bg-violet-600/30 text-white"
+                    : "border-white/15 bg-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
+                }`}
+                title="Ver documento consolidado actual"
+              >
+                <FileText size={13} />
+                <span>Ver documento actual</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsManagingSources((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                  isManagingSources
+                    ? "border-violet-400 bg-violet-600/30 text-white"
+                    : "border-white/15 bg-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
+                }`}
+                title="Ver o cargar archivos de insumo"
+              >
+                <Files size={13} />
+                <span>Insumos ({(project.sources || []).length})</span>
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
+      {/* CONTENIDO PRINCIPAL A PANTALLA COMPLETA (100% ANCHO) */}
       <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0">
         {isProcessing ? (
-          /* Efecto Gemini en procesamiento */
+          /* Barra Dinámica Minimalista con Porcentaje */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
-            <div className="w-full flex flex-col items-center space-y-4">
-              <div className="w-48 h-48 rounded-full gemini-aura-glow absolute -z-10 pointer-events-none"></div>
-              <h3 className="text-base font-semibold gemini-gradient-text tracking-normal">
-                {project.isProcessed ? "Reprocesando insumos y actualizando requisitos..." : "Generando especificación de requisitos..."}
-              </h3>
-              <div className="w-56 h-1.5 rounded-full gemini-wave-bar shadow-xs"></div>
-              <p className="text-xs text-slate-400 font-normal">
-                {project.isProcessed
-                  ? "Analizando nuevos insumos y actualizando únicamente los requisitos"
-                  : "Extrayendo y estructurando los requisitos del sistema para su revisión"}
-              </p>
+            <div className="w-full flex flex-col items-center">
+              <div className="w-56 h-56 rounded-full gemini-aura-glow absolute -z-10 pointer-events-none"></div>
 
-              <div className="w-full max-w-sm mt-4 space-y-2.5">
-                <div className="h-4 rounded-md gemini-skeleton-loader w-full"></div>
-                <div className="h-4 rounded-md gemini-skeleton-loader w-4/5 mx-auto"></div>
-                <div className="h-4 rounded-md gemini-skeleton-loader w-3/5 mx-auto"></div>
+              <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
+                {project.isProcessed ? "Reprocesando especificación de requisitos..." : "Generando especificación de requisitos..."}
+              </h3>
+
+              {/* Barra de progreso limpia sin contenedor de tarjeta ni textos redundantes */}
+              <div className="w-full mt-6 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-600">
+                    Progreso
+                  </span>
+                  <span className="text-violet-700 font-bold text-sm bg-violet-50 px-2.5 py-0.5 rounded-md border border-violet-200">
+                    {processProgress}%
+                  </span>
+                </div>
+                <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
+                  <div
+                    className="h-full bg-linear-to-r from-violet-600 via-indigo-600 to-purple-500 rounded-full transition-all duration-300 ease-out shadow-xs"
+                    style={{ width: `${Math.max(processProgress, 4)}%` }}
+                  />
+                </div>
               </div>
             </div>
           </div>
-        ) : !project.isProcessed ? (
-          /* Estado Inicial: Efecto Gemini en reposo */
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
-            <div className="flex flex-col items-center">
-              <div className="w-24 h-1 rounded-full gemini-wave-bar mb-4 opacity-70"></div>
-              <p className="text-xs text-slate-400 max-w-xs font-normal">
-                Carga tus insumos en el panel izquierdo y presiona Procesar
-              </p>
-            </div>
-          </div>
+        ) : !project.isProcessed || isManagingSources ? (
+          /* PANTALLA 0 (Inicial al crear proyecto): Cargar Insumos */
+          <SourcesPanel
+            sources={project.sources || []}
+            onAddSource={handleAddSource}
+            onUpdateSource={handleUpdateSource}
+            onSuggestSourceMetadata={handleSuggestSourceMetadata}
+            onDeleteSource={handleDeleteSource}
+            onProcess={(prov) => handleProcess(prov)}
+            selectedProvider={selectedAiProvider}
+            onSelectProvider={setSelectedAiProvider}
+            availableProviders={availableProviders}
+            isProcessing={isProcessing || isGeneratingDiagrams}
+            isProcessed={project.isProcessed}
+            onContinueToProject={project.isProcessed ? () => setIsManagingSources(false) : null}
+          />
         ) : isReviewingRequirements ? (
           <RequirementsView
             requirements={project.requirements}
@@ -1209,9 +1453,28 @@ export default function ProjectWorkspace({
               });
               const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
               if (backendId) {
+                const seenIds = new Set();
+                let rfCount = 1;
+                let rnfCount = 1;
                 const flatList = [
-                  ...(newReqs.functional || []).map((r, i) => ({ ...r, tipo: 'RF', identificador: r.identificador || r.id || `RF-0${i + 1}` })),
-                  ...(newReqs.nonFunctional || []).map((r, i) => ({ ...r, tipo: 'RNF', identificador: r.identificador || r.id || `RNF-0${i + 1}` }))
+                  ...(newReqs.functional || []).map((r) => {
+                    let id = String(r.identificador || r.id || '').trim();
+                    if (!id || seenIds.has(id)) {
+                      id = `RF-${String(rfCount++).padStart(2, '0')}`;
+                      while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+                    }
+                    seenIds.add(id);
+                    return { ...r, tipo: 'RF', identificador: id, id };
+                  }),
+                  ...(newReqs.nonFunctional || []).map((r) => {
+                    let id = String(r.identificador || r.id || '').trim();
+                    if (!id || seenIds.has(id)) {
+                      id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+                      while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+                    }
+                    seenIds.add(id);
+                    return { ...r, tipo: 'RNF', identificador: id, id };
+                  })
                 ];
                 syncProjectRequirementsApi(backendId, flatList).catch((err) => {
                   console.warn("[Workspace] Error persistiendo requerimientos editados:", err);
@@ -1288,6 +1551,38 @@ export default function ProjectWorkspace({
           />
         )}
       </main>
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      {/* Modal sobrio y sencillo para avisos del sistema (sin gradientes ni colores estridentes) */}
+      {alertModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => setAlertModal(null)}
+        >
+          <div
+            className="bg-white rounded-lg border border-slate-200 shadow-xl max-w-md w-full p-6 text-left"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {alertModal.title && (
+              <h4 className="text-sm font-semibold text-slate-900 mb-2">
+                {alertModal.title}
+              </h4>
+            )}
+            <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+              {alertModal.message}
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAlertModal(null)}
+                className="px-4 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-md transition-colors cursor-pointer"
+              >
+                Aceptar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

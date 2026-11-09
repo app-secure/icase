@@ -142,6 +142,7 @@ class CodePlanningProposalService {
         ]),
         tiempo_real: /socket\.io/i.test(texto) ? 'Socket.IO' : /websocket/i.test(texto) ? 'WebSocket' : '',
         estilos: /tailwind/i.test(texto) ? 'Tailwind CSS' : '',
+        ci_cd: 'GitHub Actions',
         observaciones_tecnicas: 'Versiones exactas y librerías complementarias deberán fijarse antes de generar dependencias.'
       },
       advertencias

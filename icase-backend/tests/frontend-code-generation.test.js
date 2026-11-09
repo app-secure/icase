@@ -51,4 +51,29 @@ describe('generación persistente del frontend', () => {
     expect(result.trazabilidad_rf).toEqual([]);
     expect(result.advertencias.join(' ')).toContain('sin trazabilidad RF');
   });
+
+  test('conecta automáticamente pantallas auxiliares o de detalle sin RF directo a las operaciones RF relacionadas del proyecto', async () => {
+    const ArtifactVerificationService = require('../src/core/services/ArtifactVerificationService');
+    const result = await new FrontendScaffoldGenerator().generar({
+      proyecto: { nombre: 'Restaurante' }, versionesOrigen: {},
+      insumos: {
+        decisiones: {},
+        diseno: {
+          manifiesto_navegacion: [
+            { pantalla_id: 'vista-de-listado-de-menu', nombre: 'Vista de Listado de Menu', slug: 'vista-de-listado-de-menu', rf_trazabilidad: ['RF-01'] },
+            { pantalla_id: 'vista-de-detalle-de-plato', nombre: 'Vista de Detalle de Plato', slug: 'vista-de-detalle-de-plato', rf_trazabilidad: [] },
+            { pantalla_id: 'vista-de-gestion-y-marcado-de-plato-agotado', nombre: 'Vista de Gestion y Marcado de Plato Agotado', slug: 'vista-de-gestion-y-marcado-de-plato-agotado', rf_trazabilidad: ['RF-01', 'RF-10'] }
+          ],
+          mockups: [
+            { pantalla_id: 'vista-de-listado-de-menu', nombre_pantalla: 'vista-de-listado-de-menu', rf_trazabilidad: ['RF-01'], preview_code: '<main>Menú</main>' },
+            { pantalla_id: 'vista-de-detalle-de-plato', nombre_pantalla: 'vista-de-detalle-de-plato', rf_trazabilidad: [], preview_code: '<main>Detalle de plato</main>' },
+            { pantalla_id: 'vista-de-gestion-y-marcado-de-plato-agotado', nombre_pantalla: 'vista-de-gestion-y-marcado-de-plato-agotado', rf_trazabilidad: ['RF-01', 'RF-10'], preview_code: '<main>Plato agotado</main>' }
+          ]
+        }
+      }
+    });
+    const verification = new ArtifactVerificationService().verificar({ tipo: 'codigo_frontend', archivos: result.archivos });
+    expect(verification.estado).toBe('apta_estructuralmente');
+    expect(verification.errores).toEqual([]);
+  });
 });

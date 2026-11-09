@@ -16,7 +16,11 @@ const SYNONYMS = new Map([
   ['comanda', 'pedido'], ['orden', 'pedido'],
   ['reservacion', 'reserva'], ['reservar', 'reserva'],
   ['reporte', 'informe'], ['report', 'informe'],
-  ['platillo', 'plato'], ['prepagado', 'paquete'], ['prepago', 'paquete']
+  ['platillo', 'plato'], ['prepagado', 'paquete'], ['prepago', 'paquete'],
+  ['pts', 'punto'], ['puntos', 'punto'],
+  ['login', 'autenticacion'], ['sesion', 'autenticacion'], ['sesiones', 'autenticacion'],
+  ['credencial', 'autenticacion'], ['credenciales', 'autenticacion'],
+  ['disponible', 'disponibilidad'], ['agotado', 'disponibilidad']
 ]);
 
 function normalize(value) {
@@ -80,7 +84,8 @@ function screenText(screen) {
 }
 
 function hasSemanticEvidence(requirement, screen) {
-  const expected = tokens(requirement?.nombre || requirement?.descripcion);
+  const titleExpected = tokens(requirement?.nombre);
+  const fullExpected = tokens(requirementText(requirement));
   const local = screenText(screen);
   const actual = new Set(tokens(local));
   if (screen?.preview_code) {
@@ -90,14 +95,23 @@ function hasSemanticEvidence(requirement, screen) {
       .replace(/<(script|style|nav|footer|aside)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
     const headings = [...html.matchAll(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/gi)]
       .map(match => localHtmlText(match[1])).join(' ');
-    const scope = new Set(tokens(headings + ' ' + pageHeadingText(source)));
-    if (scope.size && !expected.some(token => scope.has(token))) return false;
+    const screenTitle = [screen?.nombre, screen?.nombre_visible, screen?.nombre_pantalla, screen?.slug]
+      .filter(Boolean).map(s => String(s).replace(/[-_]/g, ' ')).join(' ');
+    const scope = new Set(tokens(headings + ' ' + pageHeadingText(source) + ' ' + screenTitle));
+    if (scope.size && !fullExpected.some(token => scope.has(token))) return false;
     const intent = normalize(requirement?.nombre);
     if (/^(validacion|validar)\b/.test(intent) && !/\bvalid(ar|acion|ado|ada)\b/.test(normalize(local))) return false;
     if (/^(marcado|marcar)\b/.test(intent) && !/\bmarc(ar|ado|ada)\b/.test(normalize(local))) return false;
   }
-  const matches = expected.filter(token => actual.has(token));
-  return matches.length > 0 && (matches.length >= 2 || matches.length / expected.length >= 0.5);
+  const titleMatches = titleExpected.filter(token => actual.has(token));
+  if (titleMatches.length > 0 && (titleMatches.length >= 2 || titleMatches.length / titleExpected.length >= 0.5)) {
+    return true;
+  }
+  const matches = fullExpected.filter(token => actual.has(token));
+  if (matches.includes('autenticacion') && /inicio.*sesion|login|autentic/i.test(screen?.slug || screen?.nombre || screen?.nombre_pantalla || '')) {
+    return true;
+  }
+  return matches.length > 0 && (matches.length >= 2 || matches.length / fullExpected.length >= 0.5);
 }
 
 function isHighPriority(requirement) {
