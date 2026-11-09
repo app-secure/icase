@@ -61,6 +61,16 @@ Los permisos se aplican con la sesión: si el rol no tiene el método, el contro
 
 La página solo importa el runtime (`mockupActions.js` y `MockupResult.jsx`) cuando tiene enlaces válidos. El panel «Gestión de Datos» se conserva como herramienta auxiliar.
 
+## Fidelidad visual de la conversión
+
+La pantalla generada conserva el aspecto del mockup sin ejecutar nada de lo que trae:
+
+- **CSS propio.** Los bloques `<style>` van a un archivo `frontend/src/pages/<pantalla>.css`, con cada selector acotado a `.mockup-<pantalla>` (`html`, `body` y `:root` pasan a ser el propio contenedor). El análisis respeta cadenas, comentarios y paréntesis, y lo que no esté bien cerrado se descarta. Solo se admiten `url(data:...)` y `url(#fragmento)`: se eliminan `@import`, cualquier otra carga externa (`url()`, `image-set()`, `src()`), las declaraciones con escapes fuera de comillas, `expression()`, `behavior` y `-moz-binding`. Las reglas de efecto global (`@font-face`, `@property`, `@page`, `@counter-style`) se descartan, y los `@keyframes` se renombran con el ámbito para no pisar las animaciones del resto de la aplicación.
+- **Body.** Las clases y el estilo de `<body>` pasan al contenedor del mockup.
+- **Tailwind.** La configuración `tailwind.config` del mockup se lee como datos: solo se admiten objetos, arreglos, cadenas, números y booleanos. Si trae código, llamadas o cualquier otra cosa, se descarta entera. Se aplica en el `index.html` generado, y sin configuración se deriva de los colores del sistema de diseño. Si varios mockups la definen, se combinan y, en caso de conflicto en un mismo valor, prevalece el del primero. El sanitizador de mockups aplica la misma regla de origen: del script `tailwind.config` solo conserva la configuración como datos, normalizada, y descarta cualquier otro código del script.
+- **Enlaces.** Los `<a href>` internos a rutas de la aplicación pasan a `<Link>` de React Router, con su consulta y fragmento. Los externos, `#`, las rutas desconocidas y los que llevan `data-accion` no cambian.
+- **Contenedor y menú.** Las pantallas con mockup usan un contenedor sin ancho máximo en la vista diseñada. Si el mockup trae su propio menú (un `<aside>`, o un `<nav>` con enlaces a al menos dos pantallas de la aplicación), la cabecera oculta su menú de módulos en esa ruta y conserva la marca, la sesión y, para el administrador, el enlace a Usuarios.
+
 ## De los enlaces a los métodos del backend
 
 Al generar el backend, los verbos válidos que declaran los mockups aprobados para un RF determinan los `methods` de su operación: siempre `GET` más los métodos de esos verbos, en el orden GET, POST, PATCH, DELETE. «Consultar reportes» con un único control `consultar` queda solo con `GET`.
@@ -81,4 +91,5 @@ Al generar el backend, los verbos válidos que declaran los mockups aprobados pa
 - Un enlace válido no certifica que la regla de negocio del RF esté implementada: el backend sigue ofreciendo las operaciones genéricas por RF.
 - No hay pruebas con un navegador real. Hay pruebas de la página generada ejecutándose con React en un DOM simulado (crear, consultar, seleccionar, editar y eliminar contra un `fetch` simulado) y la verificación de que el frontend generado se empaqueta.
 - Las filas de ejemplo del mockup no se sustituyen por los registros reales: estos aparecen en la tabla de resultados que se muestra sobre el mockup.
-- Los estilos, scripts y la navegación propios del mockup se siguen perdiendo en la conversión.
+- No hay comparación visual automática entre el mockup y la aplicación generada: la fidelidad se comprueba a mano.
+- Los scripts del mockup nunca se copian, y de los `<link>` solo se conserva el tipo de letra que ya carga la aplicación.

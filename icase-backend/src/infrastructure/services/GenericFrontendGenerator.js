@@ -44,7 +44,7 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/LoginScreen.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('LoginScreen.jsx'), { REGISTRO: JSON.stringify(openRoles) }) },
         { ruta: 'frontend/src/UsersScreen.jsx', lenguaje: 'javascript', contenido: template('UsersScreen.jsx') }
       ] : []),
-      { ruta: 'frontend/src/styles.css', lenguaje: 'css', contenido: `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:${colors.texto || '#0f172a'};background:#f1f5f9;--primary:${colors.primario || '#4f46e5'};--primary-hover:#4338ca}*{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#0f172a;line-height:1.5}.app-shell{min-height:100vh;display:flex;flex-direction:column}.nav{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:.75rem 1.75rem;background:white;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.04)}.nav-brand{font-size:1.15rem;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:.5rem;text-decoration:none}.nav-links{display:flex;align-items:center;gap:.5rem;overflow-x:auto;padding:.25rem 0}.nav-link{text-decoration:none;color:#475569;font-size:.875rem;font-weight:500;padding:.45rem .85rem;border-radius:6px;transition:all .15s;white-space:nowrap}.nav-link:hover{background:#f1f5f9;color:#0f172a}.nav-link.active{background:#ede9fe;color:#4f46e5;font-weight:600}.nav-user{display:flex;align-items:center;gap:1rem;font-size:.875rem;color:#475569}.user-badge{background:#f1f5f9;padding:.35rem .75rem;border-radius:9999px;font-weight:500;border:1px solid #e2e8f0}.screen{max-width:1200px;width:100%;margin:1.5rem auto;padding:0 1.5rem}.screen h1{font-size:1.65rem;font-weight:700;color:#0f172a;margin:0 0 1rem 0;letter-spacing:-.02em}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:1.5rem;margin:1.25rem 0;box-shadow:0 1px 3px rgba(0,0,0,.03)}.card h2{font-size:1.15rem;font-weight:600;margin:0 0 1rem 0;color:#1e293b}.field{width:100%;min-height:2.65rem;padding:.6rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;outline:none;transition:border-color .15s}.field:focus{border-color:var(--primary);background:white}.button{border:0;border-radius:8px;padding:.55rem 1.15rem;font-size:.875rem;font-weight:500;cursor:pointer;background:var(--primary);color:white;transition:opacity .15s,transform .05s;display:inline-flex;align-items:center;gap:.5rem}.button:hover{opacity:.92}.button:active{transform:scale(.98)}.button:disabled{opacity:.5;cursor:not-allowed}.danger{background:#ef4444!important}.danger:hover{background:#dc2626!important}.tabs{display:flex;gap:.5rem;margin-bottom:1rem}.tabs button{background:#e2e8f0;color:#334155}.tabs button.active{background:var(--primary);color:white}.record{white-space:pre-wrap;background:#f8fafc;padding:1rem;border-radius:8px;border:1px solid #e2e8f0}.error{color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}.success{color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}${typedForms ? TYPED_FORMS_CSS : ''}` },
+      { ruta: 'frontend/src/styles.css', lenguaje: 'css', contenido: `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:${colors.texto || '#0f172a'};background:#f1f5f9;--primary:${colors.primario || '#4f46e5'};--primary-hover:#4338ca}*{box-sizing:border-box}.mockup-screen{width:100%;max-width:none;margin:0;padding:0}body{margin:0;background:#f1f5f9;color:#0f172a;line-height:1.5}.app-shell{min-height:100vh;display:flex;flex-direction:column}.nav{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:.75rem 1.75rem;background:white;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.04)}.nav-brand{font-size:1.15rem;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:.5rem;text-decoration:none}.nav-links{display:flex;align-items:center;gap:.5rem;overflow-x:auto;padding:.25rem 0}.nav-link{text-decoration:none;color:#475569;font-size:.875rem;font-weight:500;padding:.45rem .85rem;border-radius:6px;transition:all .15s;white-space:nowrap}.nav-link:hover{background:#f1f5f9;color:#0f172a}.nav-link.active{background:#ede9fe;color:#4f46e5;font-weight:600}.nav-user{display:flex;align-items:center;gap:1rem;font-size:.875rem;color:#475569}.user-badge{background:#f1f5f9;padding:.35rem .75rem;border-radius:9999px;font-weight:500;border:1px solid #e2e8f0}.screen{max-width:1200px;width:100%;margin:1.5rem auto;padding:0 1.5rem}.screen h1{font-size:1.65rem;font-weight:700;color:#0f172a;margin:0 0 1rem 0;letter-spacing:-.02em}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:1.5rem;margin:1.25rem 0;box-shadow:0 1px 3px rgba(0,0,0,.03)}.card h2{font-size:1.15rem;font-weight:600;margin:0 0 1rem 0;color:#1e293b}.field{width:100%;min-height:2.65rem;padding:.6rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;outline:none;transition:border-color .15s}.field:focus{border-color:var(--primary);background:white}.button{border:0;border-radius:8px;padding:.55rem 1.15rem;font-size:.875rem;font-weight:500;cursor:pointer;background:var(--primary);color:white;transition:opacity .15s,transform .05s;display:inline-flex;align-items:center;gap:.5rem}.button:hover{opacity:.92}.button:active{transform:scale(.98)}.button:disabled{opacity:.5;cursor:not-allowed}.danger{background:#ef4444!important}.danger:hover{background:#dc2626!important}.tabs{display:flex;gap:.5rem;margin-bottom:1rem}.tabs button{background:#e2e8f0;color:#334155}.tabs button.active{background:var(--primary);color:white}.record{white-space:pre-wrap;background:#f8fafc;padding:1rem;border-radius:8px;border:1px solid #e2e8f0}.error{color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}.success{color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}${typedForms ? TYPED_FORMS_CSS : ''}` },
       { ruta: 'frontend/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ project: proyecto.nombre, mode: 'generic_contract_v1', modulos: { formularios_tipados: typedForms }, plataformas_solicitadas: platforms, auth: { habilitada: auth, registro: openRoles }, pantallas: views }, null, 2) }
     ];
     const imports = [];
@@ -55,6 +55,9 @@ class GenericFrontendGenerator {
       ...views.flatMap((view) => view.operations)
     ]);
     let anyWired = false;
+    const routeSet = new Set(views.map((view) => view.route));
+    const standalone = []; // rutas cuyo mockup trae su propio menú
+    const tailwindConfigs = [];
     for (const view of views) {
       if (auth && (view.route === '/usuarios' || view.id === 'usuarios' || view.name?.toLowerCase() === 'usuarios')) continue;
       const name = component(view.id);
@@ -63,14 +66,23 @@ class GenericFrontendGenerator {
       const screen = screens.find((item) => this._view(item, screens, requerimientos).id === view.id);
       const reference = this._plainText(screen?.mockup?.preview_code || '').slice(0, 600);
       const mockupCode = screen?.mockup?.preview_code;
-      const jsxBody = mockupCode ? HtmlToJsxTransformer.transform(mockupCode, { operaciones: allowedOperations }) : '';
+      const analysis = mockupCode ? HtmlToJsxTransformer.analyze(mockupCode, { operaciones: allowedOperations, routes: routeSet }) : null;
+      const jsxBody = analysis ? analysis.jsx : '';
       const wired = jsxBody.includes('handleAction(');
       anyWired = anyWired || wired;
+      const usesLink = jsxBody.includes('<Link ');
+      // El CSS propio del mockup se acota a su pantalla; los scripts nunca se copian.
+      const css = analysis ? HtmlToJsxTransformer.scopeCss(analysis.css, `.mockup-${view.id}`) : '';
+      if (analysis?.tailwindConfig) tailwindConfigs.push(analysis.tailwindConfig);
+      if (jsxBody && analysis.hasShell) standalone.push(view.route);
+      const bodyClass = analysis ? analysis.bodyClassName.replace(/[^\w\s:/.\-[\]%#,()!@=]/g, '').replace(/\s+/g, ' ').trim() : '';
+      const bodyStyle = analysis && Object.keys(analysis.bodyStyle).length ? analysis.bodyStyle : null;
+      if (css.trim()) files.push({ ruta: `frontend/src/pages/${view.id}.css`, lenguaje: 'css', contenido: `${css}\n` });
 
       files.push({
         ruta: `frontend/src/pages/${view.id}.jsx`,
         lenguaje: 'javascript',
-        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: setResult });\n" : ''}  return (\n    <main className="page-container screen" data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>⚙️ Gestión de Datos (API)</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content">${wired ? '<MockupResult result={result} selected={selected} onSelect={setSelected} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        <OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
+        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${usesLink ? "import { Link } from 'react-router-dom';\n" : ''}${css.trim() ? `import './${view.id}.css';\n` : ''}${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: setResult });\n" : ''}  return (\n    <main ${jsxBody ? "className={showCrud ? 'page-container screen' : 'mockup-screen'}" : 'className="page-container screen"'} data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>⚙️ Gestión de Datos (API)</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content mockup-${view.id}${bodyClass ? ` ${bodyClass}` : ''}"${bodyStyle ? ` style={${JSON.stringify(bodyStyle)}}` : ''}>${wired ? '<MockupResult result={result} selected={selected} onSelect={setSelected} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        <OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
       });
       if (screen?.mockup?.preview_code) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: screen.mockup.preview_code });
     }
@@ -80,8 +92,13 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') }
       );
     }
+    const tailwind = this._tailwindConfig(tailwindConfigs, colors);
+    if (tailwind) {
+      const index = files.find((file) => file.ruta === 'frontend/index.html');
+      index.contenido = index.contenido.replace('<script src="https://cdn.tailwindcss.com"></script>', (cdn) => `${cdn}<script>tailwind.config = ${tailwind};</script>`);
+    }
     const first = views[0]?.route || '/';
-    files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes) : this._app(proyecto, views, imports, routes, first) });
+    files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone) : this._app(proyecto, views, imports, routes, first, standalone) });
     if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth));
     if(new ModuleService().activos(decisiones.modulos).includes('procesos_negocio')){
       if(!auth)throw new Error('La bandeja de procesos requiere JWT');
@@ -161,12 +178,34 @@ class GenericFrontendGenerator {
     return matchedReqCodes.slice(0, 2);
   }
 
-  _app(proyecto, views, imports, routes, first) {
-    return `import React from 'react';\nimport{Link,Navigate,Route,Routes,useLocation}from'react-router-dom';\n${imports.join('\n')}\nexport default function App(){\n  const location = useLocation();\n  return <div className="app-shell"><header className="nav"><div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', overflow: 'hidden' }}><Link to="/" className="nav-brand"><span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: 'var(--primary)' }}></span>${this._escape(proyecto.nombre)}</Link><nav className="nav-links">${views.map((view) => `<Link key=${JSON.stringify(view.route)} to=${JSON.stringify(view.route)} className={'nav-link' + (location.pathname === ${JSON.stringify(view.route)} ? ' active' : '')}>${this._escape(view.name)}</Link>`).join('')}</nav></div></header><Routes>${routes.join('')}<Route path="*" element={<Navigate to=${JSON.stringify(first)} replace/>}/></Routes></div>;\n}\n`;
+  /**
+   * Configuración de Tailwind para `index.html`: la de los mockups (leída como datos, el primero prevalece) o, si ninguno
+   * la trae, la derivada del sistema de diseño. Sin ninguna de las dos no se añade nada.
+   */
+  _tailwindConfig(configs, colors = {}) {
+    const merge = (base, extra) => {
+      const out = { ...base };
+      for (const [key, value] of Object.entries(extra)) {
+        out[key] = value && typeof value === 'object' && !Array.isArray(value) && out[key] && typeof out[key] === 'object' && !Array.isArray(out[key]) ? merge(out[key], value) : value;
+      }
+      return out;
+    };
+    let merged = configs.length ? [...configs].reverse().reduce((acc, config) => merge(acc, config), {}) : null;
+    if (!merged && colors.primario) {
+      merged = { theme: { extend: { colors: {
+        primary: { 500: colors.primario, 600: colors.primario_oscuro || colors.primario, 700: colors.primario_oscuro || colors.primario },
+        secondary: { 500: colors.secundario || '#64748b', 600: '#475569' }
+      } } } };
+    }
+    return merged ? JSON.stringify(merged).replace(/</g, '\\u003c') : '';
+  }
+
+  _app(proyecto, views, imports, routes, first, standalone = []) {
+    return `import React from 'react';\nimport{Link,Navigate,Route,Routes,useLocation}from'react-router-dom';\n${imports.join('\n')}\nexport default function App(){\n  const location = useLocation();\n  const standalone = ${JSON.stringify(standalone)};\n  return <div className="app-shell"><header className="nav"><div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', overflow: 'hidden' }}><Link to="/" className="nav-brand"><span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: 'var(--primary)' }}></span>${this._escape(proyecto.nombre)}</Link><nav className="nav-links" style={standalone.includes(location.pathname) ? { display: 'none' } : undefined}>${views.map((view) => `<Link key=${JSON.stringify(view.route)} to=${JSON.stringify(view.route)} className={'nav-link' + (location.pathname === ${JSON.stringify(view.route)} ? ' active' : '')}>${this._escape(view.name)}</Link>`).join('')}</nav></div></header><Routes>${routes.join('')}<Route path="*" element={<Navigate to=${JSON.stringify(first)} replace/>}/></Routes></div>;\n}\n`;
   }
 
   /** Con autenticación: solo ve el menú de lo que su rol puede consultar y siempre puede cerrar sesión. */
-  _appWithAuth(proyecto, views, imports, routes) {
+  _appWithAuth(proyecto, views, imports, routes, standalone = []) {
     return `import React, { useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useSession } from './session';
@@ -179,6 +218,7 @@ const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: v
 export default function App() {
   const { user, loading, can, logout } = useSession();
   const location = useLocation();
+  const standalone = ${JSON.stringify(standalone)};
   const [openModule, setOpenModule] = useState(null);
 
   if (loading) return <main className="screen"><p role="status">Cargando…</p></main>;
@@ -201,7 +241,7 @@ export default function App() {
           </Link>
 
           <nav style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {modules.map((mod) => {
+            {!standalone.includes(location.pathname) && modules.map((mod) => {
               const screensInMod = visible.filter((v) => (v.modulo || 'General') === mod);
               const isActive = screensInMod.some((v) => v.route === location.pathname);
               return (

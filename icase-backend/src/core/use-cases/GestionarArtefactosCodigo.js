@@ -134,7 +134,7 @@ class GestionarArtefactosCodigo {
       ...(diseno.mockups || []).map((item) => [`mockup:${item.nombre_pantalla}`, item.version || 1])
     ]);
     const requisitosAprobados = (requerimientos || []).filter((item) => item.aprobado);
-    const input = { contrato_generacion: 'frontend-v16-rf-identificador', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
+    const input = { contrato_generacion: 'frontend-v17-mockup-estilos', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_frontend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
