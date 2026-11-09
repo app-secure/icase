@@ -50,7 +50,9 @@ class ArtifactVerificationService {
           if (!Array.isArray(manifest.operations) || !manifest.operations.length) errores.push('El contrato del backend no declara operaciones derivadas de los RF.');
           for (const operation of manifest.operations || []) {
             if (!operation.id || !operation.key || !operation.collectionPath) errores.push('Hay una operación sin RF, clave o ruta de colección.');
-            if (!['GET', 'POST', 'PATCH', 'DELETE'].every((method) => (operation.methods || []).includes(method))) errores.push(`La operación ${operation.id || operation.key} no ofrece un ciclo CRUD verificable.`);
+            // Basta con GET y métodos conocidos: una operación de consulta no necesita el ciclo CRUD completo.
+            const methods = operation.methods || [];
+            if (!methods.includes('GET') || methods.some((method) => !['GET', 'POST', 'PATCH', 'DELETE'].includes(method))) errores.push(`La operación ${operation.id || operation.key} no declara GET y métodos válidos (GET, POST, PATCH, DELETE).`);
           }
         } catch { /* requireJson ya registra el error. */ }
         break;

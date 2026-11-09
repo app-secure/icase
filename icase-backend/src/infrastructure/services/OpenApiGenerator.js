@@ -153,6 +153,14 @@ class OpenApiGenerator {
         responses: { 200: { description: 'Registro eliminado.', content: { 'application/json': { schema: schemaRef('Deleted'), example: { deleted: true, id: '1' } } } }, ...access, 404: responseRef('NotFound'), ...(referenced ? { 409: responseRef('Conflict') } : {}) }
       })
     };
+    // Solo se documentan los métodos que la operación declara (GET siempre); sin `methods` se documenta el CRUD completo.
+    const declares = (method) => !operation.methods || operation.methods.includes(method);
+    const collection = doc.paths[operation.collectionPath];
+    const item = doc.paths[operation.itemPath.replace(':id', '{id}')];
+    if (!declares('POST')) delete collection.post;
+    if (!declares('PATCH')) delete item.patch;
+    if (!declares('DELETE')) delete item.delete;
+    if (!item.patch && !item.delete) delete doc.paths[operation.itemPath.replace(':id', '{id}')];
     if (!entity && !doc.components.schemas.GenericoRecord) {
       doc.components.schemas.Generico = { type: 'object', additionalProperties: true, description: 'Operación sin entidad en el modelo de dominio: acepta cualquier objeto JSON.' };
       doc.components.schemas.GenericoUpdate = { $ref: '#/components/schemas/Generico' };

@@ -59,7 +59,7 @@ class GenerationCoverageService {
       if (confirmed && omitted.length && declaration.justificacion.length < 10) reasons.push('Justifica las sugerencias descartadas con al menos 10 caracteres.');
       const capabilities = confirmed ? declaration.capacidades : suggestions.map((item) => item.id);
       if (!operation || !entities.has(operation.entity)) reasons.push('No hay operación asociada por identificador a una entidad tipada.');
-      else if (!['GET', 'POST', 'PATCH', 'DELETE'].every((method) => (operation.methods || []).includes(method))) reasons.push('La operación no declara todo el ciclo CRUD.');
+      else if (!(operation.methods || []).includes('GET') || (operation.methods || []).some((method) => !['GET', 'POST', 'PATCH', 'DELETE'].includes(method))) reasons.push('La operación no declara GET y métodos válidos.');
       if (declaration?.tipo === 'personalizado') reasons.push('El comportamiento personalizado necesita implementación y pruebas específicas.');
       if (capabilities.length) reasons.push(`Capacidades sin implementación: ${capabilities.join(', ')}.`);
       blockers.push(...reasons.map((reason) => `${id}: ${reason}`));

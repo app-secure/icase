@@ -131,11 +131,14 @@ class AccessControlService {
     if (!propuesta || propuesta.autenticacion?.metodo !== 'jwt') return { habilitada: false };
     const incluidos = (propuesta.roles || []).filter((item) => item.incluir !== false);
     const llaves = new Map(operaciones.map((item) => [String(item.id).toUpperCase(), item.key]));
+    const declarados = new Map(operaciones.map((item) => [item.key, item.methods]));
     const porOperacion = Object.fromEntries(operaciones.map((item) => [item.key, {}]));
     for (const permiso of propuesta.permisos || []) {
       const key = llaves.get(String(permiso.operacion).toUpperCase());
       if (key && incluidos.some((rol) => rol.id === permiso.rol)) {
-        porOperacion[key][permiso.rol] = { metodos: [...permiso.metodos], alcance: permiso.alcance === 'propios' ? 'propios' : 'todos' };
+        // Un rol nunca recibe métodos que la operación no declara (p. ej. POST en una operación solo de consulta).
+        const metodos = permiso.metodos.filter((metodo) => !declarados.get(key) || declarados.get(key).includes(metodo));
+        porOperacion[key][permiso.rol] = { metodos, alcance: permiso.alcance === 'propios' ? 'propios' : 'todos' };
       }
     }
     return {
