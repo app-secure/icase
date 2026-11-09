@@ -460,11 +460,7 @@ app.use((error,_req,res,_next)=>{const status=Number.isInteger(error.status)&&er
           merged[role] = entry;
         }
       }
-      if (!Object.keys(merged).length) {
-        for (const role of Object.keys(policy.roles || {})) {
-          merged[role] = { metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'todos' };
-        }
-      }
+      // Sin permisos en las operaciones del par no se concede nada: el acceso mínimo es ninguno.
       policy.operaciones[op.key] = merged;
     }
   }

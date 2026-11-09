@@ -47,25 +47,9 @@ class ApplicationContractBuilder {
       };
     });
     const used = new Set(operations.map((operation) => operation.entity).filter(Boolean));
-    const byName = new Map(entities.map((entity) => [entity.name, entity.key]));
-    const rawRelations = domainModel?.relations || [];
-    const resolveEndpoint = (name, otherName) => {
-      if (used.has(byName.get(name))) return name;
-      const connected = rawRelations
-        .filter((r) => r.from === name || r.to === name)
-        .sort((a, b) => (a.cardinalidad === 'muchos_a_muchos' ? 1 : 0) - (b.cardinalidad === 'muchos_a_muchos' ? 1 : 0));
-      for (const rel of connected) {
-        const candidate = rel.from === name ? rel.to : rel.from;
-        if (candidate !== otherName && used.has(byName.get(candidate))) return candidate;
-      }
-      return name;
-    };
-    const relations = rawRelations.map((rel) => {
-      if (rel.cardinalidad !== 'muchos_a_muchos') return rel;
-      const from = resolveEndpoint(rel.from, rel.to);
-      const to = resolveEndpoint(rel.to, from);
-      return from === rel.from && to === rel.to ? rel : { ...rel, from, to };
-    });
+    // Las relaciones del modelo aprobado se conservan tal cual: si un extremo no tiene RF propio,
+    // el generador del backend le crea una operación de soporte en lugar de cambiar el significado de la relación.
+    const relations = domainModel?.relations || [];
     const byRequirement = new Map(operations.map((item) => [item.id, item]));
     const views = screens.map((screen) => {
       const rf = screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || [];
