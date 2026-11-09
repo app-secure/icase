@@ -50,10 +50,12 @@ El transformador de HTML a JSX añade un manejador `onClick` a cada control con 
 | --- | --- | --- |
 | `crear` | POST con los campos `name` del formulario del control (los vacíos se omiten; los `number` y `checkbox` se convierten). | «Registro creado» o el error del backend. |
 | `consultar` | GET con `limit=20`. Si hay un campo `search` o `buscar`, se envía como `search`. | Número de registros y una tabla genérica con ellos. |
-| `editar` | PATCH sobre el registro indicado con `data-id`, con los campos del formulario. | «Registro actualizado» o el error. |
-| `eliminar` | DELETE sobre el registro indicado con `data-id`, previa confirmación. | «Registro eliminado» o el error. |
+| `editar` | PATCH sobre el registro seleccionado, con los campos del formulario. | «Registro actualizado» o el error. |
+| `eliminar` | DELETE sobre el registro seleccionado, previa confirmación que nombra el registro. | «Registro eliminado» o el error. |
 
-`editar` y `eliminar` necesitan saber qué registro modificar: lo toman de `data-id` en el control o en un ancestro (por ejemplo, la fila). Sin él muestran un aviso y no llaman a la API. El prompt todavía no pide `data-id`, así que en los mockups generados hoy estos dos verbos solo avisan.
+`editar` y `eliminar` actúan sobre el **registro seleccionado**: el usuario pulsa `consultar`, elige una fila de la tabla de resultados con **Seleccionar** y el formulario del mockup se rellena con sus datos (por `name`). El id siempre viene del backend. Sin selección muestran «Selecciona primero un registro…» y no llaman a la API. Al eliminar se limpia la selección; si falla, se conserva.
+
+Los ids que aparecen en las filas de ejemplo de un mockup no son ids reales, por eso el prompt **no** pide `data-id`. Un mockup escrito a mano puede declarar `data-id` en el control o en una fila; se usa solo si no hay un registro seleccionado.
 
 Los permisos se aplican con la sesión: si el rol no tiene el método, el control muestra «No tienes permiso para esta acción.» y no llama a la API. El resultado se muestra encima del mockup, en la misma pantalla.
 
@@ -62,5 +64,6 @@ La página solo importa el runtime (`mockupActions.js` y `MockupResult.jsx`) cua
 ## Límites
 
 - Un enlace válido no certifica que la regla de negocio del RF esté implementada: el backend sigue ofreciendo las operaciones genéricas por RF.
-- No hay pruebas con navegador sobre el mockup real todavía. Hay pruebas del runtime en un DOM simulado y la verificación de que el frontend generado se empaqueta.
+- No hay pruebas con un navegador real. Hay pruebas de la página generada ejecutándose con React en un DOM simulado (crear, consultar, seleccionar, editar y eliminar contra un `fetch` simulado) y la verificación de que el frontend generado se empaqueta.
+- Las filas de ejemplo del mockup no se sustituyen por los registros reales: estos aparecen en la tabla de resultados que se muestra sobre el mockup.
 - Los estilos, scripts y la navegación propios del mockup se siguen perdiendo en la conversión.

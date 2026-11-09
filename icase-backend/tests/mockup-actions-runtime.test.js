@@ -10,10 +10,10 @@ const runtime = (() => {
   return module.exports;
 })();
 const page = (html) => new JSDOM(`<body><main>${html}</main></body>`).window.document;
-const run = async (button, { verb, api, can = () => true, confirmar = () => true }) => {
+const run = async (button, { verb, api, can = () => true, confirmar = () => true, selected = null, onSelect = () => {} }) => {
   const event = { preventDefault: jest.fn(), currentTarget: button };
   const results = [];
-  await runtime.runAction({ event, operation: 'rf-03', verb, api, can, confirmar, onResult: (result) => results.push(result) });
+  await runtime.runAction({ event, operation: 'rf-03', verb, api, can, confirmar, selected, onSelect, onResult: (result) => results.push(result) });
   return { event, results };
 };
 
@@ -98,6 +98,74 @@ describe('mockup-actions: ejecución', () => {
     const api = jest.fn().mockRejectedValue(Object.assign(new Error('Campo sala requerido'), { details: ['sala'] }));
     const { results } = await run(page(form).getElementById('b'), { verb: 'crear', api });
     expect(results.at(-1)).toEqual({ estado: 'error', mensaje: 'Campo sala requerido', detalles: ['sala'] });
+  });
+
+  describe('registro seleccionado', () => {
+    const selected = { operation: 'rf-03', id: '9', etiqueta: 'Sala 9' };
+    const rowButton = '<table><tr data-id="7"><td><button id="b">Acción</button></td></tr></table>';
+
+    test('consultar informa la operación para que la tabla pueda seleccionar', async () => {
+      const api = jest.fn().mockResolvedValue({ data: [] });
+      const { results } = await run(page('<button id="b">Ver</button>').getElementById('b'), { verb: 'consultar', api });
+      expect(results.at(-1)).toEqual(expect.objectContaining({ operacion: 'rf-03', registros: [] }));
+    });
+
+    test('editar usa el registro seleccionado y este gana sobre un data-id', async () => {
+      const api = jest.fn().mockResolvedValue({});
+      const document = page('<form data-id="7"><input name="sala" value="B"><button id="b">Guardar</button></form>');
+      await run(document.getElementById('b'), { verb: 'editar', api, selected });
+      expect(api).toHaveBeenCalledWith('/api/operations/rf-03/9', { method: 'PATCH', body: JSON.stringify({ sala: 'B' }) });
+    });
+
+    test('un registro seleccionado de otra operación se ignora', async () => {
+      const api = jest.fn();
+      const { results } = await run(page(rowButton.replace('data-id="7"', '')).getElementById('b'), { verb: 'eliminar', api, selected: { ...selected, operation: 'rf-99' } });
+      expect(api).not.toHaveBeenCalled();
+      expect(results.at(-1).estado).toBe('aviso');
+      expect(results.at(-1).mensaje).toContain('Selecciona');
+    });
+
+    test('eliminar confirma indicando qué registro y limpia la selección al terminar', async () => {
+      const api = jest.fn().mockResolvedValue({});
+      const confirmar = jest.fn(() => true);
+      const onSelect = jest.fn();
+      const { results } = await run(page('<button id="b">Eliminar</button>').getElementById('b'), { verb: 'eliminar', api, selected, confirmar, onSelect });
+      expect(confirmar.mock.calls[0][0]).toContain('Sala 9');
+      expect(api).toHaveBeenCalledWith('/api/operations/rf-03/9', { method: 'DELETE' });
+      expect(onSelect).toHaveBeenCalledWith(null);
+      expect(results.at(-1)).toEqual({ estado: 'ok', mensaje: 'Registro eliminado' });
+    });
+
+    test('un fallo al eliminar conserva la selección', async () => {
+      const onSelect = jest.fn();
+      const { results } = await run(page('<button id="b">Eliminar</button>').getElementById('b'), { verb: 'eliminar', api: jest.fn().mockRejectedValue(new Error('No existe')), selected, onSelect });
+      expect(onSelect).not.toHaveBeenCalled();
+      expect(results.at(-1)).toEqual({ estado: 'error', mensaje: 'No existe' });
+    });
+
+    test('si el usuario no confirma no se llama a la API ni se pierde la selección', async () => {
+      const api = jest.fn();
+      const onSelect = jest.fn();
+      await run(page('<button id="b">Eliminar</button>').getElementById('b'), { verb: 'eliminar', api, selected, confirmar: () => false, onSelect });
+      expect(api).not.toHaveBeenCalled();
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('fillFields', () => {
+    test('rellena por name texto, número, casilla, radio y select, e ignora claves sin campo', () => {
+      const document = page(`<div id="c"><input name="sala"><input name="capacidad" type="number"><input name="activo" type="checkbox">
+        <input name="tipo" type="radio" value="a"><input name="tipo" type="radio" value="b">
+        <select name="turno"><option value="m">M</option><option value="t">T</option></select></div>`);
+      runtime.fillFields(document.getElementById('c'), { sala: 'Sala 9', capacidad: 5, activo: true, tipo: 'b', turno: 't', desconocido: 'x' });
+      expect(runtime.collectFields(document.getElementById('c').querySelector('input'))).toEqual({ sala: 'Sala 9', capacidad: 5, activo: true, tipo: 'b', turno: 't' });
+    });
+
+    test('un valor nulo deja el campo vacío', () => {
+      const document = page('<div id="c"><input name="sala" value="vieja"></div>');
+      runtime.fillFields(document.getElementById('c'), { sala: null });
+      expect(document.querySelector('input').value).toBe('');
+    });
   });
 
   test('un verbo desconocido no llama a la API', async () => {

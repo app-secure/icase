@@ -54,7 +54,9 @@ describe('GenericFrontendGenerator: páginas con enlaces', () => {
     expect(pageCode).toContain("import MockupResult from '../MockupResult'");
     expect(pageCode).toContain('const { api, can } = useSession()');
     expect(pageCode).toContain('handleAction(event, "rf-03", "crear")');
-    expect(pageCode).toContain('<MockupResult result={result} />');
+    expect(pageCode).toContain('<MockupResult result={result} selected={selected} onSelect={setSelected} />');
+    expect(pageCode).toContain('const [selected, setSelected] = useState(null);');
+    expect(pageCode).toContain('selected, onSelect: setSelected');
     expect(() => transformSync(pageCode, { loader: 'jsx' })).not.toThrow();
     expect(file(files, 'frontend/src/mockupActions.js')).toBeTruthy();
     expect(file(files, 'frontend/src/MockupResult.jsx')).toBeTruthy();
