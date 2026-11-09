@@ -2,7 +2,7 @@
 
 Fuente: `icase-backend/src/infrastructure/prompts/disenador_arquitectura_sistema.md`.
 
-SHA-256 del contenido normalizado: `cb5d4ecb1481b934030625c0fdb0aeb024b144d5df0b7fe34aed3f4a438e5e59`.
+SHA-256 del contenido normalizado: `0a28cac43eee953a675cc96fc2c272936e0f3a0a9d293e25bf261cf4124dbe37`.
 
 Copia generada. Edita la fuente y ejecuta el sincronizador.
 
@@ -25,6 +25,8 @@ No uses conocimiento de otros proyectos ni conviertas una recomendación, ejempl
 
 - Conserva los clientes, aplicaciones, servicios y almacenes definidos en `arquitectura_software`.
 - Cada contenedor de software debe aparecer desplegado dentro de exactamente un nodo apropiado o quedar señalado como `Despliegue por definir`.
+- Distingue el alojamiento de los recursos web de su ejecución en el navegador. Una SPA en un dispositivo no explica desde dónde se distribuye. Si el hosting no está aprobado, indica `Alojamiento web por definir`, sin elegir proveedor ni servidor adicional por defecto. Varios dispositivos pueden ejecutar instancias de la misma aplicación; no son sistemas nuevos.
+- Distingue roles de dispositivos: mostrar administración en el PC de caja no autoriza al cajero a ejercer funciones administrativas. Conserva el control de acceso aprobado y deja la ubicación del administrador por definir si no está especificada.
 - No cambies nombres, tecnologías ni protocolos ya aprobados.
 - No agregues módulos funcionales nuevos.
 - Los dispositivos representados deben corresponder a plataformas o canales exigidos por requisitos aprobados.
@@ -50,6 +52,7 @@ No uses conocimiento de otros proyectos ni conviertas una recomendación, ejempl
 - Incluye al menos los nodos necesarios para alojar clientes, aplicación y persistencia cuando esos elementos existan en la arquitectura aprobada.
 - Usa relaciones de red legibles. Un protocolo o puerto solo puede aparecer si figura en los artefactos autorizados; de lo contrario indica `Canal por definir`.
 - Evita cruces, etiquetas largas y detalles internos propios de un diagrama de clases o componentes.
+- Separa herramientas de aplicación y protocolos: Prisma, Hibernate, TypeORM y otros ORM se ejecutan con el backend; no son protocolos de red ni tecnologías del servidor de base de datos. Ubícalos en el backend o en una nota. Usa el protocolo aprobado en la relación (o `Canal por definir`), sin inventar puertos.
 
 ## Trazabilidad RNF
 
@@ -57,6 +60,7 @@ No uses conocimiento de otros proyectos ni conviertas una recomendación, ejempl
 - Cada entrada usa `rnf_id`, `elemento_id`, `elemento` y `justificacion`; `elemento_id` es el alias exacto usado en PlantUML.
 - Una decisión rechazada o incluida en `restricciones_excluidas` no es un RNF a realizar. No dibujes balanceadores, réplicas ni failover cuando alta disponibilidad fue descartada.
 - Respaldo/recuperación y alta disponibilidad son decisiones diferentes: un respaldo solicitado no autoriza redundancia activa.
+- Cuando se soliciten respaldos, representa la responsabilidad de ejecutar y conservar las copias y la ruta de recuperación; si el mecanismo, destino, frecuencia, retención o tiempos no están aprobados, decláralos por definir. No asumas que un cilindro PostgreSQL satisface por sí solo el respaldo ni inventes un producto o servidor de copias.
 - Copia literalmente identificadores y métricas; no inventes umbrales.
 - Si no hay RNF de infraestructura aplicables, devuelve `trazabilidad_rnf: []`.
 
