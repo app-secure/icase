@@ -14,6 +14,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     const auth = this._frontendAuth(frontend);
     const typedForms = this._frontendModules(frontend).formularios_tipados === true;
     const functional = Array.isArray(contract.operations) && contract.operations.length > 0;
+    const designedUi = functional ? this._designedUiE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) : '';
     const matrix = rf.map((item) => ({
       requisito: item.identificador,
       nombre: item.nombre,
@@ -34,6 +35,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...((contract.associations || []).length ? [{ ruta: 'tests/e2e/associations.spec.js', lenguaje: 'javascript', contenido: this._associationsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth, { screens: this._frontendScreens(frontend), contract }) }] : []),
       ...(functional && typedForms ? [{ ruta: 'tests/e2e/typed-forms.spec.js', lenguaje: 'javascript', contenido: this._typedFormsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
+      ...(designedUi ? [{ ruta: 'tests/e2e/designed-ui.spec.js', lenguaje: 'javascript', contenido: designedUi }] : []),
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)))}] : []),
       ...(contract.eventos_cambios?.experimental ? [{ ruta: 'tests/e2e/change-events.spec.js', lenguaje: 'javascript', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/frontend/change-events.e2e.template'), 'utf8').replace('__SCREENS__', JSON.stringify(this._frontendScreens(frontend))).replace('__SAMPLES__', () => samplePayload.runtimeSource()) }] : []),
@@ -317,6 +319,93 @@ for (const operation of operations) {
 if (auth.habilitada) {
   test('autenticación: sesión, usuarios, revocación, bloqueo y registro', async () => {
     await exerciseAuth(access, { base, adminEmail: process.env.ADMIN_EMAIL, roles });
+  });
+}
+`;
+  }
+
+  /**
+   * Prueba de navegador sobre la interfaz diseñada (el mockup convertido, no el panel de datos): para las pantallas con
+   * enlaces válidos `crear` y `consultar`, rellena los campos del mockup, pulsa el control y comprueba el resultado en
+   * pantalla y que el registro quedó persistido. Devuelve cadena vacía si no hay nada que probar.
+   */
+  _designedUiE2eTest({ screens, contract, auth }) {
+    const operations = contract.operations || [];
+    const cases = [];
+    for (const screen of screens) {
+      for (const action of screen.enlaces?.acciones || []) {
+        const operation = operations.find((item) => item.key === action.operacion);
+        if (!operation || !['crear', 'consultar'].includes(action.verbo)) continue;
+        if (action.verbo === 'crear' && operation.methods && !operation.methods.includes('POST')) continue;
+        const id = `${operation.id}.${action.verbo}`;
+        if (cases.some((item) => item.route === screen.route && item.action === id)) continue;
+        cases.push({ route: screen.route, name: screen.name || screen.nombre || screen.id, verb: action.verbo, action: id, operation: operation.key });
+      }
+    }
+    if (!cases.length) return '';
+    const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
+    return `import { test, expect } from '@playwright/test';
+${session}
+${samplePayload.runtimeSource()}
+const operations = ${JSON.stringify(operations)};
+const cases = ${JSON.stringify(cases.slice(0, 8))};
+
+// Rellena un control del mockup según su tipo, como lo haría una persona.
+async function fillDesigned(control, value) {
+  const tag = await control.evaluate((element) => element.tagName);
+  const type = ((await control.getAttribute('type')) || '').toLowerCase();
+  if (type === 'checkbox') { await control.setChecked(Boolean(value)); return; }
+  if (type === 'radio' || type === 'file') return;
+  if (tag === 'SELECT') { await control.selectOption(String(value)).catch(async () => { await control.selectOption({ index: 1 }); }); return; }
+  if (type === 'date') { await control.fill(String(value).slice(0, 10)); return; }
+  if (type === 'datetime-local') {
+    const date = new Date(value); const pad = (n) => String(n).padStart(2, '0');
+    await control.fill(date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()));
+    return;
+  }
+  await control.fill(String(value));
+}
+
+for (const item of cases.filter((entry) => entry.verb === 'crear')) {
+  test('interfaz diseñada: ' + item.name + ' crea un registro desde el mockup (' + item.action + ')', async ({ page }) => {
+    const operation = operations.find((candidate) => candidate.key === item.operation);
+    const api = makeApi(apiBase, token || null);
+    const cleanups = [];
+    const sample = samplePayload(operation.schema, operation.rules, salted());
+    const body = { ...sample.payload };
+    try {
+      for (const parent of sample.parents) {
+        const parentOperation = operations.find((candidate) => candidate.schema && candidate.schema.title === parent.entidad);
+        body[parent.campo] = parentOperation ? (await createValidRecord(api, operations, parentOperation, cleanups, 1)).id : '1';
+      }
+      const listOf = async () => { const response = await api(operation.collectionPath); return Array.isArray(response.data) ? response.data : (response.data.data || []); };
+      const before = new Set((await listOf()).map((record) => record.id || record._id));
+      await page.goto(item.route);
+      for (const [name, value] of Object.entries(body)) {
+        if (Array.isArray(value) && value.length === 0) continue;
+        const control = page.locator('.mockup-content [name="' + name + '"]').first();
+        if (await control.count()) await fillDesigned(control, value);
+      }
+      await page.locator('.mockup-content [data-accion="' + item.action + '"]').first().click();
+      const banner = page.locator('[data-icase-result]');
+      await expect(banner).toBeVisible();
+      await expect(banner, 'si el mockup no cubre un campo obligatorio, el backend rechaza el registro').toContainText('Registro creado');
+      const created = (await listOf()).filter((record) => !before.has(record.id || record._id));
+      expect(created, 'el formulario del mockup debe crear exactamente un registro').toHaveLength(1);
+      cleanups.unshift(() => api(operation.collectionPath + '/' + (created[0].id || created[0]._id), 'DELETE'));
+    } finally {
+      for (const cleanup of cleanups) { try { await cleanup(); } catch (error) { /* mejor esfuerzo */ } }
+    }
+  });
+}
+
+for (const item of cases.filter((entry) => entry.verb === 'consultar')) {
+  test('interfaz diseñada: ' + item.name + ' consulta registros desde el mockup (' + item.action + ')', async ({ page }) => {
+    await page.goto(item.route);
+    await page.locator('.mockup-content [data-accion="' + item.action + '"]').first().click();
+    const banner = page.locator('[data-icase-result]');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText(/\\d+ registros?/);
   });
 }
 `;

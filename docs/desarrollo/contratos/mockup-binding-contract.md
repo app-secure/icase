@@ -71,6 +71,13 @@ La pantalla generada conserva el aspecto del mockup sin ejecutar nada de lo que 
 - **Enlaces.** Los `<a href>` internos a rutas de la aplicación pasan a `<Link>` de React Router, con su consulta y fragmento. Los externos, `#`, las rutas desconocidas y los que llevan `data-accion` no cambian.
 - **Contenedor y menú.** Las pantallas con mockup usan un contenedor sin ancho máximo en la vista diseñada. Si el mockup trae su propio menú (un `<aside>`, o un `<nav>` con enlaces a al menos dos pantallas de la aplicación), la cabecera oculta su menú de módulos en esa ruta y conserva la marca, la sesión y, para el administrador, el enlace a Usuarios.
 
+## Verificación del frontend y prueba de la interfaz diseñada
+
+- **Consumo de la API.** El archivo de sesión siempre contiene un `fetch` (el inicio de sesión), así que ya no basta: la verificación exige que algún otro archivo del frontend llame a la API.
+- **Resumen por pantalla.** El manifiesto del frontend (`frontend/icase.manifest.json`) añade a cada pantalla con mockup un objeto `enlaces` con los enlaces válidos, inválidos y visuales, los controles sin enlace, cuántos quedaron cableados y las acciones (operación, verbo y control).
+- **Avisos, sin bloquear.** La verificación avisa por pantalla de la vista diseñada que no ejecuta ninguna acción del backend (con los controles sin enlace), de los controles sin enlace que quedan junto a acciones conectadas y de los enlaces inválidos. Es un error que el manifiesto declare enlaces cableados que la página no ejecuta.
+- **Prueba generada.** Para las pantallas con enlaces válidos `crear` y `consultar`, la suite incluye `tests/e2e/designed-ui.spec.js`: abre la pantalla, rellena los campos del mockup por su `name`, pulsa el control y comprueba el resultado en pantalla y que el registro quedó persistido (lo elimina al terminar). Si el mockup no cubre un campo obligatorio, el backend rechaza el registro y la prueba falla: es un defecto real del mockup. Sin enlaces, o si la operación ya no admite POST, no se genera.
+
 ## De los enlaces a los métodos del backend
 
 Al generar el backend, los verbos válidos que declaran los mockups aprobados para un RF determinan los `methods` de su operación: siempre `GET` más los métodos de esos verbos, en el orden GET, POST, PATCH, DELETE. «Consultar reportes» con un único control `consultar` queda solo con `GET`.
@@ -89,7 +96,7 @@ Al generar el backend, los verbos válidos que declaran los mockups aprobados pa
 ## Límites
 
 - Un enlace válido no certifica que la regla de negocio del RF esté implementada: el backend sigue ofreciendo las operaciones genéricas por RF.
-- No hay pruebas con un navegador real. Hay pruebas de la página generada ejecutándose con React en un DOM simulado (crear, consultar, seleccionar, editar y eliminar contra un `fetch` simulado) y la verificación de que el frontend generado se empaqueta.
+- La página diseñada se prueba con React en un DOM simulado (jsdom), tanto contra un `fetch` simulado como contra el backend generado real con almacén en memoria (crear, consultar, seleccionar, editar y eliminar, con el resultado persistido). La prueba de navegador que se genera para el proyecto (`tests/e2e/designed-ui.spec.js`) solo se comprueba como JavaScript válido: no se ha ejecutado con un navegador real.
 - Las filas de ejemplo del mockup no se sustituyen por los registros reales: estos aparecen en la tabla de resultados que se muestra sobre el mockup.
-- No hay comparación visual automática entre el mockup y la aplicación generada: la fidelidad se comprueba a mano.
+- No hay comparación visual automática entre el mockup y la aplicación generada: exigiría un navegador real y una imagen de referencia. La fidelidad se comprueba a mano.
 - Los scripts del mockup nunca se copian, y de los `<link>` solo se conserva el tipo de letra que ya carga la aplicación.
