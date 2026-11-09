@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { ArrowLeft, Files, FileText, Pencil } from "lucide-react";
+import { ArrowLeft, Files, FileText, Pencil, PanelLeft } from "lucide-react";
+import { RequirementsReferencePanel } from "./ApprovedRequirementsSidebar";
 import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
 import RequirementsView from "./RequirementsView";
@@ -368,7 +369,7 @@ export default function ProjectWorkspace({
   const diagramPollingFailures = React.useRef(0);
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
-  const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(false);
+  const [isRequirementsSidebarOpen, setIsRequirementsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 768);
   const [isManagingSources, setIsManagingSources] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
@@ -1327,6 +1328,11 @@ export default function ProjectWorkspace({
 
         {/* Derecha: Ver documento actual + Acceso a Insumos cuando el proyecto ya fue procesado */}
         <div className="flex items-center gap-2.5 min-w-0 z-10">
+          {project.isAnalysisApproved && !isManagingSources && (
+            <button type="button" onClick={() => setIsRequirementsSidebarOpen(open => !open)} aria-expanded={isRequirementsSidebarOpen} aria-controls="approved-requirements-sidebar" title={isRequirementsSidebarOpen ? "Ocultar requisitos aprobados" : "Mostrar requisitos aprobados"} className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15">
+              <PanelLeft size={14} /><span>{isRequirementsSidebarOpen ? "Ocultar requisitos" : "Mostrar requisitos"}</span>
+            </button>
+          )}
           {project.isProcessed && (
             <>
               <button
@@ -1369,7 +1375,11 @@ export default function ProjectWorkspace({
       </header>
 
       {/* CONTENIDO PRINCIPAL A PANTALLA COMPLETA (100% ANCHO) */}
-      <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {project.isAnalysisApproved && !isManagingSources && (
+        <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
+      )}
+      <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
         {isProcessing ? (
           /* Barra Dinámica Minimalista con Porcentaje */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
@@ -1551,6 +1561,7 @@ export default function ProjectWorkspace({
           />
         )}
       </main>
+      </div>
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
 
       {/* Modal sobrio y sencillo para avisos del sistema (sin gradientes ni colores estridentes) */}
