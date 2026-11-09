@@ -133,11 +133,12 @@ class GestionarArtefactosCodigo {
       ...plan.etapas.filter((item) => item.estado === CODE_PHASE_STATES.APPROVED).map((item) => [item.etapa, item.version || 1]),
       ...(diseno.mockups || []).map((item) => [`mockup:${item.nombre_pantalla}`, item.version || 1])
     ]);
-    const input = { contrato_generacion: 'frontend-v15-clean-usuarios-link', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
+    const requisitosAprobados = (requerimientos || []).filter((item) => item.aprobado);
+    const input = { contrato_generacion: 'frontend-v16-rf-identificador', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_frontend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
-    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones, diseno, requerimientos: (requerimientos || []).filter((item) => item.aprobado) }, versionesOrigen });
+    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones, diseno, requerimientos: requisitosAprobados }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({ proyecto_id: proyectoId, tipo: 'codigo_frontend', version: (ultimo?.version || 0) + 1, estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, ...generado });
     if (ultimo?.aprobado) await this.artefactoRepository.actualizar(ultimo.id, { estado: 'desactualizado', aprobado: false });
     await this._actualizarEtapa(plan, 'generacion_frontend', CODE_PHASE_STATES.IN_REVIEW, `Artefacto frontend v${artefacto.version} generado.`);

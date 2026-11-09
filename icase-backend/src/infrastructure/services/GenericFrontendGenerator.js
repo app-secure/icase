@@ -75,8 +75,10 @@ class GenericFrontendGenerator {
       files.push({ruta:'frontend/src/ProcessScreen.jsx',lenguaje:'javascript',contenido:template('ProcessScreen.jsx')});
       const app=files.find(file=>file.ruta==='frontend/src/App.jsx');
       app.contenido="import ProcessScreen from './ProcessScreen';\n"+app.contenido;
+      const userBadge=/<span\b[^>\n]*>\s*\{user\.nombre/;
+      if(!userBadge.test(app.contenido))throw new Error('No se encontró dónde insertar el enlace a procesos en la cabecera');
       app.contenido=app.contenido.replace('<Routes>','<Routes><Route path="/procesos" element={<ProcessScreen/>}/>')
-        .replace('<span>{user.nombre','<Link to="/procesos">Procesos</Link><span>{user.nombre');
+        .replace(userBadge,match=>'<Link to="/procesos" className="nav-link" style={{ color: \'#cbd5e1\', textDecoration: \'none\', fontSize: \'0.9rem\' }}>Procesos</Link>'+match);
       const mobileApp=files.find(file=>file.ruta==='mobile/App.js');
       if(mobileApp){
         files.push({ruta:'mobile/ProcessScreen.js',lenguaje:'javascript',contenido:template('mobile-ProcessScreen.js')});
@@ -103,7 +105,8 @@ class GenericFrontendGenerator {
     if (!screen || isAuthScreen(screen)) return [];
     const screenTokens = tokensOf(screen.nombre || screen.nombre_visible || screen.nombre_pantalla || screen.slug || '');
     const siblings = (screens || []).filter((item) => item !== screen && (item.rf_trazabilidad || item.mockup?.rf_trazabilidad || []).length > 0);
-    const functionalReqs = (requerimientos || []).filter((req) => (req.tipo || 'funcional') !== 'no_funcional' && (req.codigo || req.id_requerimiento));
+    const codeOf = (req) => req.identificador || req.codigo || req.id_requerimiento;
+    const functionalReqs = (requerimientos || []).filter((req) => !['RNF', 'no_funcional'].includes(req.tipo) && codeOf(req));
     if (!siblings.length && !functionalReqs.length) return [];
 
     const tokenMatchScore = (candidateTokens) => {
@@ -119,7 +122,7 @@ class GenericFrontendGenerator {
       .map((req) => {
         const titleScore = tokenMatchScore(tokensOf(req.titulo || req.nombre || '')) * 2;
         const descScore = tokenMatchScore(tokensOf(req.descripcion || ''));
-        return { code: req.codigo || req.id_requerimiento, score: titleScore + descScore };
+        return { code: codeOf(req), score: titleScore + descScore };
       })
       .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score)
@@ -140,9 +143,8 @@ class GenericFrontendGenerator {
       const intersection = matchedReqCodes.filter((code) => sibRfs.includes(code));
       return intersection.length ? intersection.slice(0, 2) : sibRfs.slice(0, 2);
     }
-    if (matchedReqCodes.length) return matchedReqCodes.slice(0, 2);
-    if (scoredSiblings.length) return scoredSiblings[0].rfs.slice(0, 1);
-    return functionalReqs.length ? [functionalReqs[0].codigo || functionalReqs[0].id_requerimiento] : [];
+    // Sin coincidencia por significado la asociación queda pendiente: heredar el RF de otra pantalla sería inventarla.
+    return matchedReqCodes.slice(0, 2);
   }
 
   _app(proyecto, views, imports, routes, first) {

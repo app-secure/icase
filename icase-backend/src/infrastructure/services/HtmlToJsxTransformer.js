@@ -34,6 +34,14 @@ function parseStyleString(styleStr) {
   return obj;
 }
 
+const typeAttr = (node) => (node.attrs || []).find((attr) => attr.name.toLowerCase() === 'type')?.value || '';
+
+/** Un atributo JSX con comillas literales no admite escapes: si el valor las trae (o `\`, `&`, saltos de línea) va como expresión. */
+function attrValue(val) {
+  const json = JSON.stringify(val);
+  return /["\\&\n\r\u2028\u2029]/.test(val) ? `{${json}}` : json;
+}
+
 function nodeToJsx(node) {
   if (node.nodeName === '#text') {
     const val = node.value || '';
@@ -46,16 +54,20 @@ function nodeToJsx(node) {
 
   const attrs = [];
   for (const attr of node.attrs || []) {
-    const name = ATTR_MAP[attr.name.toLowerCase()] || attr.name;
+    let name = ATTR_MAP[attr.name.toLowerCase()] || attr.name;
     const val = attr.value;
     if (name.startsWith('on')) continue; // omitir scripts inline
+    // Un value/checked fijo sin onChange vuelve el campo de solo lectura en React.
+    if (name === 'checked') name = 'defaultChecked';
+    else if (name === 'value' && ['input', 'textarea', 'select'].includes(tag)
+      && !['checkbox', 'radio'].includes(String(typeAttr(node)).toLowerCase())) name = 'defaultValue';
     if (name === 'style') {
       const styleObj = parseStyleString(val);
       attrs.push(`style={${JSON.stringify(styleObj)}}`);
-    } else if (name === 'disabled' || name === 'readOnly' || name === 'required') {
+    } else if (name === 'disabled' || name === 'readOnly' || name === 'required' || name === 'defaultChecked') {
       attrs.push(name);
     } else {
-      attrs.push(`${name}=${JSON.stringify(val)}`);
+      attrs.push(`${name}=${attrValue(val)}`);
     }
   }
 
