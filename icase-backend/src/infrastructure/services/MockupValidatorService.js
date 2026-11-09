@@ -1,3 +1,4 @@
+const HtmlToJsxTransformer = require('./HtmlToJsxTransformer');
 class MockupValidatorService {
   constructor() {
     this.cdnPermitido = 'https://cdn.tailwindcss.com';
@@ -52,7 +53,11 @@ class MockupValidatorService {
         return '<script src="https://cdn.tailwindcss.com"></script>';
       }
       if (content.includes('tailwind.config')) {
-        return `<script>${content}</script>`;
+        // Solo se conserva la configuración como datos, normalizada: cualquier otro código del script se descarta.
+        const config = HtmlToJsxTransformer.parseTailwindConfig(content);
+        if (config) return `<script>tailwind.config = ${JSON.stringify(config).replace(/</g, '\\u003c')}</script>`;
+        advertencias.push('Script de configuración de Tailwind no admitido eliminado');
+        return '';
       }
       advertencias.push('Script peligroso o no autorizado eliminado');
       return '';
