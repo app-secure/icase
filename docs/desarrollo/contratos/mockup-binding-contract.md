@@ -1,6 +1,6 @@
 # Contrato de enlaces de mockups
 
-Cada botón o formulario de un mockup puede declarar qué operación del backend ejecuta. El modelo escribe el enlace al generar el mockup y un validador determinista lo comprueba. Este contrato **declara y valida** los enlaces. Todavía no los conecta al código generado: el transformador HTML a JSX sigue sin cablearlos.
+Cada botón o formulario de un mockup puede declarar qué operación del backend ejecuta. El modelo escribe el enlace al generar el mockup y un validador determinista lo comprueba. Este contrato **declara, valida y cablea** los enlaces: al generar el frontend, los controles con un enlace válido llaman a la operación del backend.
 
 ## Sintaxis
 
@@ -42,4 +42,25 @@ El resultado se guarda en `enlaces` de cada mockup, con los estados `valido`, `i
 
 Un mockup que no declara ningún `data-accion` se considera anterior al contrato y no recibe avisos de "sin enlace". Los enlaces se revalidan al generar, al reparar y al editar el código a mano.
 
-Un enlace válido no demuestra que la interfaz generada ejecute la operación. Esa conexión corresponde a una fase posterior.
+## Qué hace el frontend generado
+
+El transformador de HTML a JSX añade un manejador `onClick` a cada control con `data-accion="RF-xx.verbo"` cuyo RF es uno de los aprobados (o de los de la pantalla). Un control sin enlace válido (sin `data-accion`, `ui`, inválido o con un RF no aprobado) queda inerte, igual que antes. Los eventos originales del mockup (`onclick`, etc.) se siguen eliminando.
+
+| Verbo | Qué ejecuta | Resultado en la pantalla |
+| --- | --- | --- |
+| `crear` | POST con los campos `name` del formulario del control (los vacíos se omiten; los `number` y `checkbox` se convierten). | «Registro creado» o el error del backend. |
+| `consultar` | GET con `limit=20`. Si hay un campo `search` o `buscar`, se envía como `search`. | Número de registros y una tabla genérica con ellos. |
+| `editar` | PATCH sobre el registro indicado con `data-id`, con los campos del formulario. | «Registro actualizado» o el error. |
+| `eliminar` | DELETE sobre el registro indicado con `data-id`, previa confirmación. | «Registro eliminado» o el error. |
+
+`editar` y `eliminar` necesitan saber qué registro modificar: lo toman de `data-id` en el control o en un ancestro (por ejemplo, la fila). Sin él muestran un aviso y no llaman a la API. El prompt todavía no pide `data-id`, así que en los mockups generados hoy estos dos verbos solo avisan.
+
+Los permisos se aplican con la sesión: si el rol no tiene el método, el control muestra «No tienes permiso para esta acción.» y no llama a la API. El resultado se muestra encima del mockup, en la misma pantalla.
+
+La página solo importa el runtime (`mockupActions.js` y `MockupResult.jsx`) cuando tiene enlaces válidos. El panel «Gestión de Datos» se conserva como herramienta auxiliar.
+
+## Límites
+
+- Un enlace válido no certifica que la regla de negocio del RF esté implementada: el backend sigue ofreciendo las operaciones genéricas por RF.
+- No hay pruebas con navegador sobre el mockup real todavía. Hay pruebas del runtime en un DOM simulado y la verificación de que el frontend generado se empaqueta.
+- Los estilos, scripts y la navegación propios del mockup se siguen perdiendo en la conversión.

@@ -49,6 +49,12 @@ class GenericFrontendGenerator {
     ];
     const imports = [];
     const routes = [];
+    // Operaciones a las que un data-accion del mockup puede cablearse: los RF aprobados y los de las pantallas.
+    const allowedOperations = new Set([
+      ...(requerimientos || []).filter((req) => String(req.tipo || 'RF').toUpperCase() === 'RF' && req.identificador && req.aprobado !== false).map((req) => slug(req.identificador)),
+      ...views.flatMap((view) => view.operations)
+    ]);
+    let anyWired = false;
     for (const view of views) {
       if (auth && (view.route === '/usuarios' || view.id === 'usuarios' || view.name?.toLowerCase() === 'usuarios')) continue;
       const name = component(view.id);
@@ -57,14 +63,22 @@ class GenericFrontendGenerator {
       const screen = screens.find((item) => this._view(item, screens, requerimientos).id === view.id);
       const reference = this._plainText(screen?.mockup?.preview_code || '').slice(0, 600);
       const mockupCode = screen?.mockup?.preview_code;
-      const jsxBody = mockupCode ? HtmlToJsxTransformer.transform(mockupCode) : '';
+      const jsxBody = mockupCode ? HtmlToJsxTransformer.transform(mockupCode, { operaciones: allowedOperations }) : '';
+      const wired = jsxBody.includes('handleAction(');
+      anyWired = anyWired || wired;
 
       files.push({
         ruta: `frontend/src/pages/${view.id}.jsx`,
         lenguaje: 'javascript',
-        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\nconst referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n  return (\n    <main className="page-container screen" data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>⚙️ Gestión de Datos (API)</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content">${jsxBody}</div>\n        </div>\n      ) : (\n        <OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
+        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${wired ? "  const [result, setResult] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, onResult: setResult });\n" : ''}  return (\n    <main className="page-container screen" data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>⚙️ Gestión de Datos (API)</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content">${wired ? '<MockupResult result={result} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        <OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
       });
       if (screen?.mockup?.preview_code) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: screen.mockup.preview_code });
+    }
+    if (anyWired) {
+      files.push(
+        { ruta: 'frontend/src/mockupActions.js', lenguaje: 'javascript', contenido: template('mockup-actions.js') },
+        { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') }
+      );
     }
     const first = views[0]?.route || '/';
     files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes) : this._app(proyecto, views, imports, routes, first) });

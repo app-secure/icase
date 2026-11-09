@@ -42,7 +42,20 @@ function attrValue(val) {
   return /["\\&\n\r\u2028\u2029]/.test(val) ? `{${json}}` : json;
 }
 
-function nodeToJsx(node) {
+const ACTION = /^(RF-\d+)\.(consultar|crear|editar|eliminar)$/i;
+
+/** `onClick` solo para un `data-accion` válido cuya operación existe; cualquier otro control queda inerte. */
+function actionHandler(node, context) {
+  if (!context?.operaciones?.size) return '';
+  const declared = (node.attrs || []).find((attr) => attr.name === 'data-accion')?.value.trim() || '';
+  const match = ACTION.exec(declared);
+  const operation = match && match[1].toLowerCase();
+  return match && context.operaciones.has(operation)
+    ? ` onClick={(event) => handleAction(event, ${JSON.stringify(operation)}, ${JSON.stringify(match[2].toLowerCase())})}`
+    : '';
+}
+
+function nodeToJsx(node, context = null) {
   if (node.nodeName === '#text') {
     const val = node.value || '';
     return val.replace(/([{}])/g, '{"$1"}').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -71,19 +84,21 @@ function nodeToJsx(node) {
     }
   }
 
-  const attrStr = attrs.length ? ' ' + attrs.join(' ') : '';
+  const attrStr = (attrs.length ? ' ' + attrs.join(' ') : '') + actionHandler(node, context);
   const isVoid = VOID_ELEMENTS.has(tag);
   if (isVoid) {
     return `<${tag}${attrStr} />`;
   }
 
-  const children = (node.childNodes || []).map(nodeToJsx).join('');
+  const children = (node.childNodes || []).map((child) => nodeToJsx(child, context)).join('');
   return `<${tag}${attrStr}>${children}</${tag}>`;
 }
 
 class HtmlToJsxTransformer {
-  static transform(html) {
+  /** `operaciones`: claves de operación (p. ej. "rf-03") a las que se pueden cablear los `data-accion`. Sin ellas nada se cablea. */
+  static transform(html, { operaciones = null } = {}) {
     if (!html || typeof html !== 'string') return '';
+    const context = operaciones ? { operaciones: new Set(operaciones) } : null;
     const doc = parse(html);
     const findBody = (n) => {
       if (n.tagName === 'body') return n;
@@ -94,7 +109,7 @@ class HtmlToJsxTransformer {
       return null;
     };
     const body = findBody(doc) || doc;
-    return (body.childNodes || []).map(nodeToJsx).join('').trim();
+    return (body.childNodes || []).map((child) => nodeToJsx(child, context)).join('').trim();
   }
 }
 
