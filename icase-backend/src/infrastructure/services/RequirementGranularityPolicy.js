@@ -11,6 +11,8 @@ Ejemplos de frontera, solo ilustrativos, NUNCA funciones que debas añadir:
 - Consultar una cola con antigüedad y estado: UN objetivo. Consultarla y modificar la disponibilidad de recursos: DOS objetivos.
 - Leer un código y validar la operación que identifica: UN objetivo; no dos requisitos técnicos.
 Los criterios detallan cómo aceptar el resultado, no sirven para esconder operaciones independientes bajo un título «Gestión de ...».
+Una enumeración con verbos de resultados distintos —consultar y modificar, tomar y validar, comprar y acumular, cobrar y cerrar, revisar y cambiar y gestionar— son necesidades y objetivos separados, aunque compartan cita, actor o pantalla. Precios, disponibilidad, estados, filtros, medios alternativos y comprobar un saldo para poder cobrar siguen siendo detalles de una sola operación.
+Una prohibición o exclusividad (no debe, sin que, solamente, salvo que) es regla de negocio vinculada, no una frase más del mismo resultado. Si la excepción autoriza otra operación, esa operación es una necesidad propia. No omitas autenticación, permisos, tecnologías confirmadas o condicionadas, exclusiones ni preguntas de umbral por haber descrito ya la función principal.
 No impongas un máximo o mínimo de requisitos. No conviertas dispositivos, plataformas o pasos manuales externos en funciones.
 Autenticar usuarios o autorizar operaciones explícitamente solicitadas son comportamientos RF; el mecanismo tecnológico es restricción y las políticas de acceso son reglas vinculadas, sin sustituir el comportamiento por esas categorías.
 No completes resultados con reglas ausentes: periodicidad de cierres, fórmulas de puntos, equivalencias entre paquetes y saldo o relación entre carga y latencia deben estar sustentadas o quedar pendientes.`;

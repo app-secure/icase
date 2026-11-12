@@ -259,8 +259,21 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
       if (repairDiagnostic.estado !== 'fallo_proveedor') repairDiagnostic.estado = !patch ? 'sin_respuesta_utilizable' : applied.size === targets.length ? 'completada' : 'parcial_o_invalida';
       report = this.inspectInventory(repaired, input, analysisOnly);
     }
+    if (!approvedAnalysis && report.valid.length) {
+      const identifiers = require('../../core/services/AnalysisIdentifiers')([report.valid, report.invalid]);
+      const refined = require('../../core/services/NeedGranularity').refine(report.valid, input, identifiers);
+      const checked = this.inspectInventory(refined, input, analysisOnly);
+      report = { valid: checked.valid, invalid: [...report.invalid, ...checked.invalid] };
+    }
     if (analysisOnly && !report.invalid.length) await Execution.validated('clasificacion_consolidacion', { ...extraction, inventario_necesidades: report.valid });
     const comprehensive = analysisOnly && semanticReview ? await require('../../core/services/InitialAnalysisQuality').review({ inventory: report.valid, reserved: report.invalid, actors: require('../../core/services/RequirementActors').normalizeActors(extraction.actores, input), summary: extraction.sintesis || {}, input, request: (stage, text) => ask(stage, text), inspect: (items, text) => this.inspectInventory(items, text) }) : null;
+    if (comprehensive?.inventario?.length) {
+      const identifiers = require('../../core/services/AnalysisIdentifiers')([comprehensive.inventario, report.invalid]);
+      const refined = require('../../core/services/NeedGranularity').refine(comprehensive.inventario, input, identifiers);
+      const checked = this.inspectInventory(refined, input, true);
+      comprehensive.inventario = checked.valid;
+      report = { valid: checked.valid, invalid: [...report.invalid, ...checked.invalid.filter(item => !report.invalid.some(old => old.id === item.id && old.indice === item.indice))] };
+    }
     const inventoryReview = comprehensive ? { inventory: comprehensive.inventario, diagnostic: comprehensive.diagnostic } : semanticReview && !approvedAnalysis ? await require('../../core/services/RequirementInventoryReview').review({
       inventory: report.valid, input, request: text => ask('revision_inventario', text), inspect: (items, text) => this.inspectInventory(items, text)
     }) : { inventory: report.valid, diagnostic: { estado: 'deshabilitada_solo_borrador', candidatos: [] } };
@@ -269,6 +282,7 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
       return located.valido ? { ...item, evidencias: located.valid, evidencia: located.valid[0].texto } : item;
     }) : inventoryReview.inventory;
     const actors = approvedAnalysis ? structuredClone(approvedAnalysis.actores || []) : require('../../core/services/RequirementActors').normalizeActors(extraction.actores, input);
+    if (comprehensive?.actores) comprehensive.actores = comprehensive.actores.filter(actor => !require('../../core/services/RequirementActors').interviewSpeakerOnly(actor.nombre, input));
     if (analysisOnly) return {
       tipo: 'analisis_inicial', inventario: inventory, actores: comprehensive?.actores || actors, sintesis: comprehensive?.sintesis || extraction.sintesis || {},
       integridad_extraccion: { errores: extractionContractErrors, estado: extractionContractErrors.length ? 'incompleta' : 'valida' },

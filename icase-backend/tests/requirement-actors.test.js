@@ -22,6 +22,21 @@ test('rechaza renombrar a un nombre existente y fusionar consigo mismo', () => {
   expect(() => changeActor(actors, { accion: 'editar_actor', id: 'A', cambios: { nombre: 'administrador' } })).toThrow();
   expect(() => changeActor(actors, { accion: 'fusionar_actor', id: 'A', destino_id: 'A' })).toThrow();
 });
+test('quien solo habla en la entrevista no queda como actor del sistema', () => {
+  const input = 'Gerente:\nEl cliente debe poder reservar una mesa.\nAnalista:\nEl mesero podrá tomar pedidos. El administrador puede cambiar precios.';
+  const actors = normalizeActors([
+    { nombre: 'Gerente', origen: 'explicito', estado: 'confirmado', evidencia: 'Gerente:' },
+    { nombre: 'Analista', origen: 'explicito', estado: 'confirmado', evidencia: 'Analista:' },
+    { nombre: 'Cliente', origen: 'explicito', estado: 'confirmado', evidencia: 'El cliente debe poder reservar una mesa.' },
+    { nombre: 'Administrador', origen: 'explicito', estado: 'confirmado', evidencia: 'El administrador puede cambiar precios.' }
+  ], input);
+  expect(actors.map(actor => actor.nombre)).toEqual(['Cliente', 'Administrador']);
+});
+test('un entrevistado que también usa el sistema se conserva', () => {
+  const input = 'Gerente:\nEl gerente debe poder aprobar los cierres de caja.';
+  const actors = normalizeActors([{ nombre: 'Gerente', origen: 'explicito', estado: 'confirmado', evidencia: 'El gerente debe poder aprobar los cierres de caja.' }], input);
+  expect(actors.map(actor => actor.nombre)).toEqual(['Gerente']);
+});
 test('normaliza variantes sin fusionar nombres distintos y deja inferidos pendientes', () => {
   const actors = normalizeActors([
     { nombre: 'Administrador', origen: 'inferido', estado: 'confirmado' },

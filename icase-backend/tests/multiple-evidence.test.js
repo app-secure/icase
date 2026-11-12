@@ -13,6 +13,12 @@ test('propuesta y confirmación son fragmentos separados con posiciones reales y
   expect(inspectEvidence({ evidencias: [{ texto: '¿Solo el supervisor autoriza? Sí, únicamente él.' }] }, input).valido).toBe(false);
 });
 
+test('acepta el hablante o la puntuación final sobrante solo si el resto es literal y único', () => {
+  const input = '[Fuente enriquecida]\nArchivo: entrevista_gerente.txt\n[contenido_original]\nGerente:\nSí. También debe poder reservar una mesa completa o una silla, comprar paquetes.\nAnalista:\nTambién podrán marcar un plato como agotado para que deje de aparecer.';
+  expect(inspectEvidence({ evidencias: [{ texto: 'Gerente: También debe poder reservar una mesa completa o una silla.', fuente: 'entrevista_gerente.txt' }] }, input).valido).toBe(true);
+  expect(inspectEvidence({ evidencias: [{ texto: 'y podrán marcar un plato como agotado.', fuente: 'entrevista_gerente.txt' }] }, input).valido).toBe(true);
+  expect(inspectEvidence({ evidencias: [{ texto: 'Analista: ... comprar paquetes.', fuente: 'entrevista_gerente.txt' }] }, input).valido).toBe(false);
+});
 test('no acepta fuente ajena, elipsis, paráfrasis ni fragmentos ambiguos', () => {
   expect(inspectEvidence({ evidencias: [{ texto: 'Confirmado', fuente: 'otro.txt' }] }, 'Confirmado').valido).toBe(false);
   for (const texto of ['Cita [...] completa', 'Texto reformulado']) expect(inspectEvidence({ evidencias: [{ texto }] }, 'Cita original completa').valido).toBe(false);

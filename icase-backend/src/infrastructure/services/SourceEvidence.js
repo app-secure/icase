@@ -41,6 +41,25 @@ function inspectEvidence(value, input) {
         locations.push({ texto: match[0], fuente: section.fuente, inicio: section.start + match.index, fin: section.start + match.index + match[0].length });
       }
     }
+    if (!locations.length && !/(?:\.{3}|…)/u.test(quote)) {
+      // El hablante, una conjunción inicial o el punto final no forman parte de la oración
+      // citada. Se acepta solo si el resto es un fragmento literal y único.
+      const withoutSpeaker = quote.replace(/^[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{1,24}:\s+/u, '').trim();
+      const withoutPunctuation = (withoutSpeaker || quote).replace(/[.,;:]+$/u, '').trim();
+      const withoutConjunction = withoutPunctuation.replace(/^(?:y|e|o)\s+/iu, '').trim();
+      for (const candidate of [withoutSpeaker, withoutPunctuation, withoutConjunction]) {
+        if (!candidate || candidate === quote || candidate.split(/\s+/).length < 5) continue;
+        const relaxed = candidate.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+        const hits = [];
+        for (const section of sections) {
+          if (entry?.fuente && entry.fuente !== section.fuente) continue;
+          for (const match of text.slice(section.start, section.end).matchAll(new RegExp(relaxed, 'giu'))) {
+            hits.push({ texto: match[0], fuente: section.fuente, inicio: section.start + match.index, fin: section.start + match.index + match[0].length });
+          }
+        }
+        if (hits.length === 1) { locations.push(hits[0]); break; }
+      }
+    }
     if (!locations.length) {
       // Recuperación conservadora de oraciones concatenadas: solo citas extensas,
       // literales, únicas, ordenadas y del mismo contenido original. Nunca buscar

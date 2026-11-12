@@ -1,11 +1,20 @@
 const { inspectEvidence } = require('../../infrastructure/services/SourceEvidence');
 const key = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
 
+function interviewSpeakerOnly(name, input) {
+  const nombre = String(name || '').trim();
+  if (nombre.length < 3) return false;
+  const escaped = nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const source = String(input || '');
+  if (!new RegExp(`(?:^|\\n)\\s*${escaped}\\s*:`, 'i').test(source)) return false;
+  const body = source.replace(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*:`, 'gi'), '\n');
+  return !new RegExp(`\\b(?:el|la|los|las)\\s+${escaped}\\b|\\b${escaped}\\s+(?:debe|puede|podr[aá]n?)\\b`, 'i').test(body);
+}
 function normalizeActors(candidates, input) {
   const actors = [];
   for (const item of Array.isArray(candidates) ? candidates : []) {
     const nombre = String(item?.nombre || '').trim();
-    if (!nombre) continue;
+    if (!nombre || interviewSpeakerOnly(nombre, input)) continue;
     const evidence = inspectEvidence(item, input);
     const existing = actors.find(actor => key(actor.nombre) === key(nombre));
     if (existing) {
@@ -23,7 +32,7 @@ function normalizeActors(candidates, input) {
   return actors;
 }
 
-const actorInstructions = `Incluye actores como arreglo de objetos con nombre, descripcion (responsabilidad concreta del proyecto, nunca texto de plantilla), tipo (persona o sistema_externo), alias (arreglo), origen (explicito o inferido), estado (confirmado o pendiente) y evidencias (arreglo de fragmentos literales con texto y fuente). Extrae solo quienes interactúan con el sistema; no conviertas dispositivos, entidades, entrevistadores ni interesados sin interacción en actores. Un actor inferido queda pendiente. No fusiones nombres distintos por asumir equivalencia. Un actor no implica una clase, pantalla ni permiso nuevo.`;
+const actorInstructions = `Incluye actores como arreglo de objetos con nombre, descripcion (responsabilidad concreta del proyecto, nunca texto de plantilla), tipo (persona o sistema_externo), alias (arreglo), origen (explicito o inferido), estado (confirmado o pendiente) y evidencias (arreglo de fragmentos literales con texto y fuente). Extrae solo quienes interactúan con el sistema. Quien solo habla en la entrevista (gerente, analista, entrevistador u otro rótulo de turno) no es actor, aunque sus frases describan el sistema. No conviertas dispositivos, entidades ni interesados sin interacción en actores. Un actor inferido queda pendiente. No fusiones nombres distintos por asumir equivalencia. Un actor no implica una clase, pantalla ni permiso nuevo.`;
 function actorCatalog(audit, requirements) {
   if (audit.actores?.length) return structuredClone(audit.actores);
   const names = [...new Map(requirements.flatMap(r => r.actores || []).map(name => [key(name), name])).values()];
@@ -63,4 +72,4 @@ function changeActor(catalog, body) {
   }
   return { actors, replacements };
 }
-module.exports = { normalizeActors, actorInstructions, key, actorCatalog, changeActor };
+module.exports = { normalizeActors, actorInstructions, key, actorCatalog, changeActor, interviewSpeakerOnly };
