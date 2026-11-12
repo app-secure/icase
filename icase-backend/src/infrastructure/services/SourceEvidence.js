@@ -60,7 +60,13 @@ function inspectEvidence(value, input) {
       if (candidates.length === 1) valid.push(...candidates[0]);
       else invalid.push({ texto: quote, fuente: entry?.fuente, codigo: candidates.length > 1 ? 'evidencia_ambigua' : new RegExp(pattern, 'iu').test(text) ? 'evidencia_fuera_del_contenido_original' : 'evidencia_no_localizada' });
     }
-    else if (locations.length > 1) invalid.push({ texto: quote, codigo: 'evidencia_ambigua' });
+    else if (locations.length > 1) invalid.push({ texto: quote, fuente: entry?.fuente, codigo: 'evidencia_ambigua', total_coincidencias: locations.length,
+      candidatos: locations.slice(0, 8).map(location => {
+        const section = sections.find(s => s.fuente === location.fuente && location.inicio >= s.start && location.fin <= s.end);
+        const inicio = Math.max(section.start, location.inicio - 180);
+        const fin = Math.min(section.end, location.fin + 180);
+        return { ...location, contexto: text.slice(inicio, fin), contexto_inicio: inicio, contexto_fin: fin };
+      }) });
     else valid.push(locations[0]);
   }
   if (fragmented && valid.length > 1 && new Set(valid.map(item => item.fuente)).size > 1) {

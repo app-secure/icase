@@ -5,7 +5,7 @@ const AiModelConfig = require('./AiModelConfig');
 
 class MockupIaService {
   constructor() {
-    this.provider = process.env.MOCKUP_IA_PROVIDER || 'gemini';
+    this.provider = process.env.MOCKUP_IA_PROVIDER || 'auto';
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
@@ -120,7 +120,7 @@ class MockupIaService {
 
   _ordenProveedores() {
     if (!this.provider || this.provider === 'auto') return this.providerOrder;
-    return [this.provider, ...this.providerOrder.filter(p => p !== this.provider)];
+    return [this.provider];
   }
 
   _estimarTokens(texto) {
@@ -244,7 +244,7 @@ class MockupIaService {
       model: modelo,
       messages: [{ role: 'user', content: prompt }],
       max_tokens: maxTokens,
-      response_format: { type: 'json_object' },
+      ...(proveedor === 'openrouter' ? await require('./OpenRouterPolicy').parameters(modelo) : { response_format: { type: 'json_object' } }),
       temperature: 0.3
     }, { headers, timeout: 90000 });
     const choice = res.data?.choices?.[0];

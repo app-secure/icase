@@ -1,5 +1,15 @@
 # Generación resiliente de requisitos
 
+## Orden global de proveedores de texto
+
+`AI_PROVIDER_ORDER=openrouter,gemini,groq` controla el orden automático de requisitos, análisis, diagramas, código y demás solicitudes de texto. Los mockups usan ese mismo orden con `MOCKUP_IA_PROVIDER=auto`. Una selección explícita no cambia de proveedor. Transcripción y extracción especializada conservan sus adaptadores.
+
+`OPENROUTER_MODELS=nvidia/nemotron-3.5-super-vl:free` reutiliza el modelo documentado en `agente-proyectos`. La clave se configura únicamente mediante `OPENROUTER_API_KEY` en el backend; no se copia al frontend ni se registra en documentación. No se ha acreditado que la credencial local sea la misma del otro proyecto.
+
+OpenRouter verifica el catálogo y precios de entrada/salida cero antes de enviar contenido. Si el modelo no admite `response_format`, se solicita JSON mediante instrucciones y se valida localmente; no se confunde transporte válido con calidad semántica. Los endpoints gratuitos pueden tener condiciones de privacidad distintas: no enviar información confidencial sin revisarlas.
+
+El orden global sustituye las preferencias históricas descritas más abajo: ya no se adelanta Gemini por longitud ni se adelanta el último proveedor que respondió. Los contratos y checkpoints de requisitos permanecen separados de los adaptadores de otros artefactos.
+
 ## Activación gradual
 
 Este flujo es exclusivo de requisitos. Diagramas, mockups y código mantienen sus adaptadores y contratos anteriores. Está desactivado por defecto. En el `.env` del backend:

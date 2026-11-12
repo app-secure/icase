@@ -73,7 +73,7 @@ test('no altera los timeouts ni el comportamiento fuera de la generación de req
   await expect(new Budget().post('https://example.test', {}, { timeout: 60000 })).resolves.toBe('ok');
   expect(post.mock.calls[0][2]).toEqual({ timeout: 60000 });
 });
-test('un proveedor que respondió bien se intenta primero en las siguientes etapas', async () => {
+test('las siguientes etapas conservan el orden configurado aunque responda un respaldo', async () => {
   const service = new ModelosIaService();
   service.providerOrder = ['gemini', 'openai'];
   const input = 'El usuario consulta registros.';
@@ -82,7 +82,7 @@ test('un proveedor que respondió bien se intenta primero en las siguientes etap
     .mockResolvedValueOnce({ inventario_necesidades: inventory })
     .mockResolvedValueOnce({ requerimientos: [{ identificador: 'RF-01', tipo: 'RF', nombre: 'Consulta', descripcion: input, evidencia: input, necesidades_origen: ['N-01'] }] }).mockResolvedValueOnce({ hallazgos: [] });
   const result = await service.procesar({ objetivo: 'requisitos', provider: 'auto', insumo_bruto: input });
-  expect(service._ejecutarProveedor.mock.calls.map((call) => call[0])).toEqual(['gemini', 'openai', 'openai', 'openai']);
+  expect(service._ejecutarProveedor.mock.calls.map((call) => call[0])).toEqual(['gemini', 'openai', 'gemini', 'gemini']);
   expect(result.auditoria_requisitos.metricas_ejecucion.etapas.map((item) => item.etapa)).toEqual(['clasificacion_consolidacion', 'redaccion_lote_1', 'revision_semantica']);
 });
 

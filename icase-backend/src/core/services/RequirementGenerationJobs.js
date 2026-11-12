@@ -15,7 +15,7 @@ class RequirementGenerationJobs {
     const canonical = require('../../infrastructure/services/RequirementSourceContext').build(sources).content || project.insumo_bruto;
     const relevant = project.version_flujo_analisis === 2 ? { insumo_bruto: canonical, borrador: project.analisis_inicial_borrador_id, aprobado: project.analisis_inicial_aprobado_id } : project;
     const relevantSources = project.version_flujo_analisis === 2 && operation === 'redaccion_requisitos' ? sources.map(s => ({ id: s.id || s._id, texto_transcrito: s.texto_transcrito, nombre_archivo: s.nombre_archivo })) : sources;
-    return Execution.hash({ projectId, userId, operation, version: 'requirements-job-v7-initial-quality', project: relevant, requirements: sorted(requirements), sources: sorted(relevantSources) });
+    return Execution.hash({ projectId, userId, operation, version: 'requirements-job-v8-grounded-summary', project: relevant, requirements: sorted(requirements), sources: sorted(relevantSources) });
   }
   public(job) {
     if (!job) return null;

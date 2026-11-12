@@ -14,7 +14,7 @@ module.exports = {
   async request(stage, prompt, operation) {
     const ctx = contexts.getStore();
     if (!ctx) return operation();
-    const key = hash({ version: 'requirements-stages-v6-initial-quality', ...(ctx.cacheNamespace ? { namespace: ctx.cacheNamespace } : {}), stage, prompt });
+    const key = hash({ version: 'requirements-stages-v7-grounded-summary', ...(ctx.cacheNamespace ? { namespace: ctx.cacheNamespace } : {}), stage, prompt });
     ctx.stageKeys ||= {};
     ctx.stageKeys[stage] = key;
     const cached = ctx.checkpoints[key];

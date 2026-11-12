@@ -51,14 +51,13 @@ class RequirementProviderRouter {
       } catch { return false; }
     }
     const entry = this.catalogCache.data.find(m => m.id === model.id);
-    return Boolean(entry && String(model.id).endsWith(':free') && Number(entry.pricing?.prompt) === 0 && Number(entry.pricing?.completion) === 0 &&
-      (entry.supported_parameters || []).includes('response_format'));
+    return Boolean(entry && String(model.id).endsWith(':free') && Number(entry.pricing?.prompt) === 0 && Number(entry.pricing?.completion) === 0);
   }
   async status() {
     const providers = [];
-    for (const provider of catalog.order) {
+    for (const provider of Object.keys(catalog.models)) {
       const models = [];
-      for (const model of catalog.models[provider]) {
+      for (const model of catalog.models[provider] || []) {
         const configured = provider === 'ollama' ? this.env.OLLAMA_ENABLED === 'true' : Boolean(this.key(provider));
         const eligible = configured && await this.eligible(provider, model);
         const blocked = eligible ? await this.failures.blocked(provider, model.id, this.key(provider)) : null;
@@ -80,8 +79,9 @@ class RequirementProviderRouter {
     const auto = provider === 'auto';
     const execution = Execution.current();
     const preferred = execution ? execution.preferredProvider : this.preferred;
-    const order = auto ? [...new Set([preferred, ...catalog.order].filter(Boolean))] : [provider];
+    const order = auto ? catalog.order : [provider];
     const events = [];
+    let incompleteExtraction = null;
     for (const candidate of order) {
       let calls = 0;
       for (const model of catalog.models[candidate] || []) {
@@ -123,7 +123,9 @@ class RequirementProviderRouter {
               throw Object.assign(new Error('JSON inválido'), { code: 'INVALID_AI_JSON', usage: response.usage, finishReason: response.finishReason });
             }
             if (!value || Array.isArray(value) || typeof value !== 'object') throw Object.assign(new Error('Se esperaba JSON objeto.'), { code: 'INVALID_AI_JSON' });
-            if ((schemaFor(stage).required || []).some(field => !Array.isArray(value[field]))) throw Object.assign(new Error('Respuesta sin contrato de etapa.'), { code: 'INVALID_AI_JSON' });
+            const contractErrors = schemaFor.validate(stage, value);
+            if (contractErrors.length && stage === 'clasificacion_consolidacion' && Array.isArray(value.inventario_necesidades) && value.inventario_necesidades.length) incompleteExtraction = { ...value, integridad_transporte: { estado: 'incompleta', errores: contractErrors } };
+            if (contractErrors.length) throw Object.assign(new Error('Respuesta sin contrato de etapa.'), { code: 'INVALID_AI_JSON', contractErrors, usage: response.usage, finishReason: response.finishReason });
             await this.failures.clearTransient(candidate, model.id);
             if (probe) await this.failures.repo.remove(this.failures.id(candidate, model.id, 'model'));
             const metadata = { provider: candidate, model: response.model || model.id, duration_ms: Date.now() - start, usage: response.usage || null, cambios_ruta: events };
@@ -153,7 +155,7 @@ class RequirementProviderRouter {
     const ctx = Execution.current();
     this.lastEvents = events;
     if (ctx) { ctx.failures = events; await ctx.progress({ cambios_ruta: events }); }
-    return null;
+    return incompleteExtraction;
   }
   async call(provider, model, prompt, stage = 'generacion') {
     const key = this.key(provider);
@@ -188,11 +190,11 @@ class RequirementProviderRouter {
     const url = provider === 'groq' ? 'https://api.groq.com/openai/v1/chat/completions' : 'https://openrouter.ai/api/v1/chat/completions';
     const res = await this.budget.post(url, { model: model.id, stream: false, temperature: 0.2, max_tokens: model.output,
       messages: [{ role: 'system', content: 'Devuelve exclusivamente el objeto JSON solicitado.' }, { role: 'user', content: prompt }],
-      response_format: provider === 'groq' ? { type: 'json_schema', json_schema: { name: 'requirements_stage', strict: false, schema: schemaFor(stage) } } : { type: 'json_object' },
+      ...(provider === 'groq' ? { response_format: { type: 'json_schema', json_schema: { name: 'requirements_stage', strict: false, schema: schemaFor(stage) } } } : (this.catalogCache?.data.find(m => m.id === model.id)?.supported_parameters || []).includes('response_format') ? { response_format: { type: 'json_object' } } : {}),
       ...(provider === 'openrouter' ? { provider: { require_parameters: true, max_price: { prompt: 0, completion: 0 } } } : {})
     }, { headers: { Authorization: `Bearer ${key}` }, timeout: 35000 });
     if (res.data.choices?.[0]?.finish_reason === 'length') throw Object.assign(new Error('JSON truncado'), { code: 'INVALID_AI_JSON' });
-    return { text: res.data.choices?.[0]?.message?.content || '', model: res.data.model || model.id, usage: res.data.usage };
+    return { text: res.data.choices?.[0]?.message?.content || '', model: res.data.model || model.id, usage: { input: res.data.usage?.prompt_tokens, output: res.data.usage?.completion_tokens }, finishReason: res.data.choices?.[0]?.finish_reason };
   }
 }
 module.exports = RequirementProviderRouter;

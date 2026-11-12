@@ -58,13 +58,13 @@ test('selección explícita no usa otros proveedores y pago/no confirmado no se 
 test('OpenRouter solo acepta precio cero verificado, no versiones pagadas', async () => {
   const service = router({ OPENROUTER_API_KEY: 'test' });
   service.transport.get.mockResolvedValue({ data: { data: [
-    { id: 'qwen/qwen3.6-plus:free', pricing: { prompt: '0', completion: '0' }, supported_parameters: ['response_format'] },
+    { id: 'nvidia/nemotron-3.5-super-vl:free', pricing: { prompt: '0', completion: '0' }, supported_parameters: [] },
     { id: 'openai/gpt-oss-120b:free', pricing: { prompt: '1', completion: '1' }, supported_parameters: ['response_format'] }
   ] } });
   service.call = jest.fn(async () => ({ text: '{"ok":true}' }));
   await service.generate('JSON', { provider: 'openrouter' });
   expect(service.call).toHaveBeenCalledTimes(1);
-  expect(service.call.mock.calls[0][1].id).toBe('qwen/qwen3.6-plus:free');
+  expect(service.call.mock.calls[0][1].id).toBe('nvidia/nemotron-3.5-super-vl:free');
 });
 test('Ollama rechaza contexto excesivo sin truncar el prompt', async () => {
   const service = router({ OLLAMA_ENABLED: 'true' });
@@ -86,7 +86,7 @@ test('Ollama usa JSON schema, pensamiento desactivado y timeout local tipificado
   service.transport.get.mockResolvedValue({ data: { models: [{ name: 'qwen3:8b' }] } });
   service.budget.localPost = jest.fn(async () => ({ data: { message: { content: '{"inventario_necesidades":[]}' }, model: 'qwen3:8b' } }));
   await service.call('ollama', { id: 'qwen3:8b', output: 2048 }, 'input', 'clasificacion_consolidacion');
-  expect(service.budget.localPost.mock.calls[0][1]).toMatchObject({ think: false, stream: false, options: { num_ctx: 8192 }, format: { required: ['inventario_necesidades'] } });
+  expect(service.budget.localPost.mock.calls[0][1]).toMatchObject({ think: false, stream: false, options: { num_ctx: 8192 }, format: { required: ['sintesis', 'actores', 'inventario_necesidades'] } });
   expect(classify(Object.assign(new Error('timeout'), { code: 'ECONNABORTED' })).cause).toBe('transitorio');
 });
 

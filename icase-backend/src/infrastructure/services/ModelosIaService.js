@@ -388,13 +388,10 @@ class ModelosIaService {
     } else if (requestedProvider === 'openai') {
       respuestaData = await this.generarConOpenAI(promptCompleto, specificModel, { allowFallback: false });
     } else {
-      const baseOrder = promptCompleto.length > 22000
-        ? ['gemini', ...this.providerOrder.filter(p => p !== 'gemini')]
-        : this.providerOrder;
-      const orden = preferredProvider ? [preferredProvider, ...baseOrder.filter((provider) => provider !== preferredProvider)] : baseOrder;
+      const orden = this.providerOrder;
       for (const proveedor of orden) {
         if (this.requestBudget.exhausted()) break;
-        respuestaData = await this._ejecutarProveedor(proveedor, proveedor === 'groq' ? (promptGroq || promptCompleto) : promptCompleto, specificModel);
+        respuestaData = await this._ejecutarProveedor(proveedor, proveedor === 'groq' ? (promptGroq || promptCompleto) : promptCompleto, null);
         if (respuestaData) { preferredProvider = proveedor; break; }
       }
     }
@@ -467,12 +464,12 @@ class ModelosIaService {
    */
   async generarJson(prompt, { provider = null, specificModel = null } = {}) {
     const solicitado = String(provider || '').toLowerCase();
-    const orden = solicitado
+    const orden = solicitado && solicitado !== 'auto'
       ? [solicitado === 'deepseek' || solicitado.includes('deep') ? 'deepseek' : solicitado]
-      : (prompt.length > 22000 ? ['gemini', ...this.providerOrder.filter((item) => item !== 'gemini')] : this.providerOrder);
+      : this.providerOrder;
     for (const proveedor of orden) {
       try {
-        const respuesta = await this._ejecutarProveedor(proveedor, prompt, specificModel);
+        const respuesta = await this._ejecutarProveedor(proveedor, prompt, solicitado && solicitado !== 'auto' ? specificModel : null);
         if (respuesta) return respuesta;
       } catch (error) {
         console.warn(`[ModelosIaService] ${proveedor} no pudo completar la solicitud estructurada: ${error.message}`);
@@ -723,7 +720,7 @@ class ModelosIaService {
             ],
             temperature: 0.2,
             max_tokens: 8000,
-            response_format: { type: 'json_object' }
+            ...await require('./OpenRouterPolicy').parameters(modelName)
           },
           {
             headers: {

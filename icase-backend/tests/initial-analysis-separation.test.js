@@ -20,7 +20,7 @@ test('la redacción no confirma silenciosamente una necesidad pendiente aunque a
   expect(result.requiere_confirmacion).toBe(true);
 });
 test('extrae sin redactar requisitos ni generar diagramas', async () => {
-  const request = jest.fn().mockResolvedValue({ inventario_necesidades: inventory });
+  const request = jest.fn().mockResolvedValue({ inventario_necesidades: inventory, actores: [], sintesis: { contexto: input, problema: '', alcance: '', objetivos: ['Consultar expedientes'] } });
   const result = await new Coverage().extractAnalysis({ input, prompt: '', request });
   expect(result.tipo).toBe('analisis_inicial');
   expect(result.inventario).toHaveLength(1);

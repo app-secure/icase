@@ -50,6 +50,7 @@ class InitialAnalysisService {
     const report = new Coverage().inspectInventory(content.inventario, input);
     const errors = report.invalid.filter(item => activeObligation(item.elemento) || item.errores.some(e => ['identificador_duplicado', 'objetivo_invalido', 'tipo_invalido', 'estado_invalido'].includes(e))).map(item => `${item.id}: ${item.errores.join(', ')}`);
     if (!report.valid.some(isRequirementNeed)) errors.push('No se identificaron necesidades funcionales o cualidades activas.');
+    if (content.integridad_extraccion) errors.push(...require('../../infrastructure/services/InitialAnalysisContract').errors({ ...content, inventario_necesidades: content.inventario }));
     const goals = new Set(report.valid.filter(isRequirementNeed).map(n => n.objetivo_id));
     for (const item of report.valid) if ((item.objetivos_relacionados || []).some(id => !goals.has(id))) errors.push(`${item.id}: referencia a objetivo inexistente.`);
     for (const item of content.necesidades_pendientes || []) if (!['corregida', 'descartada'].includes(item.estado_validacion) && activeObligation(item.elemento)) errors.push(`${item.id}: evidencia pendiente.`);

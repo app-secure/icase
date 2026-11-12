@@ -4,7 +4,7 @@ const { inspectEvidence } = require('../../infrastructure/services/SourceEvidenc
 module.exports = async function run({ task, previous, answer, questionId, input, request }) {
   if (task === 'revision_calidad') {
     const result = await require('./InitialAnalysisQuality').review({ inventory: previous.inventario || [], reserved: previous.necesidades_pendientes || [], actors: previous.actores || [], summary: previous.sintesis || {}, input, request: (stage, text) => request(text, { etapa: stage }), inspect: (items, text) => new Coverage().inspectInventory(items, text) });
-    return { ...previous, inventario: result.inventario, revision_inventario: result.diagnostic };
+    return { ...previous, inventario: result.inventario, actores: result.actores, sintesis: result.sintesis, revision_inventario: result.diagnostic };
   }
   const question = previous.inventario.find(n => n.id === questionId && n.tipo === 'pregunta' && n.estado === 'pendiente');
   if (!question) throw Object.assign(new Error('La pregunta ya no está pendiente.'), { status: 409 });

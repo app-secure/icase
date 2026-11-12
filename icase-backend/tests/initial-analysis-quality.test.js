@@ -3,6 +3,14 @@ const Coverage = require('../src/infrastructure/services/RequirementCoverageServ
 const input = 'Los usuarios consultan registros con filtros y estados visibles.';
 const inventory = [{ id: 'N-01', tipo: 'RF', objetivo_id: 'O-01', necesidad: 'Consultar registros', estado: 'confirmado', evidencia: input }];
 const inspect = (items, text) => new Coverage().inspectInventory(items, text);
+test('conserva hallazgos válidos aunque otro incumpla el contrato', async () => {
+  const finding = { codigo: 'OMISION', elementos: ['N-01'], descripcion: 'Falta conservar filtros', accion: 'Conservar filtros', evidencia: input };
+  const result = await review({ inventory, actors: [], summary: {}, input, inspect,
+    request: jest.fn().mockResolvedValue({ completa: true, elementos_revisados: ['N-01'], hallazgos: [finding, { codigo: 'INVALIDO' }] }) });
+  expect(result.diagnostic.estado).toBe('parcial');
+  expect(result.diagnostic.hallazgos).toEqual([finding]);
+  expect(result.diagnostic.motivo).toContain('Hallazgo 2');
+});
 test('revisa todo aunque no existan candidatos léxicos', async () => {
   const request = jest.fn().mockResolvedValue({ completa: true, elementos_revisados: ['N-01'], hallazgos: [] });
   const result = await review({ inventory, actors: [], summary: {}, input, request, inspect });

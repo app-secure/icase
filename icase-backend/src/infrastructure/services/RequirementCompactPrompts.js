@@ -9,6 +9,7 @@ ${granularity}
 Antes de devolver el inventario, revisa cada enumeración: separa resultados independientes, no detalles de una operación. Revisa también reglas y decisiones para recuperar capacidades positivas explícitas que no estén representadas. Excluir alta disponibilidad no excluye respaldar y recuperar datos cuando se solicita. Una evidencia literal debe sustentar TODAS las afirmaciones: aporta varias citas si enumeras tecnologías distintas. Conserva condiciones de carga sin asociarlas a latencia salvo acuerdo explícito.`;
 const extraction = (input, sourceHints = []) => `${policy}\n${grounding}
 ${actorInstructions}
+${require('./InitialAnalysisContract').instructions}
 Incluye sintesis:{contexto:"",problema:"",objetivos:[],alcance:""} sustentada en el insumo, sin requisitos formales.
 Seguridad, usabilidad, rendimiento y recuperabilidad requieren objetivos distintos. No reinicies numeración por categoría ni reutilices un objetivo por defecto. Un ID compartido no prueba duplicidad semántica: repara referencias sin fusionar cualidades distintas.
 Clasifica y consolida antes de redactar. JSON compacto {"inventario_necesidades":[{"id":"N-01","tipo":"RF","objetivo_id":"O-01","necesidad":"resultado","evidencias":[{"texto":"cita continua","fuente":"archivo indicado o insumo_directo"}],"estado":"confirmado"}]}.
