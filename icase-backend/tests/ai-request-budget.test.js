@@ -2,6 +2,32 @@ const axios = require('axios');
 const Budget = require('../src/infrastructure/services/AiRequestBudget');
 const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
+test('reserva revisión inicial y después verificación sin multiplicar solicitudes', async () => {
+  const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} });
+  const budget = new Budget();
+  await budget.run(async () => {
+    budget.reserveStage('revision_analisis_inicial');
+    await budget.logical('extraccion', () => budget.post('https://example.test', {}));
+    await budget.logical('reparacion_estructura', () => budget.post('https://example.test', {}));
+    expect(await budget.logical('otro_reintento', () => budget.post('https://example.test', {}))).toBeNull();
+    expect(await budget.logical('revision_analisis_inicial', () => budget.post('https://example.test', {}))).not.toBeNull();
+    return {};
+  }, { AI_REQUIREMENTS_MAX_ATTEMPTS: 3 });
+  expect(post).toHaveBeenCalledTimes(3);
+});
+test('reserva la última solicitud para auditoría sin ampliar el presupuesto', async () => {
+  const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} });
+  const budget = new Budget();
+  await budget.run(async () => {
+    await budget.logical('extraccion', () => budget.post('https://example.test', {}));
+    await budget.logical('redaccion', () => budget.post('https://example.test', {}));
+    budget.reserveAudit();
+    expect(await budget.logical('reparacion', () => budget.post('https://example.test', {}))).toBeNull();
+    expect(await budget.logical('revision_semantica', () => budget.post('https://example.test', {}))).not.toBeNull();
+    return {};
+  }, { AI_REQUIREMENTS_MAX_ATTEMPTS: 3 });
+  expect(post).toHaveBeenCalledTimes(3);
+});
 
 test('limita llamadas acumuladas y conserva métricas sin registrar prompts ni credenciales', async () => {
   const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} });

@@ -8,7 +8,7 @@ const mongoose = require('mongoose');
  * inválido responde igual (404), para no revelar qué identificadores existen. Un proyecto sin dueño
  * (creado antes de exigir sesión) tampoco es accesible hasta que se le asigne uno.
  */
-function buildProjectAccess({ proyectoRepository, requerimientoRepository, diagramaRepository, fuenteRepository, trabajoGeneracionRepository, artefactoRepository }) {
+function buildProjectAccess({ proyectoRepository, requerimientoRepository, diagramaRepository, fuenteRepository, trabajoGeneracionRepository, artefactoRepository, mutationLease = null }) {
   const notFound = (res, label) => res.status(404).json({ error: `${label} no encontrado` });
 
   const ownedBy = async (proyectoId, usuarioId) => {
@@ -25,6 +25,13 @@ function buildProjectAccess({ proyectoRepository, requerimientoRepository, diagr
       if (!mongoose.isValidObjectId(String(value))) return notFound(res, label);
       const proyectoId = await resolveProject(String(value));
       if (!(await ownedBy(proyectoId, req.usuario.id))) return notFound(res, label);
+      if (mutationLease && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !req.projectMutationLease) {
+        const lease = await mutationLease.acquire(proyectoId);
+        req.projectMutationLease = lease;
+        let released = false;
+        const release = () => { if (!released) { released = true; lease.release().catch(() => {}); } };
+        res.once('finish', release); res.once('close', release);
+      }
       return next();
     } catch (error) {
       return next(error);
@@ -42,6 +49,13 @@ function buildProjectAccess({ proyectoRepository, requerimientoRepository, diagr
     proyectoEnCuerpo: (campo = 'proyecto_id') => async (req, res, next) => {
       try {
         if (!(await ownedBy(req.body && req.body[campo], req.usuario && req.usuario.id))) return notFound(res, 'Proyecto');
+        if (mutationLease && !req.projectMutationLease) {
+          const lease = await mutationLease.acquire(req.body[campo]);
+          req.projectMutationLease = lease;
+          let released = false;
+          const release = () => { if (!released) { released = true; lease.release().catch(() => {}); } };
+          res.once('finish', release); res.once('close', release);
+        }
         return next();
       } catch (error) {
         return next(error);

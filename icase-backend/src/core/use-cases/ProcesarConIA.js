@@ -99,9 +99,9 @@ class ProcesarConIA {
     this.generacionesEnCurso = new Set();
   }
 
-  async obtenerModelosDisponibles() {
+  async obtenerModelosDisponibles(options = {}) {
     if (this.aiOrchestratorService && typeof this.aiOrchestratorService.obtenerModelosDisponibles === 'function') {
-      return await this.aiOrchestratorService.obtenerModelosDisponibles();
+      return await this.aiOrchestratorService.obtenerModelosDisponibles(options);
     }
     return { provider_defecto: 'auto', proveedores: [] };
   }
@@ -159,10 +159,25 @@ class ProcesarConIA {
     };
   }
 
-  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null, regenerar = false }) {
+  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null, regenerar = false, operacion = 'legacy', usuarioId = null, analisisId = null, instruccion = '', actualizarIds = [], elementosIds = [], respuesta = '', preguntaId = null, desdeCero = false }) {
     const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
     if (!proyecto) {
       throw new Error(`Proyecto con ID ${proyectoId} no encontrado.`);
+    }
+    if (proyecto.version_flujo_analisis === 2 && ['analisis_inicial', 'correccion_analisis_inicial', 'analisis_respuesta', 'revision_calidad'].includes(operacion)) {
+      return this.initialAnalysis.generate({ proyectoId, usuarioId, insumoBrutoInput, insumoAdicional, provider, specificModel, operacion, instruccion, elementosIds, regenerar, analisisId, respuesta, preguntaId, desdeCero });
+    }
+    let initial = null;
+    let previousRequirements = [];
+    if (proyecto.version_flujo_analisis === 2 && objetivo !== 'diagramas') {
+      if (operacion !== 'redaccion_requisitos' || !require('../../infrastructure/services/RequirementExecutionContext').current()) throw Object.assign(new Error('Usa el flujo de análisis inicial y apruébalo antes de redactar.'), { status: 409 });
+      initial = await this.initialAnalysis.requireApproved(proyectoId, usuarioId, analisisId);
+      insumoAdicional = initial.insumo_adicional || '';
+      insumoBrutoInput = initial.insumo_directo || '';
+      previousRequirements = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      const newNeeds = initial.contenido.inventario.filter(n => ['RF', 'RNF'].includes(n.tipo)).some(n => !previousRequirements.some(r => (r.necesidades_origen || []).includes(n.id)));
+      if (previousRequirements.length && !actualizarIds.length && !newNeeds) throw Object.assign(new Error('Ya existen requisitos. Confirma la actualización puntual; no se reemplazarán automáticamente.'), { status: 409, code: 'REQUIREMENTS_CONFLICT' });
+      if (actualizarIds.some(id => !previousRequirements.some(r => r.identificador === id))) throw Object.assign(new Error('La selección de requisitos cambió; recarga.'), { status: 409 });
     }
     const objetivoNormalizado = ['requisitos', 'diagramas', 'completo'].includes(objetivo) ? objetivo : 'completo';
     const tipoDiagramaNormalizado = tipoDiagrama ? normalizeDiagramType(tipoDiagrama) : null;
@@ -170,6 +185,10 @@ class ProcesarConIA {
       throw new Error(`Tipo de diagrama inválido: ${tipoDiagrama}.`);
     }
     if (objetivoNormalizado === 'diagramas') {
+      if (proyecto.version_flujo_analisis === 2) {
+        const approved = await this.initialAnalysis.requireApproved(proyectoId, proyecto.usuario_id);
+        if (proyecto.auditoria_requisitos?.referencia_analisis_inicial?.id !== approved.id) throw new Error('Los requisitos deben revisarse contra el análisis inicial vigente antes de generar diagramas.');
+      }
       const estadosPermitidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
       if (!estadosPermitidos.has(proyecto.estado_fase)) {
         throw new Error('Los requisitos deben estar aprobados antes de generar los diagramas.');
@@ -180,12 +199,20 @@ class ProcesarConIA {
     let textoBase = insumoBrutoInput && insumoBrutoInput.trim() !== ''
       ? insumoBrutoInput
       : (proyecto.insumo_bruto || '');
+    let pistasFuentesRequisitos = [];
 
     // Concatenar fuentes transcritas e ingeridas de la base de datos (PDFs y Audios procesados en backend)
     if (this.fuenteRepository) {
       try {
         const fuentesBd = await this.fuenteRepository.listarPorProyecto(proyectoId);
         if (Array.isArray(fuentesBd) && fuentesBd.length > 0) {
+          if (objetivoNormalizado === 'requisitos') {
+            const context = require('../../infrastructure/services/RequirementSourceContext').build(fuentesBd);
+            if (context.content) {
+              textoBase = context.content;
+              pistasFuentesRequisitos = context.hints;
+            }
+          } else {
           const textoFuentes = fuentesBd
             .filter(f => f.texto_transcrito && f.texto_transcrito.trim().length > 0)
             .map(f => {
@@ -206,6 +233,7 @@ class ProcesarConIA {
             // La versión persistida contiene la transcripción corregida y los metadatos más recientes.
             textoBase = textoFuentes;
           }
+          }
         }
       } catch (errFuentes) {
         console.warn('[ProcesarConIA] Error consultando fuentes del proyecto:', errFuentes.message);
@@ -213,7 +241,7 @@ class ProcesarConIA {
     }
 
     // Si se envió insumoBrutoInput y el proyecto no lo tenía, persistirlo en base de datos
-    if (insumoBrutoInput && (!proyecto.insumo_bruto || proyecto.insumo_bruto.trim() === '')) {
+    if (insumoBrutoInput && (!proyecto.insumo_bruto || proyecto.insumo_bruto.trim() === '') && !require('../../infrastructure/services/RequirementExecutionContext').current()) {
       await this.proyectoRepository.actualizar(proyectoId, { insumo_bruto: insumoBrutoInput });
     }
 
@@ -312,9 +340,11 @@ class ProcesarConIA {
     // Construcción del payload de tres bloques explícitos
     const payload = {
       proyecto_id: proyectoId,
+      ...(initial ? { approvedInitialAnalysis: { ...initial.contenido, aprobado: true, requisitos_previos: previousRequirements, actualizar_ids: actualizarIds, instruccion_redaccion: instruccion, referencia: { id: initial.id, version: initial.version, huella: initial.contenido_hash || require('../../infrastructure/services/RequirementExecutionContext').hash(initial.contenido) } } } : {}),
       nombre_proyecto: proyecto.nombre,
       // Las instrucciones adicionales tienen su bloque propio en el prompt; no deben duplicarse en el insumo principal.
       insumo_bruto: textoBase,
+      ...(objetivoNormalizado === 'requisitos' ? { pistas_fuentes: pistasFuentesRequisitos } : {}),
       insumo_adicional: insumoAdicional,
       provider,
       specificModel,
@@ -469,11 +499,12 @@ class ProcesarConIA {
       }
     }
 
+    return require('../../infrastructure/services/RequirementExecutionContext').commit(async () => {
     // Persistir requerimientos únicamente durante la fase de análisis.
     const requerimientosGenerados = [];
     if (objetivoNormalizado !== 'diagramas' && resultadoIA.requerimientos && Array.isArray(resultadoIA.requerimientos)) {
       // Reemplazamos requerimientos no aprobados previos o anexamos
-      await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
+      if (!initial) await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
 
       const seenIdentifiers = new Set();
       let rfCounter = 1;
@@ -526,7 +557,18 @@ class ProcesarConIA {
         });
         requerimientosGenerados.push(reqEntity);
       }
-      await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
+      if (initial && previousRequirements.length) {
+        for (const row of requerimientosGenerados) {
+          const previous = previousRequirements.find(r => r.identificador === row.identificador);
+          if (previous && !actualizarIds.includes(row.identificador)) continue;
+          if (previous) {
+            const { historial_versiones, ...snapshot } = previous;
+            await this.requerimientoRepository.actualizar(previous.id || previous._id, { ...row, desactualizado: false, historial_versiones: [...(historial_versiones || []), { fecha: new Date(), contenido: snapshot, analisis_inicial: proyecto.auditoria_requisitos?.referencia_analisis_inicial }] });
+          } else await this.requerimientoRepository.crear(row);
+        }
+        const produced = new Set(requerimientosGenerados.map(r => r.identificador));
+        for (const previous of previousRequirements) if (actualizarIds.includes(previous.identificador) && !produced.has(previous.identificador)) await this.requerimientoRepository.actualizar(previous.id || previous._id, { desactualizado: true, aprobado: false });
+      } else await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
       if (resultadoIA.auditoria_requisitos) {
         const RequirementApprovalService = require('../services/RequirementApprovalService');
         resultadoIA.auditoria_requisitos = {
@@ -535,7 +577,8 @@ class ProcesarConIA {
         };
       }
       // Cualquier modelado anterior queda obsoleto al regenerar los requisitos.
-      await this.diagramaRepository.eliminarPorProyecto(proyectoId);
+      if (initial) await this.requirementChangeService?.invalidate(proyectoId, 'Se redactaron requisitos desde el análisis inicial aprobado.');
+      else await this.diagramaRepository.eliminarPorProyecto(proyectoId);
       if (this.disenoRepository && typeof this.disenoRepository.invalidarDerivados === 'function') {
         await this.disenoRepository.invalidarDerivados(proyectoId);
       }
@@ -666,9 +709,14 @@ class ProcesarConIA {
       descripcion: descripcionFinal,
       estado_fase: objetivoNormalizado === 'diagramas' ? 'diseno_pendiente' : 'analisis_pendiente'
     };
+    if (insumoBrutoInput && !proyecto.insumo_bruto) updates.insumo_bruto = insumoBrutoInput;
     if (objetivoNormalizado === 'requisitos' && resultadoIA.auditoria_requisitos) {
       await this.requirementChangeService?.invalidateCode(proyectoId, 'Se generó una nueva versión del análisis de requisitos.');
       const previous = proyecto.auditoria_requisitos;
+      if (initial && previousRequirements.length) {
+        const state = await this.initialAnalysis.get(proyectoId, usuarioId);
+        resultadoIA.auditoria_requisitos.pendientes_analisis_inicial = state.impacto.requisitos_afectados.filter(id => !actualizarIds.includes(id));
+      }
       updates.auditoria_requisitos = { ...resultadoIA.auditoria_requisitos,
         version_analisis: Number(previous?.version_analisis || 0) + 1,
         historial_analisis: [...(previous?.historial_analisis || []), ...(previous ? [{ fecha: new Date().toISOString(), version: previous.version_analisis || 0,
@@ -703,6 +751,7 @@ class ProcesarConIA {
         : undefined,
       reparaciones_controladas: reparacionesControladas
     };
+    });
   }
 }
 

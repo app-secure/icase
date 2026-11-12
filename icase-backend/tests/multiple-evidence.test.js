@@ -19,6 +19,23 @@ test('no acepta fuente ajena, elipsis, paráfrasis ni fragmentos ambiguos', () =
   expect(inspectEvidence({ evidencias: [{ texto: 'Sí' }] }, 'Sí. Sí.').invalid[0].codigo).toBe('evidencia_ambigua');
 });
 
+test('recupera oraciones literales no contiguas como fragmentos del mismo archivo', () => {
+  const first = 'Proponemos pantallas simples con botones claros y estados visibles.';
+  const second = 'Los operadores usarán tabletas para realizar sus tareas diarias.';
+  const input = `[Fuente enriquecida]\nArchivo: entrevista.txt\n\n[Contenido extraído]\n${first}\nPregunta: ¿Qué dispositivos utilizarán los operadores?\nRespuesta: ${second}`;
+  const result = inspectEvidence({ evidencias: [{ texto: `${first} ${second}`, fuente: 'entrevista.txt' }] }, input);
+  expect(result.valido).toBe(true);
+  expect(result.valid).toHaveLength(2);
+  expect(result.valid.map(e => e.fuente)).toEqual(['entrevista.txt', 'entrevista.txt']);
+  for (const fragment of result.valid) expect(input.slice(fragment.inicio, fragment.fin)).toBe(fragment.texto);
+  expect(result.valid[1].inicio).toBeGreaterThan(result.valid[0].fin);
+  expect(inspectEvidence({ evidencia: `${second} ${first}` }, input).valido).toBe(false);
+  expect(inspectEvidence({ evidencia: `${first} Los operadores utilizarán dispositivos móviles para todas sus actividades.` }, input).valido).toBe(false);
+  const separateSources = `[Fuente enriquecida]\nArchivo: uno.txt\n\n[Contenido extraído]\n${first}\n[Fuente enriquecida]\nArchivo: dos.txt\n\n[Contenido extraído]\n${second}`;
+  expect(inspectEvidence({ evidencia: `${first} ${second}` }, separateSources).valido).toBe(false);
+  expect(inspectEvidence({ evidencia: `${first} ${second}` }, input + `\n${second}`).valido).toBe(false);
+});
+
 test('persiste múltiples evidencias y proyectos anteriores conservan defaults', () => {
   const evidencias = inspectEvidence({ evidencias: [{ texto: 'Consulta autorizada' }] }, 'Consulta autorizada').valid;
   const entity = new Entity({ proyecto_id: 'aaaaaaaaaaaaaaaaaaaaaaaa', identificador: 'RF-1', nombre: 'Consulta', evidencias });

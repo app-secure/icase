@@ -7,6 +7,8 @@ const RequirementSemanticsService = require('./RequirementSemanticsService');
 const RequirementCoverageService = require('./RequirementCoverageService');
 const { unwrapEvidence, inspectEvidence } = require('./SourceEvidence');
 const AiRequestBudget = require('./AiRequestBudget');
+const AiRetryPolicy = require('./AiRetryPolicy');
+const RequirementExecution = require('./RequirementExecutionContext');
 const RequirementApprovalService = require('../../core/services/RequirementApprovalService');
 const { normalizeDiagramType, DIAGRAM_DEFINITIONS } = require('../../core/constants/DiagramTypes');
 
@@ -51,7 +53,6 @@ function numerosDe(value) {
 }
 
 function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
-  const insumoComparable = textoComparable(insumo);
   const semantics = new RequirementSemanticsService();
 
   return (requerimientos || []).map((requisito) => {
@@ -60,10 +61,12 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
       return conserved;
     }
     const evidenceReport = inspectEvidence(requisito, insumo);
-    const multi = Array.isArray(requisito.evidencias) && requisito.evidencias.length > 0;
-    const evidencia = multi ? (evidenceReport.valid[0]?.texto || '') : unwrapEvidence(requisito.evidencia || requisito.evidencia_fuente || '');
+    const multi = (Array.isArray(requisito.evidencias) && requisito.evidencias.length > 0) ||
+      (requisito.evidencia && typeof requisito.evidencia === 'object') ||
+      /(?:\.{3}|…|\s+\/\s+)/u.test(String(requisito.evidencia || ''));
+    const evidencia = evidenceReport.valid[0]?.texto || unwrapEvidence(requisito.evidencia || requisito.evidencia_fuente || '');
     const evidenciaComparable = textoComparable(evidencia);
-    const evidenciaValida = multi ? evidenceReport.valido : evidenciaComparable.length >= 8 && insumoComparable.includes(evidenciaComparable);
+    const evidenciaValida = evidenceReport.valido && (multi || evidenciaComparable.length >= 8);
     const numerosEvidencia = new Set(evidenciaValida ? numerosDe(multi ? evidenceReport.valid.map(item => item.texto).join(' ') : evidencia) : []);
     const tipo = String(requisito.tipo || 'RF').toUpperCase();
     let metricaMedible = String(requisito.metrica_medible || '').trim();
@@ -96,7 +99,10 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
 }
 
 class ModelosIaService {
-  constructor() {
+  constructor({ requirementsRouter = null, env = process.env } = {}) {
+    this.requirementsEnabled = env.REQUIREMENTS_RESILIENT_ENABLED === 'true';
+    this.requirementsEnv = env;
+    this.requirementsRouter = requirementsRouter;
     this.requestBudget = new AiRequestBudget();
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
@@ -191,7 +197,16 @@ class ModelosIaService {
     }
   }
 
-  async obtenerModelosDisponibles() {
+  async obtenerModelosDisponibles({ objetivo = null } = {}) {
+    if (this.requirementsEnabled && objetivo === 'requisitos') {
+      if (!this.requirementsRouter) {
+        const Router = require('./RequirementProviderRouter');
+        const StateRepository = require('../../interface-adapters/repositories/MongoAiProviderStateRepository');
+        this.requirementsRouter = new Router({ stateRepository: new StateRepository(), budget: this.requestBudget, env: this.requirementsEnv });
+      }
+      return { provider_defecto: 'auto', requisitos_resilientes: true,
+        proveedores: [{ id: 'auto', nombre: 'Automático gratuito + local', disponible: true }, ...await this.requirementsRouter.status()] };
+    }
     let deepseekDisponible = Boolean(this.deepseekApiKey);
     let deepseekDesc = 'Modelo especializado en razonamiento y arquitectura de software';
 
@@ -259,6 +274,7 @@ class ModelosIaService {
 
   async procesar(payload) {
     const insumo = payload.insumo_bruto || payload.nombre_proyecto || '';
+    const pistasFuentes = Array.isArray(payload.pistas_fuentes) ? payload.pistas_fuentes : [];
     const insumoAdicional = payload.insumo_adicional || '';
     const reqsActuales = payload.contexto_proyecto?.requerimientos_actuales || [];
     const reqsAprobados = payload.contexto_proyecto?.requerimientos_aprobados || [];
@@ -338,10 +354,22 @@ class ModelosIaService {
     const insumoPrompt = objetivo === 'diagramas' && tipoDiagrama && reqsAprobados.length && analysis && Object.values(analysis).some(items => Array.isArray(items) && items.length)
       ? 'El alcance vigente está en los requisitos y el análisis clasificado aprobados del contexto. No reinterpretes los insumos originales para añadir obligaciones. Las decisiones pendientes no son requisitos confirmados.'
       : insumo;
-    const promptCompleto = this.construirPrompt({ insumo: insumoPrompt, contextoActualTexto, insumoAdicional, objetivo, tipoDiagrama });
+    const promptCompleto = this.construirPrompt({
+      insumo: objetivo === 'requisitos' ? 'El contenido verificable se proporciona en cada etapa del análisis.' : insumoPrompt,
+      contextoActualTexto, insumoAdicional, objetivo, tipoDiagrama
+    });
+    const evidenceInput = objetivo === 'requisitos' && insumoAdicional.trim()
+      ? `${insumo}\n\n[Insumo adicional]\n${insumoAdicional}` : [insumo, insumoAdicional].filter(Boolean).join('\n\n');
 
     let preferredProvider = null;
-    const solicitar = async (promptCompleto, { etapa = 'generacion', promptGroq = null } = {}) => this.requestBudget.logical(etapa, async () => {
+    RequirementExecution.setInput(evidenceInput);
+    if (this.requirementsEnabled && !this.requirementsRouter) {
+      const Router = require('./RequirementProviderRouter');
+      const StateRepository = require('../../interface-adapters/repositories/MongoAiProviderStateRepository');
+      this.requirementsRouter = new Router({ stateRepository: new StateRepository(), budget: this.requestBudget, env: this.requirementsEnv });
+    }
+    const solicitar = async (promptCompleto, { etapa = 'generacion', promptGroq = null } = {}) => RequirementExecution.request(etapa, promptCompleto, () => this.requestBudget.logical(etapa, async () => {
+    if (this.requirementsEnabled && objetivo === 'requisitos') return this.requirementsRouter.generate(promptCompleto, { provider: requestedProvider, specificModel, promptGroq, stage: etapa });
     let respuestaData = null;
     if (requestedProvider === 'groq') {
       respuestaData = await this.generarConGroq(promptGroq || promptCompleto, specificModel, { allowFallback: false });
@@ -372,11 +400,18 @@ class ModelosIaService {
     }
 
     return respuestaData;
-    });
+    }));
     const auditoriaPrevia = payload.contexto_proyecto?.auditoria_requisitos || null;
-    const usarRefinamientoAcotado = objetivo === 'requisitos' && esRefinamientoExplicito && reqsActuales.length > 0;
+    const usarRefinamientoAcotado = objetivo === 'requisitos' && !payload.approvedInitialAnalysis && !payload.initialAnalysisOnly && esRefinamientoExplicito && reqsActuales.length > 0;
     let respuestaData = objetivo === 'requisitos'
-      ? await this.requestBudget.run(() => usarRefinamientoAcotado
+      ? await this.requestBudget.run(() => payload.initialAnalysisTask
+        ? require('../../core/services/InitialAnalysisTasks')({ task: payload.initialAnalysisTask, previous: payload.initialAnalysisPrevious, answer: payload.answerText, questionId: payload.questionId, input: evidenceInput, request: solicitar })
+        : payload.initialAnalysisOnly
+        ? new RequirementCoverageService().extractAnalysis({ input: evidenceInput, prompt: promptCompleto, request: solicitar, semanticReview: true, sourceHints: pistasFuentes,
+          analysisInstruction: payload.initialAnalysisInstruction, analysisPrevious: payload.initialAnalysisPrevious })
+        : payload.approvedInitialAnalysis
+        ? new RequirementCoverageService().draftFromAnalysis({ input: evidenceInput, prompt: promptCompleto, request: solicitar, semanticReview: true }, payload.approvedInitialAnalysis)
+        : usarRefinamientoAcotado
         ? new RequirementCoverageService().refine({
           input: insumo,
           instruction: insumoAdicional,
@@ -387,11 +422,14 @@ class ModelosIaService {
         })
         : new RequirementCoverageService().generate({
           semanticReview: true,
+          maxObjectivesPerBatch: this.requirementsEnabled && (requestedProvider === 'ollama' || (requestedProvider === 'auto' && !this.requirementsEnv.AI_FREE_TIER_PROVIDERS?.trim())) && this.requirementsEnv.OLLAMA_ENABLED === 'true'
+            ? Math.max(1, Math.min(3, Number(this.requirementsEnv.OLLAMA_REQUIREMENTS_BATCH_OBJECTIVES) || 2)) : null,
           groqInputBudget: this.groqApiKey && (requestedProvider === 'auto' || requestedProvider === 'groq') ? Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000) : null,
-          input: [insumo, insumoAdicional].filter(Boolean).join('\n\n'),
+          input: evidenceInput,
+          sourceHints: pistasFuentes,
           prompt: promptCompleto,
           request: solicitar
-        }))
+        }), this.requirementsEnv, { allowLocal: this.requirementsEnabled && ['auto', 'ollama'].includes(requestedProvider) && this.requirementsEnv.OLLAMA_ENABLED === 'true' })
       : await solicitar(promptCompleto);
 
     if (!respuestaData) {
@@ -405,11 +443,21 @@ class ModelosIaService {
       };
     }
 
+    if (payload.initialAnalysisOnly || payload.initialAnalysisTask) return respuestaData;
+    if (payload.approvedInitialAnalysis) respuestaData.auditoria_requisitos = { ...respuestaData.auditoria_requisitos, referencia_analisis_inicial: payload.approvedInitialAnalysis.referencia };
+    if (objetivo === 'requisitos' && RequirementExecution.current()) {
+      const ctx = RequirementExecution.current();
+      ctx.draft = respuestaData;
+      const reviewState = respuestaData.auditoria_requisitos?.revision_semantica?.estado;
+      ctx.pending = !payload.approvedInitialAnalysis && ['no_completada', 'parcial'].includes(reviewState);
+      if (reviewState === 'completada') await RequirementExecution.confirm('revision_semantica');
+    }
+
     return this.normalizarResultado(respuestaData, objetivo, tipoDiagrama, {
       nombreProyecto: payload.nombre_proyecto,
       requerimientos: reqsContexto,
       diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || [],
-      insumo: [insumo, insumoAdicional].filter(Boolean).join('\n\n')
+      insumo: evidenceInput
     });
   }
 
@@ -539,7 +587,7 @@ class ModelosIaService {
 
     for (const modelName of modelos) {
       if (!this._modeloDisponible(`gemini:${modelName}`)) continue;
-      const maxIntentos = Number(process.env.AI_TRANSIENT_RETRIES || 1);
+      const maxIntentos = AiRetryPolicy.attempts();
       for (let intento = 1; intento <= maxIntentos; intento++) {
         if (this.requestBudget.exhausted()) break;
         try {
@@ -567,6 +615,8 @@ class ModelosIaService {
             .map((part) => part.text).join('');
           if (rawText) {
             const parsed = this.limpiarYParsearJson(rawText);
+            this.circuitos.delete(`gemini:${modelName}`);
+            this.erroresModelo.delete(`gemini:${modelName}`);
             console.log(`[ModelosIaService] Generación exitosa con Google Gemini (${modelName})`);
             return parsed;
           }
@@ -577,11 +627,10 @@ class ModelosIaService {
             break;
           }
 
-          if (intento < maxIntentos && /demand|high demand|429|503|timeout/i.test(msg)) {
-            await new Promise(r => setTimeout(r, 1200));
-          } else if (/quota|exceeded|not found|no longer available/i.test(msg)) {
-            break;
-          }
+          const delay = AiRetryPolicy.retryDelay(err, intento);
+          if (intento >= maxIntentos || delay === null) break;
+          console.log(`[ModelosIaService] Gemini (${modelName}): espera progresiva de ${delay} ms antes del siguiente intento.`);
+          if (!await this.requestBudget.waitForRetry(delay, { allowOutsideBudget: true })) break;
         }
       }
     }

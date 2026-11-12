@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 
 const ProyectoSchema = new mongoose.Schema({
+  version_flujo_analisis: { type: Number, default: 1 },
+  analisis_inicial_borrador_id: { type: String, default: null },
+  analisis_inicial_aprobado_id: { type: String, default: null },
   auditoria_requisitos: { type: mongoose.Schema.Types.Mixed, default: null },
   usuario_id: {
     type: mongoose.Schema.Types.ObjectId,

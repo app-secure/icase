@@ -24,6 +24,13 @@ function fakeRepository(name, rows, calls) {
       if (row) Object.assign(row, data);
       return row ? { ...row } : null;
     },
+    actualizarSi: async (id, expected, data) => {
+      const row = rows.find(item => String(item.id) === String(id));
+      if (!row || !Object.entries(expected).every(([key, value]) => (row[key] ?? null) === value)) return null;
+      Object.assign(row, data); return structuredClone(row);
+    },
+    crearMuchos: async entries => entries.map((data, index) => { const row = { id: `e${rows.length + index}`.padEnd(24, '0'), ...data }; rows.push(row); return { ...row }; }),
+    eliminarPorProyecto: async projectId => { for (let i = rows.length - 1; i >= 0; i--) if (String(rows[i].proyecto_id) === String(projectId)) rows.splice(i, 1); },
     crear: async (data) => { const row = { id: `n${rows.length}`.padEnd(24, '0'), ...data }; rows.push(row); return { ...row }; }
   };
   return new Proxy(base, {
@@ -57,7 +64,7 @@ function buildData() {
   };
 }
 
-async function startPlatform({ env = {}, usuario = null } = {}) {
+async function startPlatform({ env = {}, usuario = null, repositoryOverrides = {} } = {}) {
   const data = buildData();
   data.sesionRevocada = [];
   const calls = [];
@@ -65,6 +72,7 @@ async function startPlatform({ env = {}, usuario = null } = {}) {
   for (const name of ['usuario', 'estandar', 'casoDeUso', 'diseno', 'planCodificacion']) repositories[name] = fakeRepository(name, [], calls);
   repositories.sesionRevocada.revocar = async (entry) => { data.sesionRevocada.push(entry); };
   if (usuario) repositories.usuario = usuario;
+  Object.assign(repositories, repositoryOverrides);
   const merged = { ...process.env, JWT_SECRET: SECRET, NODE_ENV: 'test', ...env };
   Object.assign(process.env, { JWT_SECRET: merged.JWT_SECRET });
   const { app } = createApp({ repositories, env: merged });

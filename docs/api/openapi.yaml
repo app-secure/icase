@@ -38,6 +38,35 @@
     }
   ],
   "paths": {
+    "/proyectos/{id}/trabajos-requisitos": {
+      "post": {
+        "tags": ["Requisitos"], "summary": "Iniciar extracción, redacción o propuesta de análisis", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"operacion": {"type": "string", "enum": ["analisis_inicial", "redaccion_requisitos", "correccion_analisis_inicial", "analisis_respuesta", "revision_calidad", "legacy"], "description": "Proyectos nuevos usan analisis_inicial por defecto; legacy solo para proyectos antiguos."}, "analisis_id": {"type": "string"}, "pregunta_id": {"type": "string"}, "respuesta": {"type": "string", "maxLength": 12000}, "actualizar_ids": {"type": "array", "items": {"type": "string"}, "description": "Identificadores de requisitos cuya actualización se confirma explícitamente; conserva los demás."}, "elementos_ids": {"type": "array", "items": {"type": "string"}}, "instruccion": {"type": "string"}, "insumo_bruto": {"type": "string"}, "insumo_adicional": {"type": "string"}, "provider": {"type": "string", "enum": ["auto", "gemini", "groq", "openrouter", "ollama"]}, "specificModel": {"type": "string", "nullable": true}}}}}},
+        "responses": {"202": {"description": "Trabajo creado o activo recuperado; consultar progreso"}, "401": {"description": "Sesión inválida"}, "404": {"description": "Proyecto no encontrado"}, "409": {"description": "Análisis aprobado o generación activa incompatible"}, "503": {"description": "Flujo no habilitado"}}
+      }
+    },
+    "/proyectos/{id}/trabajos-requisitos/ultimo": {
+      "get": {
+        "tags": ["Requisitos"], "summary": "Último trabajo de requisitos", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Estado sanitizado o null; no expone checkpoints ni entrada privada"}, "401": {"description": "Sesión inválida"}, "404": {"description": "Proyecto no encontrado"}}
+      }
+    },
+    "/proyectos/trabajos-requisitos/{trabajoId}": {
+      "get": {
+        "tags": ["Requisitos"], "summary": "Consultar progreso de requisitos", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "trabajoId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "Estado, etapa, proveedor/modelo efectivo, motivos y recuperación"}, "401": {"description": "Sesión inválida"}, "404": {"description": "Trabajo no encontrado"}}
+      }
+    },
+    "/proyectos/trabajos-requisitos/{trabajoId}/reanudar": {
+      "post": {
+        "tags": ["Requisitos"], "summary": "Reanudar etapas pendientes por decisión explícita", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "trabajoId", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"202": {"description": "Reanudación solicitada; claim idempotente"}, "401": {"description": "Sesión inválida"}, "404": {"description": "Trabajo no encontrado"}, "409": {"description": "Entrada obsoleta o análisis aprobado"}}
+      }
+    },
     "/auth/config": {
       "get": {
         "summary": "Consultar si el registro público está habilitado",
@@ -996,6 +1025,35 @@
         }
       }
     },
+    "/proyectos/{id}/analisis-inicial": {
+      "get": {
+        "tags": ["Requisitos"], "summary": "Consultar análisis inicial, versiones, vigencia e impacto", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "version", "in": "query", "schema": {"type": "string"}, "description": "ID de una versión del mismo proyecto para consultar su contenido."}],
+        "responses": {"200": {"description": "Borrador y aprobado independientes, versiones conservadas, análisis heredado si corresponde y requisitos afectados."}, "401": {"description": "Sesión requerida"}, "404": {"description": "Proyecto o versión no accesible"}}
+      },
+      "patch": {
+        "tags": ["Requisitos"], "summary": "Guardar una revisión manual o aplicar una propuesta de IA", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["accion", "version_esperada", "justificacion"], "properties": {"accion": {"type": "string", "enum": ["guardar", "aplicar_propuesta", "agregar_actor", "editar_actor", "confirmar_actor", "fusionar_actor", "responder_pregunta"]}, "version_esperada": {"type": "string"}, "justificacion": {"type": "string"}, "contenido": {"type": "object"}, "insumo_adicional": {"type": "string"}, "trabajo_id": {"type": "string"}, "id": {"type": "string"}, "destino_id": {"type": "string"}, "cambios": {"type": "object"}, "respuesta": {"type": "string", "maxLength": 12000, "description": "Respuesta explícita para responder_pregunta; se incorpora al insumo y conserva la pregunta original."}, "tipo_resultado": {"type": "string", "enum": ["decision", "RF", "RNF", "regla_negocio", "restriccion_tecnica"]}, "elementos": {"type": "array", "items": {"type": "object"}, "description": "Elementos revisados de una respuesta; cada uno incluye tipo, necesidad, estado y evidencia literal de la respuesta."}, "confirmar_elementos": {"type": "boolean"}, "propuesta_job_id": {"type": "string"}, "elementos_relacionados": {"type": "array", "items": {"type": "string"}}, "objetivo_id": {"type": "string", "description": "Opcional: objetivo RF/RNF existente de la misma categoría que se complementa; si se omite se crea otro."}}}}}},
+        "responses": {"200": {"description": "Nueva versión de borrador; no altera versiones aprobadas ni genera requisitos."}, "400": {"description": "Acción o contenido inválido"}, "401": {"description": "Sesión requerida"}, "404": {"description": "Proyecto no accesible"}, "409": {"description": "Versión obsoleta, propuesta incompatible o análisis aprobado"}}
+      }
+    },
+    "/proyectos/{id}/analisis-inicial/aprobar": {
+      "post": {
+        "tags": ["Requisitos"], "summary": "Aprobar análisis inicial e iniciar redacción", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["version_esperada", "aceptar_advertencias"], "properties": {"version_esperada": {"type": "string"}, "aceptar_advertencias": {"type": "boolean"}, "provider": {"type": "string"}, "specificModel": {"type": "string"}}}}}},
+        "responses": {"202": {"description": "Aprobación guardada y trabajo de redacción creado o recuperado. No aprueba requisitos ni habilita diagramas."}, "200": {"description": "Aprobación conservada y generación pendiente: falló el encolado o se requiere confirmar el impacto sobre requisitos existentes."}, "400": {"description": "Obligaciones con citas inválidas, estructura inválida o advertencias no reconocidas"}, "401": {"description": "Sesión requerida"}, "404": {"description": "Proyecto no accesible"}, "409": {"description": "Fuentes o versión cambiaron"}}
+      }
+    },
+    "/proyectos/{id}/analisis-inicial/reabrir": {
+      "post": {
+        "tags": ["Requisitos"], "summary": "Crear un borrador sin invalidar el trabajo aprobado", "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"adoptar": {"type": "boolean", "description": "Confirmación explícita necesaria para adoptar el flujo en un proyecto heredado."}}}}}},
+        "responses": {"200": {"description": "Borrador nuevo o existente; no consume IA ni borra artefactos."}, "401": {"description": "Sesión requerida"}, "404": {"description": "Proyecto no accesible"}, "409": {"description": "Adopción sin confirmar o cambio concurrente"}}
+      }
+    },
     "/proyectos/{id}/revision-requisitos": {
       "post": {
         "tags": ["Proyectos"], "summary": "Recalcular revisión o registrar una decisión puntual",
@@ -1004,10 +1062,11 @@
         "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": {
           "type": "object", "required": ["accion"], "properties": {
-            "accion": { "type": "string", "enum": ["validar", "editar_analisis", "confirmar", "resolver", "descartar", "aceptar"] },
+            "accion": { "type": "string", "enum": ["validar", "editar_analisis", "confirmar", "resolver", "descartar", "aceptar", "agregar_actor", "editar_actor", "confirmar_actor", "fusionar_actor"] },
+            "destino_id": { "type": "string", "description": "ID del actor destino; requerido para fusionar_actor. Conserva alias y evidencias, actualiza los nombres asociados en requisitos y registra historial." },
             "id": { "type": "string" }, "justificacion": { "type": "string" },
             "severidad": { "type": "string", "enum": ["advertencia", "critico"] },
-            "cambios": { "type": "object", "properties": { "tipo": { "type": "string" }, "necesidad": { "type": "string" }, "estado": { "type": "string" }, "objetivo_id": { "type": "string" } } }
+            "cambios": { "type": "object", "properties": { "nombre": { "type": "string" }, "descripcion": { "type": "string" }, "tipo": { "type": "string", "description": "Para actores: persona o sistema_externo; para elementos del inventario: categoría del análisis." }, "necesidad": { "type": "string" }, "estado": { "type": "string" }, "objetivo_id": { "type": "string" } } }
           }
         } } } },
         "responses": { "200": { "description": "Auditoría, control e historial actualizados" }, "400": { "description": "Decisión, evidencia o estructura inválida" }, "401": { "description": "Sesión requerida" }, "404": { "description": "Proyecto no accesible o elemento inexistente" }, "409": { "description": "Análisis aprobado" }, "500": { "description": "Error interno sanitizado" } }

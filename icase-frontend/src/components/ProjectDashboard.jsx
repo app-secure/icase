@@ -18,6 +18,7 @@ export default function ProjectDashboard({
   onDeleteProject
 }) {
   const [projectToDelete, setProjectToDelete] = useState(null);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [activeMenuProjectId, setActiveMenuProjectId] = useState(null);
   const [viewMode, setViewMode] = useState(() => {
     return localStorage.getItem("icase_dashboard_view_mode") || "grid";
@@ -59,6 +60,7 @@ export default function ProjectDashboard({
 
   const handleQuickCreate = () => {
     const newProject = {
+      analysisFlowVersion: 2,
       id: "draft-" + Date.now(),
       name: "Proyecto sin nombre",
       description: "",
@@ -487,7 +489,7 @@ export default function ProjectDashboard({
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
-                onClick={() => setProjectToDelete(null)}
+                onClick={() => !isDeletingProject && setProjectToDelete(null)}
                 className="px-5 py-2 rounded-full text-sm font-normal bg-[#f1f3f4] hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer font-inter"
               >
                 Cancelar
@@ -495,13 +497,22 @@ export default function ProjectDashboard({
 
               <button
                 type="button"
-                onClick={() => {
-                  onDeleteProject(projectToDelete.id);
-                  setProjectToDelete(null);
+                disabled={isDeletingProject}
+                onClick={async () => {
+                  if (isDeletingProject) return;
+                  setIsDeletingProject(true);
+                  try {
+                    await onDeleteProject(projectToDelete.id);
+                    setProjectToDelete(null);
+                  } catch {
+                    // Mantener el modal abierto para que el usuario pueda reintentar.
+                  } finally {
+                    setIsDeletingProject(false);
+                  }
                 }}
-                className="px-5 py-2 rounded-full text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer font-inter shadow-xs"
+                className="px-5 py-2 rounded-full text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer font-inter shadow-xs disabled:opacity-60 disabled:cursor-wait"
               >
-                Eliminar
+                {isDeletingProject ? "Eliminando…" : "Eliminar"}
               </button>
             </div>
           </div>

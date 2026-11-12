@@ -105,6 +105,26 @@ class RequerimientoController {
           }));
           return res.json({ success: true, changed: false, count: guardados.length, requerimientos: guardados });
         }
+        const projects = this.requirementChangeService.proyectoRepository;
+        const project = projects ? await projects.obtenerPorId(proyectoId) : null;
+        if (project?.version_flujo_analisis === 2) {
+          const removed = existentes.filter(old => !normalizados.some(next => next.identificador === old.identificador));
+          if (removed.length) await projects.actualizar(proyectoId, { auditoria_requisitos: { ...project.auditoria_requisitos, historial_requisitos: [
+            ...(project.auditoria_requisitos?.historial_requisitos || []), ...removed.map(contenido => ({ accion: 'retiro_manual_explicito', contenido, fecha: new Date(), usuario_id: req.usuario.id }))
+          ] } });
+          const saved = [];
+          for (const next of normalizados) {
+            const old = existentes.find(r => r.identificador === next.identificador);
+            if (!old) saved.push(await this.requerimientoRepository.crear({ proyecto_id: proyectoId, ...next, aprobado: false }));
+            else if (this.requirementChangeService.changed([old], [next])) {
+              const { historial_versiones, ...snapshot } = old;
+              saved.push(await this.requerimientoRepository.actualizar(old.id, { ...next, aprobado: false, historial_versiones: [...(historial_versiones || []), { contenido: snapshot, fecha: new Date(), accion: 'edicion_manual' }] }));
+            } else saved.push(old);
+          }
+          for (const old of removed) await this.requerimientoRepository.eliminar(old.id);
+          await this.requirementChangeService.invalidate(proyectoId);
+          return res.json({ success: true, changed: true, count: saved.length, requerimientos: saved });
+        }
         await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
         const docs = normalizados.map((r) => ({
           proyecto_id: proyectoId,

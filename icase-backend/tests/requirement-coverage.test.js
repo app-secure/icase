@@ -1,4 +1,20 @@
 const Coverage = require('../src/infrastructure/services/RequirementCoverageService');
+test('lote local rechaza requisitos ajenos aunque el JSON sea valido', async () => {
+  const source = 'El administrador gestiona usuarios. El sistema protege contraseñas.';
+  const items = [
+    { id: 'N-01', tipo: 'RF', objetivo_id: 'O-01', necesidad: 'Gestionar usuarios', evidencia: 'El administrador gestiona usuarios.', estado: 'confirmado' },
+    { id: 'N-02', tipo: 'RNF', objetivo_id: 'O-02', necesidad: 'Proteger contraseñas', evidencia: 'El sistema protege contraseñas.', estado: 'confirmado' }
+  ];
+  const request = jest.fn().mockResolvedValueOnce({ inventario_necesidades: items })
+    .mockResolvedValueOnce({ requerimientos: [
+      { identificador: 'RF-01', tipo: 'RF', nombre: 'Usuarios', descripcion: 'El sistema DEBE permitir gestionar usuarios.', necesidades_origen: ['N-01'] },
+      { identificador: 'RNF-01', tipo: 'RNF', nombre: 'Seguridad', descripcion: 'El sistema DEBE proteger contraseñas.', necesidades_origen: ['N-02'] },
+      { identificador: 'RF-99', tipo: 'RF', nombre: 'Extra', descripcion: 'El sistema DEBE crear un extra.', necesidades_origen: ['N-99'] }
+    ] });
+  await expect(new Coverage().generate({ input: source, prompt: 'Analiza', request, maxObjectivesPerBatch: 2 }))
+    .rejects.toThrow(/no devolvi/);
+  expect(request).toHaveBeenCalledTimes(2);
+});
 const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
 const input = 'El administrador gestiona usuarios. El sistema protege contraseñas. No queremos alta disponibilidad.';
 const inventory = [
@@ -40,7 +56,7 @@ test('divide una agrupación sin perder ninguna necesidad', async () => {
     .mockResolvedValueOnce({ requerimientos: [{ ...rf, necesidades_origen: ['N-01', 'N-02'] }] })
     .mockResolvedValueOnce({ eliminar_identificadores: ['RF-01'], requerimientos_corregidos: [rf, rnf] });
   const result = await new Coverage().generate({ input, prompt: 'Analiza', request });
-  expect(result.requerimientos).toEqual([rf, rnf]);
+  expect(result.requerimientos).toEqual([rf, { ...rnf, estado_decision: 'pendiente', requiere_confirmacion: true }]);
 });
 test('una cobertura incompleta devuelve borrador advertido en vez de bloquear el proyecto', async () => {
   const request = jest.fn().mockResolvedValueOnce({ inventario_necesidades: inventory })
@@ -181,7 +197,7 @@ test('conserva lotes válidos como borrador advertido si otro lote falla', async
   expect(result.requerimientos).toHaveLength(5);
   expect(result.auditoria_requisitos.estado).toBe('revision_requerida');
   expect(result.auditoria_requisitos.advertencias.join(' ')).toContain('Falta N-6');
-  expect(request).toHaveBeenCalledTimes(3);
+  expect(request).toHaveBeenCalledTimes(4); // un único intento de recuperar el lote pendiente
 });
 test('integra el flujo en el proveedor seleccionado sin llamadas externas y mantiene origen explícito sin cifra', async () => {
   const service = new ModelosIaService();
@@ -275,6 +291,8 @@ test('el refinamiento con el chat de IA solo corrige problemas críticos sin bor
   expect(rf01Final).toBeDefined();
   expect(rf01Final.nombre).toBe('Registro de usuarios');
   expect(rf01Final.descripcion).toBe('El sistema debe permitir al Administrador gestionar usuarios.');
-  expect(result.auditoria_requisitos.control_aprobacion.bloqueado).toBe(false);
-  expect(result.auditoria_requisitos.control_aprobacion.errores_criticos).toEqual([]);
+  // El proveedor no corrigió RNF-01: conservar RF-01 no autoriza a inventar
+  // una solución para el requisito restante ni a desbloquear la aprobación.
+  expect(result.auditoria_requisitos.control_aprobacion.bloqueado).toBe(true);
+  expect(result.auditoria_requisitos.control_aprobacion.errores_criticos.length).toBeGreaterThan(0);
 });

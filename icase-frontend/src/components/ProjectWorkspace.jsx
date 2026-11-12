@@ -4,6 +4,9 @@ import { RequirementsReferencePanel } from "./ApprovedRequirementsSidebar";
 import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
 import RequirementsView from "./RequirementsView";
+import InitialAnalysisView from './InitialAnalysisView';
+import AnalysisFlowProgress from './AnalysisFlowProgress';
+import RequirementJobStatus from './RequirementJobStatus';
 import DiagramsView from "./DiagramsView";
 import DocumentViewer from "./DocumentViewer";
 import CodePlanningView from "./CodePlanningView";
@@ -17,6 +20,12 @@ import {
   deleteFuenteApi,
   fetchFuentesApi,
   processWithAiApi,
+  startRequirementJobApi,
+  fetchRequirementJobApi,
+  fetchLatestRequirementJobApi,
+  resumeRequirementJobApi,
+  fetchInitialAnalysisApi,
+  initialAnalysisActionApi,
   startDiagramJobApi,
   fetchDiagramJobApi,
   fetchLatestDiagramJobApi,
@@ -65,7 +74,7 @@ const extractInsumoBruto = async (sources) => {
         `Archivo: ${s.name}`,
         `Categoría: ${s.category || s.type}`,
         `Tipo de contenido: ${s.contentType || "Sin especificar"}`,
-        s.description ? `Descripción aportada por el usuario: ${s.description}` : "",
+        s.description ? `Descripción ${s.aiMetadata ? "sugerida por IA" : "registrada en la fuente"}: ${s.description}` : "",
         s.authorOrigin ? `Autor u origen: ${s.authorOrigin}` : "",
         s.documentDate ? `Fecha del contenido: ${s.documentDate}` : "",
         s.tags?.length ? `Etiquetas: ${s.tags.join(", ")}` : "",
@@ -359,6 +368,34 @@ export default function ProjectWorkspace({
   const project = rawProject || defaultEmptyProject;
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [resilientRequirements, setResilientRequirements] = useState(false);
+  const [requirementJob, setRequirementJob] = useState(null);
+  const [initialState, setInitialState] = useState(null);
+  const [showInitial, setShowInitial] = useState(false);
+  const [initialBusy, setInitialBusy] = useState(false);
+  const [initialDirty, setInitialDirty] = useState(false);
+  const canLeaveInitial = () => !showInitial || !initialDirty || window.confirm('Hay cambios del análisis sin guardar. ¿Salir sin guardarlos?');
+  React.useEffect(() => {
+    if (!initialDirty) return;
+    const warn = event => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
+  }, [initialDirty]);
+  const [initialProposal, setInitialProposal] = useState(null);
+  const projectBackendId = project.backendId || (/^[a-f\d]{24}$/i.test(project.id || '') ? project.id : null);
+  const loadInitial = async () => {
+    if (!projectBackendId) return null;
+    const state = await fetchInitialAnalysisApi(projectBackendId); setInitialState(state); return state;
+  };
+  React.useEffect(() => {
+    let active = true; setInitialState(null); setShowInitial(false); setInitialProposal(null);
+    if (projectBackendId) fetchInitialAnalysisApi(projectBackendId).then(state => {
+      if (!active) return; setInitialState(state);
+      if (state.version_flujo === 2 && !project.isProcessed && (state.borrador || state.aprobado)) setShowInitial(true);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [projectBackendId]);
+  const initialAction = async action => { setInitialBusy(true); try { return await action(); } finally { setInitialBusy(false); } };
+  const appliedRequirementJobs = React.useRef(new Set());
   const [processProgress, setProcessProgress] = useState(0);
   const [processStage, setProcessStage] = useState("");
   const { toasts, addToast, removeToast } = useToasts();
@@ -371,6 +408,32 @@ export default function ProjectWorkspace({
   const [availableProviders, setAvailableProviders] = useState([]);
   const [isRequirementsSidebarOpen, setIsRequirementsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 768);
   const [isManagingSources, setIsManagingSources] = useState(false);
+  const [progressHidden, setProgressHidden] = useState(false);
+  const progressScroll = React.useRef({ target: null, top: 0, movement: 0, until: 0 });
+  React.useEffect(() => {
+    setProgressHidden(false);
+    progressScroll.current = { target: null, top: 0, movement: 0, until: 0 };
+  }, [project.id, project.currentPhase, showInitial, isManagingSources]);
+  const handleProgressScroll = event => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || target.closest('textarea, input, pre, [role="dialog"]') || target.scrollHeight - target.clientHeight < 80) return;
+    const previous = progressScroll.current;
+    const top = target.scrollTop;
+    const delta = top - (previous.target === target ? previous.top : 0);
+    const movement = Math.sign(delta) === Math.sign(previous.movement) ? previous.movement + delta : delta;
+    progressScroll.current = { ...previous, target, top, movement };
+    if (Date.now() < previous.until) return;
+    const hide = top > 80 && movement > 20;
+    const reveal = top < 24 || movement < -20;
+    if (hide || reveal) {
+      const next = hide && !reveal;
+      if (next !== progressHidden && !event.currentTarget.querySelector('nav:focus-within')) {
+        setProgressHidden(next);
+        progressScroll.current.until = Date.now() + 220;
+        progressScroll.current.movement = 0;
+      }
+    }
+  };
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [isReviewingRequirements, setIsReviewingRequirements] = useState(false);
@@ -448,9 +511,10 @@ export default function ProjectWorkspace({
   }, [diagramJob?.id, diagramJob?.estado, applyDiagramJobResponse]);
 
   React.useEffect(() => {
-    fetchAiModelsApi()
+    fetchAiModelsApi(project.isAnalysisApproved ? null : 'requisitos')
       .then((data) => {
         if (data?.proveedores?.length) {
+          setResilientRequirements(data.requisitos_resilientes === true);
           setAvailableProviders(data.proveedores);
           const defaultProvId = data.provider_defecto || "auto";
           const matchProv = data.proveedores.find((p) => p.id === defaultProvId && p.disponible !== false);
@@ -460,7 +524,58 @@ export default function ProjectWorkspace({
       .catch((err) => {
         console.warn("[Workspace] Error consultando modelos de IA:", err);
       });
-  }, []);
+  }, [project.isAnalysisApproved]);
+
+  React.useEffect(() => {
+    const id = project.backendId || (project.id?.length === 24 ? project.id : null);
+    if ((!resilientRequirements && project.analysisFlowVersion !== 2) || !id) return;
+    let active = true;
+    fetchLatestRequirementJobApi(id).then(job => { if (active) setRequirementJob(job); }).catch(() => {});
+    return () => { active = false; };
+  }, [resilientRequirements, project.backendId, project.id, project.isAnalysisApproved]);
+
+  React.useEffect(() => {
+    if (!requirementJob?.id || String(requirementJob.proyecto_id) !== String(project.backendId || project.id)) return;
+    if (requirementJob.operacion === 'analisis_respuesta') return;
+    if (project.isAnalysisApproved && !['analisis_inicial', 'correccion_analisis_inicial', 'revision_calidad'].includes(requirementJob.operacion)) return;
+    if (requirementJob.estado === 'completado') {
+      if (!appliedRequirementJobs.current.has(requirementJob.id)) {
+        appliedRequirementJobs.current.add(requirementJob.id);
+        if (['analisis_inicial', 'correccion_analisis_inicial', 'revision_calidad'].includes(requirementJob.operacion)) {
+          if (['correccion_analisis_inicial', 'revision_calidad'].includes(requirementJob.operacion)) setInitialProposal({ ...requirementJob.resultado_analisis_inicial, trabajo_id: requirementJob.id });
+          loadInitial().then(() => { setShowInitial(true); setIsManagingSources(false); }).catch(error => setAlertModal({ title: 'No se pudo cargar el análisis', message: error.message }));
+          return;
+        }
+        const result = requirementJob.resultado_requisitos;
+        if (result) {
+          const { reqs } = transformAiOutput(result, project.name, project.diagrams);
+          onUpdateProject({ ...project, requirements: reqs, requirementAudit: result.auditoria_requisitos, isProcessed: true,
+            currentPhase: 1, isAnalysisApproved: false, isDiagramsApproved: false, isMockupsApproved: false,
+            diagrams: project.analysisFlowVersion === 2 ? project.diagrams : {}, mockups: project.analysisFlowVersion === 2 ? project.mockups : [], name: result.nombre_proyecto || project.name });
+          setShowInitial(false);
+          setIsManagingSources(false);
+        }
+      }
+      return;
+    }
+    if (!['encolado', 'procesando'].includes(requirementJob.estado)) return;
+    let active = true, polling = false;
+    const timer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try { const next = await fetchRequirementJobApi(requirementJob.id); if (active) setRequirementJob(next); }
+      catch { if (active) setProcessStage('No se pudo consultar el avance; el trabajo sigue guardado.'); }
+      finally { polling = false; }
+    }, 2000);
+    return () => { active = false; clearInterval(timer); };
+  }, [requirementJob, project, onUpdateProject]);
+
+  const resumeRequirements = async () => {
+    try {
+      const next = await resumeRequirementJobApi(requirementJob.id);
+      setRequirementJob({ ...next, estado: ['esperando_proveedor', 'interrumpido'].includes(next.estado) ? 'encolado' : next.estado });
+    } catch (error) { setAlertModal({ title: 'No se pudo reanudar', message: error.message }); }
+  };
 
   // Subida / Eliminación de fuentes
   const handleAddSource = async (newSource) => {
@@ -539,6 +654,7 @@ export default function ProjectWorkspace({
                 description: uploaded.descripcion || s.description || "",
                 authorOrigin: uploaded.autor_origen || s.authorOrigin || "",
                 documentDate: uploaded.fecha_documento || s.documentDate || "",
+                documentDateSource: uploaded.fecha_documento_origen || s.documentDateSource || "",
                 tags: Array.isArray(uploaded.etiquetas) ? uploaded.etiquetas : (s.tags || []),
                 transcriptionVerified: Boolean(uploaded.transcripcion_verificada)
               };
@@ -695,6 +811,12 @@ export default function ProjectWorkspace({
       let aiResult = null;
       if (backendId) {
         try {
+          if (resilientRequirements || project.analysisFlowVersion === 2) {
+            onUpdateProject({ ...project, backendId, id: backendId });
+            const job = await startRequirementJobApi(backendId, { insumo_bruto: insumoBruto, provider: providerToUse });
+            setRequirementJob(job);
+            return;
+          }
           aiResult = await processWithAiApi(backendId, insumoBruto, '', providerToUse, null, 'requisitos');
         } catch (errAi) {
           console.error("[Workspace] Error en procesamiento con IA:", errAi.message);
@@ -819,7 +941,12 @@ export default function ProjectWorkspace({
     const result = payload.scope === 'necesidad'
       ? await resolveRequirementNeedApi(backendId, payload.id, payload.data)
       : await reviewRequirementsApi(backendId, payload);
-    onUpdateProject({ ...project, requirementAudit: result.auditoria_requisitos });
+    const actorKey = value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const replacements = payload.accion?.endsWith('_actor') ? result.auditoria_requisitos?.cambios_actores || [] : [];
+    const updateActors = row => ({ ...row, actors: [...new Set((row.actors || row.actores || []).map(name => replacements.find(([old]) => actorKey(old) === actorKey(name))?.[1] || name))] });
+    onUpdateProject({ ...project, requirementAudit: result.auditoria_requisitos, requirements: replacements.length ? {
+      ...project.requirements, functional: (project.requirements?.functional || []).map(updateActors), nonFunctional: (project.requirements?.nonFunctional || []).map(updateActors)
+    } : project.requirements });
     return result;
   };
 
@@ -1017,6 +1144,7 @@ export default function ProjectWorkspace({
       descripcion: changes.description,
       autor_origen: changes.authorOrigin,
       fecha_documento: changes.documentDate,
+      fecha_documento_origen: changes.documentDateSource,
       etiquetas: changes.tags,
       texto_transcrito: changes.contentSnippet,
       transcripcion_verificada: changes.transcriptionVerified,
@@ -1030,6 +1158,7 @@ export default function ProjectWorkspace({
       description: saved.descripcion,
       authorOrigin: saved.autor_origen,
       documentDate: saved.fecha_documento,
+      documentDateSource: saved.fecha_documento_origen || "",
       tags: saved.etiquetas || [],
       contentSnippet: saved.texto_transcrito || "",
       transcriptionVerified: Boolean(saved.transcripcion_verificada),
@@ -1052,7 +1181,8 @@ export default function ProjectWorkspace({
       contentType: suggestion.tipo_contenido,
       description: suggestion.descripcion,
       authorOrigin: suggestion.autor_origen,
-      documentDate: suggestion.fecha_documento,
+      documentDate: source.documentDate || "",
+      documentDateSource: source.documentDateSource || "",
       tags: suggestion.etiquetas || [],
       aiMetadata: Boolean(suggestion.generado_por_ia)
     };
@@ -1153,6 +1283,16 @@ export default function ProjectWorkspace({
           return { success: true, pending: true, job: response.trabajo };
         }
         const objetivo = phase === "diagrams" ? "diagramas" : "requisitos";
+        if (objetivo === 'requisitos' && project.analysisFlowVersion === 2) {
+          const state = await loadInitial();
+          if (!state?.aprobado || !state.vigente) return { success: false, error: 'Revisa y aprueba primero el análisis inicial vigente.' };
+          const all = [...(project.requirements?.functional || []), ...(project.requirements?.nonFunctional || [])];
+          const requestedIds = new Set((promptText.match(/\b(?:RF|RNF)-\d+\b/gi) || []).map(id => id.toUpperCase()));
+          const ids = all.map(r => r.identificador || r.id).filter(id => requestedIds.has(String(id).toUpperCase()));
+          if (!ids.length) return { success: false, error: 'Indica los IDs de los requisitos a corregir, por ejemplo RF-01. Para añadir necesidades o cambiar el alcance, revisa el análisis inicial.' };
+          const job = await startRequirementJobApi(backendId, { operacion: 'redaccion_requisitos', analisis_id: state.aprobado.id, actualizar_ids: ids, instruccion: promptText, provider: selectedAiProvider || 'auto' });
+          setRequirementJob(job); return { success: true, pending: true, job };
+        }
         if (objetivo === "requisitos" && !project.isAnalysisApproved) {
           const seenIds = new Set();
           let rfCount = 1;
@@ -1379,7 +1519,20 @@ export default function ProjectWorkspace({
       {project.isAnalysisApproved && !isManagingSources && (
         <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
       )}
-      <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
+      <main onScrollCapture={handleProgressScroll} className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
+        <RequirementJobStatus job={requirementJob} onResume={resumeRequirements} />
+        {projectBackendId && <AnalysisFlowProgress
+          collapsed={progressHidden} onReveal={() => { setProgressHidden(false); progressScroll.current.until = Date.now() + 220; }}
+          current={showInitial ? 'analysis' : isManagingSources || !project.isProcessed ? 'sources' : project.currentPhase > 1 && !isReviewingRequirements ? null : 'requirements'}
+          completed={{ sources: Boolean(project.sources?.length), analysis: Boolean(initialState?.aprobado), requirements: Boolean(project.isAnalysisApproved) }}
+          requirementsAvailable={Boolean(project.isProcessed)}
+          laterPhase={!showInitial && !isManagingSources && !isReviewingRequirements && project.currentPhase > 1 ? ({ 2: 'Diseño', 3: 'Codificación', 4: 'Documento' }[project.currentPhase]) : null}
+          onNavigate={key => {
+            if (key === 'analysis') { if (showInitial) return; loadInitial().then(() => { setShowInitial(true); setIsManagingSources(false); }).catch(error => setAlertModal({ title: 'Análisis inicial', message: error.message })); return; }
+            if (!canLeaveInitial()) return;
+            setShowInitial(false); setIsManagingSources(key === 'sources');
+            if (key === 'requirements') { if (project.isAnalysisApproved) setIsReviewingRequirements(true); else onUpdateProject({ ...project, currentPhase: 1 }); }
+          }} />}
         {isProcessing ? (
           /* Barra Dinámica Minimalista con Porcentaje */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
@@ -1409,6 +1562,35 @@ export default function ProjectWorkspace({
               </div>
             </div>
           </div>
+        ) : showInitial && initialState ? (
+          <InitialAnalysisView state={initialState} proposal={initialProposal} busy={initialBusy || ['encolado', 'procesando'].includes(requirementJob?.estado)} provider={selectedAiProvider}
+            onReviewQuality={() => initialAction(async () => { const job = await startRequirementJobApi(projectBackendId, { operacion: 'revision_calidad', analisis_id: initialState.borrador.id, provider: selectedAiProvider }); setRequirementJob(job); })}
+            onAnalyzeAnswer={async (questionId, answer, resumeId) => {
+              let job = resumeId ? await resumeRequirementJobApi(resumeId) : await startRequirementJobApi(projectBackendId, { operacion: 'analisis_respuesta', analisis_id: initialState.borrador.id, pregunta_id: questionId, respuesta: answer, provider: selectedAiProvider });
+              while (['encolado', 'procesando'].includes(job.estado)) { await new Promise(resolve => setTimeout(resolve, 900)); job = await fetchRequirementJobApi(job.id); }
+              if (job.estado !== 'completado' || !job.resultado_analisis_inicial?.elementos) throw Object.assign(new Error(job.mensaje || 'Propuesta pendiente. Puedes reanudar o introducir elementos manualmente.'), { trabajoId: job.id });
+              return { ...job.resultado_analisis_inicial, trabajo_id: job.id };
+            }}
+            onDirtyChange={setInitialDirty}
+            onViewVersion={async id => (await fetchInitialAnalysisApi(projectBackendId, id)).version_consultada}
+            onExtract={id => initialAction(async () => { const job = await startRequirementJobApi(projectBackendId, { operacion: 'analisis_inicial', analisis_id: id, regenerar: true, desde_cero: true, provider: selectedAiProvider }); setRequirementJob(job); })}
+            onBack={() => { if (!canLeaveInitial()) return; setShowInitial(false); setIsManagingSources(true); }}
+            onRequirements={() => { if (!canLeaveInitial()) return; setShowInitial(false); setIsManagingSources(false); if (project.isAnalysisApproved) setIsReviewingRequirements(true); else if (project.isProcessed) onUpdateProject({ ...project, currentPhase: 1 }); }}
+            onSave={body => initialAction(async () => { await initialAnalysisActionApi(projectBackendId, '', body); await loadInitial(); })}
+            onReopen={() => initialAction(async () => { if (initialState.version_flujo !== 2 && !window.confirm('¿Adoptar el flujo separado? No se regenerarán ni borrarán tus requisitos o diagramas.')) return; await initialAnalysisActionApi(projectBackendId, 'reabrir', { adoptar: true }); onUpdateProject({ ...project, analysisFlowVersion: 2 }); await loadInitial(); })}
+            onApprove={version => initialAction(async () => {
+              const result = await initialAnalysisActionApi(projectBackendId, 'aprobar', { version_esperada: version, aceptar_advertencias: true, provider: selectedAiProvider });
+              await loadInitial(); if (result.trabajo) setRequirementJob(result.trabajo);
+              if (result.generacion_pendiente) setAlertModal({ title: 'Análisis aprobado; generación pendiente', message: result.mensaje });
+            })}
+            onProposal={(instruction, ids) => initialAction(async () => { const job = await startRequirementJobApi(projectBackendId, { operacion: 'correccion_analisis_inicial', instruccion: instruction, elementos_ids: ids, provider: selectedAiProvider }); setRequirementJob(job); })}
+            onApplyProposal={() => initialAction(async () => { await initialAnalysisActionApi(projectBackendId, '', { accion: 'aplicar_propuesta', trabajo_id: initialProposal.trabajo_id, version_esperada: initialState.borrador.id, justificacion: 'Propuesta de IA revisada y aceptada por el usuario.' }); setInitialProposal(null); await loadInitial(); })}
+            onUpdateRequirements={() => initialAction(async () => {
+              const state = await loadInitial();
+              if (state.impacto.requisitos_existentes && !window.confirm(`¿Actualizar explícitamente ${state.impacto.requisitos_afectados.join(', ') || 'las necesidades nuevas'}? Se conservarán las versiones anteriores y los requisitos no afectados.`)) return;
+              const job = await startRequirementJobApi(projectBackendId, { operacion: 'redaccion_requisitos', analisis_id: state.aprobado.id, actualizar_ids: state.impacto.requisitos_afectados, provider: selectedAiProvider }); setRequirementJob(job);
+            })}
+          />
         ) : !project.isProcessed || isManagingSources ? (
           /* PANTALLA 0 (Inicial al crear proyecto): Cargar Insumos */
           <SourcesPanel
@@ -1421,7 +1603,7 @@ export default function ProjectWorkspace({
             selectedProvider={selectedAiProvider}
             onSelectProvider={setSelectedAiProvider}
             availableProviders={availableProviders}
-            isProcessing={isProcessing || isGeneratingDiagrams}
+            isProcessing={isProcessing || isGeneratingDiagrams || ['encolado', 'procesando'].includes(requirementJob?.estado)}
             isProcessed={project.isProcessed}
             onContinueToProject={project.isProcessed ? () => setIsManagingSources(false) : null}
           />

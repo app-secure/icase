@@ -10,6 +10,17 @@ function modelosConPreferencia(modeloSolicitado, modelosConfigurados) {
 }
 
 module.exports = {
+  requirements: {
+    version: 'requirements-router-v1',
+    order: ['gemini', 'groq', 'openrouter', 'ollama'],
+    models: {
+      gemini: [{ id: 'gemini-3.5-flash-lite', context: 1048576, output: 8192, json: true }, { id: 'gemini-3.8-flash', context: 1048576, output: 8192, json: true }],
+      groq: [{ id: 'openai/gpt-oss-120b', context: 131072, output: 8192, json: true }, { id: 'openai/gpt-oss-20b', context: 131072, output: 8192, json: true }],
+      openrouter: [{ id: 'qwen/qwen3.6-plus:free', context: 131072, output: 8192, json: true }, { id: 'openai/gpt-oss-120b:free', context: 131072, output: 8192, json: true }],
+      ollama: [{ id: 'qwen3:8b', context: 8192, output: 2048, json: true }]
+    },
+    excluded: { openai: ['gpt-5.4-mini', 'gpt-5-mini'], deepseek: ['deepseek-flash', 'deepseek-v4-pro'], siliconflow: ['Qwen/Qwen3-8B'] }
+  },
   listaEnv,
   modelosConPreferencia,
   analysis: {

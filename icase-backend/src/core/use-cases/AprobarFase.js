@@ -22,7 +22,12 @@ class AprobarFase {
     let nuevoEstado = proyecto.estado_fase;
 
     if (fase === 'analisis') {
+      if (proyecto.version_flujo_analisis === 2) {
+        const initial = await this.initialAnalysis.requireApproved(proyectoId, proyecto.usuario_id);
+        if (proyecto.auditoria_requisitos?.referencia_analisis_inicial?.id !== initial.id) throw new Error('Los requisitos no corresponden a la versión aprobada del análisis inicial. Revisa los cambios antes de aprobar.');
+      }
       const reqs = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      if (proyecto.version_flujo_analisis === 2 && reqs.some(r => !(r.necesidades_origen || []).length)) throw new Error('Vincula cada requisito con una necesidad del análisis inicial aprobado; las obligaciones nuevas deben revisarse primero allí.');
       const control = new RequirementApprovalService().evaluate(reqs, proyecto.auditoria_requisitos);
       if (control.bloqueado) {
         throw Object.assign(new Error(`No se puede aprobar el análisis: ${control.errores_criticos.map((item) => item.mensaje).join(' ')}`), {

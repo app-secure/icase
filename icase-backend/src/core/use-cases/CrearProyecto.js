@@ -17,6 +17,7 @@ class CrearProyecto {
     proyecto.validar();
     return await this.proyectoRepository.crear({
       ...proyecto,
+      version_flujo_analisis: 2,
       parametros
     });
   }

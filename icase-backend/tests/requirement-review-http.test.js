@@ -10,6 +10,24 @@ beforeEach(() => {
   Object.assign(platform.data.requerimiento[0], { tipo: 'RF', identificador: 'RF-1', nombre: 'Consulta', descripcion: 'Consultar expedientes', aprobado: false, necesidades_origen: ['N-1'], criterios_aceptacion: [{ descripcion: 'Consulta visible', necesidades_origen: ['N-1'] }] });
 });
 const review = (auth, body) => platform.request('POST', `/proyectos/${ids.projectA}/revision-requisitos`, { auth, body });
+test('actores: añadir, editar, fusionar y confirmar; actualizar asociaciones y bloquear tras aprobación', async () => {
+  const project = platform.data.proyecto[0]; project.estado_fase = 'insumos_pendientes';
+  platform.data.requerimiento[0].actores = ['Operador'];
+  const auth = token(ids.userA);
+  const send = body => review(auth, { justificacion: 'Revisión humana de actores', ...body });
+  const created = await send({ accion: 'agregar_actor', cambios: { nombre: 'Supervisor', descripcion: 'Supervisa', tipo: 'persona' } });
+  expect(created.status).toBe(200);
+  const actors = created.json.auditoria_requisitos.actores;
+  const operator = actors.find(a => a.nombre === 'Operador');
+  const supervisor = actors.find(a => a.nombre === 'Supervisor');
+  expect((await send({ accion: 'editar_actor', id: operator.id, cambios: { nombre: 'Asistente', descripcion: 'Consulta', tipo: 'persona' } })).status).toBe(200);
+  expect(platform.data.requerimiento[0].actores).toEqual(['Asistente']);
+  expect((await send({ accion: 'fusionar_actor', id: operator.id, destino_id: supervisor.id })).status).toBe(200);
+  expect(platform.data.requerimiento[0].actores).toEqual(['Supervisor']);
+  expect((await send({ accion: 'confirmar_actor', id: supervisor.id })).status).toBe(200);
+  platform.data.requerimiento[0].aprobado = true;
+  expect((await send({ accion: 'confirmar_actor', id: supervisor.id })).status).toBe(409);
+});
 
 test('HTTP real: sesión, propietario y proyecto distinto no pueden acceder a revisión', async () => {
   expect((await review(null, { accion: 'validar' })).status).toBe(401);

@@ -5,6 +5,7 @@ class MongoProyectoRepository extends IProyectoRepository {
   async crear(proyecto) {
     const nuevo = new ProyectoModel({
       usuario_id: proyecto.usuario_id || null,
+      version_flujo_analisis: proyecto.version_flujo_analisis || 1,
       nombre: proyecto.nombre,
       descripcion: proyecto.descripcion,
       insumo_bruto: proyecto.insumo_bruto,
@@ -33,6 +34,11 @@ class MongoProyectoRepository extends IProyectoRepository {
   async actualizar(id, datos) {
     const doc = await ProyectoModel.findByIdAndUpdate(id, datos, { new: true });
     return doc ? doc.toJSON() : null;
+  }
+
+  async actualizarSi(id, expected, datos) {
+    const row = await ProyectoModel.findOneAndUpdate({ _id: id, ...expected }, { $set: datos }, { new: true });
+    return row?.toJSON() || null;
   }
 
   async actualizarEstadoFase(id, estadoFase) {

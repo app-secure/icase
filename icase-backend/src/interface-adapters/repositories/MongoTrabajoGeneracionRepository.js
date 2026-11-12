@@ -2,6 +2,51 @@ const TrabajoGeneracionModel = require('../../infrastructure/database/schemas/Tr
 const { randomUUID } = require('crypto');
 
 class MongoTrabajoGeneracionRepository {
+  async requirementsRecover() {
+    await TrabajoGeneracionModel.updateMany({ tipo: 'requisitos', estado: { $in: ['encolado', 'procesando'] }, lease_expires_at: { $lte: new Date() } },
+      { $set: { estado: 'interrumpido', lease_expires_at: null, mensaje: 'Trabajo interrumpido. Reanuda para continuar sin repetir etapas válidas.' } });
+  }
+  async requirementsGet(id) {
+    const row = await TrabajoGeneracionModel.findOne({ _id: id, tipo: 'requisitos' }).lean();
+    return row ? { ...row, id: String(row._id), proyecto_id: String(row.proyecto_id), usuario_id: String(row.usuario_id) } : null;
+  }
+  async requirementsLatest(projectId, operation = null) {
+    const row = await TrabajoGeneracionModel.findOne({ proyecto_id: projectId, tipo: 'requisitos', ...(operation ? { operacion_requisitos: operation } : {}) }).sort({ createdAt: -1 }).lean();
+    return row ? this.requirementsGet(row._id) : null;
+  }
+  async requirementsStart(data) {
+    await this.requirementsRecover();
+    const key = `requisitos:${data.proyecto_id}`;
+    const existing = await TrabajoGeneracionModel.findOne({ clave_activa: key }).lean();
+    if (existing) {
+      if (existing.entrada_hash === data.entrada_hash) return { job: await this.requirementsGet(existing._id), created: false };
+      if (['encolado', 'procesando'].includes(existing.estado)) throw Object.assign(new Error('Ya existe una generación activa.'), { status: 409 });
+      await TrabajoGeneracionModel.updateOne({ _id: existing._id, estado: existing.estado }, { $unset: { clave_activa: 1 }, $set: { estado: 'fallido', mensaje: 'La entrada cambió; inicia una nueva generación.' } });
+    }
+    try {
+      // El hash del prompt de cada etapa decide la reutilización. Nunca importar
+      // checkpoints de otro usuario/proyecto ni respuestas sin validar.
+      const previous = await TrabajoGeneracionModel.findOne({ proyecto_id: data.proyecto_id, usuario_id: data.usuario_id, tipo: 'requisitos' }).sort({ createdAt: -1 }).lean();
+      const reusable = Object.fromEntries(Object.entries(previous?.checkpoints_requisitos || {}).filter(([, entry]) => entry.validated));
+      const doc = await TrabajoGeneracionModel.create({ ...data, checkpoints_requisitos: reusable, tipo: 'requisitos', estado: 'encolado', clave_activa: key, ejecutor_id: this.ejecutorId, lease_expires_at: this.leaseUntil() });
+      return { job: await this.requirementsGet(doc._id), created: true };
+    } catch (err) {
+      if (err.code !== 11000) throw err;
+      const other = await TrabajoGeneracionModel.findOne({ clave_activa: key }).lean();
+      return { job: await this.requirementsGet(other._id), created: false };
+    }
+  }
+  async requirementsClaim(id) {
+    const row = await TrabajoGeneracionModel.findOneAndUpdate({ _id: id, tipo: 'requisitos', estado: { $in: ['encolado', 'interrumpido', 'esperando_proveedor'] } },
+      { $set: { estado: 'procesando', ejecutor_id: this.ejecutorId, lease_expires_at: this.leaseUntil(), error: null } }, { new: true }).lean();
+    return row ? this.requirementsGet(row._id) : null;
+  }
+  async requirementsSave(id, changes, finish = false) {
+    const update = { $set: { ...changes, lease_expires_at: finish ? null : this.leaseUntil() } };
+    if (changes.estado === 'completado' || changes.estado === 'fallido') update.$unset = { clave_activa: 1 };
+    const res = await TrabajoGeneracionModel.updateOne({ _id: id, tipo: 'requisitos', ejecutor_id: this.ejecutorId, estado: 'procesando', lease_expires_at: { $gt: new Date() } }, update);
+    if (!res.matchedCount) throw Object.assign(new Error('El trabajo perdió su lease.'), { code: 'REQUIREMENTS_LEASE_LOST' });
+  }
   constructor() {
     this.ejecutorId = randomUUID();
     this.leaseMs = Number(process.env.GENERATION_JOB_LEASE_MS || 120000);

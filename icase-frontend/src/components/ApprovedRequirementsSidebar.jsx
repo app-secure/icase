@@ -1,4 +1,5 @@
 import React from 'react';
+import RequirementActorsPanel from './RequirementActorsPanel';
 import { PanelLeft, PanelLeftClose, PanelRight, PanelRightClose } from 'lucide-react';
 
 export function RequirementsReferencePanel({ open, onToggle, side = 'left', ...props }) {
@@ -70,6 +71,7 @@ export default function ApprovedRequirementsSidebar({ requirements = {}, audit =
       <button type="button" onClick={onHide} aria-label="Ocultar requisitos aprobados" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><CloseIcon size={18} /></button>
     </div>
     <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+      <RequirementActorsPanel audit={audit} requirements={requirements} />
       <Section title="Requisitos funcionales" entries={functional} initialOpen>{functional.map((item, i) => <Requirement key={item.id || item.identificador || i} item={item} index={i} prefix="RF" />)}</Section>
       <Section title="Requisitos no funcionales" entries={nonFunctional} initialOpen>{nonFunctional.map((item, i) => <Requirement key={item.id || item.identificador || i} item={item} index={i} prefix="RNF" />)}</Section>
       {context.map(([title, values]) => {

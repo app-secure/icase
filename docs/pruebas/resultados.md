@@ -1,5 +1,7 @@
 # Resultados, evidencias y hallazgos
 
+Consulta la [evaluación del análisis inicial y su revisión de calidad](analisis-inicial-calidad.md) para las pruebas de la nueva integración y sus límites de aceptación.
+
 ## Cómo interpretar este registro
 
 Los resultados históricos siguientes proceden de verificaciones reportadas durante el desarrollo. No constituyen una ejecución nueva de IA sobre todas las pantallas ni una medición de producción. Una verificación nueva debe registrar revisión Git y salida completa.

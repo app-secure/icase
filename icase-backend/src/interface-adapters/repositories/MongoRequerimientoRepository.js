@@ -80,6 +80,7 @@ class MongoRequerimientoRepository extends IRequerimientoRepository {
   async eliminarPorProyecto(proyectoId) {
     return await RequerimientoModel.deleteMany({ proyecto_id: proyectoId });
   }
+  async eliminar(id) { return Boolean(await RequerimientoModel.findByIdAndDelete(id)); }
 }
 
 module.exports = MongoRequerimientoRepository;

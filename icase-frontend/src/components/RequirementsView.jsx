@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { Check, CheckCircle2, Pencil, Plus, Save, Send, Trash2, X } from "lucide-react";
 import BrainGearsIcon from "./BrainGearsIcon";
 import RequirementReviewPanel from './RequirementReviewPanel';
+import RequirementDiagnostics from './RequirementDiagnostics';
+import RequirementActorsPanel from './RequirementActorsPanel';
 import { ToastContainer, useToasts } from "./Toast";
 
 const emptyRequirement = (type) => type === "rf" ? {
@@ -253,7 +255,10 @@ export default function RequirementsView({
             {!functional.length && !nonFunctional.length && !editing && <div className="py-8 text-center text-slate-400">No hay requisitos. Puedes añadirlos manualmente desde cada sección.</div>}
 
             {/* SECCIONES SECUNDARIAS: Paneles de Auditoría, Diagnósticos y Advertencias */}
+            {audit?.referencia_analisis_inicial && <p className="text-sm text-slate-500">Base: análisis inicial v{audit.referencia_analisis_inicial.version}. Para modificar actores, necesidades o clasificación, abre «Análisis inicial» y crea un borrador.</p>}
+            <RequirementActorsPanel audit={audit} requirements={requirements} onReview={onReview} readOnly={Boolean(audit?.referencia_analisis_inicial) || readOnly || isApproved || Boolean(editing) || isFixing} onBusyChange={setIsReviewing} />
             <RequirementReviewPanel audit={audit} onReview={onReview} readOnly={readOnly || isApproved || Boolean(editing) || isFixing} onBusyChange={setIsReviewing} />
+            <RequirementDiagnostics audit={audit} />
             {audit?.metricas_ejecucion && <p className="text-xs text-slate-500">Generación: {(audit.metricas_ejecucion.duracion_ms / 1000).toFixed(1)} s · {audit.metricas_ejecucion.intentos_http} solicitudes al proveedor · {audit.metricas_ejecucion.presupuesto_agotado ? "presupuesto agotado; revisar cobertura" : "dentro del presupuesto"}</p>}
             {audit?.control_aprobacion?.bloqueado && (
               <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -314,7 +319,13 @@ export default function RequirementsView({
             </section>}
             {audit?.revision_semantica && <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
               <h3 className="font-semibold">Revisión semántica del insumo</h3>
-              <p className="mt-1">{audit.revision_semantica.estado === 'completada' ? 'Revisión ejecutada' : 'No se pudo completar la revisión'} · {audit.revision_semantica.hallazgos.length} hallazgos.</p>
+              <p className="mt-1">{audit.revision_semantica.estado === 'completada' ? 'Revisión ejecutada' : audit.revision_semantica.estado === 'parcial' ? 'Revisión parcial: faltan contrastes válidos de categorías' : 'No se pudo completar la revisión'} · {audit.revision_semantica.hallazgos.length} hallazgos.</p>
+              {audit.revision_semantica.contraste_categorias && <details className="mt-2">
+                <summary className="cursor-pointer">Contraste de reglas, restricciones y contexto</summary>
+                {audit.revision_semantica.contraste_categorias.revisados.map((entry, i) => <p key={i} className="mt-1">{entry.necesidad_id} · {entry.naturaleza}: {entry.justificacion} Requisitos: {entry.requisitos.join(', ') || 'sin requisito identificado'}.</p>)}
+                {!!audit.revision_semantica.contraste_categorias.pendientes.length && <p>Pendientes: {audit.revision_semantica.contraste_categorias.pendientes.join(', ')}.</p>}
+                {audit.revision_semantica.contraste_categorias.rechazados.map((entry, i) => <p key={i}>{entry.necesidad_id || 'Entrada'}: {entry.motivo}</p>)}
+              </details>}
               <p className="text-xs text-slate-500">Las citas fueron comprobadas; su interpretación sigue siendo una evaluación de IA, no una garantía de exhaustividad.</p>
               {audit.revision_semantica.hallazgos.map(item => <details key={item.id} className="mt-3 border-t pt-2">
                 <summary className="cursor-pointer">{item.id} · {item.tipo} · {item.estado}: {item.descripcion}</summary>
@@ -322,8 +333,8 @@ export default function RequirementsView({
                 <p>Requisitos: {item.requisitos_afectados.join(', ') || 'ninguno existente'} · Necesidades: {item.necesidades_afectadas.join(', ') || 'no identificada en el inventario'}</p>
                 {item.evidencias.map((evidence, index) => <p key={index} className="mt-1 whitespace-pre-wrap break-words text-xs">“{evidence.texto}” · {evidence.fuente}</p>)}
               </details>)}
-              <p className="mt-2 text-xs">Corrección automática: {audit.revision_semantica.reparacion.estado}. {audit.revision_semantica.reparacion.motivo || ''}</p>
-              {!!audit.revision_semantica.rechazados.length && <p className="mt-1 text-xs">{audit.revision_semantica.rechazados.length} observaciones descartadas del control automático por evidencia o referencias inválidas.</p>}
+              <p className="mt-2 text-xs">Corrección de hallazgos semánticos (no incluye errores estructurales): {!audit.revision_semantica.reparacion || audit.revision_semantica.reparacion.estado === 'no_necesaria' ? 'sin corrección solicitada para esta revisión' : audit.revision_semantica.reparacion.estado}. {audit.revision_semantica.reparacion?.motivo || ''}</p>
+              {!!audit.revision_semantica.rechazados?.length && <p className="mt-1 text-xs">{audit.revision_semantica.rechazados.length} observaciones descartadas del control automático por evidencia o referencias inválidas.</p>}
             </section>}
           </div>
         </div>
@@ -339,14 +350,14 @@ export default function RequirementsView({
         </div>
       ) : <div className="z-10 w-full shrink-0 border-t border-slate-200 bg-white px-6 py-3.5 md:px-12">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-2">
-          <div className="flex items-center gap-3">
-            <form onSubmit={handleSendCorrection} className="flex flex-1 items-center rounded-full border border-slate-300 bg-slate-50 px-3 py-1.5 shadow-2xs transition-all hover:bg-slate-100/60 focus-within:border-[#7C3AED] focus-within:bg-white">
+          <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
+            <form onSubmit={handleSendCorrection} className="flex w-full min-w-0 items-center rounded-full border border-slate-300 bg-slate-50 px-3 py-1.5 shadow-2xs transition-all hover:bg-slate-100/60 focus-within:border-[#7C3AED] focus-within:bg-white md:flex-1">
               <BrainGearsIcon size={16} className="mr-2 shrink-0 text-[#7C3AED]" />
-              <span className="mr-2 shrink-0 rounded-full border border-[#DDD2F5] bg-[#F2EDFF] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#6D28D9]">Requisitos ISO 29148</span>
+              <span className="mr-2 hidden shrink-0 rounded-full border border-[#DDD2F5] bg-[#F2EDFF] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#6D28D9] sm:inline">Requisitos ISO 29148</span>
               <input type="text" value={prompt} onChange={event => setPrompt(event.target.value)} disabled={isFixing} placeholder="Pide un ajuste a los requerimientos con IA..." className="min-w-0 flex-1 bg-transparent text-xs text-slate-800 outline-none placeholder:text-slate-400" />
               <button type="submit" disabled={!prompt.trim() || isFixing} className="ml-1 shrink-0 p-1 text-[#7C3AED] hover:text-[#6D28D9] disabled:text-slate-300" title="Aplicar ajuste con IA">{isFixing ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-[#7C3AED]" /> : <Send size={14} />}</button>
             </form>
-            <button type="button" onClick={onApprovePhase} disabled={Boolean(editing) || isReviewing || isFixing} className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#6D28D9] disabled:opacity-40"><Check size={14} /><span>{isApproved ? "Ir a Fase 2 · Modelado" : "Aprobar y pasar a Modelado"}</span></button>
+            <button type="button" onClick={onApprovePhase} disabled={Boolean(editing) || isReviewing || isFixing} className="flex w-full shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#6D28D9] disabled:opacity-40 md:w-auto"><Check size={14} /><span>{isApproved ? "Ir a Fase 2 · Modelado" : "Aprobar y pasar a Modelado"}</span></button>
           </div>
         </div>
       </div>}

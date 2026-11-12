@@ -34,6 +34,26 @@ class FileIngestionService {
     }
   }
 
+  // Solo usa fechas estructuradas del PDF; nunca infiere una fecha desde el texto.
+  async extraerFechaDocumento(filePath, tipo) {
+    if (tipo !== 'pdf' || !filePath) return '';
+    let parser;
+    try {
+      const { PDFParse } = require('pdf-parse');
+      parser = new PDFParse({ data: await fs.promises.readFile(filePath) });
+      const info = await parser.getInfo();
+      const dates = info?.getDateNode?.() || {};
+      const date = dates.CreationDate || dates.XmpCreateDate || dates.XapCreateDate || dates.ModDate || dates.XmpModifyDate || dates.XapModifyDate;
+      return date instanceof Date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : '';
+    } catch {
+      return '';
+    } finally {
+      if (parser && typeof parser.destroy === 'function') {
+        try { await parser.destroy(); } catch { /* La detección de fecha es opcional. */ }
+      }
+    }
+  }
+
   async _leerTextoPlano(filePath) {
     return fs.promises.readFile(filePath, 'utf-8');
   }

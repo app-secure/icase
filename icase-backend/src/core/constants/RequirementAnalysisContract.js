@@ -7,7 +7,7 @@ function analysisSections(inventory) {
     reglas_negocio: inventory.filter((item) => item.tipo === 'regla_negocio'),
     restricciones_tecnicas: inventory.filter((item) => item.tipo === 'restriccion_tecnica'),
     contexto: inventory.filter((item) => item.tipo === 'contexto'),
-    preguntas_pendientes: inventory.filter((item) => item.tipo === 'pregunta'),
+    preguntas_pendientes: inventory.filter((item) => item.tipo === 'pregunta' && !item.respuesta && !['rechazado', 'fuera_de_alcance'].includes(item.estado)),
     decisiones: inventory.filter((item) => item.tipo === 'decision' || ['rechazado', 'fuera_de_alcance'].includes(item.estado)),
     pendientes: inventory.filter((item) => item.estado === 'pendiente')
   };

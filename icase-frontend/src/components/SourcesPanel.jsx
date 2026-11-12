@@ -236,6 +236,7 @@ export default function SourcesPanel({
         description: "",
         authorOrigin: "",
         documentDate: "",
+        documentDateSource: "",
         tags: [],
         transcriptionVerified: false,
         isUploading: true
@@ -406,10 +407,11 @@ export default function SourcesPanel({
                                 event.stopPropagation();
                                 setActiveSourceId(src.id);
                               }}
-                              className="p-1 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors cursor-pointer"
                               title="Editar contexto o transcripción"
                             >
                               <Pencil size={14} />
+                              <span>Editar</span>
                             </button>
                             <button
                               type="button"
@@ -514,6 +516,7 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
     description: item.description || "",
     authorOrigin: item.authorOrigin || "",
     documentDate: item.documentDate || "",
+    documentDateSource: item.documentDateSource || "",
     tagsText: Array.isArray(item.tags) ? item.tags.join(", ") : "",
     contentSnippet: item.contentSnippet || "",
     transcriptionVerified: Boolean(item.transcriptionVerified),
@@ -533,7 +536,11 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  const update = (field, value) => setDraft((current) => ({
+    ...current,
+    [field]: value,
+    ...(field === "documentDate" ? { documentDateSource: value ? "usuario" : "" } : {})
+  }));
 
   const handleSuggest = async () => {
     setIsSuggesting(true);
@@ -543,6 +550,8 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
       setDraft((current) => ({
         ...current,
         ...suggestion,
+        documentDate: current.documentDate,
+        documentDateSource: current.documentDateSource,
         tagsText: (suggestion.tags || []).join(", "),
         aiMetadata: true
       }));
@@ -598,7 +607,7 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
             <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Categoría</span><select value={draft.category} onChange={(event) => update("category", event.target.value)} className={inputClass}><option value="textos">Textos</option><option value="documentos">Documentos</option><option value="audios">Audios</option><option value="videos">Videos</option><option value="otros">Otros</option></select></label>
             <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Tipo de contenido</span><input value={draft.contentType} onChange={(event) => update("contentType", event.target.value)} placeholder="Ej. Entrevista, acta, especificación" maxLength={100} className={inputClass} /></label>
             <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Autor u origen</span><input value={draft.authorOrigin} onChange={(event) => update("authorOrigin", event.target.value)} placeholder="Persona, equipo o institución" maxLength={160} className={inputClass} /></label>
-            <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Fecha del contenido</span><input value={draft.documentDate} onChange={(event) => update("documentDate", event.target.value)} placeholder="Ej. 05/10/2026 o Sprint 3" maxLength={40} className={inputClass} /></label>
+            <label className="space-y-1.5"><span className="text-xs font-semibold text-slate-700">Fecha del contenido</span><input value={draft.documentDate} onChange={(event) => update("documentDate", event.target.value)} placeholder="Ej. 05/10/2026 o Sprint 3" maxLength={40} className={inputClass} />{draft.documentDateSource === "metadatos_pdf" ? <span className="block text-[10px] text-amber-700">Sugerida por los metadatos internos del PDF. Verifica que corresponda al contenido.</span> : draft.documentDateSource === "usuario" ? <span className="block text-[10px] text-slate-500">Fecha registrada o confirmada manualmente.</span> : <span className="block text-[10px] text-slate-500">Sin fecha confiable detectada; puedes completarla manualmente.</span>}</label>
             <label className="space-y-1.5 sm:col-span-2"><span className="text-xs font-semibold text-slate-700">Descripción para la IA</span><textarea value={draft.description} onChange={(event) => update("description", event.target.value)} placeholder="Explica qué contiene, quién lo produjo y por qué es relevante para el sistema." rows={3} maxLength={1200} className={`${inputClass} resize-y`} /><span className="block text-right text-[10px] text-slate-400">{draft.description.length}/1200</span></label>
             <label className="space-y-1.5 sm:col-span-2"><span className="text-xs font-semibold text-slate-700">Etiquetas</span><input value={draft.tagsText} onChange={(event) => update("tagsText", event.target.value)} placeholder="reservas, clientes, pagos, reglas de negocio" className={inputClass} /><span className="text-[10px] text-slate-400">Sepáralas con comas.</span></label>
           </div>

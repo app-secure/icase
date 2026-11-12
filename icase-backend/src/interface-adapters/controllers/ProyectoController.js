@@ -9,12 +9,28 @@ class ProyectoController {
       const requirements = await this.requerimientoRepository.listarPorProyecto(req.params.id);
       const audit = structuredClone(project.auditoria_requisitos || {});
       const { accion, id, justificacion } = req.body;
+      if (project.version_flujo_analisis === 2 && (accion.endsWith('_actor') || accion === 'editar_analisis')) return res.status(409).json({ error: 'Revisa el análisis inicial para cambiar actores, reglas o clasificación; su versión aprobada es inmutable.' });
       const Approval = require('../../core/services/RequirementApprovalService');
       if (accion !== 'validar') {
         if (requirements.some(item => item.aprobado)) return res.status(409).json({ error: 'Reabre el análisis antes de cambiar una especificación aprobada.' });
         if (typeof justificacion !== 'string' || !justificacion.trim()) return res.status(400).json({ error: 'La revisión requiere una justificación.' });
         const record = { accion, justificacion: justificacion.trim(), usuario_id: req.usuario.id, fecha: new Date().toISOString() };
-        if (accion === 'editar_analisis') {
+        if (['agregar_actor', 'editar_actor', 'confirmar_actor', 'fusionar_actor'].includes(accion)) {
+          if (project.estado_fase && !['insumos_pendientes', 'analisis_pendiente'].includes(project.estado_fase)) return res.status(409).json({ error: 'Reabre el análisis antes de editar actores.' });
+          const Actors = require('../../core/services/RequirementActors');
+          const previous = Actors.actorCatalog(audit, requirements);
+          let change;
+          try { change = Actors.changeActor(previous, req.body); }
+          catch (error) { return res.status(error.status || 400).json({ error: error.message }); }
+          for (const requirement of requirements) {
+            const names = (requirement.actores || []).map(name => change.replacements.find(([old]) => Actors.key(old) === Actors.key(name))?.[1] || name);
+            const updated = [...new Map(names.map(name => [Actors.key(name), name])).values()];
+            if (JSON.stringify(updated) !== JSON.stringify(requirement.actores || [])) await this.requerimientoRepository.actualizar(requirement.id || requirement._id, { actores: updated });
+          }
+          audit.actores = change.actors;
+          audit.historial_revision = [...(audit.historial_revision || []), { ...record, id, anterior: previous, posterior: change.actors }];
+          audit.cambios_actores = change.replacements;
+        } else if (accion === 'editar_analisis') {
           const original = audit.inventario?.find(item => item.id === id);
           if (!original) return res.status(404).json({ error: 'Elemento del análisis no encontrado.' });
           const fields = ['tipo', 'necesidad', 'estado', 'objetivo_id'];
@@ -38,7 +54,7 @@ class ProyectoController {
         }
         audit.version_analisis = Number(audit.version_analisis || 0) + 1;
         const { contextOf } = require('../../core/services/RequirementAnalysisContext');
-        if (JSON.stringify(contextOf(project.auditoria_requisitos)) !== JSON.stringify(contextOf(audit))) {
+        if (accion.endsWith('_actor') || JSON.stringify(contextOf(project.auditoria_requisitos)) !== JSON.stringify(contextOf(audit))) {
           await (this.requirementChangeService || new (require('../../core/services/RequirementChangeService'))({ proyectoRepository: this.proyectoRepository, diagramaRepository: this.diagramaRepository, disenoRepository: this.disenoRepository })).invalidate(req.params.id, 'Cambió una regla, restricción o decisión del análisis.');
         }
       }
@@ -54,6 +70,7 @@ class ProyectoController {
   async resolverNecesidad(req, res) {
     try {
       const project = await this.proyectoRepository.obtenerPorId(req.params.id);
+      if (Number(project.version_flujo_analisis || 1) >= 2) return res.status(409).json({ error: 'Revisa el análisis inicial para corregir sus necesidades; su versión aprobada es inmutable.' });
       const requirements = await this.requerimientoRepository.listarPorProyecto(req.params.id);
       if (requirements.some(item => item.aprobado)) return res.status(409).json({ error: 'Reabre el análisis antes de cambiar necesidades de una especificación aprobada.' });
       const audit = structuredClone(project.auditoria_requisitos || {});
@@ -234,7 +251,7 @@ class ProyectoController {
   async obtenerModelosIA(req, res) {
     try {
       if (this.procesarConIAUseCase && typeof this.procesarConIAUseCase.obtenerModelosDisponibles === 'function') {
-        const info = await this.procesarConIAUseCase.obtenerModelosDisponibles();
+        const info = await this.procesarConIAUseCase.obtenerModelosDisponibles({ objetivo: req.query.objetivo });
         return res.json(info);
       }
       res.json({ provider_defecto: 'auto', proveedores: [] });
@@ -247,6 +264,24 @@ class ProyectoController {
     try {
       const { id } = req.params;
       const { insumo_adicional, insumo_bruto, provider, modelo, proveedor, specificModel, objetivo, tipo_diagrama } = req.body;
+      const project = await this.proyectoRepository.obtenerPorId(id);
+      if (project?.version_flujo_analisis === 2 && objetivo !== 'diagramas') {
+        const job = await this.requirementJobs.start(id, req.usuario.id, { insumo_adicional, insumo_bruto, provider: provider || proveedor || 'auto', specificModel, operacion: 'analisis_inicial' });
+        return res.status(202).json({ trabajo: job, mensaje: 'Revisa y aprueba el análisis inicial antes de redactar requisitos.' });
+      }
+      if (this.requirementJobs && this.legacyRequirementJobsEnabled !== false && objetivo === 'requisitos') {
+        // Liberar el lease HTTP: el worker adquiere el suyo únicamente al persistir.
+        if (req.projectMutationLease) await req.projectMutationLease.release();
+        const job = await this.requirementJobs.start(id, req.usuario.id, { insumo_adicional, insumo_bruto, provider: provider || modelo || proveedor || 'auto', specificModel });
+        const deadline = Date.now() + 300000;
+        while (Date.now() < deadline) {
+          const current = await this.requirementJobs.get(job.id, req.usuario.id);
+          if (current.estado === 'completado') return res.json(current.resultado_requisitos);
+          if (['esperando_proveedor', 'fallido', 'interrumpido'].includes(current.estado)) return res.status(503).json({ error: current.mensaje, codigo: current.error || 'AI_REQUIREMENTS_PENDING', trabajo: this.requirementJobs.public(current) });
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        return res.status(503).json({ error: 'La generación continúa en segundo plano.', codigo: 'AI_REQUIREMENTS_PENDING', trabajo_id: job.id });
+      }
       const resultado = await this.procesarConIAUseCase.ejecutar({
         proyectoId: id,
         insumoBrutoInput: insumo_bruto,

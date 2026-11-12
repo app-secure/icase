@@ -75,3 +75,15 @@ test('más de cinco hallazgos se conservan sin regeneración masiva', async () =
   expect(request).toHaveBeenCalledTimes(1);
   expect(result.auditoria_requisitos.revision_semantica.reparacion.estado).toBe('omitida_por_limite_o_estructura_pendiente');
 });
+
+test('modo solo revisión conserva requisitos e inventario y no solicita corrección', async () => {
+  const before = original();
+  const snapshot = JSON.stringify(before);
+  const request = jest.fn().mockResolvedValue({ hallazgos: [finding()] });
+  const result = await new Review().run({ input, result: before, request, coverage: new Coverage(), allowCorrection: false });
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(result.requerimientos).toEqual(before.requerimientos);
+  expect(result.auditoria_requisitos.inventario).toEqual(before.auditoria_requisitos.inventario);
+  expect(JSON.stringify(before)).toBe(snapshot);
+  expect(result.auditoria_requisitos.revision_semantica.reparacion.estado).toBe('deshabilitada_solo_revision');
+});

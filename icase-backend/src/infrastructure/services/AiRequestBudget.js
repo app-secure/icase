@@ -4,7 +4,7 @@ const contexts = new AsyncLocalStorage();
 const bounded = (value, fallback, min, max) => value !== undefined && String(value).trim() && Number.isFinite(Number(value)) ? Math.floor(Math.min(max, Math.max(min, Number(value)))) : fallback;
 
 class AiRequestBudget {
-  async run(task, env = process.env) {
+  async run(task, env = process.env, { allowLocal = false } = {}) {
     const controller = new AbortController();
     const state = {
       started: Date.now(), duration: bounded(env.AI_REQUIREMENTS_TIMEOUT_MS, 180000, 1000, 600000),
@@ -12,11 +12,17 @@ class AiRequestBudget {
       maxAttempts: bounded(env.AI_REQUIREMENTS_MAX_ATTEMPTS, 8, 1, 30),
       attempts: 0, calls: [], signal: controller.signal, rejected: false, providerFailures: new Map()
     };
+    state.cloudDuration = state.duration;
+    if (allowLocal) state.maxAttempts = Math.min(8, state.maxAttempts);
+    state.allowLocal = allowLocal;
+    state.localAttempts = 0;
+    if (allowLocal) state.duration += 120000;
     const timer = setTimeout(() => controller.abort(), state.duration);
     timer.unref?.();
     const metrics = () => ({ duracion_ms: Date.now() - state.started, limite_ms: state.duration,
       intentos_http: state.attempts, max_intentos_http: state.maxAttempts,
-      presupuesto_agotado: state.rejected || state.signal.aborted, etapas: state.calls, proveedores: [...state.providerFailures.values()] });
+      intentos_locales: state.localAttempts,
+      presupuesto_agotado: state.rejected || state.signal.aborted || state.attempts >= state.maxAttempts, etapas: state.calls, proveedores: [...state.providerFailures.values()] });
     try {
       return await contexts.run(state, async () => {
         const result = await task();
@@ -37,7 +43,29 @@ class AiRequestBudget {
 
   exhausted() {
     const state = contexts.getStore();
-    return Boolean(state && (state.signal.aborted || Date.now() - state.started >= state.duration || state.attempts >= state.maxAttempts));
+    return Boolean(state && (state.signal.aborted || Date.now() - state.started >= state.cloudDuration || state.attempts >= state.maxAttempts));
+  }
+
+  reserveAudit() {
+    const state = contexts.getStore();
+    if (state && state.maxAttempts >= 3) state.auditReserved = true;
+  }
+  reserveStage(stage) {
+    const state = contexts.getStore();
+    if (state && state.maxAttempts >= 3) state.reservedStage = stage;
+  }
+
+  canTryLocal() {
+    const state = contexts.getStore();
+    return Boolean(state && state.allowLocal && !state.signal.aborted && state.localAttempts < 8 && Date.now() - state.started < state.duration);
+  }
+
+  async localPost(url, data, options = {}) {
+    const state = contexts.getStore();
+    if (!state) return axios.post(url, data, { ...options, timeout: Math.min(options.timeout || 120000, 120000) });
+    if (!this.canTryLocal()) throw Object.assign(new Error('Presupuesto local agotado.'), { code: 'AI_BUDGET_EXHAUSTED' });
+    state.localAttempts++;
+    return axios.post(url, data, { ...options, signal: state.signal, timeout: Math.min(120000, state.duration - (Date.now() - state.started)) });
   }
 
   reportProviderFailure(provider, cause, details = {}) {
@@ -48,8 +76,12 @@ class AiRequestBudget {
     state.providerFailures.set(`${provider}:${cause}`, entry);
   }
 
-  async waitForRetry(ms) {
+  async waitForRetry(ms, { allowOutsideBudget = false } = {}) {
     const state = contexts.getStore();
+    if (!state && allowOutsideBudget && Number.isFinite(ms) && ms > 0 && ms <= 30000) {
+      await new Promise(resolve => setTimeout(resolve, ms));
+      return true;
+    }
     if (!state || !Number.isFinite(ms) || ms <= 0 || ms > 30000 || this.exhausted() || Date.now() + ms + 2000 >= state.started + state.duration) return false;
     const record = state.calls.at(-1);
     if (record) record.espera_reintento_ms = (record.espera_reintento_ms || 0) + ms;
@@ -64,8 +96,10 @@ class AiRequestBudget {
   async logical(stage, operation) {
     const state = contexts.getStore();
     if (!state) return operation();
-    if (this.exhausted()) { state.rejected = true; return null; }
+    if (this.exhausted() && !this.canTryLocal()) { state.rejected = true; return null; }
     const start = Date.now();
+    const previousStage = state.currentStage;
+    state.currentStage = stage;
     const record = { etapa: stage, duracion_ms: 0, resultado: 'sin_respuesta' };
     state.calls.push(record);
     let onAbort;
@@ -76,7 +110,7 @@ class AiRequestBudget {
     try {
       const result = await Promise.race([operation(), aborted]);
       if (!result && this.exhausted()) state.rejected = true;
-      record.resultado = state.signal.aborted || state.rejected ? 'presupuesto_agotado' : result ? 'respuesta' : 'sin_respuesta';
+      record.resultado = state.signal.aborted || (!result && state.rejected) ? 'presupuesto_agotado' : result ? 'respuesta' : 'sin_respuesta';
       return result;
     } catch (error) {
       record.resultado = error.code === 'AI_BUDGET_EXHAUSTED' || state.signal.aborted ? 'presupuesto_agotado' : 'fallo_proveedor';
@@ -86,13 +120,15 @@ class AiRequestBudget {
         error.code === 'AI_BUDGET_EXHAUSTED' || state.signal.aborted ? 'presupuesto_agotado' : 'solicitud_o_respuesta_proveedor';
       // Con presupuesto activo, el flujo puede conservar lotes anteriores y advertir los faltantes.
       return null;
-    } finally { state.signal.removeEventListener('abort', onAbort); record.duracion_ms = Date.now() - start; }
+    } finally { state.currentStage = previousStage; state.signal.removeEventListener('abort', onAbort); record.duracion_ms = Date.now() - start; }
   }
 
   async transport(method, url, data, options = {}) {
     const state = contexts.getStore();
     if (!state) return method === 'get' ? axios.get(url, options) : axios.post(url, data, options);
-    if (this.exhausted()) {
+    const reserveAudit = state.auditReserved && !state.calls.some(call => call.etapa === 'revision_semantica') && state.currentStage !== 'revision_semantica';
+    const reserveStage = state.reservedStage && !state.calls.some(call => call.etapa === state.reservedStage) && state.currentStage !== state.reservedStage;
+    if (this.exhausted() || ((reserveAudit || reserveStage) && state.attempts >= state.maxAttempts - 1)) {
       state.rejected = true;
       throw Object.assign(new Error('Se agotó el presupuesto de generación de requisitos.'), { code: 'AI_BUDGET_EXHAUSTED' });
     }

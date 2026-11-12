@@ -11,7 +11,7 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
     type: String,
     enum: [
       'mockups', 'diagrama', 'codigo_backend', 'codigo_frontend', 'pruebas',
-      'infraestructura', 'pipeline_ci_cd', 'paquete_entrega', 'verificacion'
+      'infraestructura', 'pipeline_ci_cd', 'paquete_entrega', 'verificacion', 'requisitos'
     ],
     default: 'mockups',
     index: true
@@ -21,7 +21,7 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
   tipo_diagrama: { type: String, default: null, index: true },
   estado: {
     type: String,
-    enum: ['encolado', 'procesando', 'completado', 'fallido'],
+    enum: ['encolado', 'procesando', 'completado', 'fallido', 'esperando_proveedor', 'interrumpido'],
     default: 'encolado',
     index: true
   },
@@ -41,6 +41,15 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
   total_generados: { type: Number, default: 0 },
   error: { type: String, default: null },
   cache_hit: { type: Boolean, default: false },
+  usuario_id: { type: mongoose.Schema.Types.ObjectId, default: null },
+  entrada_hash: String,
+  operacion_requisitos: { type: String, enum: ['legacy', 'analisis_inicial', 'redaccion_requisitos', 'correccion_analisis_inicial', 'analisis_respuesta', 'revision_calidad'], default: 'legacy' },
+  resultado_analisis_inicial: { type: mongoose.Schema.Types.Mixed, default: null },
+  salida_hash: String,
+  entrada_requisitos: { type: mongoose.Schema.Types.Mixed, default: null },
+  checkpoints_requisitos: { type: mongoose.Schema.Types.Mixed, default: {} },
+  progreso_requisitos: { type: mongoose.Schema.Types.Mixed, default: {} },
+  resultado_requisitos: { type: mongoose.Schema.Types.Mixed, default: null },
   ejecutor_id: { type: String, required: true },
   lease_expires_at: { type: Date, default: null, index: true },
   // Solo existe durante un trabajo activo. El índice impide dos trabajos simultáneos por proyecto.
@@ -61,6 +70,8 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
       delete ret.specific_model;
       delete ret.objetivo;
       delete ret.ejecutor_id;
+      delete ret.entrada_requisitos;
+      delete ret.checkpoints_requisitos;
       return ret;
     }
   }

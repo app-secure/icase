@@ -95,6 +95,7 @@ export default function App() {
         description: f.descripcion || "",
         authorOrigin: f.autor_origen || "",
         documentDate: f.fecha_documento || "",
+        documentDateSource: f.fecha_documento_origen || "",
         tags: Array.isArray(f.etiquetas) ? f.etiquetas : [],
         transcriptionVerified: Boolean(f.transcripcion_verificada),
         aiMetadata: Boolean(f.metadatos_generados_ia),
@@ -181,6 +182,7 @@ export default function App() {
       name: finalCleanName,
       description: p.descripcion || "",
       requirementAudit: p.auditoria_requisitos || null,
+      analysisFlowVersion: p.version_flujo_analisis || 1,
       resumen: p.resumen || "",
       introduccion: p.introduccion || "",
       objetivo_general: p.objetivo_general || "",
@@ -366,6 +368,7 @@ export default function App() {
   }
 
   const createNewDraftProject = (id) => ({
+    analysisFlowVersion: 2,
     id: id || "draft-" + Date.now(),
     name: "Proyecto sin nombre",
     description: "",
@@ -425,13 +428,19 @@ export default function App() {
 
   const handleDeleteProject = async (projectId) => {
     const proj = projects.find((p) => p.id === projectId || p.backendId === projectId);
-    const targetBackendId = proj?.backendId || projectId;
-    try {
-      await deleteProjectApi(targetBackendId);
-    } catch (e) {
-      console.warn("[App] Error eliminando proyecto en backend:", e);
+    const candidateBackendId = proj?.backendId || projectId;
+    const targetBackendId = /^[a-f\d]{24}$/i.test(String(candidateBackendId)) ? candidateBackendId : null;
+    if (targetBackendId) {
+      try {
+        await deleteProjectApi(targetBackendId);
+      } catch (e) {
+        console.warn("[App] Error eliminando proyecto en backend:", e);
+        setProjectsError(`No se pudo eliminar el proyecto: ${e.message}`);
+        throw e;
+      }
     }
 
+    setProjectsError("");
     const filtered = projects.filter((p) => p.id !== projectId && p.backendId !== projectId);
     setProjects(filtered);
     if (activeProjectId === projectId || activeProjectId === targetBackendId) {

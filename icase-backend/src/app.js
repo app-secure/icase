@@ -4,6 +4,8 @@ const { corsOptions, securityHeaders, jsonLimit } = require('./infrastructure/se
 const buildProjectAccess = require('./infrastructure/security/projectAccess');
 const { getJwtSecret } = require('./infrastructure/security/jwtSecret');
 const responseErrors = require('./infrastructure/security/responseErrors');
+const RequirementGenerationJobs = require('./core/services/RequirementGenerationJobs');
+const ProjectMutationLease = require('./infrastructure/services/ProjectMutationLease');
 const SessionRevocationService = require('./core/services/SessionRevocationService');
 const MongoSesionRevocadaRepository = require('./interface-adapters/repositories/MongoSesionRevocadaRepository');
 
@@ -102,16 +104,19 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const trabajoGeneracionRepo = repositories.trabajoGeneracion || new MongoTrabajoGeneracionRepository();
   const planCodificacionRepo = repositories.planCodificacion || new MongoPlanCodificacionRepository();
   const artefactoGeneradoRepo = repositories.artefactoGenerado || new MongoArtefactoGeneradoRepository();
+  const resilientRequirements = env.REQUIREMENTS_RESILIENT_ENABLED === 'true';
+  const mutationLease = resilientRequirements ? (repositories.projectMutationLease || new ProjectMutationLease()) : null;
   const access = buildProjectAccess({
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
     fuenteRepository: fuenteRepo,
     trabajoGeneracionRepository: trabajoGeneracionRepo,
-    artefactoRepository: artefactoGeneradoRepo
+    artefactoRepository: artefactoGeneradoRepo,
+    mutationLease
   });
 
-  const modelosIaService = new ModelosIaService();
+  const modelosIaService = new ModelosIaService({ env });
   const plantumlValidator = new PlantUMLValidatorService();
   const markdownCompiler = new MarkdownCompilerService();
   const fileIngestionService = new FileIngestionService();
@@ -217,6 +222,19 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     finalProjectAuditService,
     requirementChangeService
   });
+  const InitialAnalysisService = require('./core/services/InitialAnalysisService');
+  const MongoAnalisisInicialRepository = require('./interface-adapters/repositories/MongoAnalisisInicialRepository');
+  const initialAnalysis = new InitialAnalysisService({ projects: proyectoRepo, sources: fuenteRepo, requirements: requerimientoRepo,
+    versions: repositories.analisisInicial || new MongoAnalisisInicialRepository(), ai: modelosIaService, jobs: trabajoGeneracionRepo, changes: requirementChangeService });
+  proyectoController.initialAnalysis = initialAnalysis;
+  proyectoController.legacyRequirementJobsEnabled = resilientRequirements;
+  procesarConIAUseCase.initialAnalysis = initialAnalysis;
+  aprobarFaseUseCase.initialAnalysis = initialAnalysis;
+  proyectoController.requirementJobs = new RequirementGenerationJobs({
+    jobs: trabajoGeneracionRepo, projects: proyectoRepo, requirements: requerimientoRepo, sources: fuenteRepo,
+    execute: payload => procesarConIAUseCase.ejecutar(payload), mutationLease: mutationLease || repositories.projectMutationLease || new ProjectMutationLease()
+  });
+  proyectoController.requirementJobs.initialAnalysis = initialAnalysis;
 
   const requerimientoController = new RequerimientoController({
     actualizarRequerimientoManualUseCase,
@@ -293,6 +311,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     estandarRepo,
     fuenteRepo,
     reanudarTrabajosDiagrama: async () => {
+      if (resilientRequirements) await trabajoGeneracionRepo.requirementsRecover();
       if (typeof trabajoGeneracionRepo.finalizarVerificacionesExpiradas === 'function') await trabajoGeneracionRepo.finalizarVerificacionesExpiradas();
       return proyectoController.reanudarTrabajosDiagrama();
     }

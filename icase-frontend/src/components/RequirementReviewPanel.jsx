@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { X, Check, FileText, ArrowRight } from 'lucide-react';
 import BrainGearsIcon from './BrainGearsIcon';
 
@@ -34,6 +34,7 @@ function generateSmartJustification(entry, accion) {
 }
 
 export default function RequirementReviewPanel({ audit, onReview, readOnly, onBusyChange }) {
+  const justificationId = useId();
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -186,8 +187,9 @@ export default function RequirementReviewPanel({ audit, onReview, readOnly, onBu
                     <span className="text-slate-500">({item.tipo} · {item.estado}):</span> {item.necesidad}
                   </p>
                   <button
-                    disabled={busy}
+                    disabled={busy || Boolean(audit.referencia_analisis_inicial)}
                     className={btnSecondary}
+                    title={audit.referencia_analisis_inicial ? 'Revisa la versión del análisis inicial para modificar este elemento.' : undefined}
                     onClick={() => open('analisis', item.id, 'editar_analisis', item)}
                   >
                     Revisar
@@ -376,7 +378,7 @@ export default function RequirementReviewPanel({ audit, onReview, readOnly, onBu
               {/* CAMPO JUSTIFICACIÓN CON BOTÓN DE ASISTENCIA IA */}
               <div className="space-y-1.5 border-t border-slate-100 pt-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-semibold text-slate-700">
+                  <label htmlFor={justificationId} className="text-[11px] font-semibold text-slate-700">
                     Justificación técnica *
                   </label>
                   <button
@@ -392,6 +394,7 @@ export default function RequirementReviewPanel({ audit, onReview, readOnly, onBu
                 </div>
 
                 <textarea
+                  id={justificationId}
                   required
                   rows={3}
                   placeholder="Explica la razón técnica o de alcance para esta decisión..."

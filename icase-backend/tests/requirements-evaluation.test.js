@@ -19,3 +19,11 @@ test('la telemetría distingue límite de entrada sin guardar el mensaje ni cred
   expect(result.auditoria_requisitos.metricas_ejecucion.etapas[0].causa).toBe('limite_entrada_proveedor');
   expect(JSON.stringify(result)).not.toContain('secreto-que-no-debe-guardarse');
 });
+
+test('evalúa calidad y recuperación sin atribuir exhaustividad al modelo', () => {
+  const result = evaluate(fixtures[0], { requerimientos: [{ tipo: 'RF', identificador: 'RF-01', nombre: 'Consulta', descripcion: 'Consultar expedientes' }],
+    auditoria_requisitos: { diagnostico_generacion: { lotes: [{ estado: 'parcial' }], necesidades_pendientes: ['N-02'] } } });
+  expect(result.calidad_requisitos.hallazgos.some(f => f.codigo === 'ACTOR_AUSENTE')).toBe(true);
+  expect(result.recuperacion.lotes_parciales_iniciales).toBe(1);
+  expect(result.recuperacion.necesidades_sin_referencia_final).toEqual(['N-02']);
+});

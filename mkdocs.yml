@@ -28,6 +28,7 @@ nav:
       - Explorador Swagger: api/explorador.html
   - Inteligencia artificial:
       - Funcionamiento: ia/funcionamiento.md
+      - Generación resiliente: ia/generacion-resiliente.md
       - Prompts por fase: ia/prompts.md
   - Desarrollo:
       - Instalación: desarrollo/instalacion.md

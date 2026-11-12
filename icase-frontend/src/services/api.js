@@ -2,6 +2,30 @@
 // Así cambiar de puerto del frontend no rompe CORS ni la sesión.
 const API_URL = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/icase-api' : 'http://localhost:5000')).replace(/\/$/, '');
 
+async function requirementsJobRequest(route, body) {
+  const response = await apiFetch(`${API_URL}/proyectos/${route}`, {
+    method: body === undefined ? 'GET' : 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo consultar la generación de requisitos.');
+  return data;
+}
+export const startRequirementJobApi = (id, body) => requirementsJobRequest(`${id}/trabajos-requisitos`, body);
+export const fetchRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}`);
+export const fetchLatestRequirementJobApi = id => requirementsJobRequest(`${id}/trabajos-requisitos/ultimo`);
+export const resumeRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}/reanudar`, {});
+export const fetchInitialAnalysisApi = async (id, version = null) => {
+  const response = await apiFetch(`${API_URL}/proyectos/${id}/analisis-inicial${version ? `?version=${encodeURIComponent(version)}` : ''}`, { headers: getAuthHeaders() });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cargar el análisis inicial.'); return data;
+};
+export async function initialAnalysisActionApi(id, action, body = {}) {
+  const response = await apiFetch(`${API_URL}/proyectos/${id}/analisis-inicial${action ? `/${action}` : ''}`, {
+    method: action ? 'POST' : 'PATCH', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body)
+  });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo guardar el análisis inicial.'); return data;
+}
+
 // Gestión local de token de autenticación
 export function getAuthToken() {
   return localStorage.getItem('icase_token') || '';
@@ -170,17 +194,13 @@ export async function updateProjectApi(projectId, data) {
 }
 
 export async function deleteProjectApi(projectId) {
-  try {
-    const res = await apiFetch(`${API_URL}/proyectos/${projectId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
-    });
-    if (!res.ok) throw new Error('Error al eliminar proyecto');
-    return await res.json();
-  } catch (err) {
-    console.warn('[API] Error al eliminar proyecto:', err.message);
-    return null;
-  }
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo eliminar el proyecto.');
+  return data;
 }
 
 // === FUENTES ===
@@ -269,9 +289,9 @@ export async function deleteFuenteApi(fuenteId, proyectoId = null, nombreArchivo
 }
 
 // === PROCESAMIENTO CON IA ===
-export async function fetchAiModelsApi() {
+export async function fetchAiModelsApi(objetivo = null) {
   try {
-    const res = await apiFetch(`${API_URL}/proyectos/modelos-ia`, {
+    const res = await apiFetch(`${API_URL}/proyectos/modelos-ia${objetivo ? `?objetivo=${encodeURIComponent(objetivo)}` : ''}`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al obtener modelos de IA');

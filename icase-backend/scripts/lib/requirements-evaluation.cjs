@@ -14,16 +14,23 @@ function evaluate(fixture, result) {
   });
   const invalidEvidence = requirements.filter(req => !inspectEvidence(req, fixture.input).valido).map(req => req.identificador);
   const descriptions = requirements.map(req => normalize(req.descripcion).replace(/\s+/g, ' ').trim());
+  const approval = new Approval().evaluate(requirements, audit);
   return {
     rf: requirements.filter(req => req.tipo === 'RF').length, rnf: requirements.filter(req => req.tipo === 'RNF').length,
     duracion_ms: audit.metricas_ejecucion?.duracion_ms ?? null, solicitudes_http: audit.metricas_ejecucion?.intentos_http ?? null,
     presupuesto_agotado: audit.metricas_ejecucion?.presupuesto_agotado ?? null,
-    objetivos_heuristicos: objectives, cobertura_lexica: objectives.filter(item => item.coincidencias.length).length / objectives.length,
+    objetivos_heuristicos: objectives, cobertura_lexica: objectives.length ? objectives.filter(item => item.coincidencias.length).length / objectives.length : null,
     evidencias_no_verificables: invalidEvidence, duplicados_textuales: descriptions.length - new Set(descriptions).size,
     necesidades_pendientes: (audit.necesidades_pendientes || []).filter(item => item.estado_validacion === 'pendiente').length,
     revision_semantica: audit.revision_semantica?.estado || 'sin_registro',
     hallazgos_pendientes: audit.revision_semantica?.hallazgos?.filter(item => !['corregido', 'aceptado', 'resuelto', 'descartado'].includes(item.estado)).length ?? null,
-    control_aprobacion: new Approval().evaluate(requirements, audit),
+    calidad_requisitos: approval.calidad,
+    recuperacion: {
+      lotes_parciales_iniciales: (audit.diagnostico_generacion?.lotes || []).filter(batch => batch.estado !== 'respondido').length,
+      necesidades_sin_referencia_final: audit.diagnostico_generacion?.necesidades_pendientes || [],
+      refinamiento: audit.diagnostico_refinamiento?.estado || 'sin_registro'
+    },
+    control_aprobacion: approval,
     limites: 'Coincidencia léxica solo para orientar revisión humana. No mide corrección semántica, tasa real de invención ni precisión de clasificación. Tokens y coste no se estiman si el proveedor no los informa.'
   };
 }
