@@ -40,7 +40,10 @@
 .analysis-modal::backdrop { background: #17142580; backdrop-filter: blur(3px); }
 .analysis-modal__header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px; border-bottom: 1px solid #ede9fe; background: white; }
 .analysis-modal__header h2 { font-size: 16px; font-weight: 650; color: #1e293b; }
-.analysis-modal__body { padding: 20px 24px; }
+.analysis-modal { overflow: hidden; overscroll-behavior: none; }
+.analysis-modal[open] { display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: contain; }
+.analysis-modal__header { flex-shrink: 0; }
+.analysis-modal__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; }
 .analysis-modal__body fieldset > button { margin: 12px 8px 0 0; }
 @media (max-width: 640px) { .analysis-modal__header, .analysis-modal__body { padding: 16px; } }
 .initial-analysis__approval { padding: 22px 24px; border: 1px solid #e5dcff; border-radius: 16px; background: #f5f3ff; }

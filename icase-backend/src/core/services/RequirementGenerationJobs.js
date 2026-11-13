@@ -36,7 +36,8 @@ class RequirementGenerationJobs {
     if (operation === 'redaccion_requisitos') {
       const approved = await this.initialAnalysis.requireApproved(projectId, userId, input.analisis_id);
       const existing = await this.requirements.listarPorProyecto(projectId);
-      if (existing.length && !input.actualizar_ids?.length && !(approved.contenido.inventario || []).some(n => ['RF', 'RNF'].includes(n.tipo) && !existing.some(r => (r.necesidades_origen || []).includes(n.id)))) throw fail('Confirma la actualización puntual de requisitos existentes; no se regenerarán automáticamente.');
+      if (input.regenerar === true && existing.some(item => item.aprobado)) throw fail('Los requisitos ya están aprobados. No se reemplazan.');
+      if (input.regenerar !== true && existing.length && !input.actualizar_ids?.length && !(approved.contenido.inventario || []).some(n => ['RF', 'RNF'].includes(n.tipo) && !existing.some(r => (r.necesidades_origen || []).includes(n.id)))) throw fail('Confirma la actualización puntual de requisitos existentes; no se regenerarán automáticamente.');
     }
     if (operation === 'correccion_analisis_inicial' && !project?.analisis_inicial_borrador_id) throw fail('Reabre el análisis antes de solicitar una propuesta.');
     const hash = await this.snapshot(projectId, userId, operation);

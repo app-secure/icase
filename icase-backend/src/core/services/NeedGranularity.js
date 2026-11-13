@@ -51,6 +51,13 @@ function familyOf(text) {
   const found = FAMILIES.find(([, pattern]) => pattern.test(text));
   return found ? found[0] : null;
 }
+function leadingFamily(segment) {
+  const start = clean(segment)
+    .replace(/^(?:tambi[eé]n|adem[aá]s|luego|despu[eé]s)\s+/i, '')
+    .replace(/^(?:(?:el|la|los|las)\s+\S+\s+)?(?:debe(?:n)? poder|puede|pueden|podrán|podrá)\s+/i, '');
+  const word = /^[a-záéíóúüñ]+/i.exec(start);
+  return word ? familyOf(word[0]) : null;
+}
 function isRule(text) {
   return /^(?:sin que|pero no|no\b|nunca\b)/i.test(clean(text)) || /\bno\s+(?:debe|pued[ae]|quier)/i.test(text);
 }
@@ -68,13 +75,12 @@ function partition(text) {
       previous = null;
       continue;
     }
-    const own = familyOf(segment);
+    const own = leadingFamily(segment);
     const referred = /\bantes de\s+(\S+)/i.exec(segment);
-    const referredFamily = referred ? familyOf(referred[1]) : null;
+    const referredFamily = referred ? familyOf(referred[1].replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')) : null;
     if (own) {
-      let bucket = operations.find(item => item.family === own);
-      if (!bucket) operations.push(bucket = { family: own, text: '' });
-      bucket.text = clean(`${bucket.text} ${bucket.text ? ', ' : ''}${segment}`);
+      const bucket = { family: own, text: segment };
+      operations.push(bucket);
       previous = bucket;
     } else if (referredFamily && operations.some(item => item.family === referredFamily)) {
       const bucket = operations.find(item => item.family === referredFamily);
@@ -94,11 +100,13 @@ function turnOf(quote, input) {
 }
 function actorModal(quote, input) {
   const window = turnOf(quote, input);
-  const matches = [...window.matchAll(/\b((?:El|La|Los|Las)\s+[A-Za-zÁÉÍÓÚáéíóúñ]+)\s+(debe(?:n)? poder|puedan|pueden|pueda|puede|podrán|podrá)\b/g)];
+  const matches = [...window.matchAll(/\b((?:el|la|los|las)\s+[a-záéíóúñ]+)\s+(debe(?:n)? poder|puedan|pueden|pueda|puede|podrán|podrá)(?!\p{L})/giu)];
   const last = matches.at(-1);
   if (!last) return '';
+  const [article, noun] = last[1].split(/\s+/);
+  const actor = `${article.charAt(0).toUpperCase()}${article.slice(1).toLowerCase()} ${noun.toLowerCase()}`;
   const modal = last[2].replace(/^puedan$/i, 'pueden').replace(/^pueda$/i, 'puede');
-  return `${last[1]} ${modal} `;
+  return `${actor} ${modal} `;
 }
 function withSubject(prefix, fragment) {
   const body = clean(fragment);
@@ -193,9 +201,17 @@ function classify(sentence, inventory, accepted) {
     add('decision', sentence, 'fuera_de_alcance');
     return items;
   }
-  if (/frecuencia de respaldos|tiempo maximo de recuperacion|metricas concretas|personas conectadas/.test(text)) {
-    add('pregunta', sentence, 'pendiente');
-    return items;
+  if (/pendientes se deben registrar|necesitamos confirmar|queda(?:n)? por confirmar/.test(text)) {
+    const open = [
+      [/frecuencia de respaldos|recurrencia/, '¿Con qué recurrencia se harán las copias de seguridad de la base de datos (por ejemplo, diarias)?'],
+      [/tiempo maximo de recuperacion|inactiv/, '¿Cuánto tiempo puede permanecer el sistema inactivo antes de volver a funcionar?'],
+      [/requisito futuro de alta disponibilidad|alta disponibilidad/, '¿Qué haría falta, más adelante, para que el sistema siga funcionando aunque falle un servidor?'],
+      [/metricas concretas/, '¿Qué métricas concretas faltan todavía para la seguridad y la facilidad de uso?']
+    ];
+    for (const [pattern, pregunta] of open) {
+      if (pattern.test(text) && !inventory.some(item => item.tipo === 'pregunta' && pattern.test(normalize(`${item.necesidad} ${item.evidencia}`)))) add('pregunta', pregunta, 'pendiente');
+    }
+    if (open.some(([pattern]) => pattern.test(text))) return items;
   }
   if (/menos de un segundo/.test(text) && !already(inventory, 'RNF', /segundo|latencia|tiempo real|propag/)) {
     add('RNF', sentence);
@@ -225,7 +241,8 @@ function classify(sentence, inventory, accepted) {
   }
   if (/no pueda|no pueden|no debe|sin que|pero no|solamente|unicamente|cualquier persona/.test(normalize(mainClause(sentence)))) {
     add('regla_negocio', sentence);
-    if (/reasign/.test(text) && !already(inventory, 'RF', /reasign/)) add('RF', 'El administrador puede reasignar mesas entre meseros.');
+    const exception = /salvo que\s+((?:el|la|los|las)\s+[^.]{8,140})/i.exec(sentence);
+    if (exception && /reasign/.test(normalize(exception[1])) && !already(inventory, 'RF', /reasign/)) add('RF', clean(exception[1]));
   }
   const pendingTech = /si ayuda|habiamos pensado|podriamos/.test(text);
   if (TECH.test(sentence) && /propon|usemos|usaran|utilizar|confirma|despleg|publicar|pantalla/.test(text)) {
@@ -240,7 +257,11 @@ function classify(sentence, inventory, accepted) {
       const equivalents = { reportes: ['ventas'], ventas: ['reportes'], globales: ['ventas', 'reportes'], precios: ['precio'], usuarios: ['usuario'], pedidos: ['pedido', 'comanda'], comandas: ['pedido'], reservas: ['reserva'], paquetes: ['paquete'], puntos: ['punto'], mesas: ['mesa'] };
       const tokens = normalize(clause || '').split(/[^a-z0-9]+/).filter(token => token.length > 4);
       const samePayment = name === 'registro' && /cobro|pago/.test(normalize(clause || '')) && inventory.some(item => item.tipo === 'RF' && familyOf(item.necesidad) === 'cobro');
-      const duplicated = samePayment || inventory.some(item => item.tipo === 'RF' && familyOf(item.necesidad) === name && tokens.some(token => [token, ...(equivalents[token] || [])].some(form => normalize(item.necesidad).includes(form))));
+      const stem = token => token.slice(0, 5);
+      const duplicated = samePayment || inventory.some(item => item.tipo === 'RF' && familyOf(item.necesidad) === name && tokens.some(token => [token, ...(equivalents[token] || [])].some(form => {
+        const known = normalize(item.necesidad).split(/[^a-z0-9]+/).filter(part => part.length > 4).map(stem);
+        return known.some(part => part === stem(form) || part.startsWith(stem(form)) || stem(form).startsWith(part));
+      })));
       if (clause && !duplicated) add('RF', clause);
     }
   }
@@ -261,9 +282,35 @@ function recover(input, inventory, identifiers) {
   }
   return added;
 }
+const PLAIN_QUESTIONS = [
+  [/frecuencia|recurrencia/, /respaldo|copia/, '¿Con qué recurrencia se harán las copias de seguridad de la base de datos (por ejemplo, diarias)?'],
+  [/rto|rpo|inactiv/, /recuper|caida|inactiv|funcionar/, '¿Cuánto tiempo puede permanecer el sistema inactivo antes de volver a funcionar?'],
+  [/tiempo maximo/, /recuper|caida|inactiv/, '¿Cuánto tiempo puede permanecer el sistema inactivo antes de volver a funcionar?'],
+  [/alta disponibilidad/, /futur|mas adelante|posterior|evaluar/, '¿Qué haría falta, más adelante, para que el sistema siga funcionando aunque falle un servidor?'],
+  [/metricas concretas/, /seguridad|uso|usabilidad|umbral/, '¿Qué métricas concretas faltan todavía para la seguridad y la facilidad de uso?']
+];
+function clarifyQuestions(inventory) {
+  const seen = new Set();
+  const result = [];
+  for (const item of inventory || []) {
+    if (item?.tipo !== 'pregunta' || item.estado !== 'pendiente') {
+      result.push(item);
+      continue;
+    }
+    const text = normalize(item.necesidad);
+    if (/\b150\b/.test(text) && /personas conectadas/.test(text) && !/[¿?]/.test(item.necesidad) && inventory.some(other => other.tipo === 'RNF' && /150|personas conectadas/.test(normalize(other.necesidad)))) continue;
+    const replacement = PLAIN_QUESTIONS.find(([left, right]) => left.test(text) && right.test(text));
+    const necesidad = replacement ? replacement[2] : item.necesidad;
+    const key = normalize(necesidad);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(necesidad === item.necesidad ? item : { ...item, necesidad });
+  }
+  return result;
+}
 function refine(inventory, input, identifiers) {
   const current = [];
   for (const item of inventory || []) current.push(...splitItem(item, identifiers).map(part => ensureSubject(part === item ? item : withEvidence(part, item.evidencia), input)));
-  return current.concat(recover(input, current, identifiers).map(item => ensureSubject(item, input)));
+  return clarifyQuestions(current.concat(recover(input, current, identifiers).map(item => ensureSubject(item, input))));
 }
 module.exports = { refine, partition, familyOf };

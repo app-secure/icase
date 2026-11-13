@@ -1,4 +1,5 @@
 const { isRequirementNeed } = require('../constants/RequirementAnalysisContract');
+const { extraConditions } = require('./RequirementStatement');
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
@@ -25,11 +26,15 @@ class RequirementQualityService {
         'Aplica la prueba de independencia: separa resultados que puedan aceptarse por separado; conserva filtros, medios y validaciones de una misma operación. Esta señal léxica no prueba un error.');
       if (/autentic|iniciar sesion|inicio de sesion|login/.test(title) && /sesion activa|sesion iniciada|haber iniciado sesion/.test(pre)) add('AUTENTICACION_CIRCULAR', req, 'La función de autenticación exige una sesión ya iniciada.', 'Revisa la contradicción; no confundas iniciar sesión con reautenticarse o renovar una sesión.');
       if (/operacion registrada y verificada conforme/.test(post)) add('POSCONDICION_GENERICA', req, 'La poscondición no describe el resultado concreto.', 'Describe el cambio o resultado observable sustentado por el insumo.');
+      const refs = Array.isArray(req.necesidades_origen) ? req.necesidades_origen : [];
       const criteria = Array.isArray(req.criterios_aceptacion) ? req.criterios_aceptacion : [];
       if (!criteria.length) add('CRITERIOS_AUSENTES', req, 'No hay criterios de aceptación.', 'Expresa condiciones observables sin inventar reglas ni métricas.');
-      else if (criteria.every(c => [normalize(req.nombre), normalize(req.descripcion)].includes(normalize(c?.descripcion)))) add('CRITERIOS_REPETITIVOS', req, 'Los criterios repiten el título o la declaración.', 'Comprueba resultados, alternativas y restricciones acordadas; no impongas una cantidad mínima de criterios.');
+      else if (criteria.every(c => [normalize(req.nombre), normalize(req.descripcion)].includes(normalize(c?.descripcion)))) {
+        const needs = expected.filter(n => refs.includes(n.id));
+        const covered = `${req.nombre || ''} ${req.descripcion || ''} ${criteria.map(c => c?.descripcion || '').join(' ')}`;
+        if (extraConditions(needs, covered).length) add('CRITERIOS_REPETITIVOS', req, 'Los criterios repiten el título o la declaración.', 'Comprueba resultados, alternativas y restricciones acordadas; no impongas una cantidad mínima de criterios.');
+      }
       if (req.tipo === 'RNF' && /por confirmar/.test(normalize(req.metrica_medible))) add('METRICA_PENDIENTE', req, 'La métrica todavía requiere acuerdo.', 'Conserva la cualidad explícita y solicita solo su método o umbral pendiente.');
-      const refs = Array.isArray(req.necesidades_origen) ? req.necesidades_origen : [];
       const reqObjectives = new Set(expected.filter(n => refs.includes(n.id)).map(n => n.objetivo_id).filter(Boolean));
       const declaredRules = Array.isArray(req.reglas_relacionadas) ? req.reglas_relacionadas : [];
       const related = inventory.filter(n => !isRequirementNeed(n) && (declaredRules.includes(n.id) ||

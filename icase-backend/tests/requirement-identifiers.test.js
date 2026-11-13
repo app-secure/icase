@@ -7,9 +7,13 @@ test('normaliza nuevas generaciones y referencias sin modificar citas ni necesid
   expect(result.requerimientos[0].necesidades_origen).toEqual(['N-01']);
   expect(result.auditoria_requisitos.revision_semantica.hallazgos[0].requisitos_afectados).toEqual(['RF-01', 'RNF-01']);
 });
-test('no disimula identificadores duplicados', () => {
-  const result = { requerimientos: [{ identificador: 'RF-1', tipo: 'RF' }, { identificador: 'RF-1', tipo: 'RF' }] };
-  expect(normalize(result)).toBe(result);
+test('asigna correlativos distintos cuando el modelo repite un identificador', () => {
+  const result = normalize({ requerimientos: [
+    { identificador: 'RF-08', tipo: 'RF', nombre: 'Uno', necesidades_origen: ['N-21'] },
+    { identificador: 'RF-08', tipo: 'RF', nombre: 'Dos', necesidades_origen: ['N-08'] }
+  ] });
+  expect(result.requerimientos.map(item => item.identificador)).toEqual(['RF-01', 'RF-02']);
+  expect(result.requerimientos.map(item => item.nombre)).toEqual(['Dos', 'Uno']);
 });
 test('la generación defectuosa advierte agrupación sin bloquear por palabras', () => {
   const Quality = require('../src/core/services/RequirementQualityService');

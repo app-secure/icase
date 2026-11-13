@@ -19,9 +19,12 @@ test('señala sesión previa para login como revisión, no prohíbe reautenticac
   expect(findings.find(f => f.codigo === 'AUTENTICACION_CIRCULAR').severidad).toBe('advertencia');
 });
 
-test('un solo criterio observable es válido; copia exacta produce advertencia', () => {
+test('un solo criterio observable es válido; la copia avisa solo si la evidencia trae otra condición', () => {
   expect(new Quality().evaluate([requirement()]).hallazgos).toEqual([]);
-  expect(new Quality().evaluate([requirement({ criterios_aceptacion: [{ descripcion: 'Consultar registros' }] })]).hallazgos[0].codigo).toBe('CRITERIOS_REPETITIVOS');
+  expect(new Quality().evaluate([requirement({ criterios_aceptacion: [{ descripcion: 'Consultar registros' }] })], inventory).hallazgos
+    .some(item => item.codigo === 'CRITERIOS_REPETITIVOS')).toBe(false);
+  const withCondition = [{ ...inventory[0], evidencia: 'Consultar registros. Si el registro está cerrado, no debe mostrarse.' }];
+  expect(new Quality().evaluate([requirement({ criterios_aceptacion: [{ descripcion: 'Consultar registros' }] })], withCondition).hallazgos[0].codigo).toBe('CRITERIOS_REPETITIVOS');
 });
 
 test('construye vínculos declarados sin inferirlos por coincidencias de palabras', () => {

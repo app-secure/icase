@@ -176,7 +176,8 @@ class ProcesarConIA {
       insumoBrutoInput = initial.insumo_directo || '';
       previousRequirements = await this.requerimientoRepository.listarPorProyecto(proyectoId);
       const newNeeds = initial.contenido.inventario.filter(n => ['RF', 'RNF'].includes(n.tipo)).some(n => !previousRequirements.some(r => (r.necesidades_origen || []).includes(n.id)));
-      if (previousRequirements.length && !actualizarIds.length && !newNeeds) throw Object.assign(new Error('Ya existen requisitos. Confirma la actualización puntual; no se reemplazarán automáticamente.'), { status: 409, code: 'REQUIREMENTS_CONFLICT' });
+      if (regenerar && previousRequirements.some(item => item.aprobado)) throw Object.assign(new Error('Los requisitos ya están aprobados. No se reemplazan.'), { status: 409, code: 'REQUIREMENTS_CONFLICT' });
+      if (!regenerar && previousRequirements.length && !actualizarIds.length && !newNeeds) throw Object.assign(new Error('Ya existen requisitos. Confirma la actualización puntual; no se reemplazarán automáticamente.'), { status: 409, code: 'REQUIREMENTS_CONFLICT' });
       if (actualizarIds.some(id => !previousRequirements.some(r => r.identificador === id))) throw Object.assign(new Error('La selección de requisitos cambió; recarga.'), { status: 409 });
     }
     const objetivoNormalizado = ['requisitos', 'diagramas', 'completo'].includes(objetivo) ? objetivo : 'completo';
@@ -340,7 +341,7 @@ class ProcesarConIA {
     // Construcción del payload de tres bloques explícitos
     const payload = {
       proyecto_id: proyectoId,
-      ...(initial ? { approvedInitialAnalysis: { ...initial.contenido, aprobado: true, requisitos_previos: previousRequirements, actualizar_ids: actualizarIds, instruccion_redaccion: instruccion, referencia: { id: initial.id, version: initial.version, huella: initial.contenido_hash || require('../../infrastructure/services/RequirementExecutionContext').hash(initial.contenido) } } } : {}),
+      ...(initial ? { approvedInitialAnalysis: { ...initial.contenido, aprobado: true, requisitos_previos: regenerar ? [] : previousRequirements, actualizar_ids: regenerar ? [] : actualizarIds, instruccion_redaccion: instruccion, referencia: { id: initial.id, version: initial.version, huella: initial.contenido_hash || require('../../infrastructure/services/RequirementExecutionContext').hash(initial.contenido) } } } : {}),
       nombre_proyecto: proyecto.nombre,
       // Las instrucciones adicionales tienen su bloque propio en el prompt; no deben duplicarse en el insumo principal.
       insumo_bruto: textoBase,
@@ -557,7 +558,10 @@ class ProcesarConIA {
         });
         requerimientosGenerados.push(reqEntity);
       }
-      if (initial && previousRequirements.length) {
+      if (regenerar) {
+        await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
+        await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
+      } else if (initial && previousRequirements.length) {
         for (const row of requerimientosGenerados) {
           const previous = previousRequirements.find(r => r.identificador === row.identificador);
           if (previous && !actualizarIds.includes(row.identificador)) continue;
@@ -713,7 +717,7 @@ class ProcesarConIA {
     if (objetivoNormalizado === 'requisitos' && resultadoIA.auditoria_requisitos) {
       await this.requirementChangeService?.invalidateCode(proyectoId, 'Se generó una nueva versión del análisis de requisitos.');
       const previous = proyecto.auditoria_requisitos;
-      if (initial && previousRequirements.length) {
+      if (initial && previousRequirements.length && !regenerar) {
         const state = await this.initialAnalysis.get(proyectoId, usuarioId);
         resultadoIA.auditoria_requisitos.pendientes_analisis_inicial = state.impacto.requisitos_afectados.filter(id => !actualizarIds.includes(id));
       }

@@ -174,31 +174,6 @@ export default function RequirementReviewPanel({ audit, onReview, readOnly, onBu
             </div>
           ))}
 
-          {/* EDITAR CLASIFICACIÓN Y REGLAS */}
-          <details className="mt-3 text-xs">
-            <summary className="cursor-pointer font-medium text-slate-700 hover:text-slate-900 py-1">
-              Editar clasificación, reglas, restricciones y preguntas ({audit.inventario?.length || 0})
-            </summary>
-            <div className="mt-2 space-y-1.5">
-              {(audit.inventario || []).map(item => (
-                <div key={item.id} className="flex items-start justify-between gap-2 rounded border border-slate-200 bg-white p-2">
-                  <p className="text-slate-700">
-                    <span className="font-mono font-bold text-slate-900 mr-1">[{item.id}]</span>
-                    <span className="text-slate-500">({item.tipo} · {item.estado}):</span> {item.necesidad}
-                  </p>
-                  <button
-                    disabled={busy || Boolean(audit.referencia_analisis_inicial)}
-                    className={btnSecondary}
-                    title={audit.referencia_analisis_inicial ? 'Revisa la versión del análisis inicial para modificar este elemento.' : undefined}
-                    onClick={() => open('analisis', item.id, 'editar_analisis', item)}
-                  >
-                    Revisar
-                  </button>
-                </div>
-              ))}
-            </div>
-          </details>
-
           {/* HALLAZGOS SEMÁNTICOS */}
           {(audit.revision_semantica?.hallazgos || []).map(item => (
             <div key={item.id} className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs space-y-1.5">

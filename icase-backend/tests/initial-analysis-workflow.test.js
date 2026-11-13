@@ -32,6 +32,20 @@ test('extrae sin requisitos, aprueba y redacta sin otra extracción; navegar no 
   const calls = spy.mock.calls.length; await call('GET', '/analisis-inicial'); await call('GET', ''); expect(spy).toHaveBeenCalledTimes(calls);
   expect(platform.data.diagrama).toHaveLength(before.length);
 });
+test('regenerar reemplaza el borrador desde el análisis aprobado', async () => {
+  const draft = await extract();
+  const approved = await call('POST', '/analisis-inicial/aprobar', { version_esperada: draft.id, aceptar_advertencias: true, provider: 'gemini' });
+  expect(approved.status).toBe(202);
+  await done(approved.json.trabajo.id);
+  const refused = await call('POST', '/trabajos-requisitos', { operacion: 'redaccion_requisitos', analisis_id: (await call('GET', '/analisis-inicial')).json.aprobado.id, provider: 'gemini' });
+  expect(refused.status).toBe(409);
+  const again = await call('POST', '/trabajos-requisitos', { operacion: 'redaccion_requisitos', analisis_id: (await call('GET', '/analisis-inicial')).json.aprobado.id, regenerar: true, provider: 'gemini' });
+  expect(again.status).toBe(202);
+  expect((await done(again.json.id)).estado).toBe('completado');
+  expect(platform.data.requerimiento).toHaveLength(1);
+  const drafting = spy.mock.calls.filter(([payload]) => payload.approvedInitialAnalysis);
+  expect(drafting.at(-1)[0].approvedInitialAnalysis.requisitos_previos).toEqual([]);
+});
 test('ediciones concurrentes no sobrescriben; preguntas abiertas no bloquean', async () => {
   const draft = await extract();
   const content = structuredClone(draft.contenido); content.inventario.push({ id: 'N-02', tipo: 'pregunta', necesidad: '¿Qué filtros?', estado: 'pendiente', evidencia: 'El operador consulta expedientes.' });

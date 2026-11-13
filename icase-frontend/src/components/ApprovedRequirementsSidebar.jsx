@@ -1,5 +1,6 @@
 import React from 'react';
 import RequirementActorsPanel from './RequirementActorsPanel';
+import { isTechnologyStack } from './technologyStack';
 import { PanelLeft, PanelLeftClose, PanelRight, PanelRightClose } from 'lucide-react';
 
 export function RequirementsReferencePanel({ open, onToggle, side = 'left', ...props }) {
@@ -60,7 +61,8 @@ export default function ApprovedRequirementsSidebar({ requirements = {}, audit =
   const nonFunctional = requirements?.nonFunctional || [];
   const context = [
     ['Reglas de negocio', audit?.reglas_negocio],
-    ['Restricciones técnicas y plataformas', audit?.restricciones_tecnicas],
+    ['Stack tecnológico', (audit?.restricciones_tecnicas || []).filter(isTechnologyStack)],
+    ['Restricciones técnicas', (audit?.restricciones_tecnicas || []).filter(entry => !isTechnologyStack(entry))],
     ['Alcance y decisiones', audit?.decisiones],
     ['Preguntas pendientes', audit?.preguntas_pendientes],
     ['Contexto', audit?.contexto]

@@ -11,7 +11,7 @@ const coarse = [
   need('N-01', 'O-01', 'El cliente puede ver el menú con precios y disponibilidad actualizada y no pedir platos agotados.', 'En la aplicación móvil el cliente debe poder ver el menú'),
   need('N-02', 'O-02', 'El cliente puede reservar una mesa completa o una silla a través de la aplicación móvil.', 'También debe poder reservar una mesa completa o una silla'),
   need('N-03', 'O-03', 'El cliente puede comprar paquetes semanales prepagados y acumular puntos por sus compras.', 'comprar paquetes semanales prepagados y acumular puntos'),
-  need('N-04', 'O-04', 'El mesero puede ver las mesas asignadas, su estado (libre/ocupada), tomar pedidos y validar reservas escaneando el código QR del cliente.', 'Los meseros podrán ver las mesas que tienen asignadas'),
+  need('N-04', 'O-04', 'El mesero puede ver las mesas que tienen asignadas, revisar si una mesa está libre u ocupada, tomar pedidos y validar reservas escaneando el código QR del cliente.', 'Los meseros podrán ver las mesas que tienen asignadas'),
   need('N-06', 'O-06', 'El cocinero puede ver comandas nuevas, tiempo transcurrido, resumen de platos pendientes y marcar platos como agotados, actualizando el menú y notificando a los meseros.', 'En cocina se incluirá una pantalla KDS'),
   need('N-07', 'O-07', 'El cajero puede cobrar en efectivo o por transferencia, cerrar la caja y comprobar el saldo de paquetes prepagados antes de cobrar.', 'el cajero pueda cobrar en efectivo o por transferencia'),
   need('N-08', 'O-08', 'El administrador puede revisar ventas, platos más vendidos, ventas por fecha, cambiar precios del menú y gestionar usuarios, sin que otros puedan borrar ventas o modificar precios.', 'El administrador debe poder revisar ventas')
@@ -25,7 +25,8 @@ test('separa operaciones independientes y conserva medios, estados y la comproba
   expect(functional.filter(item => /reservar una mesa/.test(item))).toHaveLength(1);
   expect(functional.some(item => /comprar paquetes/.test(item) && !/puntos/.test(item))).toBe(true);
   expect(functional.some(item => /el cliente debe poder acumular puntos por sus compras/.test(item))).toBe(true);
-  expect(functional.some(item => /mesas asignadas/.test(item) && !/tomar pedidos|validar/.test(item))).toBe(true);
+  expect(functional.some(item => /tienen asignadas/.test(item) && !/libre|tomar pedidos|validar/.test(item))).toBe(true);
+  expect(functional.some(item => /libre u ocupada/.test(item) && !/mesas asignadas|tomar pedidos/.test(item))).toBe(true);
   expect(functional.some(item => /^tomar pedidos$/.test(item) || /tomar pedidos/.test(item) && !/validar|mesas asignadas/.test(item))).toBe(true);
   expect(functional.some(item => /validar reservas/.test(item) && !/tomar pedidos/.test(item))).toBe(true);
   expect(functional.some(item => /comandas nuevas/.test(item) && !/marcar/.test(item))).toBe(true);
@@ -34,21 +35,30 @@ test('separa operaciones independientes y conserva medios, estados y la comproba
   expect(functional.some(item => /cerrar la caja/.test(item) && !/cobrar/.test(item))).toBe(true);
   expect(functional.some(item => /revisar ventas/.test(item) && !/cambiar precios|gestionar usuarios/.test(item))).toBe(true);
   expect(functional.some(item => /cambiar precios/.test(item) && !/gestionar usuarios|revisar ventas/.test(item))).toBe(true);
-  expect(functional.some(item => /gestionar usuarios/.test(item) && !/cambiar precios/.test(item))).toBe(true);
+  expect(functional.some(item => /el administrador debe poder gestionar usuarios/.test(item) && !/cambiar precios/.test(item))).toBe(true);
+  expect(functional.filter(item => /cerrar/.test(item))).toHaveLength(1);
   expect(inventory.some(item => item.tipo === 'regla_negocio' && /borrar ventas|modificar precios/.test(text(item)))).toBe(true);
 });
 
 test('recupera permisos, reasignación, autenticación y tecnologías que no estaban en el inventario', () => {
   const inventory = refine(coarse, input, identifiers([coarse]));
   const text = item => `${item.tipo} ${item.necesidad}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  expect(inventory.some(item => item.tipo === 'RF' && /reasign/.test(text(item)))).toBe(true);
+  expect(inventory.some(item => item.tipo === 'RF' && /administrador haga una reasignacion/.test(text(item)) && !/entre meseros/.test(text(item)))).toBe(true);
   expect(inventory.some(item => item.tipo === 'RF' && /autentic/.test(text(item)))).toBe(true);
   expect(inventory.some(item => item.tipo === 'restriccion_tecnica' && /jwt/.test(text(item)))).toBe(true);
   expect(inventory.some(item => item.tipo === 'restriccion_tecnica' && /redis/.test(text(item)) && item.estado === 'pendiente')).toBe(true);
   expect(inventory.some(item => item.tipo === 'decision' && /alta disponibilidad|balanceador/.test(text(item)))).toBe(true);
-  expect(inventory.some(item => item.tipo === 'pregunta' && /150 personas|frecuencia de respaldos|metricas concretas/.test(text(item)))).toBe(true);
+  expect(inventory.some(item => item.tipo === 'pregunta' && /recurrencia se haran las copias/.test(text(item)))).toBe(true);
+  expect(inventory.some(item => item.tipo === 'pregunta' && /permanecer el sistema inactivo/.test(text(item)))).toBe(true);
+  expect(inventory.some(item => item.tipo === 'pregunta' && /150 personas/.test(text(item)))).toBe(false);
   expect(inventory.some(item => item.tipo === 'regla_negocio' && /otro mesero|reportes historicos|cambiar precios/.test(text(item)))).toBe(true);
   for (const item of inventory) expect(input.includes(item.evidencia)).toBe(true);
+});
+
+test('completa un fragmento de permiso con el actor de la confirmación', () => {
+  const question = '¿Confirma que solamente el administrador podrá modificar precios, consultar reportes globales y gestionar usuarios?';
+  const inventory = refine([{ id: 'N-39', objetivo_id: 'O-07', tipo: 'RF', estado: 'confirmado', necesidad: 'gestionar usuarios', evidencia: question }], input, identifiers([]));
+  expect(inventory.find(item => item.id === 'N-39').necesidad).toMatch(/El administrador podrá gestionar usuarios/);
 });
 
 test('la extracción deja el inventario granular sin otra llamada al modelo', async () => {

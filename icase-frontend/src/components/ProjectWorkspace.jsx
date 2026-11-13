@@ -416,7 +416,7 @@ export default function ProjectWorkspace({
   }, [project.id, project.currentPhase, showInitial, isManagingSources]);
   const handleProgressScroll = event => {
     const target = event.target;
-    if (!(target instanceof HTMLElement) || target.closest('textarea, input, pre, [role="dialog"]') || target.scrollHeight - target.clientHeight < 80) return;
+    if (!(target instanceof HTMLElement) || target.closest('textarea, input, pre, dialog, [role="dialog"]') || target.scrollHeight - target.clientHeight < 80) return;
     const previous = progressScroll.current;
     const top = target.scrollTop;
     const delta = top - (previous.target === target ? previous.top : 0);
@@ -424,7 +424,7 @@ export default function ProjectWorkspace({
     progressScroll.current = { ...previous, target, top, movement };
     if (Date.now() < previous.until) return;
     const hide = top > 80 && movement > 20;
-    const reveal = top < 24 || movement < -20;
+    const reveal = top <= 2;
     if (hide || reveal) {
       const next = hide && !reveal;
       if (next !== progressHidden && !event.currentTarget.querySelector('nav:focus-within')) {
@@ -1675,6 +1675,16 @@ export default function ProjectWorkspace({
             }}
             onApprovePhase={handleApproveAnalysis}
             isApproved={project.isAnalysisApproved}
+            regenerating={requirementJob?.operacion === 'redaccion_requisitos' && ['encolado', 'procesando'].includes(requirementJob?.estado)}
+            onRegenerate={project.analysisFlowVersion === 2 ? async () => {
+              if (!window.confirm('Se reemplazarán los requisitos actuales con una nueva redacción del análisis inicial aprobado.')) return;
+              try {
+                const state = await loadInitial();
+                if (!state?.aprobado?.id) { setAlertModal({ title: 'Análisis inicial', message: 'Aprueba el análisis inicial antes de regenerar los requisitos.' }); return; }
+                const job = await startRequirementJobApi(projectBackendId, { operacion: 'redaccion_requisitos', analisis_id: state.aprobado.id, regenerar: true, provider: selectedAiProvider || 'auto' });
+                setRequirementJob(job);
+              } catch (error) { setAlertModal({ title: 'No se pudo regenerar', message: error.message }); }
+            } : undefined}
             onApplyAiCorrection={(prompt) => handleApplyAiCorrection("analysis", prompt)}
           />
         ) : project.currentPhase === 2 ? (

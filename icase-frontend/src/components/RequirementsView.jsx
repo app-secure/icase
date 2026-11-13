@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Check, CheckCircle2, Pencil, Plus, Save, Send, Trash2, X } from "lucide-react";
 import BrainGearsIcon from "./BrainGearsIcon";
 import RequirementReviewPanel from './RequirementReviewPanel';
@@ -25,7 +25,7 @@ const nextId = (items, prefix) => {
 
 export default function RequirementsView({
   requirements, onApprovePhase, isApproved, onApplyAiCorrection, onUpdateRequirements,
-  readOnly = false, onBackToDesign, audit = null, onReview
+  readOnly = false, onBackToDesign, audit = null, onReview, onRegenerate, regenerating = false
 }) {
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
@@ -45,6 +45,20 @@ export default function RequirementsView({
     setPendingDelete(null);
     setFormError("");
   };
+
+  const openRequirement = (identifier) => {
+    const id = String(identifier || "").trim();
+    const rfIndex = functional.findIndex(item => (item.identificador || item.id) === id);
+    if (rfIndex >= 0) { startEdit("rf", rfIndex, functional[rfIndex]); return; }
+    const rnfIndex = nonFunctional.findIndex(item => (item.identificador || item.id) === id);
+    if (rnfIndex >= 0) startEdit("rnf", rnfIndex, nonFunctional[rnfIndex]);
+  };
+
+  const editingAnchor = editing && !editing.isNew ? (editing.draft?.identificador || editing.draft?.id) : "";
+  useEffect(() => {
+    if (!editingAnchor) return;
+    document.getElementById(`requisito-${editingAnchor}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [editingAnchor]);
 
   const startAdd = (type) => {
     setEditing({ type, index: null, isNew: true, draft: emptyRequirement(type) });
@@ -210,6 +224,7 @@ export default function RequirementsView({
               <h2 className="mt-0.5 text-xl font-normal tracking-tight text-slate-900">Especificación de Requerimientos del Sistema</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {onRegenerate && !isApproved && !readOnly && <button type="button" onClick={onRegenerate} disabled={regenerating || isFixing || isReviewing || Boolean(editing)} className="rounded-full border border-[#CFC0F1] bg-[#F2EDFF] px-3.5 py-1.5 text-xs font-semibold text-[#6D28D9] transition-colors hover:bg-[#E9DDFE] disabled:opacity-40">{regenerating ? "Regenerando…" : "Regenerar desde el análisis"}</button>}
               {isApproved && <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={13} />Fase Aprobada</span>}
             </div>
           </div>
@@ -258,8 +273,7 @@ export default function RequirementsView({
             {audit?.referencia_analisis_inicial && <p className="text-sm text-slate-500">Base: análisis inicial v{audit.referencia_analisis_inicial.version}. Para modificar actores, necesidades o clasificación, abre «Análisis inicial» y crea un borrador.</p>}
             <RequirementActorsPanel audit={audit} requirements={requirements} onReview={onReview} readOnly={Boolean(audit?.referencia_analisis_inicial) || readOnly || isApproved || Boolean(editing) || isFixing} onBusyChange={setIsReviewing} />
             <RequirementReviewPanel audit={audit} onReview={onReview} readOnly={readOnly || isApproved || Boolean(editing) || isFixing} onBusyChange={setIsReviewing} />
-            <RequirementDiagnostics audit={audit} />
-            {audit?.metricas_ejecucion && <p className="text-xs text-slate-500">Generación: {(audit.metricas_ejecucion.duracion_ms / 1000).toFixed(1)} s · {audit.metricas_ejecucion.intentos_http} solicitudes al proveedor · {audit.metricas_ejecucion.presupuesto_agotado ? "presupuesto agotado; revisar cobertura" : "dentro del presupuesto"}</p>}
+            <RequirementDiagnostics audit={audit} onCorrect={!readOnly && !isApproved ? openRequirement : null} />
             {audit?.control_aprobacion?.bloqueado && (
               <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -280,16 +294,7 @@ export default function RequirementsView({
                 <p className="mt-2 text-xs">Completa o corrige únicamente los requisitos señalados arriba, manualmente o con IA (los requisitos que ya están listos no se tocarán). Al aprobar se volverá a comprobar la versión guardada.</p>
               </div>
             )}
-            {audit?.version >= 2 && (
-              <details className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                <summary className="cursor-pointer font-semibold">Reglas, decisiones técnicas y preguntas del análisis</summary>
-                <p className="mt-2 text-xs text-slate-500">Se conservan como contexto del proyecto; no cuentan como funciones adicionales.</p>
-                {[["Reglas de negocio", audit.reglas_negocio], ["Restricciones técnicas y plataformas", audit.restricciones_tecnicas], ["Alcance y decisiones", audit.decisiones], ["Preguntas pendientes", audit.preguntas_pendientes], ["Contexto", audit.contexto]].map(([title, entries]) => entries?.length ? (
-                  <section key={title} className="mt-3"><h3 className="font-semibold">{title}</h3><ul className="list-disc pl-5">{entries.map((entry, index) => <li key={entry.id || index}>{entry.necesidad} <span className="text-xs text-slate-500">({entry.estado})</span>{entry.evidencia && <p className="text-xs text-slate-500">Evidencia: “{entry.evidencia}”</p>}</li>)}</ul></section>
-                ) : null)}
-              </details>
-            )}
-            {audit?.estado === 'revision_requerida' && !audit.revision_actual && (
+            {audit?.estado === 'revision_requerida' && !audit.revision_actual && !audit?.control_aprobacion?.bloqueado && (
               <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
                 <p className="font-semibold">Borrador generado: cobertura pendiente de revisión</p>
                 <p>La revisión detectó incidencias y no puede acreditar la cobertura completa. Esto no significa que todos los requisitos sean incorrectos. Revisa las causas siguientes antes de aprobar.</p>
@@ -316,25 +321,6 @@ export default function RequirementsView({
                 <p className="text-xs">Estado: {entry.estado_validacion}. {entry.motivo === 'evidencia_incorrecta' ? 'Incidencia de evidencia' : 'Incidencia de clasificación o estructura'}</p>
                 {(entry.elemento?.evidencias || []).map((evidence, i) => <p key={i} className="mt-1 whitespace-pre-wrap break-words text-xs">“{evidence.texto}” · {evidence.fuente || 'fuente no identificada'}</p>)}
               </div>)}
-            </section>}
-            {audit?.revision_semantica && <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-              <h3 className="font-semibold">Revisión semántica del insumo</h3>
-              <p className="mt-1">{audit.revision_semantica.estado === 'completada' ? 'Revisión ejecutada' : audit.revision_semantica.estado === 'parcial' ? 'Revisión parcial: faltan contrastes válidos de categorías' : 'No se pudo completar la revisión'} · {audit.revision_semantica.hallazgos.length} hallazgos.</p>
-              {audit.revision_semantica.contraste_categorias && <details className="mt-2">
-                <summary className="cursor-pointer">Contraste de reglas, restricciones y contexto</summary>
-                {audit.revision_semantica.contraste_categorias.revisados.map((entry, i) => <p key={i} className="mt-1">{entry.necesidad_id} · {entry.naturaleza}: {entry.justificacion} Requisitos: {entry.requisitos.join(', ') || 'sin requisito identificado'}.</p>)}
-                {!!audit.revision_semantica.contraste_categorias.pendientes.length && <p>Pendientes: {audit.revision_semantica.contraste_categorias.pendientes.join(', ')}.</p>}
-                {audit.revision_semantica.contraste_categorias.rechazados.map((entry, i) => <p key={i}>{entry.necesidad_id || 'Entrada'}: {entry.motivo}</p>)}
-              </details>}
-              <p className="text-xs text-slate-500">Las citas fueron comprobadas; su interpretación sigue siendo una evaluación de IA, no una garantía de exhaustividad.</p>
-              {audit.revision_semantica.hallazgos.map(item => <details key={item.id} className="mt-3 border-t pt-2">
-                <summary className="cursor-pointer">{item.id} · {item.tipo} · {item.estado}: {item.descripcion}</summary>
-                <p>Acción propuesta: {item.accion_propuesta}</p>
-                <p>Requisitos: {item.requisitos_afectados.join(', ') || 'ninguno existente'} · Necesidades: {item.necesidades_afectadas.join(', ') || 'no identificada en el inventario'}</p>
-                {item.evidencias.map((evidence, index) => <p key={index} className="mt-1 whitespace-pre-wrap break-words text-xs">“{evidence.texto}” · {evidence.fuente}</p>)}
-              </details>)}
-              <p className="mt-2 text-xs">Corrección de hallazgos semánticos (no incluye errores estructurales): {!audit.revision_semantica.reparacion || audit.revision_semantica.reparacion.estado === 'no_necesaria' ? 'sin corrección solicitada para esta revisión' : audit.revision_semantica.reparacion.estado}. {audit.revision_semantica.reparacion?.motivo || ''}</p>
-              {!!audit.revision_semantica.rechazados?.length && <p className="mt-1 text-xs">{audit.revision_semantica.rechazados.length} observaciones descartadas del control automático por evidencia o referencias inválidas.</p>}
             </section>}
           </div>
         </div>
@@ -392,9 +378,10 @@ function RequirementSection({
         const key = `${type}-${index}`;
         const editingThis = editing?.type === type && editing?.index === index && !editing.isNew;
         const deletingThis = pendingDelete === key;
-        if (editingThis) return <RequirementEditor key={item.id || key} type={type} draft={editing.draft} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} />;
+        const anchor = item.identificador || item.id;
+        if (editingThis) return <RequirementEditor key={item.id || key} anchor={anchor} type={type} draft={editing.draft} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} />;
         return (
-          <article key={item.id || key} className="group flex items-start gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-[#E7E3EE] hover:bg-[#FAF9FC]">
+          <article id={anchor ? `requisito-${anchor}` : undefined} key={item.id || key} className="group flex items-start gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-[#E7E3EE] hover:bg-[#FAF9FC]">
             <span className="mt-0.5 min-w-5 text-sm font-semibold text-slate-800">{numberOffset + index + 1}.</span>
             <div className="min-w-0 flex-1 space-y-1">
               {type === "rf" ? <FunctionalDisplay item={item} /> : <NonFunctionalDisplay item={item} />}
@@ -440,21 +427,20 @@ function NonFunctionalDisplay({ item }) {
 
 function RequirementProvenance({ item }) {
   const label = item.origin === "manual" ? "Manual" : item.origin === "explicito" ? "Explícito" : "Inferido";
-  if (item.evidences?.length) return <div className="mt-1 text-[11px]">
-    <span>{label}{item.requiresConfirmation ? ' · confirmar' : ''}</span>
-    <details className="mt-1"><summary className="cursor-pointer">Evidencias ({item.evidences.length})</summary>
-      {item.evidences.map((evidence, index) => <p key={index} className="mt-1 whitespace-pre-wrap break-words text-slate-500">“{evidence.texto}” · {evidence.fuente} · caracteres {evidence.inicio}–{evidence.fin} del insumo procesado</p>)}
-    </details>
+  const quotes = (item.evidences || []).map(evidence => evidence?.texto).filter(Boolean);
+  if (!quotes.length && item.evidence) quotes.push(item.evidence);
+  return <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+    <span className={`rounded-full px-2 py-0.5 font-medium ${item.requiresConfirmation ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{label}{item.requiresConfirmation ? " · confirmar" : ""}</span>
+    {quotes.map((text, index) => <span key={index} className="max-w-full truncate text-slate-400" title={text}>Evidencia: “{text}”</span>)}
   </div>;
-  return <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]"><span className={`rounded-full px-2 py-0.5 font-medium ${item.requiresConfirmation ? "bg-amber-100 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{label}{item.requiresConfirmation ? " · confirmar" : ""}</span>{item.evidence && <span className="max-w-full truncate text-slate-400" title={item.evidence}>Evidencia: “{item.evidence}”</span>}</div>;
 }
 
-function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isNew = false }) {
+function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isNew = false, anchor }) {
   const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#7C3AED] focus:ring-2 focus:ring-violet-100";
   const criteria = draft.acceptanceCriteria || [];
   const splitIds = (text) => [...new Set(text.split(',').map((item) => item.trim()).filter(Boolean))];
   return (
-    <div className="rounded-xl border border-[#CFC0F1] bg-[#FCFBFE] p-4 shadow-sm" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); onSave(); } if (event.key === "Escape") onCancel(); }}>
+    <div id={anchor ? `requisito-${anchor}` : undefined} className="rounded-xl border border-[#CFC0F1] bg-[#FCFBFE] p-4 shadow-sm" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); onSave(); } if (event.key === "Escape") onCancel(); }}>
       <div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-[#6D28D9]">{isNew ? "Nuevo" : "Editar"} {type === "rf" ? "requisito funcional" : "requisito no funcional"}</p><button type="button" onClick={onCancel} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X size={14} /></button></div>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-1 md:col-span-1">
