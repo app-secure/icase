@@ -80,4 +80,28 @@ describe('verificación de artefactos generados', () => {
     artifact.verificacion = { huella: 'huella-actual', estado: 'apta', nivel: 'ejecucion_aislada', pruebas: [{ paso: 'Integración', resultado: 'correcto' }] };
     expect(useCase._exigirVerificacion(artifact)).toBe(artifact.verificacion);
   });
+
+  test('el modo permisivo aprueba solo el fallo de los formularios del mockup', () => {
+    const useCase = new GestionarArtefactosCodigo({});
+    useCase.verifier.verificar = jest.fn().mockReturnValue({ estado: 'apta_estructuralmente', huella: 'huella-actual', errores: [] });
+    const base = {
+      tipo: 'pruebas',
+      verificacion: {
+        huella: 'huella-actual', estado: 'fallida', nivel: 'ejecucion_aislada',
+        pruebas: [
+          { paso: 'Compilación de backend, frontend y pruebas en Docker', resultado: 'correcto' },
+          { paso: 'Arranque de base de datos, backend y frontend con health checks', resultado: 'correcto' },
+          { paso: 'Prueba CRUD y N:M HTTP derivada del contrato', resultado: 'correcto' }
+        ],
+        errores: ['No pasó la ejecución aislada: locator.fill designed-ui.spec.js interfaz diseñada']
+      }
+    };
+    expect(() => useCase._exigirVerificacion(base)).toThrow('no fue satisfactoria');
+    const accepted = useCase._exigirVerificacion(base, { permisivo: true });
+    expect(accepted.estado).toBe('apta');
+    expect(accepted.modo_permisivo).toBe(true);
+    expect(accepted.advertencias.join(' ')).toMatch(/Modo permisivo/);
+    const compile = { ...base, verificacion: { ...base.verificacion, errores: ['failed to solve'], pruebas: [] } };
+    expect(() => useCase._exigirVerificacion(compile, { permisivo: true })).toThrow('solo cubre el fallo de los formularios');
+  });
 });

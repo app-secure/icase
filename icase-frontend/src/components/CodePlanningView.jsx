@@ -18,6 +18,14 @@ import { ToastContainer, useToasts } from './Toast';
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'];
 // Etapas que se pueden editar y aprobar pero no bloquean la generación (si no se aprueban rige el modo automático).
 const OPTIONAL_PHASES = ['modulos'];
+
+function mockupFormWaiver(verification) {
+  const text = (verification?.errores || []).join('\n');
+  const passed = (pattern) => (verification?.pruebas || []).some((item) => pattern.test(item.paso) && item.resultado === 'correcto');
+  return verification?.estado === 'fallida'
+    && /designed-ui\.spec\.js|interfaz diseñada|locator\.fill/i.test(text)
+    && passed(/Compilación/) && passed(/health checks/) && passed(/CRUD/);
+}
 const EDITABLE_PHASES = [...DECISION_PHASES, ...OPTIONAL_PHASES];
 
 const DEFAULTS = {
@@ -77,6 +85,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
   const [selected, setSelected] = useState('alcance_plataforma');
   const [drafts, setDrafts] = useState(DEFAULTS);
   const [notes, setNotes] = useState('');
+  const [permissive, setPermissive] = useState(false);
   const { toasts, addToast, removeToast } = useToasts();
   const [suggestionMeta, setSuggestionMeta] = useState(null);
   const [backendArtifact, setBackendArtifact] = useState(null);
@@ -265,7 +274,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     if (decision === 'rechazar' && !notes.trim()) { addToast({ type: 'error', message: 'Indica qué debe corregirse en las pruebas.' }); return; }
     try {
       setBusy(true);
-      const artifact = await reviewTestArtifactApi(projectId, testArtifact.id, decision, notes);
+      const artifact = await reviewTestArtifactApi(projectId, testArtifact.id, decision, notes, { modo_permisivo: decision === 'aprobar' && permissive });
       setTestArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
       addToast({ type: 'success', message: decision === 'aprobar' ? 'Suite de pruebas aprobada.' : 'Suite rechazada para corrección.' });
     } catch (error) { addToast({ type: 'error', message: error.message }); }
@@ -328,7 +337,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     if (decision === 'rechazar' && !notes.trim()) { addToast({ type: 'error', message: 'Indica qué debe corregirse en el paquete final.' }); return; }
     try {
       setBusy(true);
-      const artifact = await reviewDeliveryArtifactApi(projectId, deliveryArtifact.id, decision, notes);
+      const artifact = await reviewDeliveryArtifactApi(projectId, deliveryArtifact.id, decision, notes, { modo_permisivo: decision === 'aprobar' && permissive });
       setDeliveryArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
       addToast({ type: 'success', message: decision === 'aprobar' ? 'Entrega aprobada y proyecto finalizado. Ya puedes descargar el ZIP.' : 'Paquete rechazado para corrección.' });
     } catch (error) { addToast({ type: 'error', message: error.message }); }
@@ -665,7 +674,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                     {testArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{testArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
                     <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(testArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
                     <ArtifactVerification key={testArtifact.id} projectId={projectId} artifact={testArtifact} onArtifactChange={setTestArtifact} />
-                    {testArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewTests('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewTests('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pruebas</button></div>}
+                    {testArtifact.estado === 'en_revision' && <div className="mt-3 flex flex-wrap items-center justify-end gap-2">{mockupFormWaiver(testArtifact.verificacion) && <label className="mr-auto flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup. La compilación, el arranque y el CRUD ya pasaron.</label>}<button disabled={busy} onClick={() => reviewTests('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewTests('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pruebas</button></div>}
                   </div>}
                 </div>
 
@@ -706,8 +715,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Entrega v{deliveryArtifact.version} · {deliveryArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${deliveryArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{deliveryArtifact.estado}</span></div>
                     <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(deliveryArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
                     <ArtifactVerification key={deliveryArtifact.id} projectId={projectId} artifact={deliveryArtifact} onArtifactChange={setDeliveryArtifact} />
-                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-                      {deliveryArtifact.estado === 'en_revision' && <><button disabled={busy} onClick={() => reviewDelivery('rechazar')} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewDelivery('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar entrega</button></>}
+                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                      {deliveryArtifact.estado === 'en_revision' && <>{mockupFormWaiver(deliveryArtifact.verificacion) && <label className="mr-auto flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup.</label>}<button disabled={busy} onClick={() => reviewDelivery('rechazar')} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewDelivery('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar entrega</button></>}
                       {deliveryArtifact.aprobado && <button disabled={busy} onClick={downloadDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-xs font-semibold text-white"><Download size={14} />Descargar ZIP</button>}
                     </div>
                   </div>}

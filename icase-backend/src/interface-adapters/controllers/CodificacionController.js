@@ -241,7 +241,8 @@ class CodificacionController {
     try {
       res.json(await this.gestionarArtefactosCodigo.revisarPruebas({
         proyectoId: req.params.id, artefactoId: req.params.artefactoId,
-        decision: req.body.decision, observaciones: req.body.observaciones
+        decision: req.body.decision, observaciones: req.body.observaciones,
+        modo_permisivo: req.body.modo_permisivo === true
       }));
     } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
@@ -283,7 +284,8 @@ class CodificacionController {
     try {
       res.json(await this.gestionarArtefactosCodigo.revisarPaquete({
         proyectoId: req.params.id, artefactoId: req.params.artefactoId,
-        decision: req.body.decision, observaciones: req.body.observaciones
+        decision: req.body.decision, observaciones: req.body.observaciones,
+        modo_permisivo: req.body.modo_permisivo === true
       }));
     } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }

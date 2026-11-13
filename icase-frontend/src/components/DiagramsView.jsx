@@ -844,7 +844,7 @@ export default function DiagramsView({
             >
               {isGeneratingDiagram ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
               <span>{selectedKey === "mockups"
-                ? "Aprobar Mockups y Pasar a Documento"
+                ? "Aprobar mockups y pasar a codificación"
                 : currentState === "aprobado"
                   ? "Diagrama aprobado"
                   : currentDiagram && !["desactualizado", "rechazado"].includes(currentState) && !qualityInvalid

@@ -11,6 +11,19 @@ export const DEFAULT_DESIGN_SYSTEM = {
 
 export const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM) => {
   if (!rawHtml) return "";
+  if (rawHtml.includes('data-icase-shell-version="1"') && typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+    const header = doc.querySelector('.icase-shell > header');
+    if (header) {
+      if (designSystem.nombre_aplicacion) header.querySelector('strong').textContent = designSystem.nombre_aplicacion;
+      header.querySelector('img')?.remove();
+      if (/^data:image\/(png|jpeg|webp);base64,/.test(designSystem.logo || '')) {
+        const img = doc.createElement('img'); img.src = designSystem.logo; img.alt = ''; img.width = 32; img.height = 32;
+        header.prepend(img);
+      }
+      rawHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+    }
+  }
   let html = rawHtml
     .replace(/<base\b[^>]*>/gi, "")
     .replace(/<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, "")

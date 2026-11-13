@@ -72,6 +72,7 @@ export default function MockupsView({
     onTraceabilityChange?.(data.trazabilidad || null);
     setDesignSystem(data.sistemaDiseno || DEFAULT_DESIGN_SYSTEM);
     if (!initializedSelection.current) {
+      if (!data.mockups?.length) setShowPalette(true);
       setSelectedIds(new Set(catalog.map(p => p.slug)));
       initializedSelection.current = true;
     }
@@ -180,18 +181,19 @@ export default function MockupsView({
       setSavingPalette(true);
       const response = await updateMockupDesignSystemApi(projectId, designSystem);
       setDesignSystem(response.sistemaDiseno);
-      notify({ type: "success", message: "Paleta guardada. Regenera solo las pantallas que quieras actualizar." });
+      notify({ type: "success", message: "Paleta guardada sin regenerar pantallas." });
     } catch (error) { notify({ type: "error", message: error.message }); }
     finally { setSavingPalette(false); }
   };
   const applyPalette = async () => {
-    if (!selectedIds.size || busy) return;
+    if (busy) return;
     try {
       setSavingPalette(true);
       const response = await updateMockupDesignSystemApi(projectId, designSystem);
       setDesignSystem(response.sistemaDiseno);
       setShowPalette(false);
-      await startGeneration([...selectedIds], "Aplicación de paleta");
+      await loadCatalog();
+      notify({ type: "success", message: "Apariencia guardada sin regenerar ni consultar IA." });
     } catch (error) { notify({ type: "error", message: error.message }); }
     finally { setSavingPalette(false); }
   };
@@ -232,7 +234,7 @@ export default function MockupsView({
         </div>
       </div>
 
-      {showPalette && <div className="absolute right-0 top-10 z-30 max-h-[75vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl" style={{ width: 'min(760px, calc(100vw - 2rem))' }}><div className="mb-3 flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Sistema visual · v{designSystem.version}</p><p className="text-[11px] text-slate-500">La previsualización refleja los colores al instante. “Aplicar” regenera únicamente las pantallas marcadas.</p></div><div className="flex items-center gap-2"><button disabled={suggestingPalette} onClick={suggestPalette} className="flex items-center gap-1 rounded-lg bg-violet-50 px-2.5 py-1.5 text-xs text-violet-700 disabled:opacity-50">{suggestingPalette ? <Loader2 size={12} className="animate-spin" /> : <WandSparkles size={12} />}{suggestingPalette ? 'Consultando…' : 'Sugerencia IA'}</button><button onClick={() => setShowPalette(false)} className="text-lg leading-none text-slate-400">×</button></div></div><div className="flex flex-wrap gap-3">{Object.entries(designSystem.colores || {}).map(([key, value]) => <label key={key} className="flex items-center gap-2 text-[11px] text-slate-600"><input type="color" value={value} onChange={e => setDesignSystem(prev => ({ ...prev, origen: 'manual', colores: { ...prev.colores, [key]: e.target.value } }))} className="h-7 w-8 rounded border-0" /><span>{formatName(key)}</span></label>)}</div><div className="mt-4 flex flex-wrap justify-end gap-2"><button disabled={savingPalette} onClick={savePalette} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Guardar sin regenerar</button><button disabled={savingPalette || busy || selectedIds.size === 0} onClick={applyPalette} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">{savingPalette ? <Loader2 size={12} className="animate-spin" /> : <Palette size={12} />}Aplicar a seleccionadas ({selectedIds.size})</button></div></div>}
+      {showPalette && <div className="absolute right-0 top-10 z-30 max-h-[75vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-xl" style={{ width: 'min(760px, calc(100vw - 2rem))' }}><div className="mb-3 flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">Identidad visual · v{designSystem.version}</p><p className="text-[11px] text-slate-500">La previsualización refleja los colores al instante. Guardar aplica la apariencia sin consultar IA.</p></div><div className="flex items-center gap-2"><button disabled={suggestingPalette} onClick={suggestPalette} className="flex items-center gap-1 rounded-lg bg-violet-50 px-2.5 py-1.5 text-xs text-violet-700 disabled:opacity-50">{suggestingPalette ? <Loader2 size={12} className="animate-spin" /> : <WandSparkles size={12} />}{suggestingPalette ? 'Consultando…' : 'Sugerencia IA'}</button><button onClick={() => setShowPalette(false)} className="text-lg leading-none text-slate-400">×</button></div></div><div className="mb-4 space-y-3"><label className="block text-xs">Nombre de la aplicación<input maxLength={100} value={designSystem.nombre_aplicacion || ""} onChange={e => setDesignSystem(prev => ({ ...prev, nombre_aplicacion: e.target.value }))} className="mt-1 block w-full rounded-lg border p-2" /></label><label className="block text-xs">Logo opcional · PNG, JPEG o WebP, máximo 1 MB<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async e => { const file = e.target.files?.[0]; if (!file) return; if (file.size > 1048576 || !["image/png", "image/jpeg", "image/webp"].includes(file.type)) { notify({ type: "error", message: "Usa PNG, JPEG o WebP de hasta 1 MB." }); return; } const reader = new FileReader(); reader.onload = () => setDesignSystem(prev => ({ ...prev, logo: reader.result })); reader.readAsDataURL(file); }} /></label>{designSystem.logo && <div className="flex items-center gap-3"><img src={designSystem.logo} alt="Logo de la aplicación" className="h-10 w-10 object-contain" /><button onClick={() => setDesignSystem(prev => ({ ...prev, logo: null }))}>Quitar logo</button></div>}<p className="text-xs text-slate-500">La estructura común se aplica a nuevas generaciones. Los mockups existentes se conservan.</p></div><div className="flex flex-wrap gap-3">{Object.entries(designSystem.colores || {}).map(([key, value]) => <label key={key} className="flex items-center gap-2 text-[11px] text-slate-600"><input type="color" value={value} onChange={e => setDesignSystem(prev => ({ ...prev, origen: 'manual', colores: { ...prev.colores, [key]: e.target.value } }))} className="h-7 w-8 rounded border-0" /><span>{formatName(key)}</span></label>)}</div><div className="mt-4 flex flex-wrap justify-end gap-2"><button disabled={savingPalette} onClick={savePalette} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">Guardar sin regenerar</button><button disabled={savingPalette || busy} onClick={applyPalette} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">{savingPalette ? <Loader2 size={12} className="animate-spin" /> : <Palette size={12} />}Guardar apariencia</button></div></div>}
 
       <div className="flex min-h-[620px] flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         {showCatalog && <aside className="w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50/60 p-3">

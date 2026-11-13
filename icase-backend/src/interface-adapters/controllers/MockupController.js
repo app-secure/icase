@@ -163,6 +163,15 @@ class MockupController {
       const actual = await this.disenoRepository.obtenerPorProyecto(proyectoId);
       const recibido = req.body?.sistemaDiseno || req.body || {};
       const normalizado = this.generarMockupsUseCase._normalizarSistemaDiseno(recibido);
+      if (normalizado.logo) {
+        const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(normalizado.logo);
+        const bytes = match ? Buffer.from(match[2], 'base64') : Buffer.alloc(0);
+        const valid = match && bytes.length <= 1024 * 1024 && (
+          (match[1] === 'png' && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) ||
+          (match[1] === 'jpeg' && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) ||
+          (match[1] === 'webp' && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP'));
+        if (!valid) return res.status(400).json({ error: 'Logo inválido. Usa PNG, JPEG o WebP de hasta 1 MB.' });
+      }
       const colorValido = /^#[0-9a-f]{6}$/i;
       const invalidos = Object.entries(normalizado.colores)
         .filter(([, color]) => !colorValido.test(color))
@@ -177,7 +186,15 @@ class MockupController {
       }
       normalizado.origen = recibido.origen === 'ia' ? 'ia' : 'manual';
       normalizado.version = (actual?.sistema_diseno?.version || 0) + 1;
-      await this.disenoRepository.guardarOActualizar(proyectoId, { sistema_diseno: normalizado });
+      const composer = require('../../infrastructure/services/MockupVisualComposer');
+      const validator = this.generarMockupsUseCase.validator;
+      const mockups = (actual?.mockups || []).map(mockup => {
+        // Legacy HTML remains intact; only the versioned common shell is recomposed.
+        if (!String(mockup.preview_code).includes('data-icase-shell-version="1"')) return mockup;
+        const html = composer.compose(mockup.preview_code, { screen: { ...mockup, slug: mockup.nombre_pantalla }, manifest: actual.manifiesto_navegacion || [], identity: normalizado });
+        return { ...mockup, preview_code: validator.aplicarSistemaDiseno(validator.sanitizar(html).html, normalizado) };
+      });
+      await this.disenoRepository.guardarOActualizar(proyectoId, { sistema_diseno: normalizado, ...(actual?.mockups ? { mockups } : {}) });
       res.json({ sistemaDiseno: normalizado });
     } catch (err) {
       console.error('[MockupController] Error actualizando sistema visual:', err);

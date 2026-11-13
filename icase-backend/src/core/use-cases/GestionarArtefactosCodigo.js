@@ -76,17 +76,40 @@ class GestionarArtefactosCodigo {
     return this.artefactoRepository.actualizar(artefactoId, { archivos, verificacion: null });
   }
 
-  _exigirVerificacion(artefacto) {
+  _falloSoloInterfazDisenada(stored) {
+    const errores = (stored?.errores || []).join('\n');
+    const correcto = (pattern) => (stored?.pruebas || []).some((item) => pattern.test(item.paso) && item.resultado === 'correcto');
+    const base = correcto(/Compilación/) && correcto(/health checks/) && correcto(/CRUD/);
+    const interfaz = /designed-ui\.spec\.js|interfaz diseñada|locator\.fill/i.test(errores);
+    const otro = /Cannot connect to the Docker daemon|docker: not found|failed to solve|error TS/i.test(errores);
+    return Boolean(stored && stored.estado === 'fallida' && stored.nivel === 'ejecucion_aislada' && base && interfaz && !otro);
+  }
+
+  _exigirVerificacion(artefacto, { permisivo = false } = {}) {
     const resultado = this.verifier.verificar(artefacto);
     if (resultado.estado !== 'apta_estructuralmente') {
       throw new Error(`No se puede aprobar un artefacto incompleto. Verificación: ${resultado.errores.join(' ')}`);
     }
-    const stored = artefacto.verificacion;
+    let stored = artefacto.verificacion;
     if (!stored || stored.huella !== resultado.huella) throw new Error('Verifica esta versión del artefacto antes de aprobarla.');
+    const admitePermisivo = permisivo && ['pruebas', 'paquete_entrega'].includes(artefacto.tipo);
+    if (admitePermisivo && stored.estado !== 'apta' && !this._falloSoloInterfazDisenada(stored)) {
+      throw new Error('El modo permisivo solo cubre el fallo de los formularios del mockup, cuando la compilación, el arranque y el CRUD ya pasaron.');
+    }
+    if (admitePermisivo && this._falloSoloInterfazDisenada(stored)) {
+      stored = {
+        ...stored,
+        estado: 'apta',
+        modo_permisivo: true,
+        errores: [],
+        advertencias: [...(stored.advertencias || []), 'Modo permisivo: se aprobó aunque fallaron los formularios del mockup. La compilación, el arranque y el CRUD HTTP sí pasaron.']
+      };
+    }
     const needsRuntime = ['codigo_backend', 'codigo_frontend', 'pruebas', 'paquete_entrega'].includes(artefacto.tipo);
     if (needsRuntime ? stored.estado !== 'apta' || stored.nivel !== 'ejecucion_aislada' : stored.estado !== 'apta_estructuralmente') {
       throw new Error(`La verificación del artefacto no fue satisfactoria: ${(stored.errores || []).join(' ')}`);
     }
+    if (stored.modo_permisivo) return stored;
     if (['codigo_backend', 'paquete_entrega'].includes(artefacto.tipo)) {
       let manifest = {};
       try { manifest = JSON.parse(artefacto.archivos?.find((file) => file.ruta === 'backend/icase.manifest.json')?.contenido || '{}'); } catch { /* La revisión estructural rechaza JSON inválido. */ }
@@ -212,7 +235,7 @@ class GestionarArtefactosCodigo {
     return { artefacto, reutilizado: false };
   }
 
-  async revisarBackend({ proyectoId, artefactoId, decision, observaciones = '' }) {
+  async revisarBackend({ proyectoId, artefactoId, decision, observaciones = '', modo_permisivo = false }) {
     if (!['aprobar', 'rechazar'].includes(decision)) throw new Error('Decisión de artefacto no válida.');
     if (decision === 'rechazar' && !String(observaciones).trim()) throw new Error('Debes indicar observaciones para rechazar el backend.');
     const plan = await this.planRepository.obtenerPorProyecto(proyectoId);
@@ -223,7 +246,7 @@ class GestionarArtefactosCodigo {
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
     if (String(ultimo?.id) !== String(artefactoId)) throw new Error('Solo se puede revisar la versión más reciente del backend.');
     if (artefacto.estado !== 'en_revision') throw new Error('El artefacto backend ya fue revisado.');
-    const verificacion = decision === 'aprobar' ? this._exigirVerificacion(artefacto) : undefined;
+    const verificacion = decision === 'aprobar' ? this._exigirVerificacion(artefacto, { permisivo: modo_permisivo === true }) : undefined;
     const estado = decision === 'aprobar' ? 'aprobado' : 'rechazado';
     const actualizado = await this.artefactoRepository.actualizar(artefactoId, {
       estado, aprobado: decision === 'aprobar',
@@ -259,8 +282,8 @@ class GestionarArtefactosCodigo {
     return { artefacto, reutilizado: false };
   }
 
-  async revisarPruebas({ proyectoId, artefactoId, decision, observaciones = '' }) {
-    return this._revisarArtefacto({ proyectoId, artefactoId, decision, observaciones, tipo: 'pruebas', etapa: 'generacion_pruebas', nombre: 'suite de pruebas' });
+  async revisarPruebas({ proyectoId, artefactoId, decision, observaciones = '', modo_permisivo = false }) {
+    return this._revisarArtefacto({ proyectoId, artefactoId, decision, observaciones, modo_permisivo, tipo: 'pruebas', etapa: 'generacion_pruebas', nombre: 'suite de pruebas' });
   }
 
   async generarInfraestructura(proyectoId) {
@@ -342,15 +365,15 @@ class GestionarArtefactosCodigo {
     return { artefacto, reutilizado: false };
   }
 
-  async revisarPaquete({ proyectoId, artefactoId, decision, observaciones = '' }) {
-    const actualizado = await this._revisarArtefacto({ proyectoId, artefactoId, decision, observaciones, tipo: 'paquete_entrega', etapa: 'paquete_entrega', nombre: 'paquete de entrega' });
+  async revisarPaquete({ proyectoId, artefactoId, decision, observaciones = '', modo_permisivo = false }) {
+    const actualizado = await this._revisarArtefacto({ proyectoId, artefactoId, decision, observaciones, modo_permisivo, tipo: 'paquete_entrega', etapa: 'paquete_entrega', nombre: 'paquete de entrega' });
     if (decision === 'aprobar' && typeof this.proyectoRepository.actualizarEstadoFase === 'function') {
       await this.proyectoRepository.actualizarEstadoFase(proyectoId, 'finalizado');
     }
     return actualizado;
   }
 
-  async _revisarArtefacto({ proyectoId, artefactoId, decision, observaciones, tipo, etapa, nombre }) {
+  async _revisarArtefacto({ proyectoId, artefactoId, decision, observaciones, tipo, etapa, nombre, modo_permisivo = false }) {
     if (!['aprobar', 'rechazar'].includes(decision)) throw new Error('Decisión de artefacto no válida.');
     if (decision === 'rechazar' && !String(observaciones).trim()) throw new Error(`Debes indicar observaciones para rechazar el ${nombre}.`);
     const [plan, artefacto, ultimo] = await Promise.all([
@@ -359,7 +382,7 @@ class GestionarArtefactosCodigo {
     if (!plan || !artefacto || String(artefacto.proyecto_id) !== String(proyectoId) || artefacto.tipo !== tipo) throw new Error(`Artefacto ${nombre} no encontrado para este proyecto.`);
     if (String(ultimo?.id) !== String(artefactoId)) throw new Error(`Solo se puede revisar la versión más reciente del ${nombre}.`);
     if (artefacto.estado !== 'en_revision') throw new Error(`El artefacto ${nombre} ya fue revisado.`);
-    const verificacion = decision === 'aprobar' ? this._exigirVerificacion(artefacto) : undefined;
+    const verificacion = decision === 'aprobar' ? this._exigirVerificacion(artefacto, { permisivo: modo_permisivo === true }) : undefined;
     const actualizado = await this.artefactoRepository.actualizar(artefactoId, { estado: decision === 'aprobar' ? 'aprobado' : 'rechazado', aprobado: decision === 'aprobar', ...(verificacion ? { verificacion } : {}), ...(decision === 'rechazar' ? { errores: [...(artefacto.errores || []), String(observaciones).trim()] } : {}) });
     await this._actualizarEtapa(plan, etapa, decision === 'aprobar' ? CODE_PHASE_STATES.APPROVED : CODE_PHASE_STATES.REJECTED, observaciones);
     return actualizado;

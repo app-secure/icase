@@ -107,7 +107,7 @@ COBERTURA MÍNIMA:
 - El árbol debe iniciar con el nombre del producto. Incluye acceso, recuperación, registro o panel principal únicamente si una necesidad aprobada exige esas pantallas.
 - Por cada módulo de primer nivel derivado de los RF de prioridad Alta, incluir al menos una vista de listado o consulta y una vista de registro o detalle.
 - Todo actor citado en los RF debe tener al menos un flujo explícito, con su plataforma indicada en el nombre del módulo.
-- Entre 15 y 35 nodos en total, ajustados al alcance real del proyecto, sin inventar pantallas genéricas vacías.
+- Incluye los nodos necesarios para cubrir el alcance aprobado, sin un mínimo ni máximo artificial. No omitas funciones para reducir el árbol ni inventes pantallas genéricas vacías.
 
 ## EXPLICACIÓN DEL FUNCIONAMIENTO DEL SISTEMA EN CADA DIAGRAMA:
 Para CADA UNO de los diagramas generados en el JSON (`casos_de_uso`, `clases_dominio`, `arquitectura_software`, `arquitectura_sistema`, `clases_diseno`, `arbol_navegacion`), DEBES INCLUIR OBLIGATORIAMENTE texto 100% generado y adaptado a los insumos y dominio analizados:

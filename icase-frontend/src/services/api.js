@@ -768,9 +768,9 @@ export async function generateTestArtifactApi(projectId) {
   return data;
 }
 
-export async function reviewTestArtifactApi(projectId, artifactId, decision, observaciones = '') {
+export async function reviewTestArtifactApi(projectId, artifactId, decision, observaciones = '', extra = {}) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/pruebas/${artifactId}/revision`, {
-    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones, modo_permisivo: extra.modo_permisivo === true })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo revisar la suite de pruebas.');
@@ -816,9 +816,9 @@ export async function generateDeliveryArtifactApi(projectId) {
   return data;
 }
 
-export async function reviewDeliveryArtifactApi(projectId, artifactId, decision, observaciones = '') {
+export async function reviewDeliveryArtifactApi(projectId, artifactId, decision, observaciones = '', extra = {}) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/${artifactId}/revision`, {
-    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones, modo_permisivo: extra.modo_permisivo === true })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo revisar el paquete final.');

@@ -2,6 +2,7 @@ const MockupValidatorService = require('../../infrastructure/services/MockupVali
 const MockupTraceabilityService = require('../../infrastructure/services/MockupTraceabilityService');
 const MockupRepairService = require('../../infrastructure/services/MockupRepairService');
 const MockupBindingService = require('../../infrastructure/services/MockupBindingService');
+const MockupVisualComposer = require('../../infrastructure/services/MockupVisualComposer');
 
 class GenerarMockups {
   constructor({
@@ -113,7 +114,7 @@ class GenerarMockups {
         const navegacionShell = pantallaObjetivo
           ? pantallasArbol.filter(p => p.shell === pantallaObjetivo.shell).map(p => p.nombre).join(' | ')
           : '';
-        const contextoLote = this._construirContexto(
+        let contextoLote = this._construirContexto(
           requerimientos,
           diagramas,
           proyecto,
@@ -121,6 +122,8 @@ class GenerarMockups {
           sistemaDiseno
         ) + (pantallaObjetivo ? `\n\nCONTRATO INMUTABLE DEL SHELL ${pantallaObjetivo.shell}:\nPlataforma: ${pantallaObjetivo.plataforma}. Roles: ${pantallaObjetivo.roles.join(', ')}. Opciones de navegación exactas y en este orden: ${navegacionShell}. Usa el nombre del proyecto como logo textual y el estado exacto "Sistema en línea".` : '');
 
+        contextoLote += '\nCRITERIOS DE INTERFAZ: Aplica los RNF aprobados pertinentes al rol y plataforma. Usa botones claros, estados textuales y una acción principal identificable; agrupa acciones secundarias. No inventes métricas ni cantidades máximas de acciones. No inventes monedas o medios de pago. Usa selectores de registros relacionados en lugar de IDs internos editables. No añadas marcos de dispositivo ni márgenes externos. Usa variables CSS --icase-primary, --icase-bg, --icase-text y --icase-surface para colores temáticos.';
+        contextoLote += '\nRNF DE INTERFAZ APLICABLES:\n' + MockupVisualComposer.interfaceContext(requerimientos, pantallaObjetivo) + '\nLa herramienta añade la estructura común. Genera únicamente el contenido de main dentro del documento de transporte. No incluyas header, nav, aside, footer ni dimensiones de dispositivo. Conserva campos, acciones y referencias aprobadas.';
         try {
           const target = soloReparar ? repairPlan.find(item => item.mockup.nombre_pantalla === lote[0]) : null;
           const preserved = target ? this.traceabilityService.functionalCoverage.evidence(target.mockup) : null;
@@ -149,6 +152,16 @@ class GenerarMockups {
             }
           }
 
+          const composeResults = result => {
+            for (const mockup of result?.mockups || []) {
+              if (!esAjusteChat && !soloReparar) {
+                const clean = this.validator.sanitizar(mockup.preview_code);
+                mockup.ajustes_sanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...clean.advertencias])];
+                mockup.preview_code = MockupVisualComposer.compose(clean.html, { screen: pantallaObjetivo, manifest: pantallasArbol, identity: sistemaDiseno, name: proyecto.nombre });
+              }
+            }
+          };
+          composeResults(resultadoIa);
           const primerResultado = (resultadoIa?.mockups || [])[0];
           // Evaluar el mismo HTML que se guardará, no el transporte sin normalizar.
           const htmlInicial = this.validator.aplicarSistemaDiseno(this.validator.sanitizar(primerResultado?.preview_code).html, sistemaDiseno);
@@ -166,6 +179,7 @@ class GenerarMockups {
             });
           }
 
+          composeResults(resultadoIa);
           if (esAjusteChat && mockupPrevio?.preview_code && (!resultadoIa?.mockups || resultadoIa.mockups.length === 0)) {
             const ajustadoFallback = this._aplicarAjusteDeterministaChat(mockupPrevio, insumoAdicional);
             resultadoIa = {
@@ -220,7 +234,7 @@ class GenerarMockups {
       const erroresValidacion = [...validacion.errores, ...erroresTrazabilidad];
       // Los elementos que el sanitizador ya eliminó son ajustes informativos,
       // no problemas que sigan presentes en el mockup final.
-      const ajustesSanitizacion = [...new Set(sanitizado.advertencias)];
+      const ajustesSanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...sanitizado.advertencias])];
       const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias])];
       return {
         ...mockup,
@@ -306,23 +320,22 @@ class GenerarMockups {
   }
 
   _construirContexto(requerimientos, diagramas, proyecto = {}, pantallasPrevias = null, sistemaDiseno = null) {
-    const rfList = requerimientos
+    const seleccionados = require('../../infrastructure/services/MockupRequirementSelector')(requerimientos, pantallasPrevias);
+    const rfList = seleccionados
       .filter(r => (r.tipo || '').toUpperCase() === 'RF')
       .sort((a, b) => (a.prioridad === 'Alta' ? -1 : 0) - (b.prioridad === 'Alta' ? -1 : 0))
-      .slice(0, GenerarMockups.MAX_RF_CONTEXTO)
       .map(r => `- [${r.identificador}] ${this._limitarTexto(r.nombre, 100)} (Prioridad: ${r.prioridad || 'Media'} | Actores: ${Array.isArray(r.actores) ? r.actores.join(', ') : (r.actores || 'Usuario')}): ${this._limitarTexto(r.descripcion, 320)}`)
       .join('\n');
 
-    const criteriosUi = requerimientos
+    const criteriosUi = seleccionados
       .filter(r => (r.tipo || '').toUpperCase() === 'RF' && r.aprobado !== false)
-      .slice(0, GenerarMockups.MAX_RF_CONTEXTO)
-      .flatMap(r => this.traceabilityService.functionalCoverage.expectations(r).slice(0, 8)
+      .flatMap(r => this.traceabilityService.functionalCoverage.expectations(r)
         .map(c => `- [${r.identificador}] ${c.tipo}: ${c.valores.join(' / ')} (${c.confianza === 'explicita' ? 'indicado en el RF' : 'alternativas mencionadas; revisar su representación en la UI'}).`))
       .join('\n');
 
     const rnfList = requerimientos
       .filter(r => (r.tipo || '').toUpperCase() === 'RNF')
-      .slice(0, GenerarMockups.MAX_RNF_CONTEXTO)
+
       .map(r => `- [${r.identificador}] ${this._limitarTexto(r.nombre, 100)}: ${this._limitarTexto(r.metrica_medible || r.descripcion, 220)}`)
       .join('\n');
 
@@ -349,9 +362,9 @@ class GenerarMockups {
       : `No se pudo derivar el listado de pantallas del Árbol de Navegación. En este caso, deriva las pantallas de los Requerimientos Funcionales de prioridad Alta, empezando por las de acceso y el panel principal.`;
 
     const operacionesEnlaces = this.bindingService.describirOperaciones({
-      requerimientos,
+      requerimientos: seleccionados,
       contrato: this.bindingService.contrato({ proyecto, requerimientos, diagramas }),
-      max: GenerarMockups.MAX_RF_CONTEXTO
+      max: seleccionados.length
     }) || 'Sin operaciones disponibles: marca los controles solo visuales con data-accion="ui" y no inventes enlaces.';
 
     const diseno = this._normalizarSistemaDiseno(sistemaDiseno);
@@ -634,6 +647,9 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     const colores = sistema?.colores || {};
     return {
       nombre: sistema?.nombre || 'Predeterminado I-CASE',
+      nombre_aplicacion: String(sistema?.nombre_aplicacion || '').slice(0, 100),
+      logo: sistema?.logo || null,
+      estructura_version: 1,
       origen: sistema?.origen || 'predeterminado',
       version: sistema?.version || 1,
       colores: {
