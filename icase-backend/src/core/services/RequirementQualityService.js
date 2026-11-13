@@ -14,8 +14,7 @@ class RequirementQualityService {
     const objectives = new Set(inventory.filter(n => ['RF', 'RNF'].includes(n.tipo)).map(n => n.objetivo_id).filter(Boolean));
     for (const req of requirements.filter(r => r && typeof r === 'object')) {
       const actors = Array.isArray(req.actores) ? req.actores.filter(a => String(a || '').trim()) : [];
-      if (req.tipo === 'RF' && !actors.length) add('ACTOR_AUSENTE', req, 'No se identifica quién inicia o recibe el resultado de la función.', 'Identifica el actor respaldado por el insumo; no lo inventes.');
-      else if (req.tipo === 'RF' && actors.every(a => ['usuario', 'usuarios'].includes(normalize(a)))) add('ACTOR_GENERICO', req, 'El actor está indicado solo como Usuario.', 'Comprueba si el insumo permite especificar roles; Usuario puede ser válido para funciones transversales.');
+      if (req.tipo === 'RF' && actors.length && actors.every(a => ['usuario', 'usuarios'].includes(normalize(a)))) add('ACTOR_GENERICO', req, 'El actor está indicado solo como Usuario.', 'Comprueba si el insumo permite especificar roles; Usuario puede ser válido para funciones transversales.');
       const pre = normalize(req.precondiciones), post = normalize(req.poscondiciones);
       if (/sesion activa o acceso autorizado/.test(pre)) add('PRECONDICION_GENERICA', req, 'La precondición repite una plantilla de acceso, sin condición específica.', 'Conserva solo condiciones sustentadas y necesarias para esta operación.');
       const title = normalize(`${req.nombre || ''} ${req.descripcion || ''}`);

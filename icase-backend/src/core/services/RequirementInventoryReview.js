@@ -4,11 +4,13 @@ function candidates(inventory) {
   return inventory.filter(item => {
     const text = normalize(item.necesidad).replace(/\bdisponibilidad actualizada\b/g, 'disponibilidad').replace(/\bdesde (?:la |su )?toma\b/g, 'antiguedad');
     if (['RF', 'RNF'].includes(item.tipo)) {
+      const source = `${item.necesidad || ''} ${item.evidencia || ''}`;
+      if (/confirma que|[¿?]/.test(source) || /^(?:no\b|pero no|sin que|solamente|únicamente|unicamente)\b/i.test(String(item.necesidad || '').trim())) return false;
       if (item.tipo === 'RNF' && [/segur|confidencial|integridad/, /usabil|facilidad de uso|aprendi/, /rendimiento|latencia|tiempo de respuesta/, /disponibilidad|continuidad/, /recuper|respald/].filter(pattern => pattern.test(text)).length >= 2) return true;
       const families = [/consult|visualiz|\bver\b|\brevis/, /\b(?:tomar|toman|registrar|registra|registran|crear|crean|comprar|compra|compran|reservar|reservan|pedir|pide|piden)\b/, /modific|actualiz|\bmarca|\bcambiar\b|\bcambia\b|\breasign/, /\bcerr|\bcierr/, /valid|escane/, /\bcobra|\bcobro\b/, /acumul/, /\bgestion/].filter(pattern => pattern.test(text));
       return families.length >= 2;
     }
-    return ['regla_negocio', 'decision'].includes(item.tipo) && /gestionar|reasign|respald|recuper/.test(text);
+    return false;
   });
 }
 async function review({ inventory, input, request, inspect }) {

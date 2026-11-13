@@ -24,7 +24,7 @@ function Field({ label, value }) {
 function Requirement({ item, index, prefix }) {
   const id = item.identificador || item.id || `${prefix}-${String(index + 1).padStart(2, '0')}`;
   const evidence = item.evidences || item.evidencias || [];
-  const criteria = item.acceptanceCriteria || item.criterios_aceptacion || [];
+  const criteria = (item.acceptanceCriteria || item.criterios_aceptacion || []).filter(criterion => String(criterion?.descripcion || '').trim());
   return <details className="rounded-lg border border-slate-200 bg-white p-3">
     <summary className="cursor-pointer break-words text-xs font-semibold text-slate-800">
       <span className="mr-1.5 text-violet-700">{id}</span>{item.name || item.nombre || item.category || 'Requisito'}

@@ -48,7 +48,7 @@ test('repara solo omisiones y protege requisitos correctos de cambios o borrados
     .mockResolvedValueOnce({ eliminar_identificadores: ['RF-01'], requerimientos_corregidos: [{ ...rf, nombre: 'Cambio indebido' }, rnf] });
   const result = await new Coverage().generate({ input, prompt: 'Analiza', request });
   expect(request).toHaveBeenCalledTimes(3);
-  expect(result.requerimientos[0]).toMatchObject({ identificador: 'RF-01', nombre: 'Gestionar usuarios', descripcion: 'El sistema debe gestionar usuarios.', necesidades_origen: ['N-01'] });
+  expect(result.requerimientos[0]).toMatchObject({ identificador: 'RF-01', nombre: 'Gestionar usuarios', descripcion: 'El sistema deberá gestionar usuarios.', necesidades_origen: ['N-01'] });
   expect(result.requerimientos[0].nombre).not.toBe('Cambio indebido');
   expect(result.auditoria_requisitos.reparaciones).toBe(1);
 });
@@ -58,8 +58,8 @@ test('divide una agrupación sin perder ninguna necesidad', async () => {
     .mockResolvedValueOnce({ eliminar_identificadores: ['RF-01'], requerimientos_corregidos: [rf, rnf] });
   const result = await new Coverage().generate({ input, prompt: 'Analiza', request });
   expect(result.requerimientos).toEqual([
-    { ...rf, nombre: 'Gestionar usuarios', descripcion: 'El sistema debe gestionar usuarios.', criterios_aceptacion: [], precondiciones: '', poscondiciones: '', reglas_relacionadas: [] },
-    { ...rnf, nombre: 'Proteger contraseñas', descripcion: 'El sistema debe proteger contraseñas.', criterios_aceptacion: [], precondiciones: '', poscondiciones: '', reglas_relacionadas: [], estado_decision: 'pendiente', requiere_confirmacion: true }
+    { ...rf, nombre: 'Gestionar usuarios', descripcion: 'El sistema deberá gestionar usuarios.', criterios_aceptacion: [{ descripcion: 'Queda comprobado: gestionar usuarios.', necesidades_origen: ['N-01'] }], precondiciones: '', poscondiciones: '', reglas_relacionadas: [] },
+    { ...rnf, nombre: 'Proteger contraseñas', descripcion: 'El sistema deberá proteger contraseñas.', criterios_aceptacion: [{ descripcion: 'Queda comprobado: proteger contraseñas.', necesidades_origen: ['N-02'] }], precondiciones: '', poscondiciones: '', reglas_relacionadas: [], estado_decision: 'pendiente', requiere_confirmacion: true }
   ]);
 });
 test('una cobertura incompleta devuelve borrador advertido en vez de bloquear el proyecto', async () => {
@@ -68,7 +68,7 @@ test('una cobertura incompleta devuelve borrador advertido en vez de bloquear el
   const result = await new Coverage().generate({ input, prompt: 'Analiza', request });
   expect(result.auditoria_requisitos.estado).toBe('revision_requerida');
   expect(result.auditoria_requisitos.advertencias.join(' ')).toContain('Falta N-02');
-  expect(result.requerimientos[0]).toMatchObject({ identificador: 'RF-01', necesidades_origen: ['N-01'], descripcion: 'El sistema debe gestionar usuarios.' });
+  expect(result.requerimientos[0]).toMatchObject({ identificador: 'RF-01', necesidades_origen: ['N-01'], descripcion: 'El sistema deberá gestionar usuarios.' });
   expect(request).toHaveBeenCalledTimes(3);
 });
 

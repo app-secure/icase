@@ -48,6 +48,7 @@ test('actor vacío y métrica pendiente advierten sin inventar valores ni modifi
   const reqs = [requirement({ actores: [] }), requirement({ identificador: 'RNF-01', tipo: 'RNF', metrica_medible: 'Por confirmar con el usuario' })];
   const before = JSON.stringify(reqs);
   const result = new Quality().evaluate(reqs);
-  expect(result.hallazgos.map(f => f.codigo)).toEqual(expect.arrayContaining(['ACTOR_AUSENTE', 'METRICA_PENDIENTE']));
+  expect(result.hallazgos.map(f => f.codigo)).toEqual(expect.arrayContaining(['METRICA_PENDIENTE']));
+  expect(result.hallazgos.some(f => f.codigo === 'ACTOR_AUSENTE')).toBe(false);
   expect(JSON.stringify(reqs)).toBe(before);
 });

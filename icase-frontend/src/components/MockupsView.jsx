@@ -208,14 +208,14 @@ export default function MockupsView({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col gap-3">
       {traceability && (
-        <div className={`rounded-xl border px-3 py-2 text-xs ${traceability.valido ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+        <details open className={`rounded-xl border px-3 py-2 text-xs ${traceability.valido ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+          <summary className="cursor-pointer select-none"><span className="inline-flex w-[98%] flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 font-semibold">{traceability.valido ? <Check size={13} /> : <AlertTriangle size={13} />}Trazabilidad árbol → mockups → RF</span>
             <span>{traceability.metricas?.mockups_generados || 0}/{traceability.metricas?.pantallas_arbol || 0} pantallas · {traceability.metricas?.cobertura_rf_altos_porcentaje ?? 0}% RF altos con vínculo</span>
-          </div>
+          </span></summary>
           <p className="mt-1">{traceability.metricas?.criterios_ui_con_evidencia || 0}/{traceability.metricas?.criterios_ui_evaluados || 0} criterios UI específicos con evidencia. Vincular un RF no garantiza su implementación completa.</p>
           {[...(traceability.errores || []), ...(traceability.advertencias || [])].map((message, index) => <p key={index} className="mt-1">• {message}</p>)}
-        </div>
+        </details>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -244,10 +244,10 @@ export default function MockupsView({
         <main className="flex min-w-0 flex-1 flex-col bg-slate-100/70">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-900">{currentEntry?.nombre || "Selecciona una pantalla"}</p><p className="truncate text-[10px] text-slate-500">{currentEntry?.ruta || `${currentEntry?.flujo || ''} / ${currentEntry?.modulo || ''}`}</p></div><div className="flex items-center gap-1"><button disabled={currentPosition <= 0} onClick={() => selectScreen(screens[currentPosition - 1])} className="rounded p-1.5 disabled:opacity-30"><ChevronLeft size={15} /></button><span className="text-[10px] text-slate-500">{currentPosition + 1}/{screens.length}</span><button disabled={currentPosition < 0 || currentPosition >= screens.length - 1} onClick={() => selectScreen(screens[currentPosition + 1])} className="rounded p-1.5 disabled:opacity-30"><ChevronRight size={15} /></button><div className="ml-2 flex rounded-lg bg-slate-100 p-0.5"><button onClick={() => setViewMode('visual')} className={`rounded-md px-2 py-1 text-[11px] ${viewMode === 'visual' ? 'bg-white shadow-sm' : ''}`}>Diseño</button><button onClick={() => setViewMode('code')} className={`rounded-md px-2 py-1 text-[11px] ${viewMode === 'code' ? 'bg-white shadow-sm' : ''}`}>Código</button></div></div></div>
           {currentMockup && quality(currentMockup) !== "valido" && (
-            <div className={`border-b px-3 py-2 text-xs ${quality(currentMockup) === "invalido" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
-              <p className="flex items-center gap-1.5 font-semibold"><AlertTriangle size={13} />{quality(currentMockup) === "invalido" ? "Problemas que impiden validar esta pantalla" : "Aspectos que conviene revisar"}</p>
+            <details open key={currentEntry?.slug} className={`border-b px-3 py-2 text-xs ${quality(currentMockup) === "invalido" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+              <summary className="cursor-pointer select-none font-semibold">{quality(currentMockup) === "invalido" ? "Problemas que impiden validar esta pantalla" : "Aspectos que conviene revisar"}</summary>
               {validationIssues(currentMockup).map((message, index) => <p key={index} className="mt-1 pl-5">• {message}</p>)}
-            </div>
+            </details>
           )}
           <div className="relative flex min-w-0 flex-1 items-start justify-center overflow-auto p-3">
             {isFixing && (

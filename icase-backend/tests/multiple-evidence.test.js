@@ -1,4 +1,4 @@
-const { inspectEvidence } = require('../src/infrastructure/services/SourceEvidence');
+const { inspectEvidence, supportQuote } = require('../src/infrastructure/services/SourceEvidence');
 const Coverage = require('../src/infrastructure/services/RequirementCoverageService');
 const Approval = require('../src/core/services/RequirementApprovalService');
 const Entity = require('../src/core/entities/Requerimiento');
@@ -42,6 +42,13 @@ test('recupera oraciones literales no contiguas como fragmentos del mismo archiv
   expect(inspectEvidence({ evidencia: `${first} ${second}` }, input + `\n${second}`).valido).toBe(false);
 });
 
+test('recupera la oración literal cuando la cita solo cambia una palabra', () => {
+  const input = '[Fuente enriquecida]\nArchivo: entrevista.txt\n[contenido_original]\n¿Confirma que solamente el administrador podrá modificar precios, consultar reportes globales y gestionar usuarios?';
+  const support = supportQuote({ necesidad: 'Solo el administrador puede modificar los precios.', evidencias: [{ texto: 'solo el administrador podrá modificar precios' }] }, input);
+  expect(support.texto).toBe('¿Confirma que solamente el administrador podrá modificar precios, consultar reportes globales y gestionar usuarios?');
+  expect(supportQuote({ necesidad: 'Otra cosa', evidencias: [{ texto: 'Texto reformulado' }] }, 'Cita original completa')).toBeNull();
+  expect(supportQuote({ necesidad: 'Gestionar usuarios', evidencias: [{ texto: 'El administrador ... usuarios.' }] }, 'El administrador gestiona usuarios.')).toBeNull();
+});
 test('persiste múltiples evidencias y proyectos anteriores conservan defaults', () => {
   const evidencias = inspectEvidence({ evidencias: [{ texto: 'Consulta autorizada' }] }, 'Consulta autorizada').valid;
   const entity = new Entity({ proyecto_id: 'aaaaaaaaaaaaaaaaaaaaaaaa', identificador: 'RF-1', nombre: 'Consulta', evidencias });

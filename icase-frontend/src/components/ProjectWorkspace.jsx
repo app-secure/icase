@@ -231,7 +231,7 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
           excludedConstraints: r.restricciones_excluidas || [],
           sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
           needIds: r.necesidades_origen || [],
-          acceptanceCriteria: r.criterios_aceptacion || [],
+          acceptanceCriteria: (r.criterios_aceptacion || []).filter(criterion => String(criterion?.descripcion || "").trim()),
           ruleIds: r.reglas_relacionadas || [],
           requiresConfirmation: Boolean(r.requiere_confirmacion),
           approved: Boolean(r.aprobado)
@@ -265,9 +265,10 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
           excludedConstraints: r.restricciones_excluidas || [],
           sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
           needIds: r.necesidades_origen || [],
-          acceptanceCriteria: r.criterios_aceptacion || [],
+          acceptanceCriteria: (r.criterios_aceptacion || []).filter(criterion => String(criterion?.descripcion || "").trim()),
           ruleIds: r.reglas_relacionadas || [],
           requiresConfirmation: Boolean(r.requiere_confirmacion),
+          questionIds: r.preguntas_relacionadas || [],
           approved: Boolean(r.aprobado)
         };
       });
@@ -1056,7 +1057,6 @@ export default function ProjectWorkspace({
     if (!backendId) return { success: false, error: "Proyecto no persistido" };
     try {
       const result = await approveDiagramApi(backendId, diagramType);
-      if (result.flujoDiagramas?.todos_aprobados) setIsSourcesCollapsed(true);
       const key = DIAGRAM_KEY_BY_TYPE[diagramType];
       const updatedDiagrams = {
         ...(project.diagrams || {}),
@@ -1521,7 +1521,7 @@ export default function ProjectWorkspace({
       )}
       <main onScrollCapture={handleProgressScroll} className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
         <RequirementJobStatus job={requirementJob} onResume={resumeRequirements} />
-        {projectBackendId && <AnalysisFlowProgress
+        {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <AnalysisFlowProgress
           collapsed={progressHidden} onReveal={() => { setProgressHidden(false); progressScroll.current.until = Date.now() + 220; }}
           current={showInitial ? 'analysis' : isManagingSources || !project.isProcessed ? 'sources' : project.currentPhase > 1 && !isReviewingRequirements ? null : 'requirements'}
           completed={{ sources: Boolean(project.sources?.length), analysis: Boolean(initialState?.aprobado), requirements: Boolean(project.isAnalysisApproved) }}

@@ -93,4 +93,51 @@ function inspectEvidence(value, input) {
   }
   return { valid, invalid, valido: valid.length > 0 && invalid.length === 0 };
 }
-module.exports = { unwrapEvidence, inspectEvidence };
+// Una cita corta puede estar bien y, aun así, repetirse. Se conserva la oración
+// literal de la fuente que mejor corresponde a la necesidad; no se inventa texto.
+function quoteWords(value) {
+  return String(value || '').match(/[\p{L}\p{N}]+/gu) || [];
+}
+function locateSpans(text, quote) {
+  const words = quoteWords(quote);
+  const windows = [];
+  if (words.length >= 2) windows.push(words);
+  for (let size = words.length - 1; size >= 4; size--) {
+    for (let start = 0; start <= words.length - size; start++) windows.push(words.slice(start, start + size));
+  }
+  for (const window of windows) {
+    const pattern = window.map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+    const hits = [...text.matchAll(new RegExp(pattern, 'giu'))];
+    if (hits.length) return hits;
+  }
+  return [];
+}
+function supportQuote(item, input) {
+  const located = inspectEvidence(item, input);
+  if (located.valido) return located.valid[0];
+  const quote = unwrapEvidence(item?.evidencias?.[0] || item?.evidencia);
+  if (!quote || quoteWords(quote).length < 2) return null;
+  const text = String(input || '');
+  const sentences = [...new Set(locateSpans(text, quote).map(hit => {
+    const start = Math.max(text.lastIndexOf('.', hit.index), text.lastIndexOf('!', hit.index), text.lastIndexOf('?', hit.index), text.lastIndexOf('\n', hit.index));
+    const rest = text.slice(hit.index + hit[0].length);
+    const endMatch = rest.match(/[.!?\n]/u);
+    const end = endMatch ? hit.index + hit[0].length + endMatch.index + (endMatch[0] === '\n' ? 0 : 1) : text.length;
+    return text.slice(start + 1, end).trim();
+  }).filter(Boolean))];
+  const hint = String(item?.necesidad || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const tokens = hint.split(/[^\p{L}\p{N}]+/u).filter(token => token.length > 3);
+  const score = sentence => {
+    const plain = sentence.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+    return tokens.filter(token => plain.includes(token)).length;
+  };
+  sentences.sort((left, right) => score(right) - score(left) || right.length - left.length);
+  for (const sentence of sentences) {
+    const chosen = inspectEvidence({ evidencia: sentence }, input);
+    if (chosen.valido) return chosen.valid[0];
+    const repeated = chosen.invalid.find(entry => entry.codigo === 'evidencia_ambigua' && new Set((entry.candidatos || []).map(candidate => candidate.texto)).size === 1);
+    if (repeated?.candidatos?.[0]) return repeated.candidatos[0];
+  }
+  return null;
+}
+module.exports = { unwrapEvidence, inspectEvidence, supportQuote };

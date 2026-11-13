@@ -31,7 +31,8 @@ test('separa operaciones independientes y conserva medios, estados y la comproba
   expect(functional.some(item => /validar reservas/.test(item) && !/tomar pedidos/.test(item))).toBe(true);
   expect(functional.some(item => /comandas nuevas/.test(item) && !/marcar/.test(item))).toBe(true);
   expect(functional.some(item => /marcar platos como agotados/.test(item))).toBe(true);
-  expect(functional.some(item => /cobrar en efectivo/.test(item) && /saldo/.test(item) && !/cerrar/.test(item))).toBe(true);
+  expect(functional.some(item => /cobrar en efectivo/.test(item) && !/saldo/.test(item) && !/cerrar/.test(item))).toBe(true);
+  expect(inventory.some(item => item.tipo === 'regla_negocio' && /saldo/.test(text(item)) && /antes de/.test(text(item)))).toBe(true);
   expect(functional.some(item => /cerrar la caja/.test(item) && !/cobrar/.test(item))).toBe(true);
   expect(functional.some(item => /revisar ventas/.test(item) && !/cambiar precios|gestionar usuarios/.test(item))).toBe(true);
   expect(functional.some(item => /cambiar precios/.test(item) && !/gestionar usuarios|revisar ventas/.test(item))).toBe(true);
@@ -43,7 +44,7 @@ test('separa operaciones independientes y conserva medios, estados y la comproba
 test('recupera permisos, reasignación, autenticación y tecnologías que no estaban en el inventario', () => {
   const inventory = refine(coarse, input, identifiers([coarse]));
   const text = item => `${item.tipo} ${item.necesidad}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  expect(inventory.some(item => item.tipo === 'RF' && /administrador haga una reasignacion/.test(text(item)) && !/entre meseros/.test(text(item)))).toBe(true);
+  expect(inventory.some(item => item.tipo === 'RF' && /reasignar mesas entre meseros/.test(text(item)))).toBe(true);
   expect(inventory.some(item => item.tipo === 'RF' && /autentic/.test(text(item)))).toBe(true);
   expect(inventory.some(item => item.tipo === 'restriccion_tecnica' && /jwt/.test(text(item)))).toBe(true);
   expect(inventory.some(item => item.tipo === 'restriccion_tecnica' && /redis/.test(text(item)) && item.estado === 'pendiente')).toBe(true);
@@ -59,6 +60,23 @@ test('completa un fragmento de permiso con el actor de la confirmación', () => 
   const question = '¿Confirma que solamente el administrador podrá modificar precios, consultar reportes globales y gestionar usuarios?';
   const inventory = refine([{ id: 'N-39', objetivo_id: 'O-07', tipo: 'RF', estado: 'confirmado', necesidad: 'gestionar usuarios', evidencia: question }], input, identifiers([]));
   expect(inventory.find(item => item.id === 'N-39').necesidad).toMatch(/El administrador podrá gestionar usuarios/);
+});
+
+test('reclasifica dispositivos, nombra la facilidad de uso y no duplica el respaldo', () => {
+  const inventory = refine([
+    { id: 'N-15', objetivo_id: 'O-15', tipo: 'RNF', estado: 'confirmado', necesidad: 'El cliente usará su celular, los meseros tabletas, y cocina y caja computadoras o pantallas grandes.', evidencia: quote('Los meseros usarán tabletas') },
+    { id: 'N-14', objetivo_id: 'O-14', tipo: 'RNF', estado: 'confirmado', necesidad: 'Las pantallas de cocina, meseros y caja deben ser simples, con botones claros, estados visibles y pocas acciones por pantalla.', evidencia: quote('pantallas de cocina, meseros y caja sean simples') },
+    { id: 'N-12', objetivo_id: 'O-12', tipo: 'RF', estado: 'confirmado', necesidad: 'El sistema debe permitir respaldos de la base de datos y recuperación de información.', evidencia: quote('queremos respaldos de la base de datos') },
+    { id: 'N-43', objetivo_id: 'O-28', tipo: 'RNF', estado: 'confirmado', necesidad: 'Si existe una caída breve se puede atender manualmente, pero queremos respaldos de la base de datos y poder recuperar la información.', evidencia: quote('Si existe una caída breve') },
+    { id: 'N-08', objetivo_id: 'O-08', tipo: 'RF', estado: 'confirmado', necesidad: 'El cajero puede cobrar en efectivo o por transferencia.', evidencia: quote('el cajero pueda cobrar') }
+  ], input, identifiers([]), [{ id: 'ACT-04', nombre: 'Cajero', tipo: 'persona', estado: 'confirmado' }]);
+  expect(inventory.find(item => item.id === 'N-15')).toMatchObject({ tipo: 'restriccion_tecnica' });
+  expect(inventory.find(item => item.id === 'N-15').objetivo_id).toBeUndefined();
+  expect(inventory.find(item => item.id === 'N-14').necesidad).toMatch(/Facilidad de uso de las pantallas de cocina, meseros y caja/);
+  expect(inventory.filter(item => item.tipo === 'RNF' && /respaldo|recuper/.test(item.necesidad.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()))).toHaveLength(0);
+  expect(inventory.some(item => item.tipo === 'decision' && /caída breve|caida breve/i.test(item.necesidad))).toBe(true);
+  expect(inventory.find(item => item.id === 'N-08').actor_id).toBe('ACT-04');
+  expect(inventory.find(item => item.id === 'N-08').reglas_ids || []).toEqual(expect.any(Array));
 });
 
 test('la extracción deja el inventario granular sin otra llamada al modelo', async () => {

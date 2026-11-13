@@ -406,7 +406,7 @@ function FunctionalDisplay({ item }) {
       {reqId && <span className="inline-block px-1.5 py-0.5 mr-1.5 rounded bg-violet-100 text-[#7C3AED] font-mono text-[11px] font-bold">{reqId}</span>}
       <strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}
     </p>
-    <p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {Array.isArray(item.actors) ? item.actors.join(", ") : item.actors} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>
+    <p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {(Array.isArray(item.actors) && item.actors.filter(Boolean).length ? item.actors : ['Sistema']).join(', ')} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>
     {item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}
     {item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}
     <RequirementProvenance item={item} />
@@ -421,6 +421,7 @@ function NonFunctionalDisplay({ item }) {
       <strong className="font-semibold text-slate-900">{item.category}</strong>: {item.description}
     </p>
     <p className="text-xs text-slate-600"><strong className="text-[#6D28D9]">Métrica verificable:</strong> {item.metric}{item.compliance && <> <span>•</span> <span className="text-slate-500">{item.compliance}</span></>}</p>
+    {!!item.questionIds?.length && <p className="text-xs text-slate-500">Umbral pendiente en {item.questionIds.join(', ')}.</p>}
     <RequirementProvenance item={item} />
   </>;
 }

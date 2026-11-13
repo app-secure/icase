@@ -74,6 +74,24 @@ function asegurarActoresCasosUso(diagramas, requerimientos) {
   return diagramas;
 }
 
+function completarDisenoDesdeDominio(resultado, diagramasAprobados) {
+  if (!Array.isArray(resultado?.diagramas)) return resultado;
+  const domain = (diagramasAprobados || [])
+    .filter((diagram) => normalizeDiagramType(diagram?.tipo) === 'clases_dominio' && diagram.aprobado !== false)
+    .sort((left, right) => Number(right.version || 1) - Number(left.version || 1))[0];
+  if (!domain?.codigo_plantuml) return resultado;
+  const completion = new (require('../../infrastructure/services/DesignDiagramCompletion'))();
+  let changed = false;
+  const diagramas = resultado.diagramas.map((diagram) => {
+    if (normalizeDiagramType(diagram?.tipo) !== 'clases_diseno') return diagram;
+    const next = completion.complete(diagram.codigo_plantuml, domain.codigo_plantuml);
+    if (next === diagram.codigo_plantuml) return diagram;
+    changed = true;
+    return { ...diagram, codigo_plantuml: next, codigo_mermaid: next };
+  });
+  return changed ? { ...resultado, diagramas } : resultado;
+}
+
 class ProcesarConIA {
   constructor({
     proyectoRepository,
@@ -367,6 +385,7 @@ class ProcesarConIA {
       resultadoIA = await this.aiOrchestratorService.procesar(payload);
       if (objetivoNormalizado === 'diagramas' && Array.isArray(resultadoIA?.diagramas)) {
         resultadoIA.diagramas = asegurarActoresCasosUso(resultadoIA.diagramas, requerimientosAprobados);
+        resultadoIA = completarDisenoDesdeDominio(resultadoIA, diagramasAprobados);
       }
       if (objetivoNormalizado === 'diagramas' && tipoDiagramaNormalizado) {
         const maxReparaciones = Math.max(0, Math.min(2, Number(process.env.AI_DIAGRAM_REPAIR_RETRIES ?? 1)));
@@ -398,6 +417,7 @@ class ProcesarConIA {
           }
           if (Array.isArray(resultadoIA?.diagramas)) {
             resultadoIA.diagramas = asegurarActoresCasosUso(resultadoIA.diagramas, requerimientosAprobados);
+            resultadoIA = completarDisenoDesdeDominio(resultadoIA, diagramasAprobados);
           }
           if (tipoDiagramaNormalizado === 'casos_de_uso') {
             const before = anterior.diagramas?.find(item => normalizeDiagramType(item.tipo) === tipoDiagramaNormalizado);

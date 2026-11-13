@@ -628,12 +628,13 @@ export default function DiagramsView({
                 </div>
               )}
               {currentDiagram && (qualityInvalid || qualityStatus === "advertencia") && (validationErrors.length > 0 || validationWarnings.length > 0) && (
-                <div className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${
+                <details open key={selectedKey} className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${
                   qualityInvalid ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"
                 }`}>
+                  <summary className="cursor-pointer select-none font-semibold">Advertencias y validación ({validationErrors.length + validationWarnings.length})</summary>
                   {validationErrors.map((message) => <p key={message}>• {message}</p>)}
                   {validationWarnings.map((message) => <p key={message} className="whitespace-pre-line">• {String(message).replace(/\\n/g, '\n')}</p>)}
-                </div>
+                </details>
               )}
               {Array.isArray(currentDiagram?.trazabilidad_rnf) && currentDiagram.trazabilidad_rnf.length > 0 && (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">

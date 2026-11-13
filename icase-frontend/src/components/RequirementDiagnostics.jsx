@@ -26,7 +26,7 @@ export default function RequirementDiagnostics({ audit, onCorrect = null }) {
   const refinement = audit.diagnostico_refinamiento;
   const warnings = quality?.hallazgos?.filter(f => f.severidad !== 'error') || [];
   const metrics = warnings.filter(finding => finding.codigo === 'METRICA_PENDIENTE');
-  const otherWarnings = warnings.filter(finding => finding.codigo !== 'METRICA_PENDIENTE');
+  const otherWarnings = warnings.filter(finding => finding.codigo !== 'METRICA_PENDIENTE' && finding.codigo !== 'ACTOR_AUSENTE');
   const pending = audit.preguntas_pendientes || [];
   const semantic = audit.revision_semantica;
   return <section aria-label="Resumen de validación de requisitos" className="rounded-xl border border-slate-200 bg-white p-4 text-sm">

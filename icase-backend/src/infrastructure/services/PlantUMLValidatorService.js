@@ -109,7 +109,7 @@ class PlantUMLValidatorService {
       return {
         ...this.resultado(
           [...(detalles.valido ? [] : [detalles.error].filter(Boolean)), ...(consistencia.errores || [])],
-          [...(detalles.advertencias || []), ...(consistencia.advertencias || []), ...domainWarnings, ...(clases > 20 ? ['Diagrama extenso: organiza las clases por paquetes sin omitir conceptos aprobados.'] : [])],
+          [...(detalles.advertencias || []), ...(consistencia.advertencias || []), ...domainWarnings, ...(clases > 20 && !/^\s*package\s+/im.test(trimmed) ? ['Diagrama extenso: organiza las clases por paquetes sin omitir conceptos aprobados.'] : [])],
           { ...metricas, ...(consistencia.metricas || {}) }
         ),
         detalles: { ...detalles, consistencia }
@@ -166,7 +166,7 @@ class PlantUMLValidatorService {
       const maximo = tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES ? 20 : Math.max(12,
         (Array.isArray(opts.requisitos) ? opts.requisitos : []).filter(r => r.tipo === 'RF' && r.aprobado !== false).length + 4);
       if (clases < 3) errores.push('El diagrama debe contener al menos 3 clases o interfaces legibles.');
-      if (clases > maximo) advertencias.push('Diagrama extenso: organiza las clases por paquetes sin omitir conceptos aprobados.');
+      if (clases > maximo && !(tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES && /^\s*package\s+/im.test(trimmed))) advertencias.push('Diagrama extenso: organiza las clases por paquetes sin omitir conceptos aprobados.');
       if (relaciones < 1) errores.push('El diagrama debe incluir relaciones entre sus clases.');
       if (tipoNormalizado === DIAGRAM_TYPES.DESIGN_CLASSES && !/^\s*package\s+/im.test(trimmed)) {
         advertencias.push('Conviene agrupar las clases de diseño por capas o paquetes.');

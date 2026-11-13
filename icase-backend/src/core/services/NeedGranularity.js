@@ -68,10 +68,15 @@ function partition(text) {
   for (const raw of segments(text)) {
     const segment = clean(raw);
     if (!segment) continue;
-    if (isRule(segment)) {
+    if (isRule(segment) || /^(?:solo|solamente|únicamente|unicamente)\s+(?:él|ella|el|la|los|las)\b/i.test(segment)) {
       rules.push(segment);
       const exception = /salvo que\s+(.{8,120})/i.exec(raw);
-      if (exception && /reasign/i.test(exception[1])) operations.push({ family: 'cambio', text: clean(exception[1]) });
+      if (exception && /reasign/i.test(exception[1])) operations.push({ family: 'cambio', text: reassignmentName(raw) });
+      previous = null;
+      continue;
+    }
+    if (/\bantes de\b/i.test(segment) && /\b(?:comprobar|verificar|validar|revisar)\b/i.test(segment)) {
+      rules.push(segment);
       previous = null;
       continue;
     }
@@ -217,32 +222,34 @@ function classify(sentence, inventory, accepted) {
     add('RNF', sentence);
     return items;
   }
-  if (/respaldo|recuperar la informacion/.test(text) && !already(inventory, 'RNF', /respaldo|recuper/)) {
-    add('RNF', sentence);
+  if (/respaldo|recuperar la informacion|copias de seguridad/.test(text)) {
+    if (/caida breve|atender manualmente/.test(text) && !already(inventory, 'decision', /caida breve|manualmente/)) add('decision', 'Una caída breve se puede atender manualmente.');
+    if (!already(inventory, 'RF', /respaldo|recuper/) && !/menos de\s+(?:un|una|\d+)/.test(text)) add('RF', 'Permitir respaldos de la base de datos y recuperación de información.');
     return items;
   }
-  if (/botones claros|pocas acciones por pantalla/.test(text) && !already(inventory, 'RNF', /boton|usabilidad|pocas acciones/)) {
-    add('RNF', sentence);
+  if (/botones claros|pocas acciones por pantalla/.test(text) && !already(inventory, 'RNF', /boton|usabilidad|facilidad de uso|pocas acciones/)) {
+    add('RNF', usabilityName(sentence));
     return items;
   }
-  if (/canales movil|usaran tabletas|pantallas grandes/.test(text) && !already(inventory, 'RNF', /canal|tableta/) && !already(inventory, 'restriccion_tecnica', /canal|tableta/)) {
-    add('restriccion_tecnica', sentence, accepted ? 'confirmado' : 'pendiente');
+  if (deviceAssignment(sentence)) {
+    const noun = /celular|tableta|computadora|pantalla grande/.exec(text)[0];
+    if (!already(inventory, 'RNF', new RegExp(noun)) && !already(inventory, 'restriccion_tecnica', new RegExp(noun))) add('restriccion_tecnica', sentence, accepted ? 'confirmado' : 'pendiente');
     return items;
   }
   if (/contrasenas|validacion de datos|acceso autenticado|seguridad y la facilidad de uso/.test(text)) {
-    if (/acceso autenticado|autenticacion/.test(text) && !already(inventory, 'RF', /autentic/)) add('RF', 'Autenticar el acceso según el rol de cada persona.');
+    if (/acceso autenticado|autenticacion/.test(text) && !already(inventory, 'RF', /autentic/)) add('RF', 'Autenticar el acceso según el rol.');
     if (!already(inventory, 'RNF', /contrasen|seguridad|confidencial/)) add('RNF', 'Proteger las contraseñas y validar los datos de entrada.');
     return items;
   }
   if (/\bjwt\b|autenticacion/.test(text)) {
-    if (!already(inventory, 'RF', /autentic/)) add('RF', 'Autenticar el acceso de los roles del sistema.');
+    if (!already(inventory, 'RF', /autentic/)) add('RF', 'Autenticar el acceso según el rol.');
     if (/\bjwt\b/.test(text) && !already(inventory, 'restriccion_tecnica', /\bjwt\b/)) add('restriccion_tecnica', 'Usar JWT como mecanismo de autenticación.');
     return items;
   }
   if (/no pueda|no pueden|no debe|sin que|pero no|solamente|unicamente|cualquier persona/.test(normalize(mainClause(sentence)))) {
     add('regla_negocio', sentence);
     const exception = /salvo que\s+((?:el|la|los|las)\s+[^.]{8,140})/i.exec(sentence);
-    if (exception && /reasign/.test(normalize(exception[1])) && !already(inventory, 'RF', /reasign/)) add('RF', clean(exception[1]));
+    if (exception && /reasign/.test(normalize(exception[1])) && !already(inventory, 'RF', /reasign/)) add('RF', reassignmentName(sentence));
   }
   const pendingTech = /si ayuda|habiamos pensado|podriamos/.test(text);
   if (TECH.test(sentence) && /propon|usemos|usaran|utilizar|confirma|despleg|publicar|pantalla/.test(text)) {
@@ -308,9 +315,283 @@ function clarifyQuestions(inventory) {
   }
   return result;
 }
-function refine(inventory, input, identifiers) {
+function reassignmentName(sentence) {
+  const object = /(?:ver|modificar)\s+(?:las?|los?|el|la)\s+(\p{L}+)/iu.exec(sentence);
+  const role = /otro\s+(\p{L}+)/iu.exec(sentence);
+  if (!object) return 'Reasignar';
+  const people = role ? (role[1].toLowerCase().endsWith('s') ? role[1].toLowerCase() : `${role[1].toLowerCase()}s`) : '';
+  return people ? `Reasignar ${object[1].toLowerCase()} entre ${people}` : `Reasignar ${object[1].toLowerCase()}`;
+}
+function usabilityName(sentence) {
+  const match = String(sentence || '').match(/((?:las|los)\s+pantallas?\s+de\s+.+?)(?:\s+deben|\s+sean|\s+sea)\b/i);
+  const scope = match ? match[1].trim() : 'las pantallas operativas';
+  return `Facilidad de uso de ${scope.charAt(0).toLowerCase()}${scope.slice(1)}`;
+}
+function contentStems(text) {
+  const equivalents = { reportes: ['ventas'], ventas: ['reportes'], globales: ['ventas', 'reportes'], precios: ['precio'], precio: ['precios'], usuarios: ['usuario'], usuario: ['usuarios'], pedidos: ['pedido', 'comanda'], comandas: ['pedido'], reservas: ['reserva'], mesas: ['mesa'], mesa: ['mesas'] };
+  const stop = new Set(['debe', 'deben', 'poder', 'puede', 'pueden', 'podra', 'podran', 'sistema', 'solo', 'solamente', 'unicamente', 'otro', 'otra', 'otros', 'para', 'como', 'esta', 'este', 'cuando', 'antes', 'sobre']);
+  return normalize(text).split(/[^a-z0-9]+/).filter(token => token.length > 4 && !stop.has(token)).flatMap(token => [token.slice(0, 5), ...(equivalents[token] || []).map(form => form.slice(0, 5))]);
+}
+function sharedStems(left, right) {
+  const known = new Set(contentStems(right));
+  return new Set(contentStems(left).filter(token => known.has(token))).size;
+}
+function deviceAssignment(text) {
+  const value = normalize(text);
+  return /celular|tableta|computadora|pantalla grande/.test(value) && /usara|usaran|usara su|canal/.test(value) && !/botones claros|pocas acciones/.test(value);
+}
+function quoteList(item) {
+  const listed = Array.isArray(item?.evidencias) ? item.evidencias.map(entry => (typeof entry === 'string' ? { texto: entry } : entry)).filter(entry => entry?.texto) : [];
+  if (listed.length) return listed;
+  return item?.evidencia ? [{ texto: item.evidencia, fuente: item.fuente }] : [];
+}
+function sentencesOf(text) {
+  return String(text || '').split(/(?<=[.!?])\s+/).map(sentence => sentence.trim()).filter(sentence => sentence.split(/\s+/).length >= 4);
+}
+function focusEvidence(item, inventory, input) {
+  if (!['RF', 'RNF'].includes(item?.tipo)) return item;
+  const others = (inventory || []).filter(other => other?.id !== item.id && ['RF', 'RNF'].includes(other.tipo));
+  const source = String(input || '');
+  const focused = quoteList(item).map(fragment => {
+    const parts = sentencesOf(fragment.texto);
+    if (parts.length < 2) return fragment;
+    const best = parts.map(part => ({ part, mine: sharedStems(item.necesidad, part), other: Math.max(0, ...others.map(candidate => sharedStems(candidate.necesidad, part))) }))
+      .sort((left, right) => right.mine - left.mine || Number(right.mine > right.other) - Number(left.mine > left.other))[0];
+    return best?.mine >= 1 && source.includes(best.part) ? { ...fragment, texto: best.part } : fragment;
+  }).filter(fragment => {
+    const mine = sharedStems(item.necesidad, fragment.texto);
+    const other = Math.max(0, ...others.map(candidate => sharedStems(candidate.necesidad, fragment.texto)));
+    return mine >= 1 && mine >= other;
+  });
+  if (!focused.length || !source.includes(focused[0].texto)) return item;
+  return { ...item, evidencia: focused[0].texto, ...(item.evidencias ? { evidencias: focused } : {}) };
+}
+function polish(inventory, input, identifiers) {
+  const prepared = [];
+  for (const original of inventory || []) {
+    let item = { ...original };
+    const text = normalize(item.necesidad);
+    if (item.tipo === 'RNF' && deviceAssignment(item.necesidad)) {
+      delete item.objetivo_id;
+      item = { ...item, tipo: 'restriccion_tecnica' };
+    } else if (/caida breve|atender manualmente/.test(text) && /respaldo|recuper/.test(text)) {
+      const covered = [...inventory, ...prepared].some(other => other.id !== item.id && other.tipo === 'RF' && /respaldo|recuper/.test(normalize(other.necesidad)));
+      prepared.push({ id: covered ? item.id : identifiers.next('N'), tipo: 'decision', necesidad: 'Una caída breve se puede atender manualmente.', estado: item.estado || 'confirmado', evidencia: item.evidencia, ...(item.evidencias ? { evidencias: item.evidencias } : {}), origen: item.origen || 'explicito' });
+      if (covered) continue;
+      item = { ...item, tipo: 'RF', necesidad: 'Permitir respaldos de la base de datos y recuperación de información.', objetivo_id: item.objetivo_id || identifiers.next('O') };
+    } else if (item.tipo === 'RNF' && /respaldo|recuper/.test(text) && !/menos de\s+(?:un|una|\d+)/.test(text) && [...inventory, ...prepared].some(other => other.id !== item.id && other.tipo === 'RF' && /respaldo|recuper/.test(normalize(other.necesidad)))) {
+      continue;
+    } else if (item.tipo === 'RNF' && /botones claros|pocas acciones por pantalla|pantallas?\s+de\s+.+\s+deben ser simples/.test(text)) {
+      item = { ...item, necesidad: usabilityName(`${item.necesidad}. ${item.evidencia || ''}`) };
+    } else if (item.tipo === 'RNF' && /contrasen/.test(text) && /valid/.test(text) && item.necesidad.length > 80) {
+      item = { ...item, necesidad: 'Proteger las contraseñas y validar los datos de entrada.' };
+    } else if (item.tipo === 'RF' && /haga una reasignacion/.test(text)) {
+      item = { ...item, necesidad: reassignmentName(`${item.necesidad} ${item.evidencia || ''}`) };
+    } else if (item.tipo === 'RF' && /autentic/.test(text) && /rol/.test(text)) {
+      item = { ...item, necesidad: 'Autenticar el acceso según el rol.' };
+    } else if (item.tipo === 'RF') {
+      item = { ...item, necesidad: item.necesidad.replace(/,?\s*actualizando\b[^.]{0,120}\b(?:tiempo real|menos de\s+(?:un|una|\d+)\s+\p{L}+)/giu, '').replace(/\s+/g, ' ').trim() };
+    }
+    if (item.tipo === 'RF' && /reporte/.test(normalize(item.necesidad)) && /confirma que|[?]/.test(`${item.evidencia || ''} ${(item.evidencias || []).map(entry => entry?.texto || '').join(' ')}`) && [...inventory, ...prepared].some(other => other.id !== item.id && other.tipo === 'RF' && /venta/.test(normalize(other.necesidad)))) continue;
+    prepared.push(item);
+  }
+  const withoutSubsumed = prepared.filter(item => {
+    if (item.tipo !== 'regla_negocio') return true;
+    const own = new Set(contentStems(item.necesidad));
+    const siblings = prepared.filter(other => other.tipo === 'regla_negocio');
+    return !siblings.some(other => other.id !== item.id && own.size && [...own].every(token => contentStems(other.necesidad).includes(token)) && contentStems(other.necesidad).length > own.size);
+  });
+  const uniqueAuth = [];
+  let authKept = false;
+  for (const item of withoutSubsumed) {
+    if (item.tipo === 'RF' && /autentic/.test(normalize(item.necesidad))) {
+      if (authKept) continue;
+      authKept = true;
+    }
+    uniqueAuth.push(item);
+  }
+  const focused = uniqueAuth.map(item => focusEvidence(item, uniqueAuth, input));
+  const questions = focused.filter(item => item.tipo === 'pregunta' && item.estado === 'pendiente');
+  const aligned = align(focused, identifiers).map(item => {
+    if (!['RF', 'RNF'].includes(item.tipo)) return item;
+    const preguntas = questions.filter(question => {
+      const topic = normalize(`${question.necesidad} ${question.evidencia || ''}`);
+      const subject = normalize(`${item.necesidad} ${item.evidencia || ''}`);
+      if (/metricas concretas/.test(topic) && /seguridad|contrasen|usabilidad|facilidad de uso|boton/.test(subject) && !/menos de\s+(?:un|una|\d+)|\d+\s*(?:segundos|minutos|horas)/.test(subject)) return true;
+      if (/recurrencia|frecuencia de respaldos|inactivo|tiempo maximo de recuperacion/.test(topic) && /respaldo|recuper/.test(subject)) return true;
+      return false;
+    }).map(question => question.id);
+    return preguntas.length ? { ...item, preguntas_ids: [...new Set(preguntas)] } : item;
+  });
+  return aligned;
+}
+const ACTION = [
+  ['ver', /\b(?:ver|visualizar|visualizan?|consultar|consultan|revisar|revisan?)\b/],
+  ['reservar', /\breserv/],
+  ['comprar', /\bcompr/],
+  ['acumular', /\bacumul/],
+  ['tomar', /\btomar\b|\btoma(?:n)?\b/],
+  ['ordenar', /\borden|\bpedir(?:lo|la|le|los|las)?\b|\bpid[ae]n?\b/],
+  ['cobrar', /\bcobr|\bpago\b|\bpagar\b/],
+  ['cerrar', /\bcerr/],
+  ['marcar', /\bmarc/],
+  ['cambiar', /\bcambi|\bmodific/],
+  ['gestionar', /\bgestion/],
+  ['validar', /\bvalid|\bescane/],
+  ['autenticar', /\bautentic/],
+  ['reasignar', /\breasign/],
+  ['reflejar', /\breflej/],
+  ['respaldar', /\brespald|\brecuper|\bcopias? de seguridad/]
+];
+function actionOf(text) {
+  const value = normalize(text);
+  return (ACTION.find(([, pattern]) => pattern.test(value)) || [])[0] || '';
+}
+function actionsOf(text) {
+  const value = normalize(text);
+  return ACTION.filter(([, pattern]) => pattern.test(value)).map(([name]) => name);
+}
+function leadingActor(text) {
+  const match = /^(?:el|la|los|las)\s+(\p{L}+)/iu.exec(String(text || '').trim());
+  if (!match) return '';
+  const noun = normalize(match[1]);
+  return noun === 'sistema' ? '' : noun;
+}
+function objectStems(text) {
+  const ignored = new Set(['ver', 'visua', 'consu', 'revis', 'reser', 'compr', 'acumu', 'tomar', 'cobra', 'pagar', 'cerra', 'marca', 'cambi', 'modif', 'gesti', 'valid', 'escan', 'auten', 'reasi', 'refle', 'respa', 'recup', 'permi', 'reali', 'clien', 'meser', 'cajer', 'cocin', 'admin', 'perso', 'siste']);
+  return contentStems(text).filter(token => !ignored.has(token));
+}
+function preconditionAction(text) {
+  const value = normalize(text);
+  const match = /antes de\s+(?:realizar|hacer|efectuar)?\s*(?:el|la|los|las)?\s*([a-z]+)/.exec(value);
+  if (!match) return '';
+  return actionOf(match[1]) || (/cobro|pago/.test(match[1]) ? 'cobrar' : '');
+}
+function constraintClause(text) {
+  return /no\b|salvo|imped|restring|unicamente|solamente|antes de/.test(normalize(text));
+}
+function clauseApplies(clause, need) {
+  const target = preconditionAction(clause);
+  const needActions = actionsOf(need.necesidad);
+  if (target) return needActions.includes(target);
+  if (!constraintClause(clause)) return false;
+  const clauseActor = leadingActor(clause);
+  const needActor = leadingActor(need.necesidad);
+  if (clauseActor && needActor && clauseActor !== needActor && !needActor.startsWith(clauseActor) && !clauseActor.startsWith(needActor)) return false;
+  const clauseActions = actionsOf(clause);
+  if (/solamente|unicamente/.test(normalize(clause)) && !clauseActions.length) return false;
+  if (clauseActions.length && needActions.length && !clauseActions.some(action => needActions.includes(action))) return false;
+  return objectStems(need.necesidad).some(token => objectStems(clause).includes(token));
+}
+function redundantNeed(item, inventory) {
+  if (item?.tipo !== 'RF') return false;
+  const text = normalize(tidyNeed(item.necesidad));
+  const permission = /^(?:el|la|los|las)\s+\S+\s+(?:puede|pueden|podra|podran)\s+/.test(text) || /^(?:solamente|unicamente)\b/.test(text);
+  if (!permission) return false;
+  const actions = actionsOf(item.necesidad);
+  const objects = objectStems(item.necesidad);
+  return (inventory || []).some(other => other.id !== item.id && other.tipo === 'RF' && String(other.necesidad || '').length > String(item.necesidad || '').length && actionsOf(other.necesidad).some(action => actions.includes(action)) && objects.some(token => objectStems(other.necesidad).includes(token)));
+}
+function applicableClause(rule, need) {
+  const sentences = String(rule?.necesidad || '').split(/(?<=[.;])\s+/).map(part => part.trim()).filter(Boolean);
+  const sentence = sentences.find(part => clauseApplies(part, need)) || '';
+  if (!sentence) return '';
+  const parts = sentence.split(/\s*,\s*|\s+\by\b\s+/iu).map(part => part.trim()).filter(Boolean);
+  const listed = parts.length > 1 && parts.filter(part => actionsOf(part).length).length >= 2 && !parts.slice(1).some(part => /^(?:salvo|pero|aunque)\b/i.test(part));
+  if (!listed) return sentence;
+  const prefix = (parts[0].match(/^((?:solamente|únicamente|unicamente)\s+)?(?:el|la|los|las)\s+\p{L}+(?:\s+\p{L}+)?\s+podr(?:á|an|a)\s+/iu) || [])[0] || '';
+  const match = parts.find((part, index) => clauseApplies(index && prefix ? `${prefix}${part}` : part, need));
+  return match ? (parts.indexOf(match) && prefix ? `${prefix}${match}` : match).replace(/\s+/g, ' ').trim() : '';
+}
+function ruleApplies(rule, need) {
+  return Boolean(applicableClause(rule, need));
+}
+function tidyNeed(text) {
+  return String(text || '')
+    .replace(/^(?:el|la|los|las)\s+\p{L}+\s+(?:debe(?:n)? poder|puede|pueden|podrá|podrán)\s+(?=(?:el|la|los|las)\s+\p{L}+\s+)/iu, '')
+    .replace(/\s+por parte de(?:l| la| los| las)?\s+\p{L}+[.]?/giu, '')
+    .replace(/\s+para el cliente\b[.]?\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function sameResult(left, right) {
+  if (left.tipo !== right.tipo) return false;
+  const first = actionOf(left.necesidad);
+  const second = actionOf(right.necesidad);
+  if (first && second && first !== second) return false;
+  const shared = objectStems(left.necesidad).filter(token => objectStems(right.necesidad).includes(token));
+  return shared.length >= 2 || Boolean(first && first === second && shared.length >= 1);
+}
+function align(inventory, identifiers) {
+  const prepared = [];
+  for (const original of inventory || []) {
+    let item = { ...original };
+    if (deviceAssignment(item.necesidad) || deviceAssignment(item.evidencia || '')) {
+      delete item.objetivo_id;
+      item = { ...item, tipo: 'restriccion_tecnica', grupo: 'restriccion' };
+    }
+    if (!['RF', 'RNF'].includes(item.tipo)) delete item.objetivo_id;
+    if (item.tipo === 'RF') item = { ...item, necesidad: tidyNeed(item.necesidad) };
+    if (redundantNeed(item, [...(inventory || []), ...prepared])) continue;
+    const backup = actionsOf(`${item.necesidad || ''} ${item.evidencia || ''}`).includes('respaldar');
+    const measured = /menos de\s+(?:un|una|\d+)|\d+\s*(?:segundos|minutos|horas)/.test(normalize(`${item.necesidad || ''} ${item.evidencia || ''}`));
+    if (item.tipo === 'RNF' && backup && !measured && [...(inventory || []), ...prepared].some(other => other.id !== item.id && other.tipo === 'RF' && actionsOf(`${other.necesidad || ''} ${other.evidencia || ''}`).includes('respaldar'))) continue;
+    const target = item.tipo === 'RF' ? preconditionAction(item.necesidad) : '';
+    const checksAnother = target && /comprobar|verificar|validar/.test(normalize(item.necesidad)) && (inventory || []).some(other => other.id !== item.id && other.tipo === 'RF' && actionOf(other.necesidad) === target);
+    if (checksAnother) {
+      const covered = [...inventory, ...prepared].some(other => other.id !== item.id && other.tipo === 'regla_negocio' && preconditionAction(other.necesidad) === target);
+      if (!covered) prepared.push({ ...item, tipo: 'regla_negocio', necesidad: tidyNeed(item.necesidad) });
+      continue;
+    }
+    prepared.push(item);
+  }
+  const goals = new Map();
+  for (const item of prepared) {
+    if (!['RF', 'RNF'].includes(item.tipo) || !item.objetivo_id) continue;
+    if (!goals.has(item.objetivo_id)) goals.set(item.objetivo_id, []);
+    goals.get(item.objetivo_id).push(item);
+  }
+  for (const items of goals.values()) {
+    const clusters = [];
+    for (const item of items) {
+      const cluster = clusters.find(group => group.every(other => sameResult(other, item)));
+      if (cluster) cluster.push(item);
+      else clusters.push([item]);
+    }
+    for (const cluster of clusters.slice(1)) {
+      const objetivo = identifiers.next('O');
+      for (const item of cluster) item.objetivo_id = objetivo;
+    }
+  }
+  const rules = prepared.filter(item => item.tipo === 'regla_negocio');
+  return prepared.map(item => {
+    if (!['RF', 'RNF'].includes(item.tipo)) return item;
+    const reglas = rules.filter(rule => ruleApplies(rule, item)).map(rule => rule.id);
+    const next = { ...item };
+    if (reglas.length) next.reglas_ids = [...new Set(reglas)];
+    else delete next.reglas_ids;
+    return next;
+  });
+}
+function linkActors(inventory, actors) {
+  const people = (actors || []).filter(actor => actor?.id && actor.estado !== 'rechazado');
+  if (!people.length) return inventory;
+  return (inventory || []).map(item => {
+    if (item?.tipo !== 'RF') return item;
+    const subject = (/^(?:el|la|los|las)\s+(\p{L}+)/iu.exec(item.necesidad) || [])[1] || '';
+    if (!subject || normalize(subject) === 'sistema') return item;
+    const noun = normalize(subject);
+    const actor = people.find(candidate => [candidate.nombre, ...(candidate.alias || [])].some(name => {
+      const word = normalize(name).split(/\s+/).pop();
+      return word && (word === noun || word.startsWith(noun) || noun.startsWith(word));
+    }));
+    return actor ? { ...item, actor_id: actor.id } : item;
+  });
+}
+function refine(inventory, input, identifiers, actors) {
   const current = [];
   for (const item of inventory || []) current.push(...splitItem(item, identifiers).map(part => ensureSubject(part === item ? item : withEvidence(part, item.evidencia), input)));
-  return clarifyQuestions(current.concat(recover(input, current, identifiers).map(item => ensureSubject(item, input))));
+  const recovered = clarifyQuestions(current.concat(recover(input, current, identifiers).map(item => ensureSubject(item, input))));
+  return linkActors(polish(recovered, input, identifiers), actors);
 }
-module.exports = { refine, partition, familyOf };
+module.exports = { refine, align, partition, familyOf, linkActors, ruleApplies, applicableClause, preconditionAction, actionOf, actionsOf, tidyNeed, redundantNeed };

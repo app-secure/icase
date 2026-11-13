@@ -147,6 +147,26 @@ test('corregir una necesidad pendiente elimina el bloqueo solo si la evidencia s
   expect(result.json.analisis_inicial.contenido.necesidades_pendientes[0].estado_validacion).toBe('corregida');
   expect(result.json.analisis_inicial.contenido.control_aprobacion.errores).not.toContain('N-02: evidencia pendiente.');
 });
+test('aceptar una cita corta que sí está en la fuente quita el bloqueo', async () => {
+  platform.data.fuente[0].texto_transcrito = 'El operador consulta expedientes. Más tarde el operador consulta expedientes de nuevo.';
+  const draft = await extract();
+  const content = structuredClone(draft.contenido);
+  const item = { id: 'N-02', objetivo_id: 'O-02', tipo: 'RF', necesidad: 'Consultar expedientes', estado: 'confirmado', evidencias: [{ texto: 'frase que no existe', fuente: 'a.txt' }] };
+  content.necesidades_pendientes = [{ id: 'N-02', elemento: item, estado_validacion: 'pendiente', errores: ['evidencia_no_localizada'] }];
+  const saved = await call('PATCH', '/analisis-inicial', { accion: 'guardar', version_esperada: draft.id, contenido: content, justificacion: 'Registrar cita ausente' });
+  const refused = await call('PATCH', '/analisis-inicial', { accion: 'aceptar_cita', id: 'N-02', version_esperada: saved.json.analisis_inicial.id, justificacion: 'Intentar una cita ausente' });
+  expect(refused.status).toBe(400);
+  const ready = structuredClone(saved.json.analisis_inicial.contenido);
+  ready.necesidades_pendientes[0].elemento.evidencias = [{ texto: 'consulta expedientes', fuente: 'a.txt' }];
+  ready.necesidades_pendientes[0].errores = ['evidencia_ambigua'];
+  const prepared = await call('PATCH', '/analisis-inicial', { accion: 'guardar', version_esperada: saved.json.analisis_inicial.id, contenido: ready, justificacion: 'Registrar cita repetida' });
+  expect(prepared.json.analisis_inicial.contenido.control_aprobacion.errores.some(error => error.startsWith('N-02: evidencia pendiente'))).toBe(true);
+  const accepted = await call('PATCH', '/analisis-inicial', { accion: 'aceptar_cita', id: 'N-02', version_esperada: prepared.json.analisis_inicial.id, justificacion: 'La cita está en la fuente.' });
+  expect(accepted.status).toBe(200);
+  expect(accepted.json.analisis_inicial.contenido.necesidades_pendientes[0].estado_validacion).toBe('corregida');
+  expect(accepted.json.analisis_inicial.contenido.control_aprobacion.errores.some(error => error.includes('N-02: evidencia pendiente'))).toBe(false);
+  expect(accepted.json.analisis_inicial.contenido.inventario.find(entry => entry.id === 'N-02').evidencias[0].texto).toMatch(/consulta expedientes/i);
+});
 test('propiedad, citas falsas, fuentes modificadas y aprobación inicial no equivalen a requisitos aprobados', async () => {
   expect((await call('GET', '/analisis-inicial', undefined, token(ids.userB))).status).toBe(404);
   const draft = await extract();

@@ -33,7 +33,7 @@ test('revisión semántica ejecutada no oculta errores estructurales', () => {
 
 test('expone advertencias con causa y acción separadas de decisiones pendientes', () => {
   const html = render({ control_aprobacion: { bloqueado: false, calidad: { hallazgos: [
-    { requisito: 'RF-01', codigo: 'ACTOR_AUSENTE', severidad: 'advertencia', mensaje: 'Falta actor', accion_propuesta: 'Identifica el actor' }
+    { requisito: 'RF-01', codigo: 'ACTOR_GENERICO', severidad: 'advertencia', mensaje: 'Falta actor', accion_propuesta: 'Identifica el actor' }
   ] } }, preguntas_pendientes: [{ id: 'N-09', necesidad: 'Acordar frecuencia de respaldos' }] });
   expect(html).toContain('Falta actor');
   expect(html).toContain('Qué revisar: Identifica el actor');

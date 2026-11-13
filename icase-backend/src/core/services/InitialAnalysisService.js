@@ -53,7 +53,14 @@ class InitialAnalysisService {
     if (content.integridad_extraccion) errors.push(...require('../../infrastructure/services/InitialAnalysisContract').errors({ ...content, inventario_necesidades: content.inventario }));
     const goals = new Set(report.valid.filter(isRequirementNeed).map(n => n.objetivo_id));
     for (const item of report.valid) if ((item.objetivos_relacionados || []).some(id => !goals.has(id))) errors.push(`${item.id}: referencia a objetivo inexistente.`);
-    for (const item of content.necesidades_pendientes || []) if (!['corregida', 'descartada'].includes(item.estado_validacion) && activeObligation(item.elemento)) errors.push(`${item.id}: evidencia pendiente.`);
+    for (const item of content.necesidades_pendientes || []) {
+      if (['corregida', 'descartada'].includes(item.estado_validacion) || !activeObligation(item.elemento)) continue;
+      const current = (content.inventario || []).find(entry => entry.id === item.id);
+      if (current && new Coverage().inspectInventory([current], input).valid.length) continue;
+      const codes = item.errores || [];
+      const detail = codes.includes('evidencia_no_localizada') ? 'La cita no se encontró como texto continuo.' : 'La cita está en la fuente; confírmala si corresponde a esta necesidad.';
+      errors.push(`${item.id}: evidencia pendiente. ${detail}`);
+    }
     const actors = content.actores || [];
     if (!Array.isArray(content.actores) || actors.some(a => !a?.id || !String(a.nombre || '').trim() || !['persona', 'sistema_externo'].includes(a.tipo) || !['confirmado', 'pendiente'].includes(a.estado))) errors.push('El catálogo contiene actores sin identificador, nombre, tipo o estado válido.');
     if (new Set(actors.map(a => a.id)).size !== actors.length || new Set(actors.map(a => Actors.key(a.nombre))).size !== actors.length) errors.push('Actores con IDs o nombres duplicados.');
@@ -179,6 +186,15 @@ class InitialAnalysisService {
         const ids = require('./AnalysisIdentifiers')([current.contenido, ...versions.map(v => v.contenido)]);
         content.actores[content.actores.length - 1].id = ids.next('ACT');
       }
+    } else if (body.accion === 'aceptar_cita') {
+      const pending = (content.necesidades_pendientes || []).find(item => item.id === body.id);
+      const element = pending?.elemento || (content.inventario || []).find(item => item.id === body.id);
+      if (!element) throw fault('Elemento inexistente.', 400);
+      const support = require('../../infrastructure/services/SourceEvidence').supportQuote(element, input);
+      if (!support) throw fault('La cita no está en la fuente. Pega un fragmento literal antes de aceptarla.', 400);
+      const next = { ...element, evidencia: support.texto, evidencias: [{ texto: support.texto, fuente: support.fuente }] };
+      content.inventario = content.inventario.some(item => item.id === next.id) ? content.inventario.map(item => item.id === next.id ? { ...item, ...next } : item) : [...content.inventario, next];
+      content.necesidades_pendientes = (content.necesidades_pendientes || []).map(item => item.id === next.id ? { ...item, elemento: next, estado_validacion: 'corregida', historial: [...(item.historial || []), { accion: 'aceptar_cita', usuario_id: user, justificacion: body.justificacion, fecha: new Date().toISOString() }] } : item);
     } else if (body.accion === 'guardar') {
       if (!body.contenido || !Array.isArray(body.contenido.inventario)) throw fault('Contenido de análisis inválido.', 400);
       content = structuredClone(body.contenido);

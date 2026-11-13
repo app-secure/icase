@@ -129,9 +129,12 @@ class ClasesDisenoValidatorService {
     }
 
     const outgoing = new Set([...trimmed.matchAll(/^\s*(\w+)\s+(?:\.\.>|-->)\s*\w+/gm)].map(match => match[1]));
+    const explained = new Set([...trimmed.matchAll(/^\s*note\s+(?:top|bottom|left|right)\s+of\s+(\w+)\s*:\s*(.+)$/gim)]
+      .filter(match => /sin puerto propio|no necesita dependencias|no declara persistencia/i.test(match[2]))
+      .map(match => match[1]));
     for (const match of trimmed.matchAll(/^\s*class\s+(\w+)(?:\s+<<([^>]+)>>)?/gim)) {
       if (/(?:UseCase|CasoUso)$/i.test(match[1]) || /UseCase|CasoUso/i.test(match[2] || '')) {
-        if (!outgoing.has(match[1])) advertencias.push(`Diseño por verificar: ${match[1]} no declara dependencias de salida hacia entidades, puertos u otros servicios. Comprueba cómo realiza la operación; si es pura, explica que no necesita dependencias. No inventes un repositorio por clase.`);
+        if (!outgoing.has(match[1]) && !explained.has(match[1])) advertencias.push(`Diseño por verificar: ${match[1]} no declara dependencias de salida hacia entidades, puertos u otros servicios. Comprueba cómo realiza la operación; si es pura, explica que no necesita dependencias. No inventes un repositorio por clase.`);
       }
     }
 

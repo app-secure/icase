@@ -23,6 +23,7 @@ function normalizarCodigoPlantUML(value) {
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&amp;/gi, '&')
     .replace(/\\([<>])/g, '$1')
+    .replace(/\\"/g, '"')
     .replace(/\\\r?\n/g, '\n');
 
   if (/^\s*@start(?:uml|wbs|mindmap)\\n/i.test(codigo)) {
