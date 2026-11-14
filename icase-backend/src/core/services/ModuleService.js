@@ -34,8 +34,8 @@ const INCLUDED = Object.freeze([
   },
   {
     id: 'app_movil', etiqueta: 'App móvil (Expo)', categoria: 'interfaz', descripcion: 'Paquete Expo con las mismas operaciones; no es un APK ni un IPA firmado.',
-    activo: (decisions) => [...(decisions.alcance_plataforma?.plataformas || []), ...(decisions.stack_tecnologico?.plataformas || [])].includes('móvil'),
-    motivo: (decisions) => [...(decisions.alcance_plataforma?.plataformas || []), ...(decisions.stack_tecnologico?.plataformas || [])].includes('móvil')
+    activo: (decisions) => (decisions.stack_tecnologico?.plataformas ?? decisions.alcance_plataforma?.plataformas ?? []).includes('móvil'),
+    motivo: (decisions) => (decisions.stack_tecnologico?.plataformas ?? decisions.alcance_plataforma?.plataformas ?? []).includes('móvil')
       ? 'La plataforma móvil está incluida en el alcance.' : 'El alcance no incluye plataforma móvil.'
   }
 ]);

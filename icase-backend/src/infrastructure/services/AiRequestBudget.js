@@ -16,6 +16,7 @@ class AiRequestBudget {
     if (allowLocal) state.maxAttempts = Math.min(8, state.maxAttempts);
     state.allowLocal = allowLocal;
     state.localAttempts = 0;
+    state.localTimeout = bounded(env.OLLAMA_REQUEST_TIMEOUT_MS, 120000, 1000, 600000);
     if (allowLocal) state.duration += 120000;
     const timer = setTimeout(() => controller.abort(), state.duration);
     timer.unref?.();
@@ -65,7 +66,7 @@ class AiRequestBudget {
     if (!state) return axios.post(url, data, { ...options, timeout: Math.min(options.timeout || 120000, 120000) });
     if (!this.canTryLocal()) throw Object.assign(new Error('Presupuesto local agotado.'), { code: 'AI_BUDGET_EXHAUSTED' });
     state.localAttempts++;
-    return axios.post(url, data, { ...options, signal: state.signal, timeout: Math.min(120000, state.duration - (Date.now() - state.started)) });
+    return axios.post(url, data, { ...options, signal: state.signal, timeout: Math.min(state.localTimeout, state.duration - (Date.now() - state.started)) });
   }
 
   reportProviderFailure(provider, cause, details = {}) {

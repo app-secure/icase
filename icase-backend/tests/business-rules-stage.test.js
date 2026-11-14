@@ -118,8 +118,9 @@ describe('etapa reglas_negocio', () => {
   test('sugerir devuelve la propuesta de la IA ya depurada, con evidencias y advertencias', async () => {
     const { useCase } = await entorno();
     const sugerencia = await useCase.sugerir({ proyectoId: 'p1', etapa: 'reglas_negocio' });
-    expect(sugerencia.propuesta.reglas).toHaveLength(2);
-    expect(sugerencia.propuesta.notas).toContain('1 requieren tu decisión');
+    expect(sugerencia.propuesta.reglas.filter(r => r.id.startsWith('RN-'))).toHaveLength(2);
+    expect(sugerencia.propuesta.reglas.some(r => r.id.startsWith('DOM-'))).toBe(true);
+    expect(sugerencia.propuesta.notas).toContain('4 requieren tu decisión');
     expect(sugerencia.advertencias.length).toBeGreaterThan(0);
   });
 

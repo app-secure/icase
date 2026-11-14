@@ -25,6 +25,7 @@ const ArtefactoGeneradoSchema = new mongoose.Schema({
   errores: { type: [String], default: [] },
   verificacion: { type: mongoose.Schema.Types.Mixed, default: null },
   aprobado: { type: Boolean, default: false },
+  modulos: { type: mongoose.Schema.Types.Mixed, default: null },
   generado_por: { type: String, default: 'sistema' },
   huella_entrada: { type: String, required: true },
   versiones_origen: { type: mongoose.Schema.Types.Mixed, default: {} }

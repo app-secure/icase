@@ -69,7 +69,7 @@ class GenerationReportService {
       }
     }
     const realtime = clean(stack.tiempo_real);
-    if (realtime) {
+    if (realtime && !contrato.eventos_cambios?.experimental) {
       const base = CAPABILITIES.find((item) => item.id === 'tiempo_real');
       const group = pending.get('tiempo_real') || { id: base.id, etiqueta: base.etiqueta, alternativa: base.alternativa, requisitos: [], stack: null };
       group.stack = realtime;

@@ -83,20 +83,20 @@ describe('GenericFrontendGenerator: enlace de procesos', () => {
 
 describe('generarFrontend: huella de entrada', () => {
   const approvedStages = ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'];
-  const build = (requirements) => {
+  const build = (requirements, plataformas = ['web']) => {
     const plan = {
       proyecto_id: 'p1', version: 1,
-      etapas: new CodeGenerationWorkflowService().crearEtapasIniciales().map((item) => approvedStages.includes(item.etapa) ? { ...item, estado: 'aprobada', version: 1, propuesta: {} } : item)
+      etapas: new CodeGenerationWorkflowService().crearEtapasIniciales().map((item) => approvedStages.includes(item.etapa) ? { ...item, estado: 'aprobada', version: 1, propuesta: item.etapa === 'stack_tecnologico' ? { plataformas } : {} } : item)
     };
     let latest = null;
     const artefactoRepository = { obtenerUltimo: async () => latest, crear: async (data) => { latest = { id: 'a1', ...data }; return latest; }, actualizar: async () => {} };
     return new GestionarArtefactosCodigo({
       proyectoRepository: { obtenerPorId: async () => ({ id: 'p1', nombre: 'Demo', estado_fase: 'mockups_aprobados' }) },
       planCodificacionRepository: { obtenerPorProyecto: async () => plan, guardar: async (_id, data) => Object.assign(plan, data) },
-      disenoRepository: { obtenerPorProyecto: async () => ({ manifiesto_navegacion: [], mockups: [] }) },
+      disenoRepository: { obtenerPorProyecto: async () => ({ manifiesto_navegacion: [{ nombre: 'Reservas', ruta: '/reservas', rf_trazabilidad: ['RF-01'] }], mockups: [] }) },
       requerimientoRepository: { listarPorProyecto: async () => requirements },
       artefactoRepository,
-      frontendGenerator: { generar: async () => ({ archivos: [] }) }
+      frontendGenerator: new (require('../src/infrastructure/services/FrontendScaffoldGenerator'))()
     });
   };
   const rf = (titulo) => [{ identificador: 'RF-01', tipo: 'RF', titulo, descripcion: 'd', aprobado: true }];
@@ -104,6 +104,19 @@ describe('generarFrontend: huella de entrada', () => {
   test('cambiar solo los requisitos aprobados cambia la huella y no reutiliza el artefacto', async () => {
     const [a, b] = [await build(rf('Reservar sala')).generarFrontend('p1'), await build(rf('Consultar menú')).generarFrontend('p1')];
     expect(a.artefacto.huella_entrada).not.toBe(b.artefacto.huella_entrada);
+  });
+
+  test.each([['web', 'móvil'], ['móvil', 'web']])('genera %s antes de %s y conserva ambas partes', async (primera, segunda) => {
+    const service = build(rf('Reservar sala'), [primera, segunda]);
+    const dir = primera === 'web' ? 'frontend/' : 'mobile/';
+    const first = (await service.generarFrontend('p1', primera)).artefacto;
+    expect(first.archivos.every(file => file.ruta.startsWith(dir))).toBe(true);
+    expect(first.archivos.some(file => file.ruta === dir + 'package.json')).toBe(true);
+    expect(service.verifier.verificar(first).errores).toEqual([]);
+    const next = (await service.generarFrontend('p1', segunda)).artefacto;
+    expect(next.archivos.filter(file => file.ruta.startsWith(dir))).toEqual(first.archivos);
+    expect(next.archivos.map(file => file.ruta)).toEqual(expect.arrayContaining(['frontend/package.json', 'mobile/package.json']));
+    expect((await service.generarFrontend('p1', primera)).reutilizado).toBe(true);
   });
 
   test('los mismos requisitos mantienen la misma huella', async () => {

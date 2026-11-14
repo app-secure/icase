@@ -70,7 +70,7 @@ class GenerationCoverageService {
     });
     if (!rf.length) blockers.push('No hay RF aprobados para evaluar.');
     if ((contrato.relations || []).some((r) => r.cardinalidad === 'muchos_a_muchos')) blockers.push('Relaciones N:M con soporte dependiente del stack y verificación integral pendiente; consulta storage.associations del manifiesto.');
-    if (stack.tiempo_real) blockers.push('El stack solicita tiempo real y todavía no existe ese módulo.');
+    if (stack.tiempo_real && !contrato.eventos_cambios?.experimental) blockers.push('El stack solicita tiempo real y el módulo de eventos no está activo.');
     const pendiente = blockers.length > 0;
     return {
       version: 1, modo_entrega: value.modo_entrega, aceptar_pendientes: value.aceptar_pendientes,

@@ -64,7 +64,7 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
   _informe({ proyecto, insumos, decisiones, archivos }) {
     const manifest = JSON.parse(archivos.find((item) => item.ruta === 'backend/icase.manifest.json').contenido);
     const aprobados = insumos.requerimientos.filter((item) => item.aprobado);
-    const plataformas = [...(decisiones.alcance_plataforma?.plataformas || []), ...(decisiones.stack_tecnologico?.plataformas || [])];
+    const plataformas = (decisiones.stack_tecnologico?.plataformas ?? decisiones.alcance_plataforma?.plataformas ?? []);
     const modules = new ModuleService();
     const activos = modules.activos(decisiones.modulos);
     const rawCoverage = decisiones.modulos?.cobertura || {};

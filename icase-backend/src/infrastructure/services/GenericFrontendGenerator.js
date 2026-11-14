@@ -23,7 +23,7 @@ const TYPED_FORMS_CSS = '.form-grid{display:grid;grid-template-columns:repeat(au
 
 class GenericFrontendGenerator {
   generate({ proyecto, screens, decisiones = {}, sistemaDiseno = {}, requerimientos = [] }) {
-    const platforms = decisiones.alcance_plataforma?.plataformas || decisiones.stack_tecnologico?.plataformas || ['web'];
+    const platforms = decisiones.stack_tecnologico?.plataformas || decisiones.alcance_plataforma?.plataformas || ['web'];
     const colors = sistemaDiseno.colores || {};
     const views = screens.map((screen) => this._view(screen, screens, requerimientos));
     const acceso = decisiones.control_acceso || null;
@@ -139,8 +139,13 @@ class GenericFrontendGenerator {
       }
     }
     const extended = new (require('./SpecializedFrontendGenerator'))().apply(new (require('./ExtendedFrontendGenerator'))().apply(files,{decisiones}),{decisiones});
-    return new ModuleService().activos(decisiones.modulos).includes('eventos_cambios')
+    const generated = new ModuleService().activos(decisiones.modulos).includes('eventos_cambios')
       ? new (require('./ChangeEventsClientGenerator'))().apply(extended, { auth }) : extended;
+    if (decisiones.stack_tecnologico?.estilos === 'Estilos del mockup' && !tailwind) {
+      const index = generated.find(file => file.ruta === 'frontend/index.html');
+      index.contenido = index.contenido.replace('<script src="https://cdn.tailwindcss.com"></script>', '');
+    }
+    return generated.filter(file => file.ruta.startsWith('mobile/') || platforms.includes('web') || platforms.includes('tablet'));
   }
 
   _view(screen, screens = [], requerimientos = []) {

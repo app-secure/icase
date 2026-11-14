@@ -33,7 +33,7 @@ class CodificacionController {
     try {
       res.json(await this.gestionarPlanCodificacion.sugerir({
         proyectoId: req.params.id,
-        etapa: req.params.etapa
+        etapa: req.params.etapa, inicial: req.query.inicial === '1'
       }));
     } catch (error) {
       res.status(this._status(error)).json({ error: error.message });
@@ -215,7 +215,7 @@ class CodificacionController {
 
   async generarFrontend(req, res) {
     try {
-      res.status(201).json(await this.gestionarArtefactosCodigo.generarFrontend(req.params.id));
+      res.status(201).json(await this.gestionarArtefactosCodigo.generarFrontend(req.params.id, req.body?.plataforma));
     } catch (error) {
       res.status(this._status(error)).json({ error: error.message });
     }
@@ -287,6 +287,22 @@ class CodificacionController {
         decision: req.body.decision, observaciones: req.body.observaciones,
         modo_permisivo: req.body.modo_permisivo === true
       }));
+    } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async descargarArtefacto(req, res) {
+    try {
+      const item = await this.artefactoRepository.obtenerPorId(req.params.artefactoId);
+      if (!item || String(item.proyecto_id) !== req.params.id || item.tipo === 'paquete_entrega') {
+        throw new Error('Artefacto no encontrado para este proyecto.');
+      }
+      const parte = req.query.plataforma;
+      if (parte && (item.tipo !== 'codigo_frontend' || !['web', 'móvil'].includes(parte))) throw new Error('Plataforma no válida.');
+      const carpeta = parte === 'web' ? 'frontend/' : 'mobile/';
+      const archivos = parte ? item.archivos.filter(file => file.ruta.startsWith(carpeta)) : item.archivos;
+      if (!archivos?.length) throw new Error('Todavía no hay archivos para esta descarga.');
+      res.attachment(item.tipo + '-' + (parte === 'móvil' ? 'mobile-' : parte ? 'web-' : '') + 'v' + item.version + '.zip');
+      res.send(this.zipArchiveService.crear(archivos));
     } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
 

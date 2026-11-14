@@ -32,7 +32,7 @@ class SandboxRuntimeVerifier {
         checks.push({ paso: label, resultado: 'correcto', salida: `${stdout || ''}${stderr || ''}`.slice(-2000) });
       };
       if (artefacto.tipo === 'codigo_frontend') {
-        await docker(['build', '--tag', `${project}-frontend`, '--file', 'frontend.verify.Dockerfile', '.'], 'Compilación React/Vite en Docker', 900000);
+        if (context.web) await docker(['build', '--tag', `${project}-frontend`, '--file', 'frontend.verify.Dockerfile', '.'], 'Compilación React/Vite en Docker', 900000);
         if ((artefacto.archivos || []).some((file) => file.ruta === 'mobile/package.json')) {
           await docker(['build', '--tag', `${project}-mobile`, '--file', 'mobile.verify.Dockerfile', '.'], 'Bundle Android Expo en Docker', 900000);
         }
@@ -43,11 +43,11 @@ class SandboxRuntimeVerifier {
         const compose = ['compose', '-p', project, '-f', 'verify.compose.yml'];
         try {
           const integrated = ['pruebas', 'paquete_entrega'].includes(artefacto.tipo);
-          await docker([...compose, 'build', ...(!context.java ? ['--build-arg', 'ICASE_AUDIT_NONCE=' + randomUUID()] : []), 'backend', 'smoke', ...(integrated ? ['frontend', 'tests'] : [])], integrated ? 'Compilación de backend, frontend y pruebas en Docker' : 'Compilación backend en Docker', 900000);
+          await docker([...compose, 'build', ...(!context.java ? ['--build-arg', 'ICASE_AUDIT_NONCE=' + randomUUID()] : []), 'backend', 'smoke', ...(integrated ? [...(context.web ? ['frontend'] : []), 'tests'] : [])], integrated ? 'Compilación de backend, frontend y pruebas en Docker' : 'Compilación backend en Docker', 900000);
           if (integrated && (artefacto.archivos || []).some((file) => file.ruta === 'mobile/package.json')) {
             await docker(['build', '--tag', `${project}-mobile`, '--file', 'mobile.verify.Dockerfile', '.'], 'Bundle Android Expo en Docker', 900000);
           }
-          await docker([...compose, 'up', '-d', '--wait', 'database', 'backend', ...(context.replicas?['backend_peer']:[]), ...(integrated ? ['frontend'] : [])], integrated ? 'Arranque de base de datos, backend y frontend con health checks' : 'Arranque de base de datos y backend con health checks', 240000);
+          await docker([...compose, 'up', '-d', '--wait', 'database', 'backend', ...(context.replicas?['backend_peer']:[]), ...(integrated && context.web ? ['frontend'] : [])], integrated ? 'Arranque de base de datos, backend y frontend con health checks' : 'Arranque de base de datos y backend con health checks', 240000);
           await docker([...compose, 'run', '--rm', 'smoke'], 'Prueba CRUD y N:M HTTP derivada del contrato', 240000);
           if (integrated) await docker([...compose, 'run', '--rm', 'tests'], 'Pruebas de integración del paquete', 240000);
         } finally {
@@ -87,36 +87,7 @@ class SandboxRuntimeVerifier {
       const destination = path.resolve(root, ...normalized.split('/'));
       if (!destination.startsWith(root + path.sep)) throw new Error(`Ruta fuera del entorno temporal: ${file.ruta}`);
       await fs.mkdir(path.dirname(destination), { recursive: true });
-      let content = String(file.contenido || '');
-      if (normalized.endsWith('auth.spec.js')) {
-        content = content
-          .replace(
-            /page\.getByRole\(['"]link['"],\s*\{\s*name:\s*['"]Usuarios['"]\s*\}\)\.click\(\)/g,
-            "page.getByRole('link', { name: 'Usuarios', exact: true }).click()"
-          )
-          .replace(
-            /page\.locator\(['"]nav['"]\)\.getByRole\(['"]link['"],\s*\{\s*name:\s*['"]Usuarios['"]\s*\}\)\.first\(\)\.click\(\)/g,
-            "page.getByRole('link', { name: 'Usuarios', exact: true }).click()"
-          );
-      }
-      if (normalized.endsWith('App.jsx')) {
-        // Asegurar que las vistas no incluyan duplicados de 'Usuarios'
-        content = content.replace(
-          /const visible = views\.filter\(/,
-          "const visible = views.filter(v => v.route !== '/usuarios' && v.id !== 'usuarios' && v.name?.toLowerCase() !== 'usuarios').filter("
-        );
-        // Eliminar cualquier ruta previa que registre /usuarios antes de UsersScreen
-        content = content.replace(
-          /<Route path=["']\/usuarios["'] element=\{<(?!UsersScreen)[^>]+>\}\/>\s*/g,
-          ""
-        );
-        // Asegurar que el enlace del admin a /usuarios esté presente de forma única y limpia
-        content = content.replace(
-          /\{user\.administrador\s*&&[^{}]*<Link to="\/usuarios">Usuarios<\/Link>\}/g,
-          '{user.administrador && <Link to="/usuarios">Usuarios</Link>}'
-        );
-      }
-      await fs.writeFile(destination, content, 'utf8');
+      await fs.writeFile(destination, String(file.contenido || ''), 'utf8');
     }
   }
 
@@ -144,7 +115,9 @@ class SandboxRuntimeVerifier {
     const smokeDocker = 'FROM node:22-alpine\nWORKDIR /app\nCOPY smoke.mjs /app/smoke.mjs\n';
     const frontendDocker = `FROM node:22-alpine AS build\nWORKDIR /app\nCOPY frontend/package*.json ./\nRUN npm install --ignore-scripts\nCOPY frontend/ ./\nRUN npm run build\nFROM nginxinc/nginx-unprivileged:1.27-alpine\nCOPY verify.nginx.conf /etc/nginx/conf.d/default.conf\nCOPY --from=build /app/dist /usr/share/nginx/html\n`;
     const mobileDocker = `FROM node:22-alpine\nWORKDIR /app\nCOPY mobile/package*.json ./\nRUN npm install --ignore-scripts\nCOPY mobile/ ./\nENV EXPO_PUBLIC_API_URL=http://backend:3000\nRUN npm run export:android\n`;
-    const testDocker = `FROM ${BrowserTestRuntime.image}\nWORKDIR /app/tests\nCOPY tests/package*.json ./\nRUN npm install --ignore-scripts\nCOPY tests/ ./\nCOPY backend/icase.manifest.json /app/backend/icase.manifest.json\nCOPY frontend/icase.manifest.json /app/frontend/icase.manifest.json\nCMD ["sh","-c","npm test && npm run test:e2e"]\n`;
+    const mobileOnly = await fs.access(path.join(root, 'mobile/package.json')).then(() => true, () => false)
+      && !await fs.access(path.join(root, 'frontend/package.json')).then(() => true, () => false);
+    const testDocker = `FROM ${BrowserTestRuntime.image}\nWORKDIR /app/tests\nCOPY tests/package*.json ./\nRUN npm install --ignore-scripts\nCOPY tests/ ./\nCOPY backend/icase.manifest.json /app/backend/icase.manifest.json\n${mobileOnly ? '' : 'COPY frontend/icase.manifest.json /app/frontend/icase.manifest.json\n'}CMD ["sh","-c","${mobileOnly ? 'npm test' : 'npm test && npm run test:e2e'}"]\n`;
     const nginx = `server { listen 8080; root /usr/share/nginx/html; index index.html; location / { try_files $uri /index.html; } location /api/ { proxy_pass http://backend:3000; proxy_set_header Host $host; } location /socket.io/ { proxy_pass http://backend:3000; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host $host; proxy_read_timeout 75s; proxy_send_timeout 75s; proxy_buffering off; } location = /health { proxy_pass http://backend:3000/health; } }\n`;
     let compose = `services:
   database:
@@ -218,6 +191,7 @@ networks:
       const start=compose.indexOf('  backend:\n'),end=compose.indexOf('\n  provider:',start);
       const section=compose.slice(start,end).replace('depends_on: {','depends_on: { provider: {condition: service_started},');compose=compose.slice(0,start)+section+compose.slice(end);
     }
+    if (mobileOnly) compose = compose.replace(', frontend: { condition: service_healthy }', '');
     const config = {
       database: databaseKind,
       associations,
@@ -240,7 +214,7 @@ networks:
     if (['pruebas', 'paquete_entrega'].includes(type)) {
       await fs.access(path.join(root, 'tests', 'package.json'));
     }
-    return { java,replicas:manifest.eventos_cambios?.replicas===true };
+    return { java, web: !mobileOnly, replicas:manifest.eventos_cambios?.replicas===true };
   }
 }
 

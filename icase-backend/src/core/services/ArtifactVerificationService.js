@@ -58,6 +58,11 @@ class ArtifactVerificationService {
         break;
       }
       case 'codigo_frontend': {
+        if (files.has('mobile/package.json')) {
+          requireJson('mobile/package.json');
+          requireFile('mobile/App.js');
+          if (!files.has('frontend/package.json')) break;
+        }
         requireJson('frontend/package.json');
         requireFile('frontend/src/App.jsx');
         const pages = [...files].filter(([path]) => /^frontend\/src\/pages\/.*\.(?:jsx|tsx)$/.test(path));
@@ -104,7 +109,7 @@ class ArtifactVerificationService {
         if (!testFiles.some(([, content]) => /\b(?:post|put|patch|delete)\b|method:\s*['"](?:POST|PUT|PATCH|DELETE)/i.test(content))) {
           errores.push('Las pruebas no ejercitan ninguna operación de escritura del negocio.');
         }
-        if (!testFiles.some(([, content]) => /\.click\(|\.fill\(|\.submit\(/.test(content))) {
+        if (!files.has('tests/mobile-platform.json') && !testFiles.some(([, content]) => /\.click\(|\.fill\(|\.submit\(/.test(content))) {
           errores.push('Las pruebas de navegador no verifican interacciones de usuario.');
         }
         break;
@@ -112,7 +117,7 @@ class ArtifactVerificationService {
       case 'infraestructura': {
         requireFile('ops/docker-compose.yml');
         requireFile('ops/docker/backend.Dockerfile');
-        requireFile('ops/docker/frontend.Dockerfile');
+        if (!files.has('ops/mobile-platform.json')) requireFile('ops/docker/frontend.Dockerfile');
         if (files.has('ops/docker-compose.ha.yml') && !/replicas:\s*[2-9]/.test(files.get('ops/docker-compose.ha.yml'))) {
           errores.push('El perfil de alta disponibilidad no define réplicas.');
         }
@@ -133,7 +138,7 @@ class ArtifactVerificationService {
         break;
       }
       case 'paquete_entrega': {
-        for (const path of [files.has('backend/pom.xml') ? 'backend/pom.xml' : 'backend/package.json', 'frontend/package.json', 'tests/package.json', 'ops/docker-compose.yml', 'delivery-manifest.json']) requireFile(path);
+        for (const path of [files.has('backend/pom.xml') ? 'backend/pom.xml' : 'backend/package.json', files.has('mobile/package.json') ? 'mobile/package.json' : 'frontend/package.json', 'tests/package.json', 'ops/docker-compose.yml', 'delivery-manifest.json']) requireFile(path);
         requireJson('delivery-manifest.json');
         break;
       }

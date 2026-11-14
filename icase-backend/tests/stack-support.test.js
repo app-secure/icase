@@ -46,7 +46,7 @@ describe('StackCatalog', () => {
 
 describe('propuesta y validación de la etapa de stack', () => {
   const propose = (texto) => new CodePlanningProposalService().generar({
-    etapa: 'stack_tecnologico', proyecto: {}, diagramas: [], plan: { etapas: [] },
+    etapa: 'stack_tecnologico', proyecto: { auditoria_requisitos: { restricciones_tecnicas: [{ necesidad: texto, estado: 'confirmado' }] } }, diagramas: [], plan: { etapas: [] },
     requerimientos: [{ aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Algo', descripcion: texto }]
   });
 

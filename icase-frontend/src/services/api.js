@@ -632,8 +632,8 @@ export async function proposeCodePhaseApi(projectId, phase, propuesta, observaci
   return data;
 }
 
-export async function suggestCodePhaseApi(projectId, phase) {
-  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}/sugerencia`, {
+export async function suggestCodePhaseApi(projectId, phase, inicial = false) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}/sugerencia${inicial ? "?inicial=1" : ""}`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' })
   });
@@ -745,8 +745,8 @@ export async function reviewBackendArtifactApi(projectId, artifactId, decision, 
   return data;
 }
 
-export async function generateFrontendArtifactApi(projectId) {
-  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/frontend/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+export async function generateFrontendArtifactApi(projectId, plataforma) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/frontend/generar`, { method: 'POST', body: JSON.stringify({ plataforma }), headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo generar el frontend.');
   return data;
@@ -827,9 +827,18 @@ export async function reviewDeliveryArtifactApi(projectId, artifactId, decision,
 
 export async function downloadDeliveryArtifactApi(projectId, artifactId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/${artifactId}/descargar`, { headers: getAuthHeaders() });
+  return saveZip(res);
+}
+
+export async function downloadCodeArtifactApi(projectId, artifactId, plataforma = '') {
+  const url = `${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/descargar?plataforma=${encodeURIComponent(plataforma)}`;
+  return saveZip(await fetchCodeApi(url, { headers: getAuthHeaders() }));
+}
+
+async function saveZip(res) {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'No se pudo descargar el paquete final.');
+    throw new Error(data.error || 'No se pudo descargar el ZIP.');
   }
   const blob = await res.blob();
   const disposition = res.headers.get('Content-Disposition') || '';

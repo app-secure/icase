@@ -18,7 +18,9 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
       database.url += '&replicaSet=rs0';
       database.health = 'mongosh --quiet --file /opt/icase/mongo-health.js';
     }
-    const highAvailability = /alta disponibilidad|high availability|failover|balanceador|load balanc|r[eé]plica/i.test(evidence);
+    const ha = /alta disponibilidad|high availability|failover|balanceador|load balanc|r[eé]plica/i;
+    const excluida = /\b(?:no|sin|descartad[ao]s?|futur[ao]|pendiente)\b/i;
+    const highAvailability = evidence.split(/[.;\n]+/).some(frase => ha.test(frase) && !excluida.test(frase));
     const files = [
       ...(database?.transactions ? ['mongo-start.sh', 'mongo-health.js'].map((name) => ({ ruta: 'ops/docker/' + name, lenguaje: name.endsWith('.sh') ? 'shell' : 'javascript', contenido: fs.readFileSync(path.join(__dirname, '../templates/data-layer', name), 'utf8').replace(/\r\n/g, '\n') })) : []),
       { ruta: 'ops/docker/backend.Dockerfile', lenguaje: 'dockerfile', contenido: this._backendDockerfile(stack.backend) },
@@ -60,6 +62,12 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
       const nginx=files.find(file=>file.ruta==='ops/docker/nginx.conf');nginx.contenido=nginx.contenido.replace(/upstream api \{[^}]+\}/,'resolver 127.0.0.11 valid=5s; upstream api { zone api 64k; least_conn; server backend:3000 resolve; }');
       files.push({ruta:'ops/docker-compose.events-replicas.yml',lenguaje:'yaml',contenido:'services:\n  backend:\n    ports: !reset []\n    deploy: {replicas: 2}\n    depends_on:\n      redis: {condition: service_healthy}\n# Usar la API a través del frontend; transporte WebSocket sin polling.\n'});
     }
+    const mobileOnly = frontend.archivos?.some(f => f.ruta === 'mobile/package.json') && !frontend.archivos.some(f => f.ruta === 'frontend/package.json');
+    if (mobileOnly) {
+      const compose = files.find(file => file.ruta === 'ops/docker-compose.yml');
+      compose.contenido = compose.contenido.replace(/^  frontend:\n(?:    .*\n)+/m, '');
+      files.push({ ruta: 'ops/mobile-platform.json', lenguaje: 'json', contenido: '{"plataforma":"móvil"}' });
+    }
     const warnings = [];
     if(backendManifest.integraciones?.enabled?.length)warnings.push('Completa las credenciales y campos de las integraciones aprobadas. Un proveedor local simulado no acredita cuentas Stripe/SSO reales, TLS ni hardware de producción.');
     if(backendManifest.eventos_cambios?.replicas)warnings.push('Redis Pub/Sub coordina invalidaciones sin replay ni SLA. Aísla namespaces, configura seguridad de Redis y no combines estado local con varias réplicas.');
@@ -67,7 +75,7 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
     if (!database) warnings.push('No se identificó una base de datos aprobada; el compose no creará un servicio de persistencia.');
     if (database?.transactions) warnings.push('MongoDB N:M usa un replica set autenticado de un solo nodo para transacciones. No proporciona alta disponibilidad; valida el arranque y configura usuarios de mínimo privilegio antes de producción.');
     return {
-      archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
+      archivos: files.filter(f => !mobileOnly || !['ops/docker/frontend.Dockerfile', 'ops/docker/nginx.conf'].includes(f.ruta)).map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
       dependencias: [{ tipo: 'codigo_backend', version: backend.version }, { tipo: 'codigo_frontend', version: frontend.version }],
       trazabilidad_rf: [...new Set([...(backend.trazabilidad_rf || []), ...(frontend.trazabilidad_rf || [])])],
       advertencias: warnings,
@@ -81,7 +89,7 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
   }
 
   _database(selected, evidence) {
-    const text = `${selected || ''}\n${evidence}`;
+    const text = selected || evidence;
     if (/postgres(?:ql)?/i.test(text)) return { label: 'PostgreSQL', image: 'postgres:16-alpine', env: ['POSTGRES_DB=${DB_NAME}', 'POSTGRES_USER=${DB_USER}', 'POSTGRES_PASSWORD=${DB_PASSWORD}'], url: 'postgresql://${DB_USER}:${DB_PASSWORD}@database:5432/${DB_NAME}', volume: '/var/lib/postgresql/data', health: 'pg_isready -U ${DB_USER} -d ${DB_NAME}' };
     if (/mongodb|mongo\b/i.test(text)) return { label: 'MongoDB', image: 'mongo:7', env: ['MONGO_INITDB_ROOT_USERNAME=${DB_USER}', 'MONGO_INITDB_ROOT_PASSWORD=${DB_PASSWORD}'], url: 'mongodb://${DB_USER}:${DB_PASSWORD}@database:27017/${DB_NAME}?authSource=admin', volume: '/data/db', health: 'mongosh --quiet --eval "db.adminCommand(\'ping\')"' };
     if (/mysql/i.test(text)) return { label: 'MySQL', image: 'mysql:8', env: ['MYSQL_DATABASE=${DB_NAME}', 'MYSQL_USER=${DB_USER}', 'MYSQL_PASSWORD=${DB_PASSWORD}', 'MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}'], url: 'mysql://${DB_USER}:${DB_PASSWORD}@database:3306/${DB_NAME}', volume: '/var/lib/mysql', health: 'mysqladmin ping -h 127.0.0.1 -u root -p${DB_ROOT_PASSWORD}' };

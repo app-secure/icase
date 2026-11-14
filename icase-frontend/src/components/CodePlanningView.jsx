@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   fetchCodePlanApi, fetchGeneratedArtifactsApi, generateBackendArtifactApi,
-  downloadDeliveryArtifactApi, generateDeliveryArtifactApi, generateFrontendArtifactApi,
+  downloadCodeArtifactApi, downloadDeliveryArtifactApi, generateDeliveryArtifactApi, generateFrontendArtifactApi,
   generateInfrastructureArtifactApi, generatePipelineArtifactApi, generateTestArtifactApi, proposeCodePhaseApi,
   reviewBackendArtifactApi, reviewCodePhaseApi, reviewFrontendArtifactApi,
   reviewDeliveryArtifactApi, reviewInfrastructureArtifactApi, reviewPipelineArtifactApi,
@@ -15,61 +15,19 @@ import {
 import GenerationReport from './GenerationReport';
 import { ToastContainer, useToasts } from './Toast';
 
-const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'];
-// Etapas que se pueden editar y aprobar pero no bloquean la generación (si no se aprueban rige el modo automático).
-const OPTIONAL_PHASES = ['modulos'];
+const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
 
 function mockupFormWaiver(verification) {
   const text = (verification?.errores || []).join('\n');
   const passed = (pattern) => (verification?.pruebas || []).some((item) => pattern.test(item.paso) && item.resultado === 'correcto');
+  const specs = text.match(/[\w.-]+\.spec\.[jt]s/gi) || [];
   return verification?.estado === 'fallida'
-    && /designed-ui\.spec\.js|interfaz diseñada|locator\.fill/i.test(text)
+    && specs.length > 0 && specs.every(spec => spec === 'designed-ui.spec.js')
     && passed(/Compilación/) && passed(/health checks/) && passed(/CRUD/);
 }
-const EDITABLE_PHASES = [...DECISION_PHASES, ...OPTIONAL_PHASES];
+const EDITABLE_PHASES = DECISION_PHASES;
 
-const DEFAULTS = {
-  alcance_plataforma: {
-    plataformas: ['web'],
-    alcance: 'Aplicación web funcional basada en los requisitos, diagramas y mockups aprobados.',
-    exclusiones: 'Aplicaciones móviles nativas fuera del primer incremento.'
-  },
-  stack_tecnologico: {
-    backend: 'Node.js + Express', frontend: 'React + Vite', base_datos: 'MongoDB',
-    gestor_paquetes: 'npm', plataformas: ['web'], observaciones_tecnicas: ''
-  },
-  arquitectura_codigo: {
-    estilo: 'Clean Architecture por módulos',
-    capas: 'Dominio, casos de uso, adaptadores de interfaz e infraestructura',
-    comunicacion: 'API REST con JSON',
-    autenticacion: 'JWT y control de acceso basado en roles',
-    decisiones_adicionales: ''
-  },
-  estructura_carpetas: {
-    arbol: `backend/
-  src/core/{entities,use-cases,services}
-  src/interface-adapters/{controllers,repositories}
-  src/infrastructure/{database,middlewares,services}
-  src/routes
-frontend/
-  src/{components,pages,services,hooks,utils}
-tests/{unit,integration,e2e}`,
-    convenciones: 'Un módulo por capacidad funcional; nombres de archivos consistentes y sin código generado fuera de estas raíces.'
-  },
-  reglas_negocio: { reglas: [], notas: '' },
-  control_acceso: { autenticacion: { metodo: 'jwt', expiracion: '8h' }, roles: [], permisos: [], operaciones: [], notas: '' },
-  modulos: { modo: 'automatico', modulos: [], notas: '' }
-};
-
-const ICONS = {
-  alcance_plataforma: Settings2,
-  stack_tecnologico: Code2,
-  arquitectura_codigo: Layers3,
-  estructura_carpetas: FolderTree,
-  reglas_negocio: Scale,
-  control_acceso: ShieldCheck,
-  modulos: Puzzle
-};
+const DEFAULTS = {};
 
 const STATUS_STYLE = {
   aprobada: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -133,6 +91,24 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
   }, [projectId]);
 
   const current = useMemo(() => plan?.etapas?.find((item) => item.etapa === selected), [plan, selected]);
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  useEffect(() => {
+    setLoadingDraft(false);
+    if (!current || !EDITABLE_PHASES.includes(selected) || current.estado === 'bloqueada') return;
+    if (current.propuesta && (current.estado !== 'desactualizada' || !['estructura_carpetas', 'stack_tecnologico'].includes(selected))) return;
+    let active = true;
+    setLoadingDraft(true);
+    suggestCodePhaseApi(projectId, selected, true).then(result => {
+      if (active) {
+        setDrafts(old => ({ ...old, [selected]: result.propuesta }));
+        setSuggestionMeta(result);
+      }
+    }).catch(error => active && addToast({ type: 'error', message: error.message }))
+      .finally(() => active && setLoadingDraft(false));
+    return () => { active = false; };
+  }, [projectId, selected, current]);
+
+  const plataformas = plan?.etapas?.find(item => item.etapa === 'stack_tecnologico')?.propuesta?.plataformas || ['web'];
   const approvedCount = plan?.etapas?.filter((item) => DECISION_PHASES.includes(item.etapa) && item.estado === 'aprobada').length || 0;
   const testsEnabled = plan?.etapas?.find((item) => item.etapa === 'generacion_pruebas')?.habilitada;
   const infrastructureEnabled = plan?.etapas?.find((item) => item.etapa === 'generacion_infraestructura')?.habilitada;
@@ -141,7 +117,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
   const [showOneClickReport, setShowOneClickReport] = useState(true);
 
   const handleOneClickMode = async () => {
-    if (!window.confirm('¿Deseas ejecutar el Modo de un clic?\n\nRecorrerá todas las etapas de planificación aplicando valores seguros:\n• Autenticación JWT con roles derivados de los RF\n• Registro cerrado (sin autoregistro de usuarios)\n• Solo reglas explícitas con evidencia literal confirmadas\n• Módulos recomendados por defecto\n\nAl terminar tendrás un informe detallado con los aspectos dudosos o descartados.')) {
+    if (!window.confirm('¿Deseas ejecutar el Modo de un clic?\n\nRecorrerá todas las etapas de planificación aplicando valores seguros:\n• Autenticación JWT con roles derivados de los RF\n• Registro cerrado (sin autoregistro de usuarios)\n• Solo reglas explícitas con evidencia literal confirmadas\n• Módulos sugeridos por el análisis\n\nAl terminar tendrás un informe detallado con los aspectos dudosos o descartados.')) {
       return;
     }
     try {
@@ -171,7 +147,13 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     try {
       setBusy(true);
       const updated = await proposeCodePhaseApi(projectId, selected, drafts[selected], notes);
+      setDrafts(old => ({ ...old, [selected]: updated.etapas.find(e => e.etapa === selected)?.propuesta }));
       setPlan((previous) => ({ ...updated, modulos: { ...updated.modulos, requisitos: previous?.modulos?.requisitos || [] } }));
+      const artefactos = await fetchGeneratedArtifactsApi(projectId);
+      for (const [tipo, actualizar] of Object.entries({ codigo_backend: setBackendArtifact, codigo_frontend: setFrontendArtifact,
+        pruebas: setTestArtifact, infraestructura: setInfrastructureArtifact, pipeline_ci_cd: setPipelineArtifact, paquete_entrega: setDeliveryArtifact })) {
+        actualizar(artefactos.find(item => item.tipo === tipo) || null);
+      }
       addToast({ type: 'success', message: 'Propuesta guardada. Ahora debe aprobarse explícitamente.' });
     } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
@@ -181,7 +163,19 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     try {
       setBusy(true); setSuggestionMeta(null);
       const result = await suggestCodePhaseApi(projectId, selected);
-      setDrafts((old) => ({ ...old, [selected]: result.propuesta }));
+      setDrafts(old => {
+        if (selected !== 'reglas_negocio') return { ...old, [selected]: result.propuesta };
+        const anteriores = old[selected]?.reglas || [];
+        const nuevas = result.propuesta.reglas.filter(r => !anteriores.some(v => v.entidad === r.entidad && v.tipo === r.tipo && v.campo === r.campo && v.mensaje === r.mensaje));
+        const ids = new Set(anteriores.map(r => r.id));
+        const adicionales = nuevas.map(r => {
+          let id = r.id;
+          while (ids.has(id)) id += 'a';
+          ids.add(id);
+          return { ...r, id };
+        });
+        return { ...old, [selected]: { ...result.propuesta, reglas: [...anteriores, ...adicionales] } };
+      });
       setSuggestionMeta({ evidencias: result.evidencias || [], advertencias: result.advertencias || [] });
       addToast({ type: 'success', message: 'Propuesta preparada con artefactos aprobados. Revísala antes de guardarla.' });
     } catch (error) { addToast({ type: 'error', message: error.message }); }
@@ -236,10 +230,10 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     finally { setBusy(false); }
   };
 
-  const generateFrontend = async () => {
+  const generateFrontend = async (plataforma) => {
     try {
       setBusy(true);
-      const result = await generateFrontendArtifactApi(projectId);
+      const result = await generateFrontendArtifactApi(projectId, plataforma);
       setFrontendArtifact(result.artefacto);
       setPlan(await fetchCodePlanApi(projectId));
       addToast({ type: 'success', message: result.reutilizado ? 'La entrada no cambió; se reutilizó el frontend existente.' : 'Frontend generado. Verifica sus interacciones antes de aprobar.' });
@@ -352,11 +346,11 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-white">
-      {/* SIDEBAR IZQUIERDO DELGADO TIPO ROADMAP: Compuertas de decisión */}
+      {/* SIDEBAR IZQUIERDO DELGADO TIPO ROADMAP: Decisiones de codificación */}
       <aside className="w-64 shrink-0 border-r border-slate-100 bg-white flex flex-col overflow-y-auto select-none">
         <div className="px-5 pt-6 pb-3">
           <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Compuertas de decisión
+            Decisiones de codificación
           </h2>
         </div>
 
@@ -368,7 +362,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
               titulo: 'Generación y entrega',
               estado: deliveryArtifact?.aprobado
                 ? 'aprobada'
-                : approvedCount === DECISION_PHASES.length
+                : plan?.etapas?.some(e => e.etapa === 'generacion_backend' && e.habilitada)
                   ? 'en_revision'
                   : 'bloqueada'
             };
@@ -377,7 +371,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
             return roadmapItems.map((item, idx) => {
               const isSelected = selected === item.etapa;
               const isApproved = item.estado === 'aprobada';
-              const isBlocked = item.estado === 'bloqueada';
+              const isBlocked = item.estado === 'bloqueada' && !item.propuesta;
               const nextItem = roadmapItems[idx + 1];
               const isNextApproved = nextItem?.estado === 'aprobada';
               const showConnector = idx < roadmapItems.length - 1;
@@ -398,7 +392,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                     }`}
                     title={
                       item.etapa === 'generacion_entrega' && isBlocked
-                        ? 'Aprueba las 6 decisiones anteriores para habilitar la generación y entrega'
+                        ? 'Aprueba las decisiones anteriores para habilitar la generación y entrega'
                         : `${item.titulo} (${item.estado?.replace('_', ' ')})`
                     }
                   >
@@ -431,46 +425,14 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
             });
           })()}
 
-          {(plan?.etapas || []).some((item) => OPTIONAL_PHASES.includes(item.etapa)) && (
-            <div className="mt-3 pt-3 border-t border-slate-100">
-              <p className="px-5 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Opcional
-              </p>
-              {(plan?.etapas || []).filter((item) => OPTIONAL_PHASES.includes(item.etapa)).map((item) => {
-                const Icon = ICONS[item.etapa] || Puzzle;
-                const isSelected = selected === item.etapa;
-                const isApproved = item.estado === 'aprobada';
-                return (
-                  <button
-                    key={item.etapa}
-                    onClick={() => { setSelected(item.etapa); setSuggestionMeta(null); }}
-                    className={`w-full flex items-center gap-3 px-5 py-2.5 text-left text-[13px] transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#F8F4FF] text-[#6D28D9] font-bold'
-                        : isApproved
-                        ? 'text-slate-800 font-semibold hover:bg-slate-50/80'
-                        : 'text-slate-500 font-medium hover:bg-slate-50/80'
-                    }`}
-                    title={`${item.titulo} (Opcional)`}
-                  >
-                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-                      isApproved
-                        ? 'bg-emerald-500 text-white'
-                        : 'border border-slate-300 bg-white text-slate-500'
-                    }`}>
-                      {isApproved ? <Check size={12} strokeWidth={3} /> : <Icon size={11} />}
-                    </span>
-                    <span className="truncate">{item.titulo}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
         </nav>
       </aside>
 
       {/* SECCIÓN DERECHA: Misma altura y estructura de cabecera que la Fase 2 */}
       <div className="w-full flex-1 overflow-y-auto min-h-0 pt-6 pb-10 px-6 md:px-12 flex flex-col bg-white">
+        {plan?.etapas?.some(item => item.estado === 'desactualizada') && <p role="status" className="rounded bg-amber-50 p-3 text-sm">
+          Vuelve a revisar o generar: {plan.etapas.filter(item => item.estado === 'desactualizada').map(item => item.titulo).join(', ')}.
+        </p>}
         <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col min-h-0">
           {/* Cabecera superior unificada de Fase 3 (idéntica en altura a Fase 2) */}
           <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
@@ -504,7 +466,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                 Modo de un clic
               </button>
               <span className="text-xs text-slate-500 hidden sm:inline">
-                Aprueba cada decisión antes de habilitar la generación del código.
+                Puedes volver a revisar las decisiones aprobadas.
               </span>
             </div>
 
@@ -617,7 +579,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                   </div>
                   <h2 className="mt-1.5 text-2xl font-bold text-slate-900">Generación y entrega del sistema</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Genera, verifica y aprueba secuencialmente el backend, frontend, pruebas, infraestructura, pipeline CI/CD y paquete final.
+                    Genera las partes seleccionadas. Cada versión tiene su propia descarga y verificación.
                   </p>
                 </div>
               </div>
@@ -653,7 +615,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                 <div className="border-t border-slate-200 pt-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div><h3 className="font-semibold text-slate-900">Generación del frontend</h3><p className="mt-1 text-xs text-slate-500">Aplicación React/Vite con rutas y vistas derivadas del árbol y mockups aprobados.</p></div>
-                    <button disabled={busy} onClick={generateFrontend} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 cursor-pointer"><Code2 size={15} />{frontendArtifact ? 'Regenerar frontend' : 'Generar frontend'}</button>
+                    <div className="flex gap-2">{plataformas.map(p => <button key={p} disabled={busy} onClick={() => generateFrontend(p)} className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white">Generar {p}</button>)}</div>
                   </div>
                   {frontendArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {frontendArtifact.version} · {frontendArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${frontendArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{frontendArtifact.estado}</span></div>
@@ -729,7 +691,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                 <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5">
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-bold uppercase tracking-wider text-violet-600 leading-tight max-w-[180px]">
-                      Compuerta de decisión activa
+                      Decisión
                     </span>
                     <span className={`inline-flex rounded-full border px-3 py-0.5 text-xs font-semibold ${STATUS_STYLE[current.estado]}`}>
                       {current.estado?.replace('_', ' ')}
@@ -752,6 +714,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
 
                 {/* Formulario principal de decisión */}
                 <div className="rounded-xl border border-slate-100 bg-slate-50/40 p-5">
+                  {loadingDraft && <p role="status">Preparando propuesta…</p>}
                   <PhaseForm phase={selected} modules={plan?.modulos} value={drafts[selected] || {}} disabled={busy || current.estado === 'bloqueada'} onChange={(value) => setDrafts((old) => ({ ...old, [selected]: value }))} />
                 </div>
                 {suggestionMeta && <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
@@ -762,8 +725,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                 <label className="mt-5 block"><span className="mb-1 block text-xs font-semibold text-slate-700">Observaciones de revisión</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-violet-500" placeholder="Motivo, restricciones o cambios solicitados…" /></label>
                 <div className="mt-5 flex flex-wrap justify-end gap-2">
                   {current.estado === 'en_revision' && <button disabled={busy} onClick={() => review('rechazar')} className="flex items-center gap-1.5 rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 disabled:opacity-50"><RotateCcw size={14} />Solicitar cambios</button>}
-                  <button disabled={busy || current.estado === 'bloqueada'} onClick={saveProposal} className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50"><Save size={14} />{current.estado === 'aprobada' ? 'Guardar nueva versión' : 'Guardar propuesta'}</button>
-                  {current.estado === 'en_revision' && <button disabled={busy} onClick={() => review('aprobar')} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={14} />Aprobar decisión</button>}
+                  <button disabled={busy || current.estado === 'bloqueada' || loadingDraft || !drafts[selected]} onClick={saveProposal} className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50"><Save size={14} />{current.estado === 'aprobada' ? 'Guardar nueva versión' : 'Guardar propuesta'}</button>
+                  {current.estado === 'en_revision' && <button disabled={busy || JSON.stringify(current.propuesta) !== JSON.stringify(drafts[selected])} onClick={() => review('aprobar')} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check size={14} />Aprobar decisión</button>}
                 </div>
               </>}
             </div>
@@ -842,7 +805,13 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
     finally { setLoading(false); }
   };
 
+  const partes = artifact.tipo === 'codigo_frontend'
+    ? [['web', 'frontend/'], ['móvil', 'mobile/']].filter(([, dir]) => artifact.archivos?.some(f => f.ruta.startsWith(dir))).map(([p]) => p) : [''];
   return <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs">
+    {artifact.tipo !== 'paquete_entrega' && partes.map(p => <button key={p} className="mb-2 mr-3 font-semibold text-violet-700"
+      onClick={() => downloadCodeArtifactApi(projectId, artifact.id, p).catch(e => setError(e.message))}>Descargar ZIP {p}</button>)}
+    {artifact.modulos && <details><summary>Módulos de esta versión</summary>
+      <p>Incluidos: {artifact.modulos.incluidos.join(', ') || 'ninguno'}</p><p>Fuera: {artifact.modulos.excluidos.join(', ') || 'ninguno'}</p></details>}
     <div className="flex items-center justify-between gap-3">
       <span className="font-semibold text-slate-700">Verificación aislada (Docker): {result?.estado || (job?.estado === 'procesando' ? 'en ejecución…' : 'pendiente')}</span>
       <button type="button" disabled={loading} onClick={verify} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-1.5 font-semibold text-violet-700 hover:bg-violet-100/60 disabled:opacity-50 transition cursor-pointer">
@@ -887,8 +856,9 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
 
 // Lo que el generador sabe producir (debe coincidir con StackCatalog del backend, que lo valida de todos modos).
 const STACK_OPTIONS = {
-  backend: ['Node.js + Express', 'Node.js + NestJS', 'Java + Spring Boot'],
+  backend: ['Node.js + Express', 'Node.js + NestJS', 'Node.js 22.12+ + NestJS 12.3.2', 'Java + Spring Boot'],
   base_datos: ['PostgreSQL', 'MySQL', 'MongoDB'],
+  gestor_paquetes: ['npm', 'Maven'], tiempo_real: ['', 'Socket.IO'], estilos: ['Estilos del mockup', 'Tailwind CSS'],
   frontend: ['React + Vite']
 };
 
@@ -1015,7 +985,7 @@ function AccessEditor({ value, onChange, disabled }) {
         </select></label>
       <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">Duración de la sesión</span>
         <select disabled={disabled || auth.metodo === 'ninguna'} value={auth.expiracion} onChange={(event) => setAuth({ expiracion: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50">
-          {['1h', '8h', '24h', '7d'].map((item) => <option key={item} value={item}>{item}</option>)}
+          {['1h', '8h', '24h', '7d'].map((item) => <option key={item} value={item}>{item || 'Ninguno'}</option>)}
         </select></label>
     </section>
     {auth.metodo === 'ninguna' && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">Sin autenticación, cualquier persona con acceso a la red podrá leer, crear, modificar y eliminar datos.</p>}
@@ -1071,20 +1041,14 @@ function ModulesEditor({ value, onChange, disabled, modules }) {
     const chosen = (value.modulos || []).find((item) => item.id === id);
     return mode === 'personalizado' && chosen ? chosen.activo : recommended;
   };
-  const setMode = (next) => onChange({ ...value, modo: next, modulos: optional.map((item) => ({ id: item.id, activo: next === 'automatico' ? item.porDefecto : stateOf(item.id) })) });
   const toggle = (id, active) => onChange({ ...value, modo: 'personalizado', modulos: optional.map((item) => ({ id: item.id, activo: item.id === id ? active : stateOf(item.id) })) });
   return <div className="space-y-5">
     <CoverageEditor value={value.cobertura || {}} onChange={(cobertura) => onChange({ ...value, cobertura })} disabled={disabled} modules={modules} />
-    <fieldset className="space-y-2">
-      <legend className="mb-1 text-xs font-semibold text-slate-700">Modo</legend>
-      <label className="flex items-start gap-2 text-sm"><input type="radio" name="modo-modulos" disabled={disabled} checked={mode === 'automatico'} onChange={() => setMode('automatico')} className="mt-1" /><span><span className="font-medium text-slate-800">Automático (recomendado)</span><span className="block text-xs text-slate-500">Usa los módulos recomendados. Es lo que se genera si no apruebas esta etapa.</span></span></label>
-      <label className="flex items-start gap-2 text-sm"><input type="radio" name="modo-modulos" disabled={disabled} checked={mode === 'personalizado'} onChange={() => setMode('personalizado')} className="mt-1" /><span><span className="font-medium text-slate-800">Personalizado</span><span className="block text-xs text-slate-500">Tú decides qué módulos opcionales se incluyen.</span></span></label>
-    </fieldset>
     <section>
       <h3 className="mb-2 text-xs font-semibold text-slate-700">Módulos opcionales</h3>
       {optional.length === 0 ? <p className="text-xs text-slate-500">No hay módulos opcionales disponibles.</p> : <ul className="space-y-2">{optional.map((item) => <li key={item.id} className="rounded-lg border border-slate-200 p-3">
-        <label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={disabled || mode === 'automatico'} checked={stateOf(item.id)} onChange={(event) => toggle(item.id, event.target.checked)} className="mt-1" />
-          <span><span className="font-medium text-slate-800">{item.etiqueta}</span><span className="ml-2 text-[10px] text-slate-500">{item.porDefecto ? 'recomendado' : 'no recomendado por defecto'}</span>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={disabled} checked={stateOf(item.id)} onChange={(event) => toggle(item.id, event.target.checked)} className="mt-1" />
+          <span><span className="font-medium text-slate-800">{item.etiqueta}</span>
             <span className="block text-xs text-slate-600">{item.descripcion}</span>
             {item.sinEfecto && <span className="block text-xs text-slate-500">{item.sinEfecto}</span>}</span></label>
       </li>)}</ul>}
@@ -1159,28 +1123,26 @@ function CoverageEditor({ value, onChange, disabled, modules }) {
 function PhaseForm({ phase, value, onChange, disabled, modules }) {
   if (phase === 'modulos') return <ModulesEditor value={value} onChange={onChange} disabled={disabled} modules={modules} />;
   if (phase === 'control_acceso') return <AccessEditor value={value} onChange={onChange} disabled={disabled} />;
-  if (phase === 'reglas_negocio') return <RulesEditor value={value} onChange={onChange} disabled={disabled} />;
-  const field = (key, label, multiline = false) => {
-    const displayValue = Array.isArray(value[key]) ? value[key].join(', ') : (value[key] || '');
-    const update = (raw) => onChange({
-      ...value,
-      [key]: Array.isArray(value[key]) ? raw.split(',').map((item) => item.trim()).filter(Boolean) : raw
-    });
-    return <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">{label}</span>{multiline ? <textarea disabled={disabled} rows={key === 'arbol' ? 12 : 4} value={displayValue} onChange={(e) => update(e.target.value)} className="w-full rounded-lg border border-slate-300 p-3 font-mono text-sm disabled:bg-slate-50" /> : <input disabled={disabled} value={displayValue} onChange={(e) => update(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50" />}</label>;
-  };
-  if (phase === 'alcance_plataforma') return <div className="space-y-4">{field('alcance', 'Alcance del incremento', true)}{field('exclusiones', 'Exclusiones explícitas', true)}{field('plataformas', 'Plataformas (separadas por coma)')}{field('capacidades_principales', 'Requisitos funcionales incluidos', true)}{field('restricciones_no_funcionales', 'Restricciones no funcionales', true)}</div>;
+  if (phase === 'reglas_negocio') return <div className="space-y-3">
+    {value.confirmadas?.map(item => <p key={item.id}><strong>{item.id}</strong> {item.necesidad} · Confirmada en el análisis</p>)}
+
+    <RulesEditor value={value} onChange={onChange} disabled={disabled} />
+  </div>;
+  if (phase === 'alcance_plataforma') return <fieldset className="space-y-2"><legend>Interfaces</legend>
+    {(value.detectadas || ['web', 'móvil']).map(p => <label key={p} className="mr-4"><input type="checkbox" checked={(value.plataformas || []).includes(p)} disabled={disabled || (value.plataformas?.length === 1 && value.plataformas.includes(p))}
+      onChange={e => onChange({ ...value, plataformas: e.target.checked ? [...(value.plataformas || []), p] : value.plataformas.filter(item => item !== p) })} /> {p}</label>)}
+  </fieldset>;
   const choice = (key, label) => {
     const current = String(value[key] || '');
     const known = STACK_OPTIONS[key].includes(current);
-    return <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">{label}</span>
-      <select disabled={disabled} value={current} onChange={(event) => onChange({ ...value, [key]: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50">
+    return <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-700">{label} · {value.origen?.[key] || 'Propuesta'}</span>
+      <select disabled={disabled} value={current} onChange={(event) => onChange({ ...value, [key]: event.target.value, origen: { ...value.origen, [key]: 'Elegido por ti' }, ...(key === 'backend' ? { version_backend: undefined, gestor_paquetes: /spring/i.test(event.target.value) ? 'Maven' : 'npm' } : {}) })} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-50">
         {current && !known && <option value={current}>{current} (no soportado)</option>}
-        {STACK_OPTIONS[key].map((item) => <option key={item} value={item}>{item}</option>)}
+        {STACK_OPTIONS[key].filter(item => key !== 'gestor_paquetes' || item === (/spring/i.test(value.backend) ? 'Maven' : 'npm')).map((item) => <option key={item} value={item}>{item || 'Ninguno'}</option>)}
       </select>
       {current && !known && <span role="alert" className="mt-1 block text-xs text-red-600">«{current}» todavía no está soportado: elige una de las opciones.</span>}
     </label>;
   };
-  if (phase === 'stack_tecnologico') return <div className="grid gap-4 md:grid-cols-2">{choice('backend', 'Backend')}{choice('frontend', 'Frontend')}{choice('base_datos', 'Base de datos')}{stackProblem(value) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 md:col-span-2">{stackProblem(value)}</p>}{field('gestor_paquetes', 'Gestor de paquetes')}{field('tiempo_real', 'Comunicación en tiempo real')}{field('estilos', 'Sistema de estilos')}<div className="md:col-span-2">{field('observaciones_tecnicas', 'Restricciones y versiones', true)}</div></div>;
-  if (phase === 'arquitectura_codigo') return <div className="space-y-4">{field('estilo', 'Estilo arquitectónico')}{field('capas', 'Capas')}{field('modulos', 'Módulos funcionales', true)}{field('comunicacion', 'Comunicación entre componentes')}{field('autenticacion', 'Autenticación y autorización')}{field('decisiones_adicionales', 'Decisiones adicionales', true)}</div>;
-  return <div className="space-y-4">{field('arbol', 'Árbol de carpetas propuesto', true)}{field('convenciones', 'Convenciones', true)}</div>;
+  if (phase === 'stack_tecnologico') return <div className="grid gap-4 md:grid-cols-2">{choice('backend', 'Backend')}{choice('frontend', 'Frontend')}{choice('base_datos', 'Base de datos')}{stackProblem(value) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 md:col-span-2">{stackProblem(value)}</p>}{choice('gestor_paquetes', 'Gestor de paquetes')}{choice('tiempo_real', 'Tiempo real')}{choice('estilos', 'Estilos')}</div>;
+  return <pre className="max-h-96 overflow-auto text-xs">{value.arbol}</pre>;
 }

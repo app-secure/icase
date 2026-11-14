@@ -10,21 +10,16 @@ const CODE_PHASE_STATES = Object.freeze({
 const CODE_PHASES = Object.freeze({
   scope: Object.freeze({
     id: 'alcance_plataforma', orden: 10, tipo: 'decision', dependencias: [],
-    titulo: 'Alcance y plataforma',
-    descripcion: 'Define plataformas incluidas, exclusiones y límites de la primera entrega.'
+    titulo: 'Qué generar',
+    descripcion: 'El backend se incluye siempre. Elige las interfaces que necesitas.'
   }),
   stack: Object.freeze({
-    id: 'stack_tecnologico', orden: 20, tipo: 'decision', dependencias: ['alcance_plataforma'],
+    id: 'stack_tecnologico', orden: 20, tipo: 'decision', dependencias: [], influyen: ['alcance_plataforma'],
     titulo: 'Herramientas y tecnologías',
     descripcion: 'Confirma lenguajes, frameworks, base de datos, gestor de paquetes y versiones.'
   }),
-  architecture: Object.freeze({
-    id: 'arquitectura_codigo', orden: 30, tipo: 'decision', dependencias: ['stack_tecnologico'],
-    titulo: 'Arquitectura de implementación',
-    descripcion: 'Convierte la arquitectura aprobada en módulos, capas, contratos y decisiones técnicas.'
-  }),
   folders: Object.freeze({
-    id: 'estructura_carpetas', orden: 40, tipo: 'decision', dependencias: ['arquitectura_codigo'],
+    id: 'estructura_carpetas', orden: 40, tipo: 'decision', dependencias: ['stack_tecnologico'],
     titulo: 'Estructura de carpetas',
     descripcion: 'Aprueba el árbol de archivos antes de producir código fuente.'
   }),
@@ -39,9 +34,9 @@ const CODE_PHASES = Object.freeze({
     descripcion: 'Define cómo se autentican las personas, qué roles existen y qué puede hacer cada rol sobre cada operación.'
   }),
   modules: Object.freeze({
-    id: 'modulos', orden: 47, tipo: 'decision', dependencias: ['estructura_carpetas'], opcional: true,
+    id: 'modulos', orden: 47, tipo: 'decision', dependencias: ['reglas_negocio', 'control_acceso'], opcional: true,
     titulo: 'Módulos',
-    descripcion: 'Elige qué funcionalidades opcionales incluye la aplicación. Si no la apruebas se usan los módulos del modo automático.'
+    descripcion: 'Elige qué funcionalidades opcionales incluye la aplicación. Si omites este paso, se incluyen los módulos sugeridos por el análisis.'
   }),
   backend: Object.freeze({
     id: 'generacion_backend', orden: 50, tipo: 'generacion', dependencias: ['estructura_carpetas', 'reglas_negocio', 'control_acceso'], influyen: ['modulos'],

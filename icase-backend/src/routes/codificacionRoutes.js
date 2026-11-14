@@ -28,6 +28,7 @@ function buildCodificacionRoutes(controller, access) {
   router.post('/:id/codificacion/paquete/generar', (req, res) => controller.generarPaquete(req, res));
   router.post('/:id/codificacion/paquete/:artefactoId/revision', (req, res) => controller.revisarPaquete(req, res));
   router.get('/:id/codificacion/paquete/:artefactoId/descargar', (req, res) => controller.descargarPaquete(req, res));
+  router.get('/:id/artefactos/:artefactoId/descargar', (req, res) => controller.descargarArtefacto(req, res));
   router.get('/:id/artefactos', (req, res) => controller.listarArtefactos(req, res));
   router.post('/:id/artefactos/:artefactoId/verificar', (req, res) => controller.verificarArtefacto(req, res));
   router.post('/:id/artefactos/:artefactoId/verificar-async', (req, res) => controller.iniciarVerificacionAsync(req, res));

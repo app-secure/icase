@@ -67,15 +67,15 @@ class CodeGenerationWorkflowService {
         }
       }
     }
-    return etapas.map((item) => afectadas.has(item.etapa) && item.estado === CODE_PHASE_STATES.APPROVED
+    return etapas.map((item) => afectadas.has(item.etapa) && [CODE_PHASE_STATES.APPROVED, CODE_PHASE_STATES.IN_REVIEW].includes(item.estado)
       ? { ...item, estado: CODE_PHASE_STATES.STALE, observaciones: `Desactualizada por cambios en ${etapaCambiada}.` }
       : item);
   }
 
   sincronizarBloqueos(etapas) {
     const estados = new Map(etapas.map((item) => [item.etapa, item.estado]));
-    return etapas.map((item) => {
-      const definition = this.obtenerDefinicion(item.etapa);
+    return etapas.filter(item => CODE_PHASE_DEFINITIONS[item.etapa]).map((item) => {
+      const definition = CODE_PHASE_DEFINITIONS[item.etapa];
       const habilitada = definition.dependencias.every(
         (dependency) => estados.get(dependency) === CODE_PHASE_STATES.APPROVED
       );

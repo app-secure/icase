@@ -87,7 +87,7 @@ describe('exerciseOpenApi con operaciones de métodos reducidos', () => {
 });
 
 describe('suite de pruebas generada con operaciones de métodos reducidos', () => {
-  const op = (id, methods) => ({ id, key: id.toLowerCase(), entity: null, collectionPath: `/api/operations/${id.toLowerCase()}`, itemPath: `/api/operations/${id.toLowerCase()}/:id`, methods, schema: { type: 'object', properties: {} }, rules: [] });
+  const op = (id, methods) => ({ id, key: id.toLowerCase(), entity: null, collectionPath: `/api/operations/${id.toLowerCase()}`, itemPath: `/api/operations/${id.toLowerCase()}/:id`, methods, schema: { type: 'object', properties: { nombre: { type: 'string' } } }, rules: [] });
   const ALL = ['GET', 'POST', 'PATCH', 'DELETE'];
   const build = (operations, { typed = true } = {}) => new TestSuiteGenerator().generar({
     proyecto: { nombre: 'Tienda' }, versionesOrigen: {},
@@ -106,6 +106,13 @@ describe('suite de pruebas generada con operaciones de métodos reducidos', () =
     const result = await build([op('RF-01', ['GET']), op('RF-02', ALL)]);
     expect(spec(result, 'typed-forms.spec.js')).toContain('const route = "/dos";');
     expect(spec(result, 'typed-forms.spec.js')).toContain('"key":"rf-02"');
+  });
+
+  test('el formulario sin campos del dominio prueba el editor JSON de la pantalla', async () => {
+    const operation = { ...op('RF-01', ALL), schema: { properties: {} } };
+    const result = await build([operation]);
+    expect(spec(result, 'typed-forms.spec.js')).toContain("page.getByLabel('Datos JSON')");
+    expect(spec(result, 'typed-forms.spec.js')).toContain('await expect(editor).toBeVisible()');
   });
 
   test('si ninguna operación admite el ciclo completo la prueba del formulario se omite', async () => {

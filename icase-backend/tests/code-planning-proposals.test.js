@@ -8,7 +8,7 @@ describe('propuestas de planificación de código', () => {
   test('detecta tecnologías solo desde requisitos y diagramas aprobados', () => {
     const result = service.generar({
       etapa: 'stack_tecnologico',
-      proyecto: { nombre: 'Restaurante' },
+      proyecto: { nombre: 'Restaurante', auditoria_requisitos: { restricciones_tecnicas: [{ tipo: 'restriccion_tecnica', estado: 'confirmado', necesidad: 'NestJS, PostgreSQL, Socket.IO, React y Tailwind' }] } },
       plan: { etapas: [] },
       requerimientos: [
         { aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Aplicación React Native', descripcion: 'Backend NestJS y PostgreSQL con Socket.IO' },
@@ -24,19 +24,19 @@ describe('propuestas de planificación de código', () => {
     expect(result.propuesta.base_datos).toBe('PostgreSQL');
     expect(result.propuesta.tiempo_real).toBe('Socket.IO');
     expect(result.propuesta.estilos).toBe('Tailwind CSS');
-    expect(result.evidencias).toHaveLength(2);
+    expect(result.evidencias).toHaveLength(3);
   });
 
-  test('genera carpetas desde las decisiones aprobadas', () => {
-    const result = service.generar({
+  test('genera carpetas desde las decisiones aprobadas', async () => {
+    const result = await service.generar({
       etapa: 'estructura_carpetas', proyecto: {}, requerimientos: [], diagramas: [],
       plan: { etapas: [
         { etapa: 'stack_tecnologico', estado: 'aprobada', propuesta: { backend: 'Node.js + NestJS' } },
         { etapa: 'arquitectura_codigo', estado: 'aprobada', propuesta: { estilo: 'Clean Architecture' } }
       ] }
     });
-    expect(result.propuesta.arbol).toContain('src/{domain,application,infrastructure,interfaces,modules}');
-    expect(result.propuesta.convenciones).toContain('Clean Architecture');
+    expect(result.propuesta.arbol).toContain('backend/src/app.controller.ts');
+    expect(result.propuesta.arbol).not.toContain('mobile/');
   });
 
   test('sugerir no guarda ni aprueba la propuesta', async () => {

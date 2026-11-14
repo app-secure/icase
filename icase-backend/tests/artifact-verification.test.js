@@ -100,6 +100,10 @@ describe('verificación de artefactos generados', () => {
     const accepted = useCase._exigirVerificacion(base, { permisivo: true });
     expect(accepted.estado).toBe('apta');
     expect(accepted.modo_permisivo).toBe(true);
+    for (const errores of [['locator.fill: timeout'], ['designed-ui.spec.js y auth.spec.js']]) {
+      const mixed = { ...base, verificacion: { ...base.verificacion, errores } };
+      expect(() => useCase._exigirVerificacion(mixed, { permisivo: true })).toThrow();
+    }
     expect(accepted.advertencias.join(' ')).toMatch(/Modo permisivo/);
     const compile = { ...base, verificacion: { ...base.verificacion, errores: ['failed to solve'], pruebas: [] } };
     expect(() => useCase._exigirVerificacion(compile, { permisivo: true })).toThrow('solo cubre el fallo de los formularios');

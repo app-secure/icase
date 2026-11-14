@@ -17,12 +17,16 @@ class GestionarPlanCodificacion {
     planCodificacionRepository,
     requerimientoRepository = null,
     diagramaRepository = null,
+    disenoRepository = null,
+    artefactoRepository = null,
     proposalService = null
   }) {
     this.proyectoRepository = proyectoRepository;
     this.planCodificacionRepository = planCodificacionRepository;
     this.requerimientoRepository = requerimientoRepository;
     this.diagramaRepository = diagramaRepository;
+    this.disenoRepository = disenoRepository;
+    this.artefactoRepository = artefactoRepository;
     this.proposalService = proposalService;
     this.workflow = new CodeGenerationWorkflowService();
     this.ruleService = new BusinessRuleService();
@@ -31,7 +35,7 @@ class GestionarPlanCodificacion {
     this.domainExtractor = new DomainModelExtractor();
   }
 
-  async sugerir({ proyectoId, etapa }) {
+  async sugerir({ proyectoId, etapa, inicial = false }) {
     const proyecto = await this._obtenerProyectoListo(proyectoId);
     const definition = this.workflow.obtenerDefinicion(etapa);
     if (definition.tipo !== 'decision') {
@@ -42,12 +46,13 @@ class GestionarPlanCodificacion {
     }
 
     const plan = await this._obtenerOCrear(proyectoId);
-    this.workflow.validarDependencias(plan, etapa);
+
     const [requerimientos, diagramas] = await Promise.all([
       this.requerimientoRepository.listarPorProyecto(proyectoId),
       this.diagramaRepository.listarPorProyecto(proyectoId)
     ]);
-    return this.proposalService.generar({ etapa, proyecto, requerimientos, diagramas, plan });
+    const diseno = etapa === 'estructura_carpetas' ? await this.disenoRepository?.obtenerPorProyecto(proyectoId) : null;
+    return this.proposalService.generar({ etapa, proyecto, requerimientos, diagramas, diseno, plan, inicial });
   }
 
   async obtener(proyectoId) {
@@ -81,7 +86,20 @@ class GestionarPlanCodificacion {
 
     const plan = await this._obtenerOCrear(proyectoId);
     this.workflow.validarDependencias(plan, etapa);
-    if (etapa === 'stack_tecnologico') StackCatalog.resolve(propuesta); // lanza un error claro si algo no está soportado
+    if (etapa === 'alcance_plataforma') {
+      if (!Array.isArray(propuesta.plataformas) || !propuesta.plataformas.length || propuesta.plataformas.some(p => !['web', 'móvil'].includes(p))) throw new Error('Selecciona plataformas válidas.');
+      const detectadas = propuesta.detectadas?.filter?.(p => ['web', 'móvil'].includes(p));
+      propuesta = { plataformas: [...new Set(propuesta.plataformas)], ...(detectadas?.length ? { detectadas: [...new Set(detectadas)] } : {}) };
+    }
+    if (etapa === 'stack_tecnologico') {
+      const stack = StackCatalog.resolve(propuesta);
+      const gestor = stack.language === 'java' ? 'Maven' : 'npm';
+      if (propuesta.gestor_paquetes && propuesta.gestor_paquetes !== gestor) throw new Error('El gestor compatible es ' + gestor + '.');
+      if (propuesta.tiempo_real && propuesta.tiempo_real !== 'Socket.IO') throw new Error('Selecciona Socket.IO o ninguno.');
+      if (propuesta.estilos && !['Tailwind CSS', 'Estilos del mockup'].includes(propuesta.estilos)) throw new Error('Selecciona un sistema de estilos compatible.');
+      const seleccion = plan.etapas.find(item => item.etapa === 'alcance_plataforma')?.propuesta;
+      if (seleccion) propuesta = { ...propuesta, plataformas: seleccion.plataformas };
+    } // lanza un error claro si algo no está soportado
     if (etapa === 'reglas_negocio') propuesta = await this._normalizarReglas(proyectoId, propuesta);
     if (etapa === 'control_acceso') propuesta = await this._normalizarAcceso(proyectoId, propuesta);
     if (etapa === 'modulos') propuesta = await this._normalizarModulos(propuesta, proyectoId);
@@ -96,6 +114,7 @@ class GestionarPlanCodificacion {
       aprobada_por: null,
       aprobada_en: null
     } : item);
+    if (!cambioReal && actual.estado === CODE_PHASE_STATES.APPROVED) return this._conModulos(this.workflow.enriquecer(plan));
     if (cambioReal) etapas = this.workflow.invalidarDependientes(etapas, etapa);
     etapas = this.workflow.sincronizarBloqueos(etapas);
 
@@ -103,6 +122,13 @@ class GestionarPlanCodificacion {
       etapas,
       version: (plan.version || 0) + 1
     });
+    if (cambioReal && this.artefactoRepository) {
+      const tipos = new Set(etapas.filter(item => item.estado === CODE_PHASE_STATES.STALE)
+        .map(item => this.workflow.obtenerDefinicion(item.etapa).artefacto).filter(Boolean));
+      const artefactos = await this.artefactoRepository.listarPorProyecto(proyectoId);
+      await Promise.all(artefactos.filter(item => tipos.has(item.tipo) && ['en_revision', 'aprobado'].includes(item.estado))
+        .map(item => this.artefactoRepository.actualizar(item.id, { estado: 'desactualizado', aprobado: false })));
+    }
     return this._conModulos(this.workflow.enriquecer(guardado));
   }
 
@@ -188,15 +214,6 @@ class GestionarPlanCodificacion {
     await this.proponer({ proyectoId, etapa: 'stack_tecnologico', propuesta: sugStack.propuesta, observaciones: 'Stack seguro derivado de los requisitos.' });
     await this.revisar({ proyectoId, etapa: 'stack_tecnologico', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
     etapasAprobadas.push('stack_tecnologico');
-
-    // 3. Arquitectura de código
-    const sugArqui = await this.sugerir({ proyectoId, etapa: 'arquitectura_codigo' });
-    if (sugArqui.advertencias?.length) {
-      dudas.push(...sugArqui.advertencias.map((adv) => ({ etapa: 'arquitectura_codigo', tipo: 'advertencia', detalle: adv })));
-    }
-    await this.proponer({ proyectoId, etapa: 'arquitectura_codigo', propuesta: sugArqui.propuesta, observaciones: 'Arquitectura modular por capas.' });
-    await this.revisar({ proyectoId, etapa: 'arquitectura_codigo', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
-    etapasAprobadas.push('arquitectura_codigo');
 
     // 4. Estructura de carpetas
     const sugCarpetas = await this.sugerir({ proyectoId, etapa: 'estructura_carpetas' });
@@ -308,12 +325,8 @@ class GestionarPlanCodificacion {
     etapasAprobadas.push('control_acceso');
 
     // 7. Módulos: modo automático con valores recomendados por defecto
-    const propModulos = {
-      modo: 'automatico',
-      modulos: this.moduleService.automatico(),
-      notas: 'Modo un clic: valores automáticos recomendados.'
-    };
-    await this.proponer({ proyectoId, etapa: 'modulos', propuesta: propModulos, observaciones: 'Módulos en modo automático.' });
+    const { propuesta: propModulos } = await this.sugerir({ proyectoId, etapa: 'modulos' });
+    await this.proponer({ proyectoId, etapa: 'modulos', propuesta: propModulos, observaciones: 'Módulos sugeridos por los requisitos y las decisiones aprobadas.' });
     await this.revisar({ proyectoId, etapa: 'modulos', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
     etapasAprobadas.push('modulos');
 
@@ -336,7 +349,7 @@ class GestionarPlanCodificacion {
         autoregistro: 'desactivado',
         reglas_confirmadas: reglasConfirmadas,
         reglas_descartadas: reglasDescartadas,
-        modulos: 'automatico'
+        modulos: propModulos.modo
       },
       dudas,
       total_dudas: dudas.length

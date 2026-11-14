@@ -23,7 +23,8 @@ test('interfaces de adjuntos y reportes generadas',async({page})=>{
     }
   }finally{for(const cleanup of cleanups){try{await cleanup();}catch{}}}
 });
-test('la recuperación se puede solicitar desde la pantalla de acceso',{skip:!enabled.includes('recuperacion_cuentas')},async({page})=>{
+test('la recuperación se puede solicitar desde la pantalla de acceso',async({page})=>{
+  test.skip(!enabled.includes('recuperacion_cuentas'), 'Recuperación de cuentas desactivada.');
   await page.goto('/');await page.getByRole('button',{name:'Recuperar contraseña',exact:true}).click();
   await page.getByLabel('Correo de recuperación').fill('unknown-ui@example.test');await page.getByRole('button',{name:'Enviar recuperación',exact:true}).click();
   await expect(page.getByText('Si la cuenta existe y está activa, recibirás un enlace de recuperación.',{exact:true})).toBeVisible();

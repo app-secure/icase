@@ -190,6 +190,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     planCodificacionRepository: planCodificacionRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo,
+    artefactoRepository: artefactoGeneradoRepo,
     proposalService: codePlanningProposalService
   });
   const gestionarArtefactosCodigo = new GestionarArtefactosCodigo({

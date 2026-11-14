@@ -11,7 +11,8 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     const frontendRf = new Set(frontend.trazabilidad_rf || []);
     const routes = this._frontendRoutes(frontend);
     const contract = this._backendContract(backend);
-    const auth = this._frontendAuth(frontend);
+    const mobileOnly = frontend.archivos?.some(f => f.ruta === 'mobile/package.json') && !frontend.archivos.some(f => f.ruta === 'frontend/package.json');
+    const auth = mobileOnly ? contract.auth || {} : this._frontendAuth(frontend);
     const typedForms = this._frontendModules(frontend).formularios_tipados === true;
     const functional = Array.isArray(contract.operations) && contract.operations.length > 0;
     const designedUi = functional ? this._designedUiE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) : '';
@@ -55,8 +56,13 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
         files.push({ruta:'tests/integration/redis-isolation.test.js',lenguaje:'javascript',contenido:readTemplate('redis-isolation.template')},{ruta:'tests/support/redis-bridge.cjs',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/auth/change-events-redis.js'),'utf8')});
       }
     }
+    let seleccion = files;
+    if (mobileOnly) {
+      seleccion = files.filter(file => !file.ruta.startsWith('tests/e2e/') && file.ruta !== 'tests/playwright.config.js');
+      seleccion.push({ ruta: 'tests/mobile-platform.json', lenguaje: 'json', contenido: JSON.stringify({ plataforma: 'móvil' }) });
+    }
     return {
-      archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
+      archivos: seleccion.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
       dependencias: [{ tipo: 'codigo_backend', version: backend.version }, { tipo: 'codigo_frontend', version: frontend.version }],
       trazabilidad_rf: rf.map((item) => item.identificador),
       advertencias: [...(uncovered.length ? [`RF sin cobertura en backend ni frontend aprobados: ${uncovered.join(', ')}.`] : []), ...(functional ? [] : ['La suite solo cubre salud, navegación y trazabilidad; faltan pruebas funcionales.']),...(contract.integraciones?.enabled?.length&&!contract.integraciones.fixture?['Sin fixture/proveedor configurado, las pruebas especializadas se omiten: no acreditan pagos, SSO o hardware reales.']:[])],
@@ -244,7 +250,7 @@ test('una clave de idempotencia distinta no puede reutilizar la misma firma de a
   }
 
   _unitTest(matrix) {
-    return `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs';\n\nconst expected = ${JSON.stringify(matrix.map((item) => item.requisito))};\n\ntest('los manifiestos generados mantienen trazabilidad RF', () => {\n  const backend = JSON.parse(fs.readFileSync('../backend/icase.manifest.json', 'utf8'));\n  const frontend = JSON.parse(fs.readFileSync('../frontend/icase.manifest.json', 'utf8'));\n  const actual = new Set([...(backend.requisitos || []).map((item) => item.id), ...(frontend.pantallas || []).flatMap((item) => item.requirements || item.rf || [])]);\n  for (const id of expected) assert.ok(actual.has(id), \`Falta trazabilidad para \${id}\`);\n});\n`;
+    return `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport fs from 'node:fs';\n\nconst expected = ${JSON.stringify(matrix.map((item) => item.requisito))};\n\ntest('los manifiestos generados mantienen trazabilidad RF', () => {\n  const backend = JSON.parse(fs.readFileSync('../backend/icase.manifest.json', 'utf8'));\n  const frontend = fs.existsSync('../frontend/icase.manifest.json') ? JSON.parse(fs.readFileSync('../frontend/icase.manifest.json', 'utf8')) : {};\n  const actual = new Set([...(backend.requisitos || []).map((item) => item.id), ...(frontend.pantallas || []).flatMap((item) => item.requirements || item.rf || [])]);\n  for (const id of expected) assert.ok(actual.has(id), \`Falta trazabilidad para \${id}\`);\n});\n`;
   }
 
   _integrationTest() {
@@ -426,11 +432,12 @@ ${this._e2eSession(auth)}
 test('una pantalla ejecuta una operación declarada en el contrato', async ({ page }) => {
   await page.goto(${JSON.stringify(firstRoute)});
   const editor = page.getByLabel('Datos JSON');
-  if (await editor.count()) {
-    await editor.fill('{"origen":"prueba-e2e"}');
-    await page.getByRole('button', { name: 'Crear' }).click();
-    await expect(page.locator('.success[role="status"]')).toContainText('Registro creado');
-  }
+  const toggle = page.getByRole('button', { name: /Gestión de Datos/i });
+  if (await toggle.count()) await toggle.click();
+  await expect(editor).toBeVisible();
+  await editor.fill('{"origen":"prueba-e2e"}');
+  await page.getByRole('button', { name: 'Crear' }).click();
+  await expect(page.locator('.success[role="status"]')).toContainText('Registro creado');
 });
 `;
   }
@@ -447,9 +454,14 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
     const canCreate = (item) => !item.methods || item.methods.includes('POST');
     const withOperation = (item) => (item.operations || []).some((key) => operations.some((operation) => operation.key === key));
     // La pantalla muestra el formulario de su primera operación existente: solo sirve si esa admite el ciclo completo.
-    const pick = (item) => { const first = (item.operations || []).map((key) => operations.find((operation) => operation.key === key)).find(Boolean); return first && fullCycle(first) ? first : undefined; };
-    const screen = screens.find((item) => pick(item));
-    const operation = screen && pick(screen);
+    const firstOperation = screen => (screen.operations || []).map(key => operations.find(op => op.key === key)).find(Boolean);
+    const editableScreens = screens.filter(screen => firstOperation(screen) && fullCycle(firstOperation(screen)));
+    const screen = editableScreens.find(item => Object.keys(firstOperation(item).schema?.properties || {}).some(name => name !== 'id'));
+    if (!screen && editableScreens.length) {
+      const route = editableScreens[0].route || editableScreens[0].ruta;
+      return this._contractE2eTest([route], auth);
+    }
+    const operation = screen && firstOperation(screen);
     if (!operation) return `import { test } from '@playwright/test';\ntest.skip('${screens.some(withOperation) ? 'ninguna pantalla tiene una operación con el ciclo completo' : 'el contrato no tiene una pantalla con operación'}', () => {});\n`;
     const strict = screens.map((item) => ({ route: item.route, operation: operations.find((candidate) => candidate.key === (item.operations || [])[0]) }))
       .find((item) => item.operation && canCreate(item.operation) && (item.operation.rules || []).some((rule) => rule.tipo === 'requerido' && (item.operation.schema?.properties || {})[rule.campo]));

@@ -7,7 +7,7 @@ const DependencyAudit = require('../../core/constants/DependencyAudit');
 class ExportedComposeVerifier {
   constructor({ run }) { this.run = run; }
 
-  validate(config, root, project) {
+  validate(config, root, project, web = true) {
     const within = (target) => {
       const resolved = path.resolve(target);
       return resolved === root || resolved.startsWith(root + path.sep);
@@ -34,7 +34,7 @@ class ExportedComposeVerifier {
     for (const network of Object.values(config.networks || {})) {
       if (network.external || !network.internal || !network.name?.startsWith(project + '_')) throw new Error('Red de entrega no aislada.');
     }
-    if (!config.services?.backend || !config.services?.frontend || !config.services?.database) throw new Error('El paquete no declara backend, frontend y base de datos verificables.');
+    if (!config.services?.backend || (web && !config.services?.frontend) || !config.services?.database) throw new Error('El paquete no declara backend, frontend y base de datos verificables.');
   }
 
   async verificar(root, project) {
@@ -67,6 +67,10 @@ networks:
   default:
     internal: true
 `;
+    const mobileOnly = await fs.access(path.join(root, 'mobile/package.json')).then(() => true, () => false)
+      && !await fs.access(path.join(root, 'frontend/package.json')).then(() => true, () => false);
+    const webServices = mobileOnly ? [] : ['frontend'];
+    if (mobileOnly) overlay = overlay.replace('  frontend:\n    ports: !reset []\n', '');
     let backendManifest={};try{backendManifest=JSON.parse(await fs.readFile(path.join(root,'backend/icase.manifest.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
     if(backendManifest.extensions?.enabled?.includes('recuperacion_cuentas')) {
       overlay=overlay.replace('  backend:\n','  backend:\n    environment:\n      NODE_ENV: test\n      SMTP_HOST: mailpit\n      SMTP_PORT: 1025\n      SMTP_FROM: no-reply@example.test\n      SMTP_ALLOW_INSECURE: "true"\n      RESET_PUBLIC_URL: http://frontend\n    depends_on:\n      mailpit: {condition: service_started}\n')
@@ -95,11 +99,11 @@ networks:
     let safe = false;
     try {
       const resolved = await execute(['config', '--format', 'json'], 'Aislamiento del Compose exportado', 60000, true);
-      this.validate(JSON.parse(resolved.stdout), root, project);
+      this.validate(JSON.parse(resolved.stdout), root, project, !mobileOnly);
       safe = true;
-      await execute(['build', ...(nodeBackend ? ['--build-arg', 'ICASE_AUDIT_NONCE=' + randomUUID()] : []), 'backend', 'frontend', 'smoke', 'tests',...(integrations?['provider']:[])], 'Compilación de los Dockerfiles exportados', 900000);
-      await execute(['up', '-d', '--wait', 'database', 'backend',...(backendManifest.eventos_cambios?.replicas?['backend_peer']:[]), 'frontend'], 'Arranque del Compose exportado', 240000);
-      const targets = ['http://backend:3000/health', ...(backendManifest.eventos_cambios?.replicas ? ['http://backend_peer:3000/health'] : []), 'http://frontend'];
+      await execute(['build', ...(nodeBackend ? ['--build-arg', 'ICASE_AUDIT_NONCE=' + randomUUID()] : []), 'backend', ...webServices, 'smoke', 'tests',...(integrations?['provider']:[])], 'Compilación de los Dockerfiles exportados', 900000);
+      await execute(['up', '-d', '--wait', 'database', 'backend',...(backendManifest.eventos_cambios?.replicas?['backend_peer']:[]), ...webServices], 'Arranque del Compose exportado', 240000);
+      const targets = ['http://backend:3000/health', ...(backendManifest.eventos_cambios?.replicas ? ['http://backend_peer:3000/health'] : []), ...(mobileOnly ? [] : ['http://frontend'])];
       const probe = `const targets=${JSON.stringify(targets)};let last='';for(let i=0;i<90;i++){try{for(const url of targets){const response=await fetch(url,{signal:AbortSignal.timeout(2000)});if(!response.ok||(url.endsWith('/health')&&(await response.json()).status!=='ok'))throw new Error('Servicio no listo: '+url)}console.log('Backend, réplicas y frontend exportados listos');process.exit(0)}catch(e){last=e.message}await new Promise(r=>setTimeout(r,1000))}throw new Error('La entrega no está lista: '+last)`;
       await execute(['run', '--rm', '--no-deps', 'smoke', 'node', '--input-type=module', '-e', probe], 'Disponibilidad HTTP de la entrega', 150000);
       await execute(['run', '--rm', '--no-deps', 'smoke'], 'CRUD, permisos y N:M sobre el despliegue exportado');

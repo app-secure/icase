@@ -29,7 +29,7 @@ describe('base NestJS 12 autorizada', () => {
     expect(() => Stack.resolve({ backend })).toThrow('22.12+');
   });
   test('la propuesta muestra la versión nueva y advierte si el insumo fija una antigua', () => {
-    const proposal = new Proposal()._stack_tecnologico({ texto: 'Usar NestJS 10 con PostgreSQL y React' });
+    const proposal = new Proposal()._stack_tecnologico({ texto: '', analisis: { restricciones_tecnicas: [{ estado: 'confirmado', necesidad: 'Usar NestJS 10 con PostgreSQL y React' }] } });
     expect(proposal.valor.backend).toBe(Policy.label);
     expect(proposal.valor.version_backend).toBe('12.3.2');
     expect(proposal.advertencias.join(' ')).toContain('no se migra silenciosamente');
