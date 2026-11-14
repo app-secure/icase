@@ -144,7 +144,7 @@ class RecordStore {
     const { name, table } = tableFor(model, operation);
     const row = await this._row(name, table, operation, id, scope);
     if (!row) return null;
-    const previous = toRecord(table, operation, row).data;
+    const previous = toRecord(table, operation, row, { includeSensitive: true }).data;
     const { values, extra } = split(table, rules.derive(name,body,previous));
     assignOwner(table, values, extra, null);
     await this._assertOwnedReferences(table, values, scope);

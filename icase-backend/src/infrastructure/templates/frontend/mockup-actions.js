@@ -18,10 +18,24 @@ export function collectFields(control) {
       fields[name] = Array.from(field.selectedOptions).map((option) => option.value);
       continue;
     }
+    // Un campo de solo lectura vacío con placeholder es un valor que fija el sistema (estado "pendiente"): se envía ese valor.
+    if (field.value === '' && field.readOnly && field.getAttribute('placeholder')) { fields[name] = field.getAttribute('placeholder'); continue; }
     if (field.value === '') continue;
     fields[name] = type === 'number' || type === 'range' ? (Number.isNaN(Number(field.value)) ? field.value : Number(field.value)) : field.value;
   }
   return fields;
+}
+
+const ACCOUNT_FIELDS = { correo: 'email', email: 'email', contrasena: 'password', 'contraseña': 'password', password: 'password', passwordhash: 'password', clave: 'password', nombre: 'nombre', rol: 'rol', activo: 'activo' };
+
+/** Traduce los campos de un formulario de usuarios a los de la API de cuentas; los desconocidos se descartan. */
+export function accountFields(fields) {
+  const out = {};
+  for (const [name, value] of Object.entries(fields)) {
+    const target = ACCOUNT_FIELDS[String(name).replace(/[_\s-]/g, '').toLowerCase()];
+    if (target && !(target in out)) out[target] = value;
+  }
+  return out;
 }
 
 /** Vuelca los datos de un registro en los campos con `name` del contenedor; las claves sin campo se ignoran. */
@@ -47,13 +61,16 @@ export function fillFields(container, data) {
  * `editar` y `eliminar` actúan sobre el registro seleccionado (`selected`, elegido en la tabla de `consultar`),
  * o, si no hay selección, sobre un `data-id` declarado a mano. El id de un mockup generado es de ejemplo y no se usa.
  */
-export async function runAction({ event, operation, verb, api, can, onResult, confirmar, selected, onSelect }) {
+export async function runAction({ event, operation, verb, api, can, onResult, confirmar, selected, onSelect, identidad }) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   const method = METHODS[verb];
   if (!method) return onResult({ estado: 'error', mensaje: `Acción desconocida: ${verb}` });
   if (can && !can(operation, method)) return onResult({ estado: 'error', mensaje: 'No tienes permiso para esta acción.' });
   const control = event && event.currentTarget;
-  const base = `/api/operations/${encodeURIComponent(operation)}`;
+  // Las cuentas de usuario viven en /api/users (con la contraseña protegida), no en una tabla de datos.
+  const accounts = identidad && identidad[operation] === 'usuarios';
+  const base = accounts ? '/api/users' : `/api/operations/${encodeURIComponent(operation)}`;
+  const read = (target) => (accounts ? accountFields(collectFields(target)) : collectFields(target));
   const ask = confirmar || ((message) => (typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true));
   try {
     if (verb === 'consultar') {
@@ -66,7 +83,7 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
       return onResult({ estado: 'ok', mensaje: `${registros.length} ${registros.length === 1 ? 'registro' : 'registros'}`, registros, operacion: operation });
     }
     if (verb === 'crear') {
-      await api(base, { method, body: JSON.stringify(control ? collectFields(control) : {}) });
+      await api(base, { method, body: JSON.stringify(control ? read(control) : {}) });
       return onResult({ estado: 'ok', mensaje: 'Registro creado' });
     }
     const chosen = selected && selected.operation === operation && selected.id ? selected : null;
@@ -74,7 +91,7 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
     if (!id) return onResult({ estado: 'aviso', mensaje: 'Selecciona primero un registro: usa Consultar y luego Seleccionar en la tabla.' });
     const target = `${base}/${encodeURIComponent(id)}`;
     if (verb === 'editar') {
-      await api(target, { method, body: JSON.stringify(collectFields(control)) });
+      await api(target, { method, body: JSON.stringify(read(control)) });
       return onResult({ estado: 'ok', mensaje: 'Registro actualizado' });
     }
     if (!ask(`¿Eliminar el registro ${(chosen && chosen.etiqueta) || id}?`)) return undefined;

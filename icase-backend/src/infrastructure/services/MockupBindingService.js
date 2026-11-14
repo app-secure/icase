@@ -30,7 +30,9 @@ class MockupBindingService {
       .filter((item) => String(item.tipo || '').toUpperCase() === 'RF' && item.identificador && item.aprobado !== false)
       .slice(0, max)
       .map((item) => {
-        const properties = operations.get(String(item.identificador).toUpperCase())?.schema?.properties || {};
+        const operation = operations.get(String(item.identificador).toUpperCase());
+        if (operation?.identity === 'login') return `- [${item.identificador}] autenticación: no la enlaces; los controles de acceso llevan data-accion="ui" (la aplicación genera el acceso real)`;
+        const properties = operation?.schema?.properties || {};
         const campos = Object.entries(properties).filter(([, definition]) => !definition?.readOnly).map(([name]) => name);
         return `- [${item.identificador}] campos: ${campos.length ? campos.join(', ') : 'sin campos definidos (usa nombres claros en camelCase)'}`;
       })

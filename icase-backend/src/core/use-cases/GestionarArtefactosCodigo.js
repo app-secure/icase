@@ -176,7 +176,12 @@ class GestionarArtefactosCodigo {
       ...(diseno.mockups || []).map((item) => [`mockup:${item.nombre_pantalla}`, item.version || 1])
     ]);
     const requisitosAprobados = (requerimientos || []).filter((item) => item.aprobado);
-    const input = { contrato_generacion: 'frontend-v18-plataformas', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
+    // Identidad (RF de acceso y de cuentas de usuario): sale del contrato de operaciones, que necesita el modelo de dominio.
+    const diagramas = this.diagramaRepository ? await this.diagramaRepository.listarPorProyecto(proyectoId) : [];
+    const contratoOperaciones = new (require('../../infrastructure/services/MockupBindingService'))().contrato({ proyecto, requerimientos: requisitosAprobados, diagramas });
+    const identidad = contratoOperaciones?.identity || null;
+    const referencias = contratoOperaciones?.references || null;
+    const input = { contrato_generacion: 'frontend-v20-referencias', identidad, referencias, analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_frontend');
     const seleccion = decisiones.stack_tecnologico?.plataformas ?? decisiones.alcance_plataforma?.plataformas ?? ['web'];
@@ -189,7 +194,7 @@ class GestionarArtefactosCodigo {
       return { artefacto: ultimo, reutilizado: true };
     }
     const decisionesParte = { ...decisiones, stack_tecnologico: { ...decisiones.stack_tecnologico, plataformas: solicitadas } };
-    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones: decisionesParte, diseno, requerimientos: requisitosAprobados }, versionesOrigen });
+    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones: decisionesParte, diseno, requerimientos: requisitosAprobados, identidad, referencias }, versionesOrigen });
     generado.archivos = generado.archivos.filter(f => solicitadas.some(p => f.ruta.startsWith(carpeta(p))));
     if (vigente) generado.archivos.push(...ultimo.archivos.filter(f => !solicitadas.some(p => f.ruta.startsWith(carpeta(p)))));
     const artefacto = await this.artefactoRepository.crear({ proyecto_id: proyectoId, tipo: 'codigo_frontend', version: (ultimo?.version || 0) + 1, estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, modulos: this._modulosDelPlan(plan, decisiones.modulos), ...generado });
@@ -247,7 +252,7 @@ class GestionarArtefactosCodigo {
   async generarBackend(proyectoId) {
     const { proyecto, plan, requerimientos, diagramaDominio, decisiones, versionesOrigen, dominio, verbosPorRf } = await this._insumosBackend(proyectoId);
     const semanticRequirements = new (require('../services/RequirementChangeService'))({}).normalize(requerimientos.filter(item => item.aprobado));
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'capacidades-v17-nm-endpoints', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, requerimientos: semanticRequirements, dominio, ...(Object.keys(verbosPorRf).length ? { verbos: verbosPorRf } : {}) })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'capacidades-v18-identidad-secretos', analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), decisiones, requerimientos: semanticRequirements, dominio, ...(Object.keys(verbosPorRf).length ? { verbos: verbosPorRf } : {}) })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
 
@@ -300,7 +305,7 @@ class GestionarArtefactosCodigo {
     this.workflow.validarDependencias(plan, 'generacion_pruebas');
     if (!backend || !frontend) throw new Error('Debes aprobar backend y frontend antes de generar las pruebas.');
     const versionesOrigen = { codigo_backend: backend.version, codigo_frontend: frontend.version };
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pruebas-v9-formularios-plataformas', versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pruebas-v11-identidad-rutas', versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'pruebas');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
     const generado = await this.testGenerator.generar({ proyecto, insumos: { requerimientos, backend, frontend }, versionesOrigen });

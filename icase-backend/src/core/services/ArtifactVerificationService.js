@@ -84,6 +84,10 @@ class ArtifactVerificationService {
             const links = screen.enlaces;
             if (!links) continue;
             const label = screen.name || screen.nombre || screen.id;
+            const loginOperations = new Set((manifest.identidad?.login || []).map((id) => String(id).toLowerCase()));
+            if ((links.acciones || []).some((action) => loginOperations.has(String(action.operacion).toLowerCase()))) {
+              errores.push(`La pantalla «${label}» conecta el RF de autenticación a un registro de datos: el acceso lo resuelve la sesión de la aplicación.`);
+            }
             if (links.cableados > 0 && !(files.get(`frontend/src/pages/${screen.id}.jsx`) || '').includes('handleAction(')) {
               errores.push(`La pantalla «${label}» declara enlaces cableados, pero su página no los ejecuta.`);
             }

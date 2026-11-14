@@ -98,12 +98,25 @@ function nodeToJsx(node, context = null) {
     }
   }
 
+  // Un campo de texto o oculto cuyo name es una referencia (cliente_id: "CLI-8923") no puede guardar un id inventado: se vuelve un select
+  // con los registros reales. Los campos de solo lectura (vistas de detalle) se dejan como están.
+  const refTarget = tag === 'input' && context?.referencias?.[attrOf(node, 'name')]
+    && ['', 'text', 'hidden', 'number'].includes(String(typeAttr(node)).toLowerCase())
+    && !(node.attrs || []).some((attr) => attr.name.toLowerCase() === 'readonly') ? context.referencias[attrOf(node, 'name')] : null;
+  if (refTarget) {
+    const kept = attrs.filter((item) => !/^(?:type|defaultValue|value|placeholder|min|max|step|pattern|maxLength|autoComplete)(?:=|$)/.test(item));
+    return `<select${kept.length ? ' ' + kept.join(' ') : ''}><ReferenceOptions operation=${JSON.stringify(refTarget)} /></select>`;
+  }
+
   const attrStr = (attrs.length ? ' ' + attrs.join(' ') : '') + actionHandler(node, context);
   const isVoid = VOID_ELEMENTS.has(tag);
   if (isVoid) {
     return `<${outTag}${attrStr} />`;
   }
 
+  // Un select cuyo name es una referencia a otra entidad (mesa_id) carga sus opciones reales del backend en lugar de las del mockup.
+  const referenced = tag === 'select' ? context?.referencias?.[attrOf(node, 'name')] : null;
+  if (referenced) return `<${outTag}${attrStr}><ReferenceOptions operation=${JSON.stringify(referenced)} /></${outTag}>`;
   const children = (node.childNodes || []).map((child) => nodeToJsx(child, context)).join('');
   return `<${outTag}${attrStr}>${children}</${outTag}>`;
 }
@@ -352,17 +365,22 @@ const textOf = (node) => (node.childNodes || []).map((child) => child.value || '
 const attrOf = (node, name) => (node.attrs || []).find((attr) => attr.name === name)?.value || '';
 
 class HtmlToJsxTransformer {
+  /** Quita la barra de las comillas escapadas de atributos (class=\"a\" pasa a class="a"); sin ellas, el HTML queda igual. */
+  static unescapeQuotes(html) {
+    return typeof html === 'string' && /=\s*\\["']/.test(html) ? html.replace(/\\(["'])/g, '$1') : html;
+  }
+
   /**
    * Convierte el documento del mockup. `operaciones`: claves de operación a las que se pueden cablear los `data-accion`;
    * `routes`: rutas internas cuyos `<a href>` pasan a `<Link>`. Devuelve además lo que el JSX no conserva por sí solo:
    * el CSS de los `<style>`, las clases y el estilo del `<body>`, la configuración de Tailwind (como datos) y si el
    * mockup trae su propio menú. Los scripts nunca se copian.
    */
-  static analyze(html, { operaciones = null, routes = null } = {}) {
+  static analyze(html, { operaciones = null, routes = null, referencias = null } = {}) {
     const empty = { jsx: '', css: '', bodyClassName: '', bodyStyle: {}, tailwindConfig: null, hasShell: false };
     if (!html || typeof html !== 'string') return empty;
-    const context = operaciones || routes ? { operaciones: new Set(operaciones || []), routes: new Set(routes || []) } : null;
-    const doc = parse(html);
+    const context = operaciones || routes || referencias ? { operaciones: new Set(operaciones || []), routes: new Set(routes || []), referencias: referencias || {} } : null;
+    const doc = parse(HtmlToJsxTransformer.unescapeQuotes(html));
     const body = walk(doc, (node) => node.tagName === 'body')[0] || doc;
     let tailwindConfig = null;
     for (const script of walk(doc, (node) => node.tagName === 'script')) {

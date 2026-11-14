@@ -1,3 +1,5 @@
+const { isLoginRequirement, isUsersRequirement, hasCredentials } = require('./IdentityRequirements');
+const { SYNONYMS } = require('./DomainSynonyms');
 const slug = (value) => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'operacion';
@@ -16,9 +18,9 @@ const stem = (token) => {
   return token;
 };
 const tokens = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-  .split(/[^a-z0-9]+/).filter((token) => token.length > 1 && !STOPWORDS.has(token)).map(stem);
+  .split(/[^a-z0-9]+/).filter((token) => token.length > 1 && !STOPWORDS.has(token)).map(stem).map((token) => SYNONYMS.get(token) || token);
 // "OrdenCompra" -> ["orden", "compra"]
-const entityTokens = (name) => tokens(String(name).replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
+const entityTokens = (name) => [...new Set(tokens(String(name).replace(/([a-z0-9])([A-Z])/g, '$1 $2')))];
 
 const ALL_METHODS = ['GET', 'POST', 'PATCH', 'DELETE'];
 const VERB_METHOD = { consultar: 'GET', crear: 'POST', editar: 'PATCH', eliminar: 'DELETE' };
@@ -38,8 +40,12 @@ class ApplicationContractBuilder {
       const id = item.identificador || `RF-${String(index + 1).padStart(2, '0')}`;
       const match = this._entityFor(item, entities);
       if (entities.length && !match) warnings.push(`${id} no se asoció a ninguna entidad del modelo de dominio; usa un esquema genérico.`);
+      else if (match && !match.inName) warnings.push(`${id} se asoció a ${match.primary.name} solo por su descripción o por coincidencia parcial; revisa que sea la entidad correcta.`);
+      // Identidad: el acceso lo resuelve la sesión de la aplicación y las cuentas viven en /api/users, no en una tabla de datos.
+      const identity = isLoginRequirement(item) ? 'login' : (isUsersRequirement(item) && match && hasCredentials(match.primary.schema) ? 'usuarios' : null);
       return {
         id,
+        ...(identity ? { identity } : {}),
         key,
         name: item.nombre || `Operación ${index + 1}`,
         description: item.descripcion || '',
@@ -65,6 +71,20 @@ class ApplicationContractBuilder {
       ...entities.flatMap((entity) => (entity.references || []).map((reference) => reference.entity))
     ].map((name) => keyOf.get(name)).filter(Boolean));
     for (const operation of operations) if (fullCrud.has(operation.entity)) operation.methods = [...ALL_METHODS];
+    // Campos que referencian a otra entidad (mesa_id): su select se llena con los registros de la operación de esa entidad.
+    const operationOf = new Map();
+    for (const operation of operations) if (operation.entity && !operationOf.has(operation.entity)) operationOf.set(operation.entity, operation.key);
+    const references = {};
+    const ambiguous = new Set();
+    for (const entity of entities) {
+      for (const reference of entity.references || []) {
+        const target = operationOf.get(keyOf.get(reference.entity));
+        if (!target) continue;
+        if (references[reference.field] && references[reference.field] !== target) ambiguous.add(reference.field);
+        else references[reference.field] = target;
+      }
+    }
+    for (const field of ambiguous) delete references[field];
     const byRequirement = new Map(operations.map((item) => [item.id, item]));
     const views = screens.map((screen) => {
       const rf = screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || [];
@@ -86,6 +106,11 @@ class ApplicationContractBuilder {
       relations,
       rules,
       operations,
+      references,
+      identity: {
+        login: operations.filter((operation) => operation.identity === 'login').map((operation) => operation.id),
+        usuarios: operations.filter((operation) => operation.identity === 'usuarios').map((operation) => operation.id)
+      },
       views,
       warnings,
       health: '/health'
@@ -124,7 +149,7 @@ class ApplicationContractBuilder {
       if (!partial.length) return null;
       return { primary: partial[0].entity, related: partial.slice(1).map((item) => item.entity) };
     }
-    return { primary: scored[0].entity, related: scored.slice(1).map((item) => item.entity) };
+    return { primary: scored[0].entity, inName: scored[0].inName, related: scored.slice(1).map((item) => item.entity) };
   }
 
   _uniqueKey(base, requirements, index) {

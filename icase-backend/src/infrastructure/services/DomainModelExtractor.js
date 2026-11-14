@@ -1,3 +1,4 @@
+const { markSensitive } = require('./IdentityRequirements');
 const normalize = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 const slug = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const snake = (value) => slug(value).replace(/-/g, '_');
@@ -155,7 +156,7 @@ class DomainModelExtractor {
     for (const reference of entity.references) {
       properties[reference.field] = { type: 'string', 'x-references': reference.entity };
     }
-    return { type: 'object', title: entity.name, properties, required: [], additionalProperties: true };
+    return markSensitive({ type: 'object', title: entity.name, properties, required: [], additionalProperties: true });
   }
 }
 

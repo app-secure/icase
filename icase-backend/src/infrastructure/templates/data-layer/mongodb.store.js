@@ -144,7 +144,7 @@ class RecordStore {
     this._applyOwnerFilter(filter, table, scope);
     const current = await this.db.collection(name).findOne(filter);
     if (!current) return null;
-    const previous = toRecord(table, operation, current).data;
+    const previous = toRecord(table, operation, current, { includeSensitive: true }).data;
     const { values, extra } = split(table, rules.derive(name,body,previous), OPTIONS);
     assignOwner(table, values, extra, null);
     this._checkExtra(extra);

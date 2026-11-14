@@ -10,6 +10,9 @@ test('interfaces de adjuntos y reportes generadas',async({page})=>{
   try{
     await createValidRecord(api,contract.operations,operation,cleanups,0);
     await page.addInitScript(token=>localStorage.setItem('icase_token',token),session.data.token);await page.goto(screen.route);
+    await expect(page.locator('[data-screen]')).toBeVisible();
+    const tab = page.getByRole('button', { name: /Gestión de Datos/i });
+    if (await tab.count()) await tab.click();
     if(enabled.includes('archivos_imagenes')) {
       const panel=page.getByRole('region',{name:'Archivos del registro'}).first();await expect(panel).toBeVisible();
       await panel.getByLabel('Adjuntar PNG, JPEG o PDF (512 KiB)').setInputFiles({name:'prueba.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6HkAAAAAASUVORK5CYII=','base64')});

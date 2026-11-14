@@ -205,9 +205,8 @@ import { createRequire } from 'node:module';
 const { derive } = createRequire(import.meta.url)('../support/calculations.cjs');
 const rules = ${JSON.stringify(rules, null, 2)};
 
-test('el cálculo del servidor pisa un valor de salida enviado por el cliente', () => {
-  const calculos = rules.filter((rule) => rule.tipo === 'calculo');
-  assert.ok(calculos.length, 'No hay reglas de cálculo confirmadas');
+const calculos = rules.filter((rule) => rule.tipo === 'calculo');
+test('el cálculo del servidor pisa un valor de salida enviado por el cliente', { skip: !calculos.length && 'Sin reglas de cálculo en el contrato' }, () => {
   for (const rule of calculos) {
     const result = derive([rule], { [rule.campo]: 999999, precio: 2, cantidad: 4, ...(rule.expresion?.izquierda?.campo ? { [rule.expresion.izquierda.campo]: 3 } : {}), ...(rule.expresion?.derecha?.campo ? { [rule.expresion.derecha.campo]: 5 } : {}) });
     assert.notEqual(result[rule.campo], 999999, rule.id + ' conservó el valor del cliente');
@@ -361,8 +360,14 @@ async function fillDesigned(control, value) {
   const tag = await control.evaluate((element) => element.tagName);
   const type = ((await control.getAttribute('type')) || '').toLowerCase();
   if (type === 'checkbox') { await control.setChecked(Boolean(value)); return; }
-  if (type === 'radio' || type === 'file') return;
-  if (tag === 'SELECT') { await control.selectOption(String(value)).catch(async () => { await control.selectOption({ index: 1 }); }); return; }
+  if (type === 'radio' || type === 'file' || type === 'hidden' || !await control.isEditable()) return;
+  if (tag === 'SELECT') {
+    // Las opciones de un select de referencia llegan del backend: se espera a que haya alguna real.
+    await control.locator('option:not([value=""])').first().waitFor({ timeout: 5000 }).catch(() => {});
+    const options = await control.locator('option:not([disabled])').evaluateAll(items => items.map(item => item.value));
+    await control.selectOption(options.includes(String(value)) ? String(value) : options.find(Boolean));
+    return;
+  }
   if (type === 'date') { await control.fill(String(value).slice(0, 10)); return; }
   if (type === 'datetime-local') {
     const date = new Date(value); const pad = (n) => String(n).padStart(2, '0');
@@ -380,13 +385,24 @@ for (const item of cases.filter((entry) => entry.verb === 'crear')) {
     const sample = samplePayload(operation.schema, operation.rules, salted());
     const body = { ...sample.payload };
     try {
-      for (const parent of sample.parents) {
+      await page.goto(item.route);
+      await expect(page.locator('.mockup-content')).toBeVisible();
+      const parents = [...sample.parents];
+      for (const [campo, property] of Object.entries(operation.schema?.properties || {})) {
+        if (!property['x-references'] || parents.some(parent => parent.campo === campo)) continue;
+        const input = page.locator('.mockup-content [name="' + campo + '"]').first();
+        if (await input.count() && await input.isEditable() && await input.isVisible() && (await input.inputValue() || await input.getAttribute('required') !== null || await input.evaluate((element) => element.tagName === 'SELECT'))) {
+          parents.push({ campo, entidad: property['x-references'] });
+        }
+      }
+      for (const parent of parents) {
         const parentOperation = operations.find((candidate) => candidate.schema && candidate.schema.title === parent.entidad);
         body[parent.campo] = parentOperation ? (await createValidRecord(api, operations, parentOperation, cleanups, 1)).id : '1';
       }
+      // Los select de referencia cargaron sus opciones al abrir la pantalla: se vuelve a abrir para que incluyan los registros recién creados.
+      if (parents.length) { await page.goto(item.route); await expect(page.locator('.mockup-content')).toBeVisible(); }
       const listOf = async () => { const response = await api(operation.collectionPath); return Array.isArray(response.data) ? response.data : (response.data.data || []); };
       const before = new Set((await listOf()).map((record) => record.id || record._id));
-      await page.goto(item.route);
       for (const [name, value] of Object.entries(body)) {
         if (Array.isArray(value) && value.length === 0) continue;
         const control = page.locator('.mockup-content [name="' + name + '"]').first();
@@ -419,6 +435,9 @@ for (const item of cases.filter((entry) => entry.verb === 'consultar')) {
 
   _contractE2eTest(routes, auth = { habilitada: false }, { screens = [], contract = {} } = {}) {
     let firstRoute = routes[0] || '/';
+    // La prueba necesita una pantalla con una operación existente: la primera ruta puede ser una vista sin RF conectado.
+    const withOperation = screens.find((item) => (item.operations || []).some((key) => (contract.operations || []).some((operation) => operation.key === key)));
+    if (withOperation) firstRoute = withOperation.route || withOperation.ruta || firstRoute;
     // Con operaciones de métodos reducidos, la prueba crea un registro solo en una pantalla cuya operación admite crear.
     const operations = contract.operations || [];
     if (operations.some((operation) => operation.methods && !['GET', 'POST', 'PATCH', 'DELETE'].every((method) => operation.methods.includes(method)))) {
@@ -427,17 +446,34 @@ for (const item of cases.filter((entry) => entry.verb === 'consultar')) {
       if (!screen) return "import { test } from '@playwright/test';\ntest.skip('ninguna pantalla tiene una operación que admita crear', () => {});\n";
       firstRoute = screen.route || screen.ruta || firstRoute;
     }
+    const targetScreen = screens.find(screen => (screen.route || screen.ruta) === firstRoute);
+    const operation = operations.find(op => op.key === targetScreen?.operations?.[0]);
     return `import { test, expect } from '@playwright/test';
 ${this._e2eSession(auth)}
+${samplePayload.runtimeSource()}
+const operations = ${JSON.stringify(operations)};
 test('una pantalla ejecuta una operación declarada en el contrato', async ({ page }) => {
   await page.goto(${JSON.stringify(firstRoute)});
+  await expect(page.locator('[data-screen]')).toBeVisible();
   const editor = page.getByLabel('Datos JSON');
   const toggle = page.getByRole('button', { name: /Gestión de Datos/i });
   if (await toggle.count()) await toggle.click();
   await expect(editor).toBeVisible();
-  await editor.fill('{"origen":"prueba-e2e"}');
-  await page.getByRole('button', { name: 'Crear' }).click();
-  await expect(page.locator('.success[role="status"]')).toContainText('Registro creado');
+  const op = operations.find(item => item.key === ${JSON.stringify(operation?.key || '')});
+  const sample = samplePayload(op?.schema || {}, op?.rules || [], salted());
+  const cleanups = [];
+  const api = makeApi(process.env.BASE_API_URL || 'http://localhost:3000', ${auth.habilitada ? 'token' : 'null'});
+  try {
+    for (const parent of sample.parents) {
+      const target = operations.find(item => item.schema?.title === parent.entidad);
+      sample.payload[parent.campo] = target ? (await createValidRecord(api, operations, target, cleanups, 0)).id : '1';
+    }
+    await editor.fill(JSON.stringify(sample.payload));
+    await page.getByRole('button', { name: 'Crear' }).click();
+    await expect(page.locator('.success[role="status"]')).toContainText('Registro creado');
+  } finally {
+    for (const cleanup of cleanups) await cleanup();
+  }
 });
 `;
   }
@@ -459,7 +495,7 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
     const screen = editableScreens.find(item => Object.keys(firstOperation(item).schema?.properties || {}).some(name => name !== 'id'));
     if (!screen && editableScreens.length) {
       const route = editableScreens[0].route || editableScreens[0].ruta;
-      return this._contractE2eTest([route], auth);
+      return this._contractE2eTest([route], auth, { screens: [editableScreens[0]], contract });
     }
     const operation = screen && firstOperation(screen);
     if (!operation) return `import { test } from '@playwright/test';\ntest.skip('${screens.some(withOperation) ? 'ninguna pantalla tiene una operación con el ciclo completo' : 'el contrato no tiene una pantalla con operación'}', () => {});\n`;
@@ -597,7 +633,7 @@ test('el administrador accede a la gestión de usuarios', async ({ page }) => {
   }
 
   _readme(backendVersion, frontendVersion) {
-    return `# Pruebas generadas\n\nDependencias: backend v${backendVersion} y frontend v${frontendVersion}.\n\n1. Levanta backend y frontend.\n2. Copia \`.env.example\` a \`.env\` si necesitas otras URLs.\n3. Ejecuta \`npm install\`, \`npx playwright install\` y \`npm test\`.\n4. Ejecuta \`npm run test:e2e\` para las pruebas de navegador.\n`;
+    return `# Pruebas generadas\n\nDependencias: backend v${backendVersion} y frontend v${frontendVersion}.\n\n1. Levanta backend y frontend.\n2. Copia \`.env.example\` a \`.env\` si necesitas otras URLs.\n3. Ejecuta \`npm install\`, \`npx playwright install\` y \`npm test\`.\n4. Ejecuta \`npm run test:e2e\` para las pruebas de navegador.\n\n## Antes de ejecutarlas contra tu propio despliegue\n\n- La suite hace cientos de peticiones: con los límites por defecto del backend (\`HTTP_RATE_MAX=300\`, \`AUTH_RATE_MAX=20\`) responde 429. Súbelos para la prueba, por ejemplo \`HTTP_RATE_MAX=3000\` y \`AUTH_RATE_MAX=300\`, como hace el pipeline de CI.\n- \`CORS_ORIGINS\` debe incluir el origen de \`BASE_WEB_URL\` (y el canal de cambios en tiempo real también lo exige); si usas otro puerto, añádelo.\n- \`ADMIN_EMAIL\` y \`ADMIN_PASSWORD\` deben ser los del administrador inicial del backend.\n`;
   }
 
   _slug(value) {

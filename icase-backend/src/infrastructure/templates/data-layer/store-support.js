@@ -2,6 +2,8 @@
 // No nombrar motores de base de datos aquí: ArtifactVerificationService infiere el motor buscando su nombre en todo el backend.
 // Describe tipos y estructura; las reglas de negocio no viven aquí.
 
+const crypto = require('node:crypto');
+
 class HttpError extends Error {
   constructor(status, message) {
     super(message);
@@ -20,6 +22,13 @@ function tableFor(model, operation) {
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Guarda un secreto solo como hash (scrypt, mismo formato que la sesión de la aplicación); nunca en claro. */
+function hashSecret(value) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(value, salt, 32, { N: 16384, r: 8, p: 1 });
+  return ['scrypt', 16384, 8, 1, salt.toString('base64'), hash.toString('base64')].join('$');
 }
 
 /** Valida y normaliza un valor según el tipo físico de la columna. Lanza 400 si no corresponde. */
@@ -82,7 +91,10 @@ function split(table, body, options) {
   for (const [key, value] of Object.entries(body)) {
     if (RESERVED.has(key)) continue; // gestionados por el sistema; owner_id no es escribible por el cliente
     const column = columns.get(key);
-    if (column) values[column.column] = coerce(column, value, options);
+    if (column) {
+      const coerced = coerce(column, value, options);
+      values[column.column] = column.sensitive && typeof coerced === 'string' && coerced !== '' ? hashSecret(coerced) : coerced;
+    }
     else extra[key] = value;
   }
   return { values, extra };
@@ -107,13 +119,14 @@ function fromStorage(column, value) {
   }
 }
 
-/** Convierte una fila/documento en el registro público: { id, capability, data, created_at, updated_at }. */
-function toRecord(table, operation, row) {
+/** Convierte una fila/documento en el registro público: { id, capability, data, created_at, updated_at }. Los secretos no salen salvo uso interno. */
+function toRecord(table, operation, row, { includeSensitive = false } = {}) {
   const extra = typeof row.extra === 'string' ? JSON.parse(row.extra) : row.extra || {};
   const data = {};
   for (const [key, value] of Object.entries(extra)) if (value !== null) data[key] = value;
   for (const column of table.columns) {
     if (column.internal || column.column === 'owner_id' || column.name === '__owner') continue;
+    if (column.sensitive && !includeSensitive) continue;
     const value = row[column.column];
     if (value !== null && value !== undefined) data[column.name] = fromStorage(column, value);
   }
@@ -157,4 +170,4 @@ function matchesOwner(row, table, scope) {
   return row.owner_id != null && String(row.owner_id) === owner;
 }
 
-module.exports = { withRetry, HttpError, coerce, split, viewOf, toRecord, tableFor, isObject, publicColumns, ownerWhere, assignOwner, matchesOwner };
+module.exports = { withRetry, HttpError, hashSecret, coerce, split, viewOf, toRecord, tableFor, isObject, publicColumns, ownerWhere, assignOwner, matchesOwner };

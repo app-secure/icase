@@ -15,7 +15,35 @@ class DomainModelQualityService {
     if (shells.length && shells.length >= model.entities.length / 2) {
       advertencias.push(`Modelo de dominio por verificar: ${shells.map(entity => entity.name).join(', ')} solo declaran id/estado o ningún atributo. Revisa los datos y estados exigidos por los RF y criterios aprobados; no inventes campos si el concepto es legítimamente mínimo.`);
     }
+    advertencias.push(...this._relacionesSospechosas(model));
     return { errores, advertencias, metricas: { entidades_extraibles: model.entities.length, relaciones_extraibles: model.relations.length } };
+  }
+
+  /**
+   * Relaciones que casi siempre son un error de modelado (no se corrigen solas, se avisan):
+   * una herencia de una entidad de cuentas hacia algo que no es una persona, y una "parte" con dos dueños.
+   */
+  _relacionesSospechosas(model) {
+    const avisos = [];
+    const byName = new Map(model.entities.map((entity) => [entity.name, entity]));
+    const names = (entity) => (entity?.attributes || []).map((attribute) => attribute.name);
+    const PERSON = /^(?:nombre|nombres|apellido|apellidos|correo|email|telefono|celular|documento|cedula|dni|rol)$/i;
+    for (const relation of model.relations.filter((item) => item.kind === 'herencia')) {
+      const parent = byName.get(relation.from);
+      const child = byName.get(relation.to);
+      if (!parent || !child || !names(parent).some((field) => require('./IdentityRequirements').isSensitiveField(field))) continue;
+      if (!names(child).some((field) => PERSON.test(field.normalize('NFD').replace(/[\u0300-\u036f]/g, '')))) {
+        avisos.push(`Modelo de dominio por verificar: ${child.name} hereda de ${parent.name} (entidad de cuentas con contraseña) pero no parece una persona; revisa que sea un tipo de usuario real y no una relación distinta.`);
+      }
+    }
+    const owners = new Map();
+    for (const relation of model.relations.filter((item) => item.kind === 'composicion')) {
+      owners.set(relation.to, [...new Set([...(owners.get(relation.to) || []), relation.from])]);
+    }
+    for (const [part, wholes] of owners) {
+      if (wholes.length > 1) avisos.push(`Modelo de dominio por verificar: ${part} es parte de ${wholes.join(' y de ')} a la vez; una composición no puede tener dos dueños. Probablemente es una relación muchos a muchos (por ejemplo con una entidad intermedia).`);
+    }
+    return avisos;
   }
 
   comparar(domainCode, designCode) {

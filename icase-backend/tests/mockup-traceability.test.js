@@ -173,3 +173,19 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
     expect(guardarOActualizar).toHaveBeenCalledWith('p1', expect.objectContaining({ trazabilidad_mockups: expect.any(Object) }));
   });
 });
+
+describe('sinónimos de respaldo y recuperación', () => {
+  const service = new MockupTraceabilityService();
+  const rf14 = { identificador: 'RF-14', tipo: 'RF', nombre: 'Permitir respaldos de la base de datos y recuperación de información', descripcion: 'El sistema deberá permitir respaldos de la base de datos y recuperación de información.', prioridad: 'Alta', actores: ['Administrador'], aprobado: true };
+  const html = '<main><h1>Copias de Seguridad</h1><p>Respaldo completado</p><button>Restaurar</button></main>';
+
+  test('una pantalla de copias de seguridad con restaurar evidencia el RF de respaldos y recuperación', () => {
+    const mockup = { nombre_pantalla: 'vista-de-copias-de-seguridad', nombre_visible: 'Vista de Copias de Seguridad', preview_code: html };
+    expect(service.enrichMockup(mockup, { slug: mockup.nombre_pantalla }, [rf14])).toEqual(['RF-14']);
+  });
+
+  test('comportamiento previo: una pantalla sin relación no se enlaza', () => {
+    const mockup = { nombre_pantalla: 'menu', nombre_visible: 'Menú', preview_code: '<main><h1>Menú del día</h1><p>Lomo saltado</p></main>' };
+    expect(service.enrichMockup(mockup, { slug: 'menu' }, [rf14])).toEqual([]);
+  });
+});

@@ -7,6 +7,8 @@ const MobileRuntime = require('../../core/constants/MobileRuntime');
 
 const HtmlToJsxTransformer = require('./HtmlToJsxTransformer');
 const MockupBindingValidator = require('./MockupBindingValidator');
+const { isLoginRequirement } = require('./IdentityRequirements');
+const MockupTraceabilityService = require('./MockupTraceabilityService');
 
 const TEMPLATES = path.join(__dirname, '..', 'templates', 'frontend');
 const template = (name) => fs.readFileSync(path.join(TEMPLATES, name), 'utf8');
@@ -22,12 +24,26 @@ const isAuthScreen = (screen) => /inicio.*sesion|login|autentic/i.test(screen?.s
 const TYPED_FORMS_CSS = '.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}.form-row{display:flex;flex-direction:column;gap:.35rem}.input{width:100%;padding:.65rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;transition:border-color .15s,box-shadow .15s;outline:none}.input:focus{border-color:var(--primary);background:white;box-shadow:0 0 0 3px rgba(99,102,241,.15)}.input[aria-invalid="true"]{border-color:#ef4444;background:#fef2f2}.field-error{color:#dc2626;font-size:.8rem;font-weight:500}.secondary{background:#f1f5f9!important;color:#334155!important;border:1px solid #cbd5e1!important}.secondary:hover{background:#e2e8f0!important}.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;margin-top:.75rem}.records{width:100%;border-collapse:collapse;font-size:.875rem}.records th{background:#f8fafc;color:#475569;font-weight:600;text-transform:uppercase;font-size:.75rem;letter-spacing:.05em;padding:.75rem 1rem;border-bottom:1px solid #e2e8f0}.records td{padding:.85rem 1rem;border-bottom:1px solid #f1f5f9;color:#1e293b;vertical-align:middle}.records tr:last-child td{border-bottom:none}.records tr:hover{background:#f8fafc}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}';
 
 class GenericFrontendGenerator {
-  generate({ proyecto, screens, decisiones = {}, sistemaDiseno = {}, requerimientos = [] }) {
+  generate({ proyecto, screens, decisiones = {}, sistemaDiseno = {}, requerimientos = [], identidad = null, referencias = null }) {
     const platforms = decisiones.stack_tecnologico?.plataformas || decisiones.alcance_plataforma?.plataformas || ['web'];
     const colors = sistemaDiseno.colores || {};
-    const views = screens.map((screen) => this._view(screen, screens, requerimientos));
     const acceso = decisiones.control_acceso || null;
     const auth = acceso?.autenticacion?.metodo === 'jwt';
+    // Identidad: los RF de acceso no son destino de datos y, con sesión real, su pantalla diseñada sobra (la aplicación trae su acceso).
+    const identity = {
+      login: [...new Set([...(identidad?.login || []), ...(requerimientos || []).filter(isLoginRequirement).map((item) => item.identificador)].filter(Boolean).map((id) => String(id).toUpperCase()))],
+      usuarios: [...new Set((identidad?.usuarios || []).map((id) => String(id).toUpperCase()))]
+    };
+    const loginIds = new Set(identity.login);
+    const views = screens.map((screen) => this._view(screen, screens, requerimientos))
+      .filter((view, index) => !(auth && isAuthScreen(screens[index]) && view.requirements.every((id) => loginIds.has(String(id).toUpperCase()))));
+    const usedRoutes = new Set();
+    for (const view of views) {
+      let candidate = view.route;
+      for (let suffix = 2; usedRoutes.has(candidate); suffix += 1) candidate = `${view.route}-${suffix}`;
+      view.route = candidate;
+      usedRoutes.add(candidate);
+    }
     const openRoles = auth ? (acceso.roles || []).filter((role) => role.incluir !== false && role.autoregistro === true).map((role) => ({ id: role.id, nombre: role.nombre })) : [];
     const typedForms = new ModuleService().activos(decisiones.modulos).includes('formularios_tipados');
     const files = [
@@ -46,7 +62,7 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/UsersScreen.jsx', lenguaje: 'javascript', contenido: template('UsersScreen.jsx') }
       ] : []),
       { ruta: 'frontend/src/styles.css', lenguaje: 'css', contenido: `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:${colors.texto || '#0f172a'};background:#f1f5f9;--primary:${colors.primario || '#4f46e5'};--primary-hover:#4338ca}*{box-sizing:border-box}.mockup-screen{width:100%;max-width:none;margin:0;padding:0}body{margin:0;background:#f1f5f9;color:#0f172a;line-height:1.5}.app-shell{min-height:100vh;display:flex;flex-direction:column}.nav{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:.75rem 1.75rem;background:white;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.04)}.nav-brand{font-size:1.15rem;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:.5rem;text-decoration:none}.nav-links{display:flex;align-items:center;gap:.5rem;overflow-x:auto;padding:.25rem 0}.nav-link{text-decoration:none;color:#475569;font-size:.875rem;font-weight:500;padding:.45rem .85rem;border-radius:6px;transition:all .15s;white-space:nowrap}.nav-link:hover{background:#f1f5f9;color:#0f172a}.nav-link.active{background:#ede9fe;color:#4f46e5;font-weight:600}.nav-user{display:flex;align-items:center;gap:1rem;font-size:.875rem;color:#475569}.user-badge{background:#f1f5f9;padding:.35rem .75rem;border-radius:9999px;font-weight:500;border:1px solid #e2e8f0}.screen{max-width:1200px;width:100%;margin:1.5rem auto;padding:0 1.5rem}.screen h1{font-size:1.65rem;font-weight:700;color:#0f172a;margin:0 0 1rem 0;letter-spacing:-.02em}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:1.5rem;margin:1.25rem 0;box-shadow:0 1px 3px rgba(0,0,0,.03)}.card h2{font-size:1.15rem;font-weight:600;margin:0 0 1rem 0;color:#1e293b}.field{width:100%;min-height:2.65rem;padding:.6rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;outline:none;transition:border-color .15s}.field:focus{border-color:var(--primary);background:white}.button{border:0;border-radius:8px;padding:.55rem 1.15rem;font-size:.875rem;font-weight:500;cursor:pointer;background:var(--primary);color:white;transition:opacity .15s,transform .05s;display:inline-flex;align-items:center;gap:.5rem}.button:hover{opacity:.92}.button:active{transform:scale(.98)}.button:disabled{opacity:.5;cursor:not-allowed}.danger{background:#ef4444!important}.danger:hover{background:#dc2626!important}.tabs{display:flex;gap:.5rem;margin-bottom:1rem}.tabs button{background:#e2e8f0;color:#334155}.tabs button.active{background:var(--primary);color:white}.record{white-space:pre-wrap;background:#f8fafc;padding:1rem;border-radius:8px;border:1px solid #e2e8f0}.error{color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}.success{color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}${typedForms ? TYPED_FORMS_CSS : ''}` },
-      { ruta: 'frontend/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ project: proyecto.nombre, mode: 'generic_contract_v1', modulos: { formularios_tipados: typedForms }, plataformas_solicitadas: platforms, auth: { habilitada: auth, registro: openRoles }, pantallas: views }, null, 2) }
+      { ruta: 'frontend/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ project: proyecto.nombre, mode: 'generic_contract_v1', modulos: { formularios_tipados: typedForms }, plataformas_solicitadas: platforms, auth: { habilitada: auth, registro: openRoles }, identidad: identity, pantallas: views }, null, 2) }
     ];
     const imports = [];
     const routes = [];
@@ -54,8 +70,10 @@ class GenericFrontendGenerator {
     const allowedOperations = new Set([
       ...(requerimientos || []).filter((req) => String(req.tipo || 'RF').toUpperCase() === 'RF' && req.identificador && req.aprobado !== false).map((req) => slug(req.identificador)),
       ...views.flatMap((view) => view.operations)
-    ]);
+    ].filter((operation) => !loginIds.has(String(operation).toUpperCase())));
+    const usersMap = Object.fromEntries(identity.usuarios.map((id) => [slug(id), 'usuarios']).filter(([key]) => allowedOperations.has(key)));
     let anyWired = false;
+    let anyReferences = false;
     const routeSet = new Set(views.map((view) => view.route));
     const standalone = []; // rutas cuyo mockup trae su propio menú
     const tailwindConfigs = [];
@@ -68,11 +86,13 @@ class GenericFrontendGenerator {
       const screen = screens.find((item) => this._view(item, screens, requerimientos).id === view.id);
       const reference = this._plainText(screen?.mockup?.preview_code || '').slice(0, 600);
       const mockupCode = screen?.mockup?.preview_code;
-      const analysis = mockupCode ? HtmlToJsxTransformer.analyze(mockupCode, { operaciones: allowedOperations, routes: routeSet }) : null;
+      const analysis = mockupCode ? HtmlToJsxTransformer.analyze(mockupCode, { operaciones: allowedOperations, routes: routeSet, referencias: referencias || {} }) : null;
       const jsxBody = analysis ? analysis.jsx : '';
       const wired = jsxBody.includes('handleAction(');
       anyWired = anyWired || wired;
       const usesLink = jsxBody.includes('<Link ');
+      const usesReferences = jsxBody.includes('<ReferenceOptions');
+      anyReferences = anyReferences || usesReferences;
       // El CSS propio del mockup se acota a su pantalla; los scripts nunca se copian.
       const css = analysis ? HtmlToJsxTransformer.scopeCss(analysis.css, `.mockup-${view.id}`) : '';
       if (analysis?.tailwindConfig) tailwindConfigs.push(analysis.tailwindConfig);
@@ -81,7 +101,7 @@ class GenericFrontendGenerator {
       const bodyStyle = analysis && Object.keys(analysis.bodyStyle).length ? analysis.bodyStyle : null;
       if (css.trim()) files.push({ ruta: `frontend/src/pages/${view.id}.css`, lenguaje: 'css', contenido: `${css}\n` });
       if (analysis) {
-        const check = new MockupBindingValidator().validar({ html: mockupCode, requerimientos });
+        const check = new MockupBindingValidator().validar({ html: mockupCode, requerimientos, identidad: identity });
         const unlinked = check.advertencias.filter((item) => item.startsWith('sin enlace: ')).map((item) => item.slice('sin enlace: '.length));
         const count = (state) => check.enlaces.filter((item) => item.estado === state).length;
         linkSummaries.set(view.id, {
@@ -96,7 +116,7 @@ class GenericFrontendGenerator {
       files.push({
         ruta: `frontend/src/pages/${view.id}.jsx`,
         lenguaje: 'javascript',
-        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${usesLink ? "import { Link } from 'react-router-dom';\n" : ''}${css.trim() ? `import './${view.id}.css';\n` : ''}${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: setResult });\n" : ''}  return (\n    <main ${jsxBody ? "className={showCrud ? 'page-container screen' : 'mockup-screen'}" : 'className="page-container screen"'} data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>⚙️ Gestión de Datos (API)</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content mockup-${view.id}${bodyClass ? ` ${bodyClass}` : ''}"${bodyStyle ? ` style={${JSON.stringify(bodyStyle)}}` : ''}>${wired ? '<MockupResult result={result} selected={selected} onSelect={setSelected} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        <OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
+        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${usesLink ? "import { Link } from 'react-router-dom';\n" : ''}${usesReferences ? "import ReferenceOptions from '../ReferenceOptions';\n" : ''}${css.trim() ? `import './${view.id}.css';\n` : ''}${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: setResult" + (Object.keys(usersMap).length ? `, identidad: ${JSON.stringify(usersMap)}` : '') + " });\n" : ''}  return (\n    <main ${jsxBody ? "className={showCrud ? 'page-container screen' : 'mockup-screen'}" : 'className="page-container screen"'} data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>⚙️ Gestión de Datos (API)</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content mockup-${view.id}${bodyClass ? ` ${bodyClass}` : ''}"${bodyStyle ? ` style={${JSON.stringify(bodyStyle)}}` : ''}>${wired ? '<MockupResult result={result} selected={selected} onSelect={setSelected} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        <OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
       });
       if (screen?.mockup?.preview_code) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: screen.mockup.preview_code });
     }
@@ -106,6 +126,7 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') }
       );
     }
+    if (anyReferences) files.push({ ruta: 'frontend/src/ReferenceOptions.jsx', lenguaje: 'javascript', contenido: template('ReferenceOptions.jsx') });
     if (linkSummaries.size) {
       const manifestFile = files.find((file) => file.ruta === 'frontend/icase.manifest.json');
       const manifest = JSON.parse(manifestFile.contenido);
@@ -153,12 +174,18 @@ class GenericFrontendGenerator {
     const rf = directRf.length ? directRf : this._inferScreenRfs(screen, screens, requerimientos);
     const id = slug(screen.slug || screen.nombre || screen.nombre_pantalla);
     const route = String(screen.ruta || '').trim();
-    const modulo = screen.modulo || screen.mockup?.modulo || 'General';
-    return { id, name: screen.nombre || screen.nombre_visible || screen.nombre_pantalla || id, route: route.startsWith('/') ? route : `/${route || id}`, roles: screen.roles || [], requirements: rf, operations: rf.map(slug), modulo };
+    // El menú agrupa por flujo de usuario (Cliente, Mesero...); si el mockup no lo trae, por su módulo. Evita un grupo por pantalla.
+    const modulo = screen.flujo || screen.mockup?.flujo || screen.modulo || screen.mockup?.modulo || 'General';
+    // La ruta del árbol de navegación ("Sistema / Flujo / Pantalla") agrupa el menú, pero no es una URL: se usa una corta.
+    const simple = /^\/[a-z0-9_-]+(?:\/[a-z0-9_-]+)?$/i.test(route);
+    return { id, name: screen.nombre || screen.nombre_visible || screen.nombre_pantalla || id, route: simple ? route : `/${id}`, roles: screen.roles || [], requirements: rf, operations: rf.map(slug), modulo };
   }
 
   _inferScreenRfs(screen, screens = [], requerimientos = []) {
     if (!screen || isAuthScreen(screen)) return [];
+    // Primero la evidencia semántica del propio mockup (con sinónimos): no depende de que la trazabilidad guardada esté al día.
+    const evidencia = screen.mockup?.preview_code ? new MockupTraceabilityService().enrichMockup(screen.mockup, screen, requerimientos) : [];
+    if (evidencia.length) return evidencia.slice(0, 4);
     const screenTokens = tokensOf(screen.nombre || screen.nombre_visible || screen.nombre_pantalla || screen.slug || '');
     const siblings = (screens || []).filter((item) => item !== screen && (item.rf_trazabilidad || item.mockup?.rf_trazabilidad || []).length > 0);
     const codeOf = (req) => req.identificador || req.codigo || req.id_requerimiento;

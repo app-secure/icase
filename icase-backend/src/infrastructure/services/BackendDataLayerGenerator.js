@@ -73,7 +73,7 @@ class BackendDataLayerGenerator {
           const targetTable = byEntity.get(target);
           columns.push({ name: property, column, type: 'id', references: targetTable, enforced: reachable.has(this._key(contract, target)) });
         } else {
-          columns.push({ name: property, column, type: this._type(schema), ...(schema.enum ? { enum: schema.enum } : {}) });
+          columns.push({ name: property, column, type: this._type(schema), ...(schema.enum ? { enum: schema.enum } : {}), ...(schema['x-sensitive'] ? { sensitive: true } : {}) });
         }
       }
       tables[name] = {

@@ -32,6 +32,7 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
 2b. **ENLACES CON EL BACKEND (`data-accion`)**:
    - Todo botón o formulario que ejecuta un RF lleva `data-accion="RF-xx.verbo"` con un RF del bloque OPERACIONES DISPONIBLES y un verbo `consultar`, `crear`, `editar` o `eliminar`.
    - Los campos de ese formulario usan en `name` los nombres indicados en el bloque OPERACIONES DISPONIBLES para ese RF.
+   - Un formulario con `crear` incluye un control con `name` para CADA campo listado de ese RF (un campo como `estado` puede ir en un `select` o en un `<input type="hidden">` con un valor razonable): el backend rechaza el registro si falta un campo obligatorio. Los campos de referencia (terminan en `_id`) van en un `select`.
    - Un control solo visual (cancelar, cerrar, abrir menú, cambiar pestaña) lleva `data-accion="ui"`.
    - No inventes RF, verbos ni campos. No uses `onclick` ni scripts: el enlace es solo el atributo.
 

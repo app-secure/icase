@@ -47,6 +47,14 @@ class MockupValidatorService {
       .replace(/(<\/html\s*>)>+\s*$/i, '$1');
     if (sanitizado !== original) advertencias.push('Delimitadores externos de HTML normalizados sin modificar el contenido');
 
+    // Comillas escapadas (class=\"a\"): la IA a veces entrega el HTML como si aún fuera una cadena JSON. Sin repararlo,
+    // los atributos quedan rotos y la pantalla no compila.
+    const sinEscapes = HtmlToJsxTransformer.unescapeQuotes(sanitizado);
+    if (sinEscapes !== sanitizado) {
+      sanitizado = sinEscapes;
+      advertencias.push('Comillas escapadas en los atributos corregidas');
+    }
+
     // Preservar tailwind cdn y tailwind.config, remover cualquier otro script
     sanitizado = sanitizado.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (match, attrs, content) => {
       if (attrs.includes('cdn.tailwindcss.com') || match.includes('cdn.tailwindcss.com')) {
@@ -110,6 +118,8 @@ class MockupValidatorService {
 
     if (!this.listo(codigo)) errores.push('El documento HTML está incompleto o truncado');
     if (!/<body\b/i.test(codigo)) errores.push('Falta la etiqueta body');
+    // Atributos corruptos (restos de comillas escapadas): la pantalla no compilaría y el error aparece recién en la verificación.
+    if (/\\&quot;|<[^>]*\s[^\s=>"']*\\"=/.test(codigo)) errores.push('Los atributos HTML están corruptos por comillas escapadas; regenera la pantalla');
     if (!/(?:<style\b|cdn\.tailwindcss\.com|class=["'][^"']*(?:flex|grid|bg-|p-|m-|text-))/i.test(codigo)) {
       errores.push('La pantalla no contiene estilos verificables');
     }

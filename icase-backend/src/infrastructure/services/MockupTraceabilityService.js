@@ -1,4 +1,5 @@
 const MockupFunctionalCoverageService = require('./MockupFunctionalCoverageService');
+const { SYNONYMS: SHARED_SYNONYMS } = require('./DomainSynonyms');
 
 const STOPWORDS = new Set([
   'accion', 'actualizar', 'administrar', 'aplicacion', 'crear', 'debe', 'digital',
@@ -12,6 +13,7 @@ const STOPWORDS = new Set([
 ]);
 
 const SYNONYMS = new Map([
+  ...SHARED_SYNONYMS,
   ['cobrar', 'pago'], ['cobro', 'pago'], ['pagar', 'pago'],
   ['comanda', 'pedido'], ['orden', 'pedido'],
   ['reservacion', 'reserva'], ['reservar', 'reserva'],
@@ -20,6 +22,7 @@ const SYNONYMS = new Map([
   ['pts', 'punto'], ['puntos', 'punto'],
   ['login', 'autenticacion'], ['sesion', 'autenticacion'], ['sesiones', 'autenticacion'],
   ['credencial', 'autenticacion'], ['credenciales', 'autenticacion'],
+  ['copia', 'respaldo'], ['restaurar', 'recuperacion'], ['restauracion', 'recuperacion'],
   ['disponible', 'disponibilidad'], ['agotado', 'disponibilidad']
 ]);
 

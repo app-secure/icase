@@ -15,10 +15,10 @@ test('cambios entre dos usuarios y recuperación tras desconexión, sin recargar
   const api = makeApi(apiBase, admin);
   const contract = await api('/api/contract');
   const operations = contract.data.operations;
-  const operation = operations.find(op => screens.some(screen => screen.operations?.includes(op.key)) && Object.entries(op.schema?.properties || {}).some(([, field]) => field.type === 'string' && !field.enum && !field.format && !field.readOnly && !field['x-references'] && (!field.maxLength || field.maxLength >= 24)));
+  const operation = operations.find(op => ['GET','POST','PATCH','DELETE'].every(method => !op.methods || op.methods.includes(method)) && screens.some(screen => screen.operations?.[0] === op.key) && Object.entries(op.schema?.properties || {}).some(([, field]) => field.type === 'string' && !field.enum && !field.format && !field.readOnly && !field['x-references'] && (!field.maxLength || field.maxLength >= 24)));
   test.skip(!operation, 'No existe una operación con un campo textual libre para comprobar cambios visibles.');
   const field = Object.entries(operation.schema.properties).find(([, value]) => value.type === 'string' && !value.enum && !value.format && !value.readOnly && !value['x-references'] && (!value.maxLength || value.maxLength >= 24))[0];
-  const screen = screens.find(screen => screen.operations?.includes(operation.key));
+  const screen = screens.find(screen => screen.operations?.[0] === operation.key);
   const salt = Date.now().toString(36);
   const password = 'Verify-Changes-123!';
   const email = 'changes-' + salt + '@example.test';
@@ -39,24 +39,29 @@ test('cambios entre dos usuarios y recuperación tras desconexión, sin recargar
     const readerPage = await contexts[0].newPage();
     const writerPage = await contexts[1].newPage();
     await Promise.all([readerPage.goto(screen.route), writerPage.goto(screen.route)]);
+    for (const page of [readerPage, writerPage]) {
+      await expect(page.locator('[data-screen]')).toBeVisible();
+      const tab = page.getByRole('button', { name: /Gestión de Datos/i });
+      if (await tab.count()) await tab.click();
+    }
     for (const page of [readerPage, writerPage]) await expect(page.getByTestId('change-events-status')).toHaveText('Canal de cambios: activo');
     // La escritura usa la API de otro usuario; ambas vistas reciben el aviso por WebSocket.
     const record = await createValidRecord(writer, operations, operation, cleanups, 0);
     const marker = 'changes-' + salt;
     const route = operation.collectionPath + '/' + record.id;
     expect((await writer(route, 'PATCH', { [field]: marker })).status).toBe(200);
-    for (const page of [readerPage, writerPage]) await expect(page.getByText(marker, { exact: true })).toBeVisible();
+    for (const page of [readerPage, writerPage]) await expect(page.locator('article.record, table.records tbody tr').filter({hasText: marker})).toBeVisible();
     const updated = marker + '-2';
     expect((await writer(route, 'PATCH', { [field]: updated })).status).toBe(200);
-    await expect(readerPage.getByText(updated, { exact: true })).toBeVisible();
+    await expect(readerPage.locator('article.record, table.records tbody tr').filter({hasText: updated})).toBeVisible();
     await contexts[0].setOffline(true);
     await expect(readerPage.getByTestId('change-events-status')).not.toHaveText('Canal de cambios: activo');
     const missed = marker + '-3';
     expect((await writer(route, 'PATCH', { [field]: missed })).status).toBe(200);
     await contexts[0].setOffline(false);
-    await expect(readerPage.getByText(missed, { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(readerPage.locator('article.record, table.records tbody tr').filter({hasText: missed})).toBeVisible({ timeout: 15000 });
     expect((await writer(route, 'DELETE')).status).toBe(200);
-    for (const page of [readerPage, writerPage]) await expect(page.getByText(missed, { exact: true })).toHaveCount(0);
+    for (const page of [readerPage, writerPage]) await expect(page.locator('article.record, table.records tbody tr').filter({hasText: missed})).toHaveCount(0);
   } finally {
     for (const context of contexts) await context.close();
     for (const cleanup of cleanups) { try { await cleanup(); } catch {} }

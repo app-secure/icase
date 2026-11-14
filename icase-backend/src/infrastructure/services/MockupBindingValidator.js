@@ -33,7 +33,7 @@ const isButton = (node) => node.tagName === 'button' || attr(node, 'role') === '
  * y qué controles quedaron sin enlace. Las advertencias no bloquean la aprobación.
  */
 class MockupBindingValidator {
-  validar({ html, requerimientos = [], contrato = null } = {}) {
+  validar({ html, requerimientos = [], contrato = null, identidad = null } = {}) {
     if (!html || typeof html !== 'string') return { enlaces: [], advertencias: [] };
     const document = parse(html);
     const root = descendants(document, (node) => node.tagName === 'main')[0]
@@ -41,6 +41,11 @@ class MockupBindingValidator {
     // Un RF marcado explícitamente como no aprobado no es destino; los que no traen la marca (requisitos locales) sí.
     const rfs = new Set(requerimientos.filter((item) => item.identificador && item.tipo !== 'RNF' && item.aprobado !== false).map((item) => String(item.identificador).toUpperCase()));
     const operations = new Map((contrato?.operations || []).map((operation) => [String(operation.id).toUpperCase(), operation]));
+    // RF de autenticación: no son destino de enlaces de datos (el acceso lo resuelve la sesión de la aplicación).
+    const login = new Set([
+      ...(identidad?.login || []).map((id) => String(id).toUpperCase()),
+      ...(contrato?.identity?.login || []).map((id) => String(id).toUpperCase())
+    ]);
     const enlaces = [];
     const advertencias = [];
 
@@ -55,12 +60,12 @@ class MockupBindingValidator {
         enlaces.push({ control, rf: null, verbo: null, estado: 'ui', campos: [], campos_desconocidos: [] });
         continue;
       }
-      enlaces.push(this._enlace({ node, control, declared, rfs, operations, advertencias }));
+      enlaces.push(this._enlace({ node, control, declared, rfs, operations, login, advertencias }));
     }
     return { enlaces, advertencias };
   }
 
-  _enlace({ node, control, declared, rfs, operations, advertencias }) {
+  _enlace({ node, control, declared, rfs, operations, login, advertencias }) {
     const invalid = (motivo, rf = null, verbo = null) => {
       advertencias.push(`enlace inválido "${control}": ${motivo}`);
       return { control, rf, verbo, estado: 'invalido', motivo, campos: [], campos_desconocidos: [] };
@@ -71,6 +76,7 @@ class MockupBindingValidator {
     const verbo = match[2].toLowerCase();
     if (!VERBS[verbo]) return invalid(`verbo "${match[2]}" no válido (consultar, crear, editar o eliminar)`, rf);
     if (!rfs.has(rf)) return invalid(`${rf} no es un RF aprobado`, rf, verbo);
+    if (login.has(rf)) return invalid(`${rf} es de autenticación: la resuelve la sesión de la aplicación, no un registro de datos; usa data-accion="ui"`, rf, verbo);
 
     const operation = operations.get(rf);
     if (operation?.methods && !operation.methods.includes(VERBS[verbo])) {
@@ -81,7 +87,11 @@ class MockupBindingValidator {
     const known = properties && Object.keys(properties).length ? new Set(Object.keys(properties)) : null;
     const campos_desconocidos = known ? campos.filter((name) => !known.has(name)) : [];
     for (const name of campos_desconocidos) advertencias.push(`campo "${name}" de "${control}" no existe en la operación ${rf}`);
-    return { control, rf, verbo, estado: 'valido', campos, campos_desconocidos };
+    // Un formulario que crea registros sin control para algún campo de la operación no podrá guardarlos si el backend lo exige.
+    const campos_faltantes = known && verbo === 'crear'
+      ? Object.entries(properties).filter(([name, definition]) => !definition?.readOnly && !campos.includes(name)).map(([name]) => name) : [];
+    if (campos_faltantes.length) advertencias.push(`el formulario de "${control}" no tiene control para: ${campos_faltantes.join(', ')} (${rf} los guarda y el backend puede exigirlos)`);
+    return { control, rf, verbo, estado: 'valido', campos, campos_desconocidos, campos_faltantes };
   }
 
   /** Campos con `name` del formulario del control; sin formulario, los de toda la pantalla. */

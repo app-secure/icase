@@ -89,6 +89,14 @@ class CodePlanningProposalService {
           mensaje: campo.name + ' es obligatorio.', justificacion: 'Atributo sin marca opcional en el dominio aprobado.' });
       }
     }
+    // Reglas de sentido común (no negativos, fin >= inicio): solo las que el motor de reglas valida como correctas.
+    const rfPorEntidad = Object.fromEntries((modelo?.entities || []).map((entidad) => [entidad.key, contrato.operations.filter((op) => op.entity === entidad.key).map((op) => op.id)]));
+    const sentidoComun = new (require('./SanityRuleService'))().derivar({ entidades: modelo?.entities || [], rfPorEntidad });
+    const validador = new (require('./BusinessRuleService'))();
+    const contextoReglas = { entidades: modelo?.entities || [], requerimientos: requisitosAprobados };
+    for (const regla of sentidoComun) {
+      if (!validador.validar([regla], contextoReglas).errores.length) dominio.push(regla);
+    }
     if (inicial) return { valor: { reglas: dominio, confirmadas }, advertencias: [] };
     if (!this.ruleInferenceService) {
       return { valor: { reglas: dominio, confirmadas, notas: 'Revisa las reglas derivadas del dominio.' }, advertencias: ['El servicio de inferencia de reglas no está configurado.'] };

@@ -82,7 +82,8 @@ function samplePayload(schema, rules, salt) {
     if (adjusted !== undefined) payload[rule.campo] = adjusted;
   }
 
-  const typed = Object.entries(payload).map(([name, value]) => ({ name, type: properties[name].type, format: properties[name].format || null, value }));
+  // Los campos de secretos se guardan como hash y no se devuelven: no se comparan con lo enviado.
+  const typed = Object.entries(payload).filter(([name]) => !properties[name]['x-sensitive']).map(([name, value]) => ({ name, type: properties[name].type, format: properties[name].format || null, value }));
   const defaults = rules.filter((rule) => rule.tipo === 'valor_por_defecto').map((rule) => ({ campo: rule.campo, valor: rule.valor }));
 
   const cases = [];
@@ -171,6 +172,9 @@ async function exerciseOperation(api, operations, operation) {
     }
     const main = await createValidRecord(api, operations, operation, cleanups, 0);
     const stored = main.response.data.data;
+    for (const name of Object.keys(operation.schema.properties || {}).filter((key) => operation.schema.properties[key]['x-sensitive'])) {
+      if (stored[name] !== undefined) fail('el campo ' + name + ' es un secreto y no debe devolverse');
+    }
     for (const field of main.sample.typed) {
       if (!same(field.value, stored[field.name], field.format)) fail('el campo ' + field.name + ' no conservó su tipo (' + JSON.stringify(stored[field.name]) + ')');
     }
