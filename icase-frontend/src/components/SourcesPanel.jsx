@@ -8,25 +8,26 @@ import {
   Save,
   CheckCircle2,
   ArrowLeft
+  , Files
 } from "lucide-react";
 
 function CloudUploadFileIllustration() {
   return (
-    <svg width="68" height="76" viewBox="0 0 68 76" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+    <svg width="48" height="54" viewBox="0 0 68 76" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
       {/* Document Base */}
       <path
         d="M10 12C10 7.58172 13.5817 4 18 4H43.3726C45.4943 4 47.5291 4.84285 49.0294 6.34315L55.6569 12.9706C57.1571 14.4709 58 16.5057 58 18.6274V64C58 68.4183 54.4183 72 50 72H18C13.5817 72 10 68.4183 10 64V12Z"
-        fill="#DCE4FF"
+        fill="#F2EDFF"
       />
       {/* Folded Corner */}
       <path
         d="M44 4.5V14C44 17.3137 46.6863 20 50 20H57.5L44 4.5Z"
-        fill="#BCCBFF"
+        fill="#DDD6FE"
       />
       {/* Cloud inside Document */}
       <path
         d="M25.5 49H43C46.5899 49 49.5 46.0899 49.5 42.5C49.5 39.2111 47.0548 36.4926 43.8819 36.0604C42.9056 31.4648 38.8247 28 33.95 28C28.3443 28 23.8 32.5443 23.8 38.15C23.8 38.4981 23.8175 38.8422 23.8517 39.1812C21.3774 39.8825 19.5 42.1552 19.5 44.85C19.5 47.142 21.358 49 23.65 49H25.5Z"
-        fill="#7B96FF"
+        fill="#8B5CF6"
       />
       {/* Upward Arrow inside Cloud */}
       <path
@@ -43,7 +44,7 @@ function CloudUploadFileIllustration() {
 function FileTypeBadge({ type }) {
   if (type === "audio") {
     return (
-      <div className="w-10 h-10 rounded-xl bg-[#5850EC] flex items-center justify-center shrink-0 shadow-2xs">
+      <div className="w-10 h-10 rounded-xl bg-[#7C3AED] flex items-center justify-center shrink-0 shadow-2xs">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
           <rect x="4" y="10" width="2.2" height="4" rx="1.1" fill="white" />
           <rect x="7.5" y="7" width="2.2" height="10" rx="1.1" fill="white" />
@@ -70,7 +71,7 @@ function FileTypeBadge({ type }) {
     );
   }
   return (
-    <div className="w-10 h-10 rounded-xl bg-[#3B82F6] flex items-center justify-center shrink-0 shadow-2xs">
+    <div className="w-10 h-10 rounded-xl bg-[#7C3AED] flex items-center justify-center shrink-0 shadow-2xs">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
         <path
           d="M7 4.5H14L18 8.5V19.5H7V4.5Z"
@@ -118,6 +119,7 @@ export default function SourcesPanel({
   onSelectProvider,
   availableProviders = [],
   onContinueToProject = null
+  , compact = false, readOnly = false
 }) {
   const [uploadingItems, setUploadingItems] = useState([]);
   const [uploadError, setUploadError] = useState("");
@@ -269,8 +271,16 @@ export default function SourcesPanel({
     }
   };
 
+  if (compact) return <div className="flex h-full min-h-0 flex-col bg-white p-4">
+    <h2 className="font-semibold text-slate-900">Insumos del proyecto</h2>
+    <p className="mb-4 mt-1 text-xs text-slate-500">Consulta el contenido y la transcripción de cada fuente.</p>
+    {!readOnly && <><input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} accept=".txt,.pdf,.mp3,.wav,.m4a,.mp4,.aac,.ogg,.opus,.docx" className="hidden" /><button type="button" disabled={isProcessing || isAnySourceLoading} onClick={() => fileInputRef.current?.click()} className="mb-3 rounded-xl border border-violet-200 px-3 py-2 text-sm font-semibold text-violet-700 disabled:opacity-50">Subir insumo</button><p className="mb-3 text-xs text-slate-500">Añadir fuentes deja pendiente revisar la vigencia del análisis; no lo regenera automáticamente.</p></>}
+    {uploadError && <p role="alert" className="text-xs text-red-700">{uploadError}</p>}
+    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">{uniqueSources.map(src => <button key={src.id} type="button" onClick={() => setActiveSourceId(src.id)} className="block w-full rounded-xl border border-slate-200 p-3 text-left hover:border-violet-300 hover:bg-violet-50"><span className="block break-words text-sm font-medium text-slate-800">{src.name}</span><span className="text-xs text-slate-500">{src.isUploading ? 'Cargando…' : 'Ver contenido'}</span></button>)}{!uniqueSources.length && <p className="text-xs text-slate-500">No hay fuentes cargadas.</p>}</div>
+    {activeSource && <SourceDetailsModal source={activeSource} onClose={() => setActiveSourceId(null)} readOnly />}
+  </div>;
   return (
-    <div className="flex-1 w-full h-full overflow-y-auto bg-[#F8F9FB] px-4 py-8 md:py-12 flex flex-col items-center">
+    <div className="flex-1 min-h-0 w-full h-full overflow-y-auto bg-[#F8F9FC] p-4 md:p-8 flex flex-col items-center">
       <input
         type="file"
         multiple
@@ -280,12 +290,9 @@ export default function SourcesPanel({
         className="hidden"
       />
 
-      <div className="w-full max-w-2xl my-auto">
-        {/* Cabecera de sección "Cargar Insumos" */}
-        <div className="mb-5 flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Cargar Insumos
-          </h1>
+      <div className="w-full max-w-[1200px]">
+        <header className="initial-analysis__header"><div className="initial-analysis__icon"><Files size={24} /></div><div><p className="text-xs font-bold tracking-wide text-violet-700">FASE 1 · FUENTES</p><h1 className="text-2xl font-bold">Reunir la información del proyecto</h1><p className="initial-analysis__intro">Sube documentos, notas o audios y revisa su contenido. Esta información será la base del análisis inicial.</p></div></header>
+        <div className={isProcessed && onContinueToProject ? "mb-3 flex justify-end" : "hidden"}>
           {isProcessed && onContinueToProject && (
             <button
               type="button"
@@ -323,14 +330,15 @@ export default function SourcesPanel({
                 setIsDragging(false);
               }}
               onDrop={handleDrop}
-              className={`rounded-2xl border-2 border-dashed px-6 py-10 flex flex-col items-center justify-center text-center transition-all cursor-pointer select-none ${
+              aria-label="Subir insumos: arrastra o selecciona tus archivos"
+              className={`rounded-2xl border-2 border-dashed px-6 py-5 flex flex-col items-center justify-center text-center transition-all cursor-pointer select-none ${
                 isDragging
-                  ? "border-[#4349C6] bg-[#EEF2FF]"
-                  : "border-[#C7D2FE] bg-[#F5F7FF]/80 hover:bg-[#EEF2FF]/75 hover:border-[#818CF8]"
+                  ? "border-[#7C3AED] bg-[#F2EDFF]"
+                  : "border-[#DDD6FE] bg-[#FAF9FC]/80 hover:bg-[#F2EDFF]/75 hover:border-[#A78BFA]"
               } ${isAnySourceLoading || isProcessing ? "opacity-60 cursor-not-allowed" : ""}`}
             >
               <CloudUploadFileIllustration />
-              <p className="mt-4 text-[16px] font-medium text-slate-800 tracking-tight">
+              <p className="mt-2 text-[16px] font-medium text-slate-800 tracking-tight">
                 Arrastra o selecciona tus archivos
               </p>
               <p className="mt-1 text-xs text-slate-400">
@@ -374,7 +382,7 @@ export default function SourcesPanel({
                           <div className="mt-0.5 flex items-center gap-1.5">
                             {src.isUploading ? (
                               <>
-                                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-[#4349C6]" />
+                                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-[#7C3AED]" />
                                 <span className="text-[11px] text-slate-400">Subiendo...</span>
                               </>
                             ) : src.uploadError ? (
@@ -407,7 +415,7 @@ export default function SourcesPanel({
                                 event.stopPropagation();
                                 setActiveSourceId(src.id);
                               }}
-                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 transition-colors cursor-pointer"
+                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:border-violet-200 hover:bg-violet-50 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 transition-colors cursor-pointer"
                               title="Editar contexto o transcripción"
                             >
                               <Pencil size={14} />
@@ -435,12 +443,12 @@ export default function SourcesPanel({
           </div>
 
           {/* Barra inferior: Botón Procesar (izquierda) + Selector Elegir modelo (derecha) */}
-          <div className="border-t border-slate-100 bg-[#FAFAFC] px-6 py-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5">
+          <div className="border-t border-slate-100 bg-[#FAF9FC] px-6 py-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5">
             <button
               type="button"
               onClick={() => onProcess(currentProvider)}
               disabled={uniqueSources.length === 0 || isProcessing || isAnySourceLoading}
-              className="flex-1 h-11 px-6 rounded-xl bg-[#4349C6] hover:bg-[#373CB3] disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed"
+              className="flex-1 h-11 px-6 rounded-xl bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed"
             >
               {isProcessing ? (
                 <>
@@ -459,7 +467,7 @@ export default function SourcesPanel({
               <span className="absolute -top-2 left-3 bg-white px-1 text-[10px] font-medium text-slate-400 z-10 leading-none">
                 Elegir modelo
               </span>
-              <div className="relative flex items-center h-11 rounded-xl border border-slate-200 bg-white px-3 shadow-2xs hover:border-slate-300 focus-within:border-[#4349C6]">
+              <div className="relative flex items-center h-11 rounded-xl border border-slate-200 bg-white px-3 shadow-2xs hover:border-slate-300 focus-within:border-[#7C3AED]">
                 <AiBrainModelIcon />
                 <select
                   value={currentProvider}
@@ -509,7 +517,7 @@ export default function SourcesPanel({
   );
 }
 
-function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
+function SourceDetailsModal({ source, onClose, onSave, onSuggest, readOnly = false }) {
   const toDraft = React.useCallback((item) => ({
     category: item.category || (item.type === "audio" ? "audios" : item.type === "pdf" ? "documentos" : "textos"),
     contentType: item.contentType || "",
@@ -580,26 +588,21 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
     }
   };
 
-  const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-[#4349C6] focus:ring-2 focus:ring-indigo-100";
+  const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-[#7C3AED] focus:ring-2 focus:ring-violet-100";
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#171425]/45 p-4 backdrop-blur-[2px]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form onSubmit={handleSave} className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#E7E3EE] bg-white shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#4349C6]">Contexto de la fuente</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#7C3AED]">Contexto de la fuente</p>
             <h3 className="truncate text-lg font-semibold text-slate-900">{source.name}</h3>
             <p className="mt-0.5 text-xs text-slate-500">Estos datos acompañarán el contenido cuando la IA analice el proyecto.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={18} /></button>
         </header>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          <div className="flex justify-end">
-            <button type="button" onClick={handleSuggest} disabled={isSuggesting || isSaving} className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-xs font-semibold text-[#4349C6] hover:bg-indigo-100 disabled:opacity-50">
-              {isSuggesting ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-[#4349C6]" /> : <Sparkles size={14} />}
-              {isSuggesting ? "Analizando fuente..." : "Rellenar campos con IA"}
-            </button>
-          </div>
+        <fieldset disabled={readOnly} className="flex-1 min-h-0 space-y-4 overflow-y-auto px-5 py-4">
+
 
           {feedback && <div className={`rounded-xl border px-3 py-2 text-xs ${feedback.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{feedback.message}</div>}
 
@@ -613,7 +616,7 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
           </div>
 
           {hasTranscription && (
-            <section className="rounded-2xl border border-indigo-100 bg-[#FCFBFE] p-4">
+            <section className="rounded-2xl border border-violet-100 bg-[#FCFBFE] p-4">
               <div className="mb-3">
                 <h4 className="text-sm font-semibold text-slate-900">Revisión de transcripción</h4>
                 <p className="text-xs text-slate-500">Corrige nombres, cifras o reglas mal interpretadas antes de procesar el proyecto.</p>
@@ -625,11 +628,15 @@ function SourceDetailsModal({ source, onClose, onSave, onSuggest }) {
               </label>
             </section>
           )}
-        </div>
+        </fieldset>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+        <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+          <button type="button" onClick={handleSuggest} disabled={readOnly || isSuggesting || isSaving} className="mr-auto flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3.5 py-2 text-xs font-semibold text-[#7C3AED] hover:bg-violet-100 disabled:opacity-50">
+              {isSuggesting ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-[#7C3AED]" /> : <Sparkles size={14} />}
+              {isSuggesting ? "Analizando fuente..." : "Rellenar campos con IA"}
+            </button>
           <button type="button" onClick={onClose} disabled={isSaving} className="rounded-full px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200">Cancelar</button>
-          <button type="submit" disabled={isSaving || isSuggesting} className="flex items-center gap-2 rounded-full bg-[#4349C6] px-5 py-2 text-xs font-semibold text-white hover:bg-[#373CB3] disabled:opacity-50">{isSaving ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Save size={14} />}Guardar contexto</button>
+          <button type="submit" disabled={readOnly || isSaving || isSuggesting} className="flex items-center gap-2 rounded-full bg-[#7C3AED] px-5 py-2 text-xs font-semibold text-white hover:bg-[#6D28D9] disabled:opacity-50">{isSaving ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <Save size={14} />}Guardar contexto</button>
         </footer>
       </form>
     </div>

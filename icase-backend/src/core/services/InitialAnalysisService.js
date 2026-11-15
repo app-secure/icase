@@ -110,9 +110,12 @@ class InitialAnalysisService {
       result.control_aprobacion = this.control(result, this.evidence(context, additional));
       return { propuesta: result, version_base: current.id, elementos_afectados: [], justificacion: 'Revisión integral de calidad sobre el borrador, sin repetir extracción.', entrada_hash: Execution.hash(this.evidence(context, additional)) };
     }
+    const correcting = payload.operacion === 'correccion_analisis_inicial';
+    const correctionPrevious = correcting ? require('./InitialAnalysisCorrectionScope')(current.contenido, payload.elementosIds) : current?.contenido;
+    const correctionInstruction = correcting ? `${payload.instruccion}\nALCANCE DE EDICIÓN: ${(payload.elementosIds || []).join(', ')}. Modifica únicamente esos IDs. Las fuentes y elementos relacionados son contexto de solo lectura. Conserva IDs y evidencias válidas. No añadas elementos fuera de selección; explica problemas externos sin modificarlos.` : payload.instruccion || '';
     const result = await this.ai.procesar({ objetivo: 'requisitos', provider: payload.provider, specificModel: payload.specificModel,
       insumo_bruto: context.content, insumo_adicional: additional, pistas_fuentes: context.hints,
-      initialAnalysisOnly: true, initialAnalysisInstruction: payload.desdeCero ? '' : payload.instruccion || '', initialAnalysisPrevious: payload.desdeCero ? null : current?.contenido || null });
+      initialAnalysisOnly: true, initialAnalysisInstruction: payload.desdeCero ? '' : correctionInstruction, initialAnalysisPrevious: payload.desdeCero ? null : correctionPrevious || null });
     const input = this.evidence(context, additional);
     result.control_aprobacion = this.control(result, input);
     if (payload.operacion === 'correccion_analisis_inicial') {
@@ -124,7 +127,7 @@ class InitialAnalysisService {
         const originals = new Set(before.map(n => n.id));
         return [...before.map(n => selected.has(n.id) ? after.find(item => item.id === n.id) || n : n), ...(allowNew ? after.filter(n => !originals.has(n.id)) : [])];
       };
-      const candidate = { ...previous, inventario: replace(previous.inventario || [], result.inventario || [], (previous.inventario || []).some(n => selected.has(n.id))),
+      const candidate = { ...previous, inventario: replace(previous.inventario || [], result.inventario || [], false),
         actores: replace(previous.actores || [], result.actores || [], false), sintesis: selected.has('sintesis') ? result.sintesis : previous.sintesis };
       Object.assign(candidate, analysisSections(candidate.inventario));
       candidate.control_aprobacion = this.control(candidate, input);
@@ -138,11 +141,14 @@ class InitialAnalysisService {
   async edit(projectId, user, body) {
     const project = await this.project(projectId, user);
     const current = await this.versions.get(project.analisis_inicial_borrador_id);
-    if (!current || current.id !== body.version_esperada || current.estado !== 'borrador') throw fault('Reabre el análisis o recarga su versión antes de editar.');
+    if (!current || current.estado !== 'borrador') throw fault('El análisis no tiene un borrador editable. Reábrelo antes de guardar cambios.');
+    if (String(current.id) !== String(body.version_esperada)) throw fault('El borrador cambió desde que abriste el formulario. Actualiza la versión antes de guardar; tus cambios no se han aplicado.');
     if (!String(body.justificacion || '').trim()) throw fault('Escribe una justificación.', 400);
     let content = structuredClone(current.contenido);
     let additional = [current.insumo_adicional, body.insumo_adicional].filter(Boolean).join('\n\n');
-    if (body.accion === 'responder_pregunta') {
+    if (body.accion === 'fusionar_necesidades') {
+      content = require('./MergeAnalysisNeeds')(content, body);
+    } else if (body.accion === 'responder_pregunta') {
       const question = content.inventario?.find(n => n.id === body.id && n.tipo === 'pregunta');
       if (!question || question.estado !== 'pendiente') throw fault('La pregunta no está pendiente en esta versión.');
       const answer = String(body.respuesta || '').trim();
@@ -153,24 +159,18 @@ class InitialAnalysisService {
       if (!Array.isArray(related) || related.some(id => !content.inventario.some(n => n.id === id && n.id !== question.id && n.tipo !== 'pregunta'))) throw fault('Hay elementos relacionados inexistentes.', 400);
       const previousVersions = await this.versions.list(projectId);
       const identifiers = require('./AnalysisIdentifiers')([content, ...previousVersions.map(v => v.contenido)]);
-      const elements = body.elementos === undefined ? [{ tipo: type, necesidad: answer, estado: 'confirmado', evidencia: answer, objetivo_id: body.objetivo_id }] : body.elementos;
+      const elements = body.elementos === undefined ? [{ tipo: type, necesidad: answer, estado: 'confirmado', evidencia: answer, objetivo_id: body.objetivo_id, destino_id: body.destino_id }] : body.elementos;
       if (!Array.isArray(elements) || !elements.length || body.elementos && body.confirmar_elementos !== true) throw fault('Revisa y confirma los elementos de la respuesta.', 400);
       if (body.propuesta_job_id) {
         const job = await this.jobs.requirementsGet(body.propuesta_job_id);
         const proposal = job?.resultado_analisis_inicial;
         if (job?.estado !== 'completado' || String(job.usuario_id) !== String(user) || String(job.proyecto_id) !== String(projectId) || proposal?.version_base !== current.id || proposal.respuesta_hash !== Execution.hash(answer) || proposal.entrada_hash !== current.entrada_hash || proposal.pregunta_id !== question.id) throw fault('La propuesta de respuesta está obsoleta.');
       }
-      const results = elements.map(element => {
-        if (!['decision', 'RF', 'RNF', 'regla_negocio', 'restriccion_tecnica'].includes(element.tipo) || !String(element.necesidad || '').trim() || !['confirmado', 'pendiente'].includes(element.estado || 'confirmado')) throw fault('Elemento de respuesta inválido.', 400);
-        const located = require('../../infrastructure/services/SourceEvidence').inspectEvidence(element, answer);
-        if (!located.valido) throw fault('Cada elemento debe citar literalmente la respuesta registrada.', 400);
-        if (element.objetivo_id && !content.inventario.some(n => n.objetivo_id === element.objetivo_id && n.tipo === element.tipo && isRequirementNeed(n))) throw fault('El objetivo seleccionado no corresponde a una necesidad activa de esa categoría.', 400);
-        return { id: identifiers.next('N'), tipo: element.tipo, necesidad: String(element.necesidad).trim(), estado: element.estado || 'confirmado', origen: 'explicito', evidencia: located.valid[0].texto, evidencias: located.valid.map(e => ({ texto: e.texto, fuente: 'insumo_directo' })), origenes: [question.id], elementos_relacionados: [...new Set(related)], ...(['RF', 'RNF'].includes(element.tipo) ? { objetivo_id: element.objetivo_id || identifiers.next('O') } : {}) };
-      });
+      const applied = require('./ApplyAnswerElements')(content.inventario, elements, { answer, questionId: question.id, related, identifiers });
       additional = [additional, `Respuesta del usuario a ${question.id}: ${question.necesidad}\n${answer}`].filter(Boolean).join('\n\n');
       const evidence = [{ texto: answer, fuente: 'insumo_directo' }];
-      const resolved = { ...question, estado: 'confirmado', respuesta: { texto: answer, usuario_id: user, fecha: new Date().toISOString(), elemento_resultante: results[0].id, elementos_resultantes: results.map(n => n.id), elementos_relacionados: [...new Set(related)], evidencias: evidence } };
-      content.inventario = content.inventario.map(n => n.id === question.id ? resolved : n).concat(results);
+      const resolved = { ...question, estado: 'confirmado', respuesta: { texto: answer, usuario_id: user, fecha: new Date().toISOString(), elemento_resultante: applied.ids[0], elementos_resultantes: applied.ids, elementos_relacionados: [...new Set(related)], evidencias: evidence } };
+      content.inventario = applied.inventory.map(n => n.id === question.id ? resolved : n);
     }
     const context = await this.source(project, current.insumo_directo);
     const input = this.evidence(context, additional);
@@ -180,7 +180,26 @@ class InitialAnalysisService {
       if (!job || String(job.usuario_id) !== String(user) || String(job.proyecto_id) !== String(projectId) || job.estado !== 'completado' || proposed?.version_base !== current.id || proposed.entrada_hash !== Execution.hash(input)) throw fault('Propuesta obsoleta o inaccesible.');
       content = structuredClone(proposed.propuesta);
     } else if (body.accion?.endsWith('_actor')) {
+      if (body.accion !== 'fusionar_actor' && (body.cambios?.origen === 'explicito' || body.cambios?.estado === 'confirmado') && body.cambios?.evidencias === undefined) {
+        const actor = (content.actores || []).find(item => item.id === body.id);
+        const evidence = require('../../infrastructure/services/SourceEvidence').inspectEvidence(actor || {}, input);
+        if (!evidence.valido) throw fault('Corrige la evidencia antes de marcar el actor como explícito o confirmado.', 400);
+      }
+      if (body.cambios?.evidencias !== undefined && body.accion !== 'fusionar_actor') {
+        const evidence = require('../../infrastructure/services/SourceEvidence').inspectEvidence({ evidencias: body.cambios.evidencias }, input);
+        if (!evidence.valido) throw fault('La evidencia del actor no se localiza en la fuente. Revisa las citas y sus archivos.', 400);
+        body = { ...body, cambios: { ...body.cambios, evidencias: evidence.valid } };
+      }
       content.actores = Actors.changeActor(content.actores || [], body).actors;
+      if (body.cambios?.evidencias !== undefined && body.accion !== 'fusionar_actor') {
+        content.actores = content.actores.map(actor => actor.id === body.id ? {
+          ...actor,
+          advertencias: (actor.advertencias || []).filter(message => !/^evidencia_(?:no_localizada|ausente|ambigua|fuera_del_contenido_original|fuentes_distintas)$/.test(message))
+        } : actor);
+      }
+      if (body.accion === 'fusionar_actor') {
+        content.inventario = (content.inventario || []).map(item => item.actor_id === body.id ? { ...item, actor_id: body.destino_id } : item);
+      }
       if (body.accion === 'agregar_actor') {
         const versions = await this.versions.list(projectId);
         const ids = require('./AnalysisIdentifiers')([current.contenido, ...versions.map(v => v.contenido)]);
@@ -199,7 +218,7 @@ class InitialAnalysisService {
       if (!body.contenido || !Array.isArray(body.contenido.inventario)) throw fault('Contenido de análisis inválido.', 400);
       content = structuredClone(body.contenido);
       content.inventario = require('./AnalysisIdentifiers').reserveManualAdditions(current.contenido, (await this.versions.list(projectId)).map(v => v.contenido), content.inventario);
-    } else if (body.accion !== 'responder_pregunta') throw fault('Acción no admitida.', 400);
+    } else if (!['responder_pregunta', 'fusionar_necesidades'].includes(body.accion)) throw fault('Acción no admitida.', 400);
     if (body.sintesis && typeof body.sintesis === 'object' && !Array.isArray(body.sintesis)) content.sintesis = structuredClone(body.sintesis);
     if (body.accion !== 'aplicar_propuesta' && content.revision_inventario) content.revision_inventario = { ...content.revision_inventario, estado: 'parcial', motivo: 'El contenido cambió después de su revisión. Ejecuta Revisar calidad del análisis para contrastar esta versión.' };
     if (body.accion === 'guardar') {

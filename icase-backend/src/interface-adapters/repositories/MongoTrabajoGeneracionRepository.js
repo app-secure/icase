@@ -41,6 +41,13 @@ class MongoTrabajoGeneracionRepository {
       { $set: { estado: 'procesando', ejecutor_id: this.ejecutorId, lease_expires_at: this.leaseUntil(), error: null } }, { new: true }).lean();
     return row ? this.requirementsGet(row._id) : null;
   }
+  async requirementsCancel(id, userId) {
+    await TrabajoGeneracionModel.updateOne({ _id: id, tipo: 'requisitos', usuario_id: userId, estado: { $in: ['encolado', 'procesando', 'interrumpido', 'esperando_proveedor'] } }, {
+      $set: { estado: 'cancelado', mensaje: 'Procesamiento cancelado por el usuario. Se conservan las etapas guardadas.', lease_expires_at: null },
+      $unset: { clave_activa: 1 }
+    });
+    return this.requirementsGet(id);
+  }
   async requirementsSave(id, changes, finish = false) {
     const update = { $set: { ...changes, lease_expires_at: finish ? null : this.leaseUntil() } };
     if (changes.estado === 'completado' || changes.estado === 'fallido') update.$unset = { clave_activa: 1 };

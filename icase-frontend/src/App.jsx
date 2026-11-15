@@ -289,6 +289,7 @@ export default function App() {
     if (!token) return;
     try {
     const data = await fetchProjects();
+    if (getAuthToken() !== token) return false;
     if (!Array.isArray(data)) throw new Error("El servidor devolvió una lista de proyectos inválida.");
     setProjectsError("");
     if (data && Array.isArray(data)) {
@@ -302,14 +303,27 @@ export default function App() {
     }
     } catch (error) {
       // Un fallo de conexión no significa que los proyectos se hayan eliminado.
+      if (getAuthToken() !== token) return false;
       setProjectsError(error.message);
+      return error.retryable === true;
     }
   }, [token, mapBackendProject]);
 
   useEffect(() => {
-    if (token) {
-      loadBackendProjects();
-    }
+    if (!token) return;
+    let cancelled = false;
+    let timer;
+    const attempt = async (number = 0) => {
+      if (cancelled || getAuthToken() !== token) return;
+      const retryable = await loadBackendProjects();
+      // Vite can start before MongoDB/backend. Retry only this read operation,
+      // never uploads, mutations or invalid/expired sessions.
+      if (!cancelled && retryable && number < 12 && getAuthToken() === token) {
+        timer = setTimeout(() => attempt(number + 1), Math.min(1000 * 2 ** number, 5000));
+      }
+    };
+    attempt();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [token, loadBackendProjects]);
 
   useEffect(() => {

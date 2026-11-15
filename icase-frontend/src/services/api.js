@@ -15,6 +15,7 @@ export const startRequirementJobApi = (id, body) => requirementsJobRequest(`${id
 export const fetchRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}`);
 export const fetchLatestRequirementJobApi = id => requirementsJobRequest(`${id}/trabajos-requisitos/ultimo`);
 export const resumeRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}/reanudar`, {});
+export const cancelRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}/cancelar`, {});
 export const fetchInitialAnalysisApi = async (id, version = null) => {
   const response = await apiFetch(`${API_URL}/proyectos/${id}/analisis-inicial${version ? `?version=${encodeURIComponent(version)}` : ''}`, { headers: getAuthHeaders() });
   const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cargar el análisis inicial.'); return data;
@@ -138,12 +139,12 @@ export async function fetchProjects() {
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || `Error al listar proyectos (${res.status})`);
+      throw Object.assign(new Error(data.error || `Error al listar proyectos (${res.status})`), { retryable: [500, 502, 503, 504].includes(res.status) });
     }
     return await res.json();
   } catch (err) {
     console.warn('[API] Backend no disponible o error:', err.message);
-    throw new Error(`No se pudieron cargar los proyectos: ${err.message}. Comprueba que el backend esté disponible y que tu sesión sea válida.`);
+    throw Object.assign(new Error(`No se pudieron cargar los proyectos: ${err.message}. Comprueba que el backend esté disponible y que tu sesión sea válida.`), { retryable: err.retryable === true || err instanceof TypeError });
   }
 }
 

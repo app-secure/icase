@@ -22,12 +22,12 @@ function normalizeActors(candidates, input) {
       existing.evidencias = [...new Map([...existing.evidencias, ...evidence.valid].map(e => [JSON.stringify(e), e])).values()];
       continue;
     }
-    const explicit = key(item.origen) === 'explicito' && evidence.valido;
+    const explicit = key(item.origen) === 'explicito';
     actors.push({ id: `ACT-${String(actors.length + 1).padStart(2, '0')}`, nombre,
       descripcion: String(item.descripcion || ''), tipo: item.tipo === 'sistema_externo' ? 'sistema_externo' : 'persona',
       alias: [...new Set((Array.isArray(item.alias) ? item.alias : []).map(String).filter(Boolean))],
-      origen: explicit ? 'explicito' : 'inferido', estado: explicit && key(item.estado) === 'confirmado' ? 'confirmado' : 'pendiente',
-      evidencias: evidence.valid, advertencias: [...evidence.invalid.map(e => e.codigo), ...(!explicit && evidence.valido ? ['El modelo lo clasificó como inferido aunque aportó citas. Revisa su interacción antes de confirmarlo.'] : [])] });
+      origen: explicit ? 'explicito' : 'inferido', estado: explicit && evidence.valido && key(item.estado) === 'confirmado' ? 'confirmado' : 'pendiente',
+      evidencias: [...evidence.valid, ...evidence.invalid.filter(e => e.texto)], advertencias: [...evidence.invalid.map(e => e.codigo), ...(!explicit && evidence.valido ? ['El modelo lo clasificó como inferido aunque aportó citas. Revisa su interacción antes de confirmarlo.'] : [])] });
   }
   return actors;
 }
@@ -60,8 +60,7 @@ function changeActor(catalog, body) {
     replacements = [target.nombre, ...(target.alias || [])].map(nombre => [nombre, destination.nombre]);
     return { actors: actors.filter(a => a.id !== target.id), replacements };
   }
-  if (body.accion === 'confirmar_actor') target.estado = 'confirmado';
-  else {
+  if (body.accion !== 'confirmar_actor' || body.cambios?.nombre !== undefined) {
     const nombre = String(body.cambios?.nombre || '').trim();
     if (!nombre || actors.some(a => a.id !== target.id && key(a.nombre) === key(nombre))) throw Object.assign(new Error('Nombre vacío o ya utilizado; utiliza fusionar si corresponde.'), { status: 400 });
     replacements = [target.nombre, ...(target.alias || [])].map(old => [old, nombre]);
@@ -70,6 +69,20 @@ function changeActor(catalog, body) {
     target.descripcion = String(body.cambios?.descripcion || '').trim();
     target.tipo = body.cambios?.tipo === 'sistema_externo' ? 'sistema_externo' : 'persona';
   }
+  if (body.cambios?.evidencias !== undefined) {
+    if (!Array.isArray(body.cambios.evidencias)) throw Object.assign(new Error('Evidencias de actor inválidas.'), { status: 400 });
+    target.evidencias = structuredClone(body.cambios.evidencias);
+  }
+  if (body.accion === 'confirmar_actor') target.estado = 'confirmado';
+  if (body.cambios?.origen !== undefined) {
+    if (!['explicito', 'inferido', 'manual'].includes(body.cambios.origen)) throw Object.assign(new Error('Origen de actor inválido.'), { status: 400 });
+    target.origen = body.cambios.origen;
+  }
+  if (body.cambios?.estado !== undefined) {
+    if (!['confirmado', 'pendiente'].includes(body.cambios.estado)) throw Object.assign(new Error('Estado de actor inválido.'), { status: 400 });
+    target.estado = body.cambios.estado;
+  }
+  if (target.origen === 'explicito') target.advertencias = (target.advertencias || []).filter(message => !/modelo lo clasificó como inferido/i.test(message));
   return { actors, replacements };
 }
 module.exports = { normalizeActors, actorInstructions, key, actorCatalog, changeActor, interviewSpeakerOnly };

@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
-export default function AnalysisModal({ open, title, onClose, busy = false, children }) {
+export default function AnalysisModal({ open, title, onClose, busy = false, children, footer }) {
   const ref = useRef(null);
   const titleId = useId();
   const close = useRef(onClose);
@@ -59,5 +59,6 @@ export default function AnalysisModal({ open, title, onClose, busy = false, chil
     onCancel={event => { event.preventDefault(); if (!busy) close.current(); }}>
     <header className="analysis-modal__header"><h2 id={titleId}>{title}</h2><button type="button" aria-label="Cerrar formulario" disabled={busy} onClick={() => close.current()}><X size={18} /></button></header>
     <div className="analysis-modal__body">{children}</div>
+    {footer && <footer className="shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-4">{footer}</footer>}
   </dialog>, document.body);
 }

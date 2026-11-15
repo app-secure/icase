@@ -1,6 +1,9 @@
 .initial-analysis { background: #f8f9fc; color: #0f172a; font-size: 14px; line-height: 1.6; }
 .initial-analysis__content { width: 100%; max-width: 1200px; margin: 0 auto; padding-bottom: 24px; }
 .initial-analysis__header { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+.initial-analysis__header > div:nth-child(2) { flex: 1; min-width: 0; }
+.initial-analysis__header .initial-analysis__metadata { margin: 0 0 0 auto; max-width: 220px; justify-content: flex-end; flex-shrink: 0; }
+@media (max-width: 900px) { .initial-analysis__header { flex-wrap: wrap; } .initial-analysis__header .initial-analysis__metadata { max-width: none; width: 100%; justify-content: flex-start; margin-left: 64px; } }
 .initial-analysis__header h1 { margin-top: 5px; font-size: clamp(20px, 2vw, 27px); line-height: 1.3; letter-spacing: -.025em; }
 .initial-analysis__icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 48px; height: 48px; border: 1px solid #e9ddff; border-radius: 14px; background: #f3edff; color: #7c3aed; }
 .initial-analysis__intro { margin: 9px 0 14px; color: #64748b; font-size: 13px; }
@@ -47,7 +50,11 @@
 .analysis-modal__body fieldset > button { margin: 12px 8px 0 0; }
 @media (max-width: 640px) { .analysis-modal__header, .analysis-modal__body { padding: 16px; } }
 .initial-analysis__approval { padding: 22px 24px; border: 1px solid #e5dcff; border-radius: 16px; background: #f5f3ff; }
-.initial-analysis__actions { padding: 20px 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: white; }
+.initial-analysis__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 0 0 16px; border-bottom: 1px solid #e2e8f0; }
+.initial-analysis__restart { margin-left: auto; }
+.initial-analysis__actions .initial-analysis__restart-button { border-color: #e2e8f0; color: #64748b; background: transparent; }
+.initial-analysis__actions .initial-analysis__restart-button:hover:not(:disabled) { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+@media (max-width: 640px) { .initial-analysis__restart { margin-left: 0; } }
 .initial-analysis__approval label { display: flex; align-items: flex-start; gap: 6px; }
 .initial-analysis__approval input { margin-top: 3px; }
 .initial-analysis button.initial-analysis__primary { min-height: 44px; padding: 12px 20px; border-color: #7c3aed; border-radius: 999px; background: #7c3aed; color: white; font-size: 13px; box-shadow: 0 3px 8px #7c3aed20; }

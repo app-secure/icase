@@ -16,6 +16,7 @@ function buildProyectoRoutes(proyectoController, access) {
   };
   router.get('/trabajos-requisitos/:trabajoId', requirementsJob(async (jobs, req, res) => res.json(jobs.public(await jobs.get(req.params.trabajoId, req.usuario.id)))));
   router.post('/trabajos-requisitos/:trabajoId/reanudar', requirementsJob(async (jobs, req, res) => res.status(202).json(await jobs.resume(req.params.trabajoId, req.usuario.id))));
+  router.post('/trabajos-requisitos/:trabajoId/cancelar', requirementsJob(async (jobs, req, res) => res.json(await jobs.cancel(req.params.trabajoId, req.usuario.id))));
 
   router.post('/', (req, res) => proyectoController.crear(req, res));
   router.get('/', (req, res) => proyectoController.listar(req, res));

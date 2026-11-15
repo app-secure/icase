@@ -3,6 +3,7 @@ import { ArrowLeft, Files, FileText, Pencil, PanelLeft } from "lucide-react";
 import { RequirementsReferencePanel } from "./ApprovedRequirementsSidebar";
 import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
+import SourcesDrawer from "./SourcesDrawer";
 import RequirementsView from "./RequirementsView";
 import InitialAnalysisView from './InitialAnalysisView';
 import AnalysisFlowProgress from './AnalysisFlowProgress';
@@ -24,6 +25,7 @@ import {
   fetchRequirementJobApi,
   fetchLatestRequirementJobApi,
   resumeRequirementJobApi,
+  cancelRequirementJobApi,
   fetchInitialAnalysisApi,
   initialAnalysisActionApi,
   startDiagramJobApi,
@@ -409,32 +411,8 @@ export default function ProjectWorkspace({
   const [availableProviders, setAvailableProviders] = useState([]);
   const [isRequirementsSidebarOpen, setIsRequirementsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 768);
   const [isManagingSources, setIsManagingSources] = useState(false);
+  const [analysisSourcesOpen, setAnalysisSourcesOpen] = useState(false);
   const [progressHidden, setProgressHidden] = useState(false);
-  const progressScroll = React.useRef({ target: null, top: 0, movement: 0, until: 0 });
-  React.useEffect(() => {
-    setProgressHidden(false);
-    progressScroll.current = { target: null, top: 0, movement: 0, until: 0 };
-  }, [project.id, project.currentPhase, showInitial, isManagingSources]);
-  const handleProgressScroll = event => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement) || target.closest('textarea, input, pre, dialog, [role="dialog"]') || target.scrollHeight - target.clientHeight < 80) return;
-    const previous = progressScroll.current;
-    const top = target.scrollTop;
-    const delta = top - (previous.target === target ? previous.top : 0);
-    const movement = Math.sign(delta) === Math.sign(previous.movement) ? previous.movement + delta : delta;
-    progressScroll.current = { ...previous, target, top, movement };
-    if (Date.now() < previous.until) return;
-    const hide = top > 80 && movement > 20;
-    const reveal = top <= 2;
-    if (hide || reveal) {
-      const next = hide && !reveal;
-      if (next !== progressHidden && !event.currentTarget.querySelector('nav:focus-within')) {
-        setProgressHidden(next);
-        progressScroll.current.until = Date.now() + 220;
-        progressScroll.current.movement = 0;
-      }
-    }
-  };
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [isReviewingRequirements, setIsReviewingRequirements] = useState(false);
@@ -1415,114 +1393,18 @@ export default function ProjectWorkspace({
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
-      {/* HEADER SUPERIOR OSCURO: Izquierda Logo RBIX | Centro Título Grande del Proyecto | Derecha Acciones */}
-      <header className="relative h-14 shrink-0 border-b border-white/10 bg-[#171425] px-6 flex items-center justify-between gap-4 z-20 select-none">
-        {/* Izquierda: Volver + Logo del Equipo */}
-        <div className="flex items-center gap-3 z-10">
-          <button
-            type="button"
-            onClick={onBackToDashboard}
-            className="p-1.5 -ml-1.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
-            title="Volver a Mis Proyectos"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div
-            onClick={onBackToDashboard}
-            className="cursor-pointer flex items-center hover:opacity-90 transition-opacity"
-            title="RBIX - Volver a Mis Proyectos"
-          >
-            <RbixLogo size="sm" isDark={true} />
-          </div>
-        </div>
-
-        {/* Centro: Título del proyecto grande y centrado */}
-        <div className="absolute inset-x-0 flex justify-center pointer-events-none px-44">
-          <div className="pointer-events-auto max-w-full">
-            {isEditingName ? (
-              <input
-                type="text"
-                autoFocus
-                value={editedName}
-                onChange={(e) => setEditedName(e.target.value)}
-                onBlur={handleSaveEditName}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveEditName();
-                  if (e.key === "Escape") setIsEditingName(false);
-                }}
-                className="text-base sm:text-lg font-bold text-white text-center bg-white/10 border border-violet-400 rounded-lg px-3 py-1 outline-none ring-2 ring-violet-500/40 w-72 sm:w-96"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={handleStartEditName}
-                className="group flex items-center justify-center gap-2 rounded-lg px-3 py-1 text-base sm:text-lg font-bold text-white tracking-tight hover:bg-white/10 transition-colors cursor-pointer max-w-[320px] sm:max-w-[480px] md:max-w-[600px]"
-                title="Clic para renombrar el proyecto"
-              >
-                <span className="truncate">{cleanProjectTitle(project.name)}</span>
-                <Pencil size={14} className="text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Derecha: Ver documento actual + Acceso a Insumos cuando el proyecto ya fue procesado */}
-        <div className="flex items-center gap-2.5 min-w-0 z-10">
-          {project.isAnalysisApproved && !isManagingSources && (
-            <button type="button" onClick={() => setIsRequirementsSidebarOpen(open => !open)} aria-expanded={isRequirementsSidebarOpen} aria-controls="approved-requirements-sidebar" title={isRequirementsSidebarOpen ? "Ocultar requisitos aprobados" : "Mostrar requisitos aprobados"} className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-slate-200 hover:bg-white/15">
-              <PanelLeft size={14} /><span>{isRequirementsSidebarOpen ? "Ocultar requisitos" : "Mostrar requisitos"}</span>
-            </button>
-          )}
-          {project.isProcessed && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsManagingSources(false);
-                  setIsReviewingRequirements(false);
-                  onUpdateProject({
-                    ...project,
-                    currentPhase: project.currentPhase === 4 ? 3 : 4
-                  });
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                  project.currentPhase === 4 && !isManagingSources
-                    ? "border-violet-400 bg-violet-600/30 text-white"
-                    : "border-white/15 bg-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
-                }`}
-                title="Ver documento consolidado actual"
-              >
-                <FileText size={13} />
-                <span>Ver documento actual</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsManagingSources((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                  isManagingSources
-                    ? "border-violet-400 bg-violet-600/30 text-white"
-                    : "border-white/15 bg-white/10 text-slate-200 hover:bg-white/15 hover:text-white"
-                }`}
-                title="Ver o cargar archivos de insumo"
-              >
-                <Files size={13} />
-                <span>Insumos ({(project.sources || []).length})</span>
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-
       {/* CONTENIDO PRINCIPAL A PANTALLA COMPLETA (100% ANCHO) */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {!analysisSourcesOpen && <button type="button" onClick={() => setAnalysisSourcesOpen(true)} aria-label="Mostrar insumos del proyecto" aria-haspopup="dialog" aria-controls="project-sources-drawer" title="Insumos del proyecto" className="fixed left-3 top-3 z-30 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-[#262235] text-violet-200 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400"><PanelLeft size={18} /></button>}
+      <SourcesDrawer open={analysisSourcesOpen} onClose={() => setAnalysisSourcesOpen(false)}><SourcesPanel compact sources={project.sources || []} onAddSource={async source => { await handleAddSource(source); await loadInitial(); }} readOnly={project.isAnalysisApproved} isProcessing={['encolado', 'procesando'].includes(requirementJob?.estado)} /></SourcesDrawer>
       {project.isAnalysisApproved && !isManagingSources && (
         <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
       )}
-      <main onScrollCapture={handleProgressScroll} className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
-        <RequirementJobStatus job={requirementJob} onResume={resumeRequirements} />
+      <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
+        <RequirementJobStatus key={requirementJob?.id} job={requirementJob} onResume={resumeRequirements} onCancel={async () => { const next = await cancelRequirementJobApi(requirementJob.id); setRequirementJob(next); }} />
         {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <AnalysisFlowProgress
-          collapsed={progressHidden} onReveal={() => { setProgressHidden(false); progressScroll.current.until = Date.now() + 220; }}
+          onBack={onBackToDashboard}
+          collapsed={progressHidden} onReveal={() => setProgressHidden(false)} onCollapse={() => setProgressHidden(true)}
           current={showInitial ? 'analysis' : isManagingSources || !project.isProcessed ? 'sources' : project.currentPhase > 1 && !isReviewingRequirements ? null : 'requirements'}
           completed={{ sources: Boolean(project.sources?.length), analysis: Boolean(initialState?.aprobado), requirements: Boolean(project.isAnalysisApproved) }}
           requirementsAvailable={Boolean(project.isProcessed)}
@@ -1563,11 +1445,15 @@ export default function ProjectWorkspace({
             </div>
           </div>
         ) : showInitial && initialState ? (
-          <InitialAnalysisView state={initialState} proposal={initialProposal} busy={initialBusy || ['encolado', 'procesando'].includes(requirementJob?.estado)} provider={selectedAiProvider}
+          <InitialAnalysisView onRefresh={loadInitial} sources={project.sources || []} state={initialState} proposal={initialProposal} busy={initialBusy || ['encolado', 'procesando'].includes(requirementJob?.estado)} provider={selectedAiProvider}
             onReviewQuality={() => initialAction(async () => { const job = await startRequirementJobApi(projectBackendId, { operacion: 'revision_calidad', analisis_id: initialState.borrador.id, provider: selectedAiProvider }); setRequirementJob(job); })}
             onAnalyzeAnswer={async (questionId, answer, resumeId) => {
               let job = resumeId ? await resumeRequirementJobApi(resumeId) : await startRequirementJobApi(projectBackendId, { operacion: 'analisis_respuesta', analisis_id: initialState.borrador.id, pregunta_id: questionId, respuesta: answer, provider: selectedAiProvider });
-              while (['encolado', 'procesando'].includes(job.estado)) { await new Promise(resolve => setTimeout(resolve, 900)); job = await fetchRequirementJobApi(job.id); }
+              const deadline = Date.now() + 210000;
+              while (['encolado', 'procesando'].includes(job.estado)) {
+                if (Date.now() >= deadline) throw Object.assign(new Error('La consulta tardó más de lo esperado. Tu respuesta se conserva; consulta nuevamente el trabajo antes de crear otra propuesta.'), { trabajoId: job.id });
+                await new Promise(resolve => setTimeout(resolve, 1200)); job = await fetchRequirementJobApi(job.id);
+              }
               if (job.estado !== 'completado' || !job.resultado_analisis_inicial?.elementos) throw Object.assign(new Error(job.mensaje || 'Propuesta pendiente. Puedes reanudar o introducir elementos manualmente.'), { trabajoId: job.id });
               return { ...job.resultado_analisis_inicial, trabajo_id: job.id };
             }}

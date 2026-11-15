@@ -427,7 +427,11 @@ class ModelosIaService {
           sourceHints: pistasFuentes,
           prompt: promptCompleto,
           request: solicitar
-        }), this.requirementsEnv, { allowLocal: this.requirementsEnabled && ['auto', 'ollama'].includes(requestedProvider) && this.requirementsEnv.OLLAMA_ENABLED === 'true' })
+        }), payload.initialAnalysisTask === 'analisis_respuesta' ? { ...this.requirementsEnv,
+          AI_REQUIREMENTS_TIMEOUT_MS: Math.min(Number(this.requirementsEnv.AI_REQUIREMENTS_TIMEOUT_MS) || 180000, 60000),
+          AI_REQUIREMENTS_REQUEST_TIMEOUT_MS: Math.min(Number(this.requirementsEnv.AI_REQUIREMENTS_REQUEST_TIMEOUT_MS) || 35000, 20000),
+          AI_REQUIREMENTS_MAX_ATTEMPTS: Math.min(Number(this.requirementsEnv.AI_REQUIREMENTS_MAX_ATTEMPTS) || 8, 4)
+        } : this.requirementsEnv, { allowLocal: this.requirementsEnabled && ['auto', 'ollama'].includes(requestedProvider) && this.requirementsEnv.OLLAMA_ENABLED === 'true' })
       : await solicitar(promptCompleto);
 
     if (!respuestaData) {

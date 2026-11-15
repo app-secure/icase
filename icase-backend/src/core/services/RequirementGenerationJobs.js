@@ -65,18 +65,29 @@ class RequirementGenerationJobs {
   }
   async resume(id, userId) {
     const job = await this.get(id, userId);
-    if (['completado', 'fallido'].includes(job.estado)) return this.public(job);
+    if (['completado', 'fallido', 'cancelado'].includes(job.estado)) return this.public(job);
     if (await this.snapshot(job.proyecto_id, userId, job.operacion_requisitos) !== job.entrada_requisitos.snapshot) throw fail('La entrada cambió. Inicia una nueva generación para no perder los cambios.');
-    this.launch(id, true);
-    return this.public(job);
+    if (['encolado', 'procesando'].includes(job.estado)) return this.public(job);
+    // Claim before replying: returning the old interrupted state made clients
+    // stop polling immediately, even though setImmediate had queued the worker.
+    const claimed = await this.jobs.requirementsClaim(id);
+    if (!claimed) return this.public(await this.get(id, userId));
+    this.launch(id, true, claimed);
+    return this.public(claimed);
   }
-  launch(id, probeUnknownReset = false) { setImmediate(() => this.run(id, probeUnknownReset).catch(() => {})); }
-  async run(id, probeUnknownReset = false) {
+  async cancel(id, userId) {
+    const job = await this.get(id, userId);
+    const lock = await this.mutationLease.acquire(job.proyecto_id);
+    try { return this.public(await this.jobs.requirementsCancel(id, String(userId))); }
+    finally { await lock.release(); }
+  }
+  launch(id, probeUnknownReset = false, claimed = null) { setImmediate(() => this.run(id, probeUnknownReset, claimed).catch(() => {})); }
+  async run(id, probeUnknownReset = false, claimed = null) {
     if (this.running.has(id)) return;
     this.running.add(id);
     let timer;
     try {
-      const job = await this.jobs.requirementsClaim(id);
+      const job = claimed || await this.jobs.requirementsClaim(id);
       if (!job) return;
       const checkpoints = job.checkpoints_requisitos || {};
       let progress = { ...(job.progreso_requisitos || {}) };
@@ -89,6 +100,7 @@ class RequirementGenerationJobs {
         probeUnknownReset,
         checkpoints,
         assertCurrent: async () => {
+          if ((await this.jobs.requirementsGet(id))?.estado === 'cancelado') throw fail('Procesamiento cancelado.', 409, 'REQUIREMENTS_CANCELLED');
           if (lost) throw fail('El trabajo perdió su ejecutor.', 409, 'REQUIREMENTS_LEASE_LOST');
           if (await this.snapshot(job.proyecto_id, job.usuario_id, job.operacion_requisitos) !== job.entrada_requisitos.snapshot) throw fail('La entrada cambió durante la generación. No se aplicó el resultado.');
         },

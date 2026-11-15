@@ -1,5 +1,20 @@
 const { normalizeActors } = require('../src/core/services/RequirementActors');
 const { actorCatalog, changeActor } = require('../src/core/services/RequirementActors');
+test('una cita inválida no transforma un actor explícito en inferido', () => {
+  const result = normalizeActors([{ nombre: 'Cocinero', origen: 'explicito', estado: 'confirmado', evidencias: [{ texto: 'Una cita que no está en la fuente', fuente: 'entrevista.txt' }] }], 'El cocinero consulta comandas.');
+  expect(result[0]).toMatchObject({ origen: 'explicito', estado: 'pendiente' });
+  expect(result[0].advertencias).toContain('evidencia_no_localizada');
+});
+test('guardar permite corregir origen y confirmación de forma explícita', () => {
+  const result = changeActor([{ id: 'A', nombre: 'Cocinero', origen: 'inferido', estado: 'pendiente' }], { accion: 'editar_actor', id: 'A', cambios: { nombre: 'Cocinero', origen: 'explicito', estado: 'confirmado' } });
+  expect(result.actors[0]).toMatchObject({ origen: 'explicito', estado: 'confirmado' });
+});
+test('guardar y confirmar conserva las evidencias editadas y no modifica el original', () => {
+  const actors = [{ id: 'A', nombre: 'Cocinero', estado: 'pendiente', evidencias: [] }];
+  const result = changeActor(actors, { accion: 'confirmar_actor', id: 'A', cambios: { nombre: 'Cocinero', descripcion: 'Consulta comandas', tipo: 'persona', evidencias: [{ texto: 'El cocinero consulta comandas.', fuente: 'entrevista.txt' }] } });
+  expect(result.actors[0]).toMatchObject({ estado: 'confirmado', descripcion: 'Consulta comandas', evidencias: [{ texto: 'El cocinero consulta comandas.', fuente: 'entrevista.txt' }] });
+  expect(actors[0].evidencias).toEqual([]);
+});
 test('fusiona conservando alias, evidencias y responsabilidad', () => {
   const result = changeActor([
     { id: 'A', nombre: 'Gerente', descripcion: 'Supervisa', evidencias: [{ texto: 'gerente' }], alias: ['Responsable'] },

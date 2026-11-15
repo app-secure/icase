@@ -25,6 +25,7 @@ module.exports = {
     await ctx.assertCurrent();
     await ctx.progress({ etapa: stage, recuperada: false });
     const result = await operation();
+    await ctx.assertCurrent();
     if (result) {
       ctx.checkpoints[key] = { stage, data: result, validated: checkpointValid(stage, result, ctx.input || ''), provider: ctx.lastProvider || null, date: new Date().toISOString() };
       await ctx.save();

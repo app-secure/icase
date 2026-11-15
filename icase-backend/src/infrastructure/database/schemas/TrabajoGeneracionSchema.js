@@ -21,7 +21,7 @@ const TrabajoGeneracionSchema = new mongoose.Schema({
   tipo_diagrama: { type: String, default: null, index: true },
   estado: {
     type: String,
-    enum: ['encolado', 'procesando', 'completado', 'fallido', 'esperando_proveedor', 'interrumpido'],
+    enum: ['encolado', 'procesando', 'completado', 'fallido', 'esperando_proveedor', 'interrumpido', 'cancelado'],
     default: 'encolado',
     index: true
   },
