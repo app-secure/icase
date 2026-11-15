@@ -38,6 +38,34 @@
     }
   ],
   "paths": {
+    "/proyectos/{id}/transferencia/exportar": {
+      "get": {
+        "tags": ["Proyectos"], "summary": "Exportar proyecto portable con originales e informe SHA-256",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Descarga .icase.json; contiene manifest, data, files y report_markdown", "content": {"application/json": {"schema": {"type": "object"}}}},
+          "401": {"description": "Sesión no válida"}, "404": {"description": "Proyecto inexistente o ajeno"},
+          "409": {"description": "Trabajo activo, escritura concurrente u original ausente"}, "413": {"description": "Paquete demasiado grande"}
+        }
+      }
+    },
+    "/proyectos/transferencias/verificar": {
+      "post": {
+        "tags": ["Proyectos"], "summary": "Verificar sin importar; devuelve recuentos, sha256, import_id e informe Markdown",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {"required": true, "content": {"multipart/form-data": {"schema": {"type": "object", "required": ["paquete"], "properties": {"paquete": {"type": "string", "format": "binary", "description": "Archivo .icase.json, máximo 64 MiB"}}}}}},
+        "responses": {"200": {"description": "Paquete íntegro; no crea registros"}, "400": {"description": "Formato, referencias o huellas inválidas"}, "401": {"description": "Sesión no válida"}, "409": {"description": "Esquemas incompatibles"}, "413": {"description": "Límite excedido"}}
+      }
+    },
+    "/proyectos/transferencias/importar": {
+      "post": {
+        "tags": ["Proyectos"], "summary": "Crear copia independiente bajo el usuario actual; no inicia IA",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {"required": true, "content": {"multipart/form-data": {"schema": {"type": "object", "required": ["paquete", "confirmar", "sha256", "import_id"], "properties": {"paquete": {"type": "string", "format": "binary"}, "confirmar": {"type": "string", "enum": ["true"]}, "sha256": {"type": "string", "description": "Huella del archivo verificado"}, "import_id": {"type": "string", "format": "uuid", "description": "Identificador recibido al verificar; reutilizarlo para reintentos idempotentes"}, "nombre": {"type": "string", "maxLength": 200}}}}}},
+        "responses": {"201": {"description": "Copia verificada; devuelve proyecto_id, nombre, counts y report_markdown"}, "400": {"description": "Paquete inválido"}, "401": {"description": "Sesión no válida"}, "409": {"description": "Confirmación, esquema u operación incompatible"}, "413": {"description": "Límite excedido"}, "500": {"description": "Escritura fallida; copia parcial retirada o limpieza pendiente registrada"}}
+      }
+    },
     "/proyectos/{id}/trabajos-requisitos": {
       "post": {
         "tags": ["Requisitos"], "summary": "Iniciar extracción, redacción o propuesta de análisis", "security": [{"bearerAuth": []}],

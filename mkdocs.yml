@@ -19,6 +19,7 @@ nav:
   - Inicio: index.md
   - Manual de usuario:
       - Primeros pasos: usuario/primeros-pasos.md
+      - Compartir proyectos: usuario/transferencia-proyectos.md
       - Requisitos y diagramas: usuario/requisitos-y-diagramas.md
       - Mockups y exportación: usuario/mockups-y-exportacion.md
       - Codificación: usuario/codificacion.md

@@ -503,6 +503,7 @@ export default function App() {
             onSelectProject={handleSelectProject}
             onCreateProject={handleCreateProject}
             onDeleteProject={handleDeleteProject}
+            onImported={loadBackendProjects}
           />
         ) : (
           <ProjectWorkspace

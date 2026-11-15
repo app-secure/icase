@@ -11,7 +11,7 @@ async function start() {
     await mongoose.connect(MONGO_URI);
     console.log(`[MongoDB] Conectado exitosamente a ${MONGO_URI}`);
 
-    const { app, estandarRepo, fuenteRepo, reanudarTrabajosDiagrama } = createApp();
+    const { app, estandarRepo, fuenteRepo, reanudarTrabajosDiagrama, recuperarImportaciones } = createApp();
     let cleanupTimer;
     if (process.env.UPLOAD_CLEANUP_ENABLED === 'true') {
       const cleanup = new UploadCleanupService({ repository: fuenteRepo, dryRun: process.env.UPLOAD_CLEANUP_DRY_RUN !== 'false' });
@@ -24,9 +24,11 @@ async function start() {
 
     // Sincronizar reglas del sistema: ISO/IEC/IEEE 29148:2018 y trazabilidad.
     await estandarRepo.sembrarSiVacio();
+    await recuperarImportaciones();
 
     await reanudarTrabajosDiagrama();
     const recoveryTimer = setInterval(() => {
+      recuperarImportaciones().catch(() => console.error('[Transferencia] No se pudo completar la recuperación de importaciones.'));
       reanudarTrabajosDiagrama().catch(err => console.error('[Jobs] Error recuperando diagramas:', err.message));
     }, 30000);
     recoveryTimer.unref?.();

@@ -2,6 +2,21 @@
 // Así cambiar de puerto del frontend no rompe CORS ni la sesión.
 const API_URL = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/icase-api' : 'http://localhost:5000')).replace(/\/$/, '');
 
+export async function exportProjectPackageApi(id) {
+  const res = await apiFetch(`${API_URL}/proyectos/${encodeURIComponent(id)}/transferencia/exportar`, { headers: getAuthHeaders() });
+  if (!res.ok) { const data = await res.json(); throw new Error(data.error || 'No se pudo exportar el proyecto.'); }
+  return res.blob();
+}
+export async function projectPackageApi(file, verification = null, name = '') {
+  const body = new FormData();
+  body.append('paquete', file);
+  if (verification) { body.append('confirmar', 'true'); body.append('sha256', verification.sha256); body.append('nombre', name); body.append('import_id', verification.import_id); }
+  const res = await apiFetch(`${API_URL}/proyectos/transferencias/${verification ? 'importar' : 'verificar'}`, { method: 'POST', headers: getAuthHeaders(), body });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudo completar la transferencia.');
+  return data;
+}
+
 async function requirementsJobRequest(route, body) {
   const response = await apiFetch(`${API_URL}/proyectos/${route}`, {
     method: body === undefined ? 'GET' : 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }),

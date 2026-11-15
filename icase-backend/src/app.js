@@ -289,6 +289,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
 
   // Montaje de rutas
   app.use('/auth', buildAuthRoutes(authController));
+  const projectTransfer = repositories.projectTransfer || new (require('./infrastructure/services/ProjectTransferService'))({});
+  app.use('/proyectos', require('./routes/projectTransferRoutes')(projectTransfer, access));
   app.use('/proyectos', buildProyectoRoutes(proyectoController, access));
   app.use('/proyectos', buildCodificacionRoutes(codificacionController, access));
   app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController, access));
@@ -312,6 +314,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     app,
     estandarRepo,
     fuenteRepo,
+    recuperarImportaciones: () => projectTransfer.recover(),
     reanudarTrabajosDiagrama: async () => {
       if (resilientRequirements) await trabajoGeneracionRepo.requirementsRecover();
       if (typeof trabajoGeneracionRepo.finalizarVerificacionesExpiradas === 'function') await trabajoGeneracionRepo.finalizarVerificacionesExpiradas();
