@@ -400,6 +400,19 @@ class ProcesarConIA {
           );
           const anterior = resultadoIA;
           resultadoIA = await this.aiOrchestratorService.procesar(repairPayload);
+          if (tipoDiagramaNormalizado === 'clases_dominio') {
+            const before = anterior?.diagramas?.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
+            const after = resultadoIA?.diagramas?.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
+            const options = { tipo: tipoDiagramaNormalizado, requisitos: requerimientosAprobados, analisisRequisitos: contextoProyecto.analisis_requisitos, diagramasDependencia: diagramasAprobados };
+            const previousValid = before?.codigo_plantuml && this.plantumlValidatorService?.validar(before.codigo_plantuml, options).valido;
+            const nextValid = after?.codigo_plantuml && this.plantumlValidatorService?.validar(after.codigo_plantuml, options).valido;
+            // Una reparación de advertencias no puede destruir un borrador válido.
+            // Conserva sus advertencias: no equivale a aprobarlo ni a corregirlas.
+            if (previousValid && !nextValid) {
+              console.warn('[ProcesarConIA] Reparación de dominio descartada: no devolvió un diagrama estructuralmente válido; se conserva el borrador anterior con sus advertencias.');
+              resultadoIA = anterior;
+            }
+          }
           if (tipoDiagramaNormalizado === 'clases_diseno') {
             const before = anterior.diagramas?.find(item => normalizeDiagramType(item.tipo) === tipoDiagramaNormalizado);
             const after = resultadoIA.diagramas?.find(item => normalizeDiagramType(item.tipo) === tipoDiagramaNormalizado);
@@ -453,8 +466,14 @@ class ProcesarConIA {
       // flujo y la exportación final sí exigen los seis tipos canónicos.
       const cantidadEsperada = tipoDiagramaNormalizado ? 1 : 4;
       if (diagramasValidos.length < cantidadEsperada) {
+        const received = Array.isArray(resultadoIA?.diagramas) ? resultadoIA.diagramas : [];
+        const target = received.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
+        const cause = !received.length ? 'La respuesta no contiene diagramas.'
+          : !target && tipoDiagramaNormalizado ? 'La respuesta no contiene el tipo solicitado.'
+          : !String(target?.codigo_plantuml || '').trim() ? 'El código PlantUML recibido está vacío.'
+          : 'El código recibido no contiene un inicio PlantUML utilizable o es un marcador de ausencia.';
         throw new Error(tipoDiagramaNormalizado
-          ? `La IA no devolvió un diagrama válido de tipo ${tipoDiagramaNormalizado}. Puedes reintentar sin perder los artefactos aprobados.`
+          ? `La IA no devolvió un diagrama válido de tipo ${tipoDiagramaNormalizado}. ${cause} Puedes reintentar sin perder los artefactos aprobados.`
           : 'La IA no devolvió suficientes diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
       }
       if (!tipoDiagramaNormalizado && diagramasValidos.length >= DIAGRAM_TYPE_VALUES.length) {

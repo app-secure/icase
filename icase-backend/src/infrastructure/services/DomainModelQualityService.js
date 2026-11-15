@@ -16,7 +16,51 @@ class DomainModelQualityService {
       advertencias.push(`Modelo de dominio por verificar: ${shells.map(entity => entity.name).join(', ')} solo declaran id/estado o ningún atributo. Revisa los datos y estados exigidos por los RF y criterios aprobados; no inventes campos si el concepto es legítimamente mínimo.`);
     }
     advertencias.push(...this._relacionesSospechosas(model));
+    advertencias.push(...this._cardinalidadesRevisables(model));
+    advertencias.push(...this._tiposRevisables(code));
     return { errores, advertencias, metricas: { entidades_extraibles: model.entities.length, relaciones_extraibles: model.relations.length } };
+  }
+
+  _cardinalidadesRevisables(model) {
+    const avisos = [];
+    const oneToOne = model.relations.filter(r => r.kind === 'asociacion' && r.fromCardinality === '1' && r.toCardinality === '1');
+    for (const entity of model.entities) {
+      const links = oneToOne.filter(r => r.from === entity.name || r.to === entity.name);
+      const targets = [...new Set(links.map(r => r.from === entity.name ? r.to : r.from))];
+      const isAccount = entity.attributes.some(a => require('./IdentityRequirements').isSensitiveField(a.name)) &&
+        entity.attributes.some(a => /^(?:rol|role|roles|perfil)$/i.test(a.name));
+      if (isAccount && targets.length >= 2) {
+        avisos.push(`Modelo de dominio por verificar: ${entity.name} exige simultáneamente una instancia de cada perfil (${targets.join(', ')}) mediante relaciones 1–1 obligatorias. Contrasta opcionalidad y reglas de roles aprobadas; no conviertas automáticamente todos los actores en perfiles obligatorios ni impongas herencia.`);
+      } else if (targets.length >= 3) {
+        avisos.push(`Modelo de dominio por verificar: ${entity.name} tiene asociaciones 1–1 obligatorias con ${targets.join(', ')}. Comprueba ambos extremos, reutilización e historial según los RF; una restricción simultánea no limita necesariamente toda la historia. Es una señal orientativa, no un defecto confirmado.`);
+      }
+    }
+    return avisos;
+  }
+
+  _tiposRevisables(code) {
+    const avisos = [];
+    let entity = null;
+    for (const line of String(code || '').split(/\r?\n/)) {
+      const declaration = line.match(/^\s*(?:abstract\s+)?class\s+(?:"[^"]+"\s+as\s+)?([\w.]+)(?:\s*<<[^>]*>>)?\s*\{/i);
+      if (declaration) { entity = declaration[1]; continue; }
+      if (/^\s*}/.test(line)) { entity = null; continue; }
+      if (!entity || line.includes('(')) continue;
+      const field = line.replace(/^\s*[+\-#~]?\s*/, '').trim();
+      const colon = field.match(/^(\w+)\s*:\s*([\w.]+)/);
+      const spaced = field.match(/^([\w.]+)\s+(\w+)\s*$/);
+      if (!colon && !spaced) continue;
+      const name = colon ? colon[1] : spaced[2];
+      const type = colon ? colon[2] : spaced[1];
+      const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (/^(?:float|double|real)$/i.test(type) && /(?:precio|importe|monto|saldo|efectivo|ingreso|egreso|costo|coste|price|amount|money|balance|cash)/.test(key)) {
+        avisos.push(`Modelo de dominio por verificar: ${entity}.${name} usa ${type} para un valor aparentemente monetario. Si representa dinero, usa Decimal o un valor monetario exacto sin cambiar la unidad ni las reglas aprobadas.`);
+      }
+      if (/^(?:datetime|timestamp|instant|localdatetime)$/i.test(type) && /(?:transcurrid|duracion|elapsed|duration)/.test(key)) {
+        avisos.push(`Modelo de dominio por verificar: ${entity}.${name} usa ${type} para una duración aparente. Representa duración con unidad o derívala del instante de inicio; no confundas un intervalo con una fecha/hora.`);
+      }
+    }
+    return avisos;
   }
 
   /**

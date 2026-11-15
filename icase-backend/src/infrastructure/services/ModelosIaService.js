@@ -896,7 +896,11 @@ class ModelosIaService {
     let diagramas = [];
     if (objetivo !== 'requisitos') {
       if (tipoDiagrama) {
-        const recibidos = Array.isArray(data?.diagramas) ? data.diagramas : [];
+        // Admitir un objeto singular sin inventar contenido ni sintetizar CRUD.
+        const recibidos = Array.isArray(data?.diagramas) ? data.diagramas
+          : data?.diagramas && typeof data.diagramas === 'object' ? [data.diagramas]
+          : data?.diagrama && typeof data.diagrama === 'object' ? [data.diagrama]
+          : typeof data?.codigo_plantuml === 'string' || typeof data?.codigo_puml === 'string' ? [data] : [];
         const matchesTarget = (diagram) => {
           const raw = String(diagram?.tipo || '').toLowerCase();
           const normalized = normalizeDiagramType(raw);
