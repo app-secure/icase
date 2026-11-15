@@ -1,14 +1,15 @@
 import React from 'react';
 import RequirementActorsPanel from './RequirementActorsPanel';
+import SourcesDrawer from './SourcesDrawer';
 import { isTechnologyStack } from './technologyStack';
 import { PanelLeft, PanelLeftClose, PanelRight, PanelRightClose } from 'lucide-react';
 
 export function RequirementsReferencePanel({ open, onToggle, side = 'left', ...props }) {
   const Icon = side === 'right' ? PanelRight : PanelLeft;
-  return open ? <ApprovedRequirementsSidebar {...props} side={side} onHide={onToggle} /> : (
-    <div className={`flex shrink-0 flex-col border-slate-200 bg-slate-50 ${side === 'right' ? 'order-last border-l' : 'border-r'}`}>
-      <button type="button" onClick={onToggle} aria-label="Mostrar requisitos aprobados" aria-expanded={false} aria-controls="approved-requirements-sidebar" title="Mostrar requisitos aprobados" className="m-1 flex flex-col items-center gap-2 rounded-lg px-2 py-3 text-violet-700 hover:bg-violet-100 focus-visible:outline-2 focus-visible:outline-violet-600">
-        <Icon size={18} /><span className="text-xs font-medium [writing-mode:vertical-rl]">Requisitos</span>
+  return open ? <SourcesDrawer open onClose={onToggle} side={side} id="approved-requirements-drawer" label="Requisitos aprobados" closeLabel="Ocultar requisitos aprobados"><ApprovedRequirementsSidebar {...props} side={side} embedded /></SourcesDrawer> : (
+    <div className={`fixed top-3 z-30 ${side === 'right' ? 'right-3 order-last' : 'left-3'}`}>
+      <button type="button" onClick={onToggle} aria-label="Mostrar requisitos aprobados" aria-expanded={false} aria-haspopup="dialog" aria-controls="approved-requirements-drawer" title="Mostrar requisitos aprobados" className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-[#262235] text-violet-200 shadow-lg focus-visible:outline-2 focus-visible:outline-violet-400">
+        <Icon size={18} />
       </button>
     </div>
   );
@@ -55,7 +56,7 @@ function Section({ title, entries, children, initialOpen = false }) {
   </details>;
 }
 
-export default function ApprovedRequirementsSidebar({ requirements = {}, audit = {}, onHide, side = 'left' }) {
+export default function ApprovedRequirementsSidebar({ requirements = {}, audit = {}, onHide, side = 'left', embedded = false }) {
   const CloseIcon = side === 'right' ? PanelRightClose : PanelLeftClose;
   const functional = requirements?.functional || [];
   const nonFunctional = requirements?.nonFunctional || [];
@@ -67,13 +68,13 @@ export default function ApprovedRequirementsSidebar({ requirements = {}, audit =
     ['Preguntas pendientes', audit?.preguntas_pendientes],
     ['Contexto', audit?.contexto]
   ];
-  return <aside id="approved-requirements-sidebar" aria-label="Referencia de requisitos aprobados" data-side={side} className={`absolute inset-y-0 z-30 flex w-[min(85vw,20rem)] shrink-0 flex-col border-slate-200 bg-slate-50 shadow-lg md:relative md:w-80 md:shadow-none ${side === 'right' ? 'right-0 order-last border-l' : 'left-0 border-r'}`}>
+  return <aside id="approved-requirements-sidebar" aria-label="Referencia de requisitos aprobados" data-side={side} className={`flex min-h-0 flex-col bg-[#f8f9fc] ${embedded ? 'h-full w-full' : `fixed inset-y-0 z-30 w-80 max-w-[90vw] shadow-2xl ${side === 'right' ? 'right-0' : 'left-0'}`}`}>
     <div className="flex items-start justify-between gap-2 border-b border-slate-200 bg-white p-4">
       <div><h2 className="text-sm font-semibold text-slate-900">Requisitos aprobados</h2><p className="mt-1 text-xs text-slate-500">Referencia de solo lectura · {functional.length + nonFunctional.length} requisitos</p></div>
-      <button type="button" onClick={onHide} aria-label="Ocultar requisitos aprobados" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><CloseIcon size={18} /></button>
+      {!embedded && <button type="button" onClick={onHide} aria-label="Ocultar requisitos aprobados" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><CloseIcon size={18} /></button>}
     </div>
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-      <RequirementActorsPanel audit={audit} requirements={requirements} />
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
+      <RequirementActorsPanel audit={audit} requirements={requirements} readOnly compact />
       <Section title="Requisitos funcionales" entries={functional} initialOpen>{functional.map((item, i) => <Requirement key={item.id || item.identificador || i} item={item} index={i} prefix="RF" />)}</Section>
       <Section title="Requisitos no funcionales" entries={nonFunctional} initialOpen>{nonFunctional.map((item, i) => <Requirement key={item.id || item.identificador || i} item={item} index={i} prefix="RNF" />)}</Section>
       {context.map(([title, values]) => {

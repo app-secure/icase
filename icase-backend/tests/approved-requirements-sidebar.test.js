@@ -10,9 +10,24 @@ beforeAll(() => {
   dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });
   global.window = dom.window; global.document = dom.window.document; global.navigator = dom.window.navigator;
   global.IS_REACT_ACT_ENVIRONMENT = true;
+  dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
   const source = fs.readFileSync(path.resolve(__dirname, '../../icase-frontend/src/components/ApprovedRequirementsSidebar.jsx'), 'utf8');
   const icon = () => null;
-  const sandbox = { module: { exports: {} }, require: id => id === 'lucide-react' ? { PanelLeftClose: icon, PanelRightClose: icon, PanelLeft: icon, PanelRight: icon } : require(id) };
+  const load = filename => {
+    const nested = { module: { exports: {} }, require: customRequire, document: dom.window.document };
+    vm.runInNewContext(transformSync(fs.readFileSync(path.resolve(__dirname, '../../icase-frontend/src/components', filename), 'utf8'), { loader: 'jsx', format: 'cjs' }).code, nested);
+    return nested.module.exports;
+  };
+  const customRequire = id => {
+    if (id === 'lucide-react') return { PanelLeftClose: icon, PanelRightClose: icon, PanelLeft: icon, PanelRight: icon, X: icon };
+    if (id === './SourcesDrawer') return load('SourcesDrawer.jsx');
+    if (id === './RequirementActorsPanel') return load('RequirementActorsPanel.jsx');
+    if (id === './RbixLogo' || id === './AnalysisModal' || id === './SourceAutocomplete') return { __esModule: true, default: () => null };
+    if (id === './technologyStack') return load('technologyStack.js');
+    return require(id);
+  };
+  const sandbox = { module: { exports: {} }, require: customRequire };
   vm.runInNewContext(transformSync(source, { loader: 'jsx', format: 'cjs' }).code, sandbox);
   Sidebar = sandbox.module.exports.default;
   Panel = sandbox.module.exports.RequirementsReferencePanel;
@@ -34,7 +49,7 @@ test('separa RF/RNF y conserva descripción, criterios, métricas y evidencia', 
 });
 test('presenta contexto clasificado y secciones colapsables sin acciones de generación', async () => {
   await render({ audit: { reglas_negocio: [{ id: 'N-1', necesidad: 'Solo el responsable aprueba', estado: 'confirmado' }], restricciones_tecnicas: [{ necesidad: 'PostgreSQL' }], decisiones: [{ necesidad: 'Aplicación web' }], contexto: ['Centro de atención'], preguntas_pendientes: [{ necesidad: '¿Cuál es el horario?' }] } });
-  expect(document.querySelectorAll('aside > div details.group\\/section')).toHaveLength(7);
+  expect(document.querySelectorAll('aside > div details.group\\/section')).toHaveLength(8);
   for (const value of ['PostgreSQL', 'Centro de atención', '¿Cuál es el horario?', 'Solo el responsable aprueba']) expect(document.body.textContent).toContain(value);
   expect(document.querySelectorAll('button')).toHaveLength(1);
 });
@@ -50,6 +65,16 @@ test('admite proyectos sin análisis clasificado', async () => {
   expect(document.body.textContent).toContain('Sin información registrada');
 });
 
+test('actores usa el mismo encabezado compacto y conserva responsabilidades, vínculos y evidencia', async () => {
+  await render({ requirements: { functional: [{ id: 'RF-01', name: 'Consultar', actors: ['Operador'] }] }, audit: { actores: [{ id: 'ACT-01', nombre: 'Operador', descripcion: 'Consulta registros', estado: 'confirmado', alias: ['Operadora'], origen: 'explicito', evidencias: [{ texto: 'El operador consulta registros.', fuente: 'entrevista.txt' }] }] } });
+  const header = [...document.querySelectorAll('summary')].find(s => s.textContent.startsWith('Actores del sistema'));
+  expect(header.textContent).toContain('(1)');
+  expect(header.parentNode.className).toContain('group/section');
+  expect(header.parentNode.className).not.toContain('rounded-xl');
+  expect(header.className).toBe([...document.querySelectorAll('summary')].find(s => s.textContent.startsWith('Requisitos funcionales')).className);
+  for (const text of ['Consulta registros', 'RF-01', 'El operador consulta registros.', 'entrevista.txt']) expect(header.parentNode.textContent).toContain(text);
+});
+
 test.each(['left', 'right'])('ocultar y reabrir desde el borde %s mantiene un control disponible', async side => {
   function Harness() {
     const [open, setOpen] = React.useState(true);
@@ -58,6 +83,12 @@ test.each(['left', 'right'])('ocultar y reabrir desde el borde %s mantiene un co
   root = require('react-dom/client').createRoot(document.getElementById('root'));
   await act(async () => root.render(React.createElement(Harness)));
   expect(document.querySelector('aside').dataset.side).toBe(side);
+  const drawer = document.querySelector('dialog');
+  expect(drawer.open).toBe(true);
+  expect(drawer.parentNode).toBe(document.body);
+  expect(drawer.className).toContain('fixed');
+  expect(drawer.className).toContain(side === 'right' ? 'right-0' : 'left-0');
+  expect(document.querySelector('aside').className).not.toContain('md:relative');
   await act(async () => document.querySelector('[aria-label="Ocultar requisitos aprobados"]').click());
   expect(document.querySelector('aside')).toBeNull();
   const reopen = document.querySelector('[aria-label="Mostrar requisitos aprobados"]');

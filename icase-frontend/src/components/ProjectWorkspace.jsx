@@ -409,7 +409,7 @@ export default function ProjectWorkspace({
   const diagramPollingFailures = React.useRef(0);
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
-  const [isRequirementsSidebarOpen, setIsRequirementsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 768);
+  const [isRequirementsSidebarOpen, setIsRequirementsSidebarOpen] = useState(false);
   const [isManagingSources, setIsManagingSources] = useState(false);
   const [analysisSourcesOpen, setAnalysisSourcesOpen] = useState(false);
   const [progressHidden, setProgressHidden] = useState(false);
@@ -1395,9 +1395,11 @@ export default function ProjectWorkspace({
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
       {/* CONTENIDO PRINCIPAL A PANTALLA COMPLETA (100% ANCHO) */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {(project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <>
       {!analysisSourcesOpen && <button type="button" onClick={() => setAnalysisSourcesOpen(true)} aria-label="Mostrar insumos del proyecto" aria-haspopup="dialog" aria-controls="project-sources-drawer" title="Insumos del proyecto" className="fixed left-3 top-3 z-30 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-[#262235] text-violet-200 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400"><PanelLeft size={18} /></button>}
       <SourcesDrawer open={analysisSourcesOpen} onClose={() => setAnalysisSourcesOpen(false)}><SourcesPanel compact sources={project.sources || []} onAddSource={async source => { await handleAddSource(source); await loadInitial(); }} readOnly={project.isAnalysisApproved} isProcessing={['encolado', 'procesando'].includes(requirementJob?.estado)} /></SourcesDrawer>
-      {project.isAnalysisApproved && !isManagingSources && (
+      </>}
+      {project.isAnalysisApproved && project.currentPhase > 1 && !showInitial && !isManagingSources && !isReviewingRequirements && (
         <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
       )}
       <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">

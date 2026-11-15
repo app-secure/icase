@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from "react";
-import { Check, CheckCircle2, Pencil, Plus, Save, Send, Trash2, X } from "lucide-react";
+import React, { useState } from "react";
+import { Check, CheckCircle2, ChevronDown, ClipboardCheck, Pencil, Plus, Save, Send, Trash2 } from "lucide-react";
 import BrainGearsIcon from "./BrainGearsIcon";
 import RequirementReviewPanel from './RequirementReviewPanel';
 import RequirementDiagnostics from './RequirementDiagnostics';
 import RequirementActorsPanel from './RequirementActorsPanel';
 import ActorAutocomplete from './ActorAutocomplete';
+import AnalysisModal from './AnalysisModal';
+import './InitialAnalysisView.css';
 import { ToastContainer, useToasts } from "./Toast";
 
 const emptyRequirement = (type) => type === "rf" ? {
@@ -35,6 +37,7 @@ export default function RequirementsView({
   const [editing, setEditing] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const functional = requirements?.functional || [];
   const actorCatalog = audit?.actores?.length ? audit.actores : [...new Set(functional.flatMap(r => r.actors || []))].filter(Boolean).map(nombre => ({ nombre, heredado: true }));
@@ -56,12 +59,6 @@ export default function RequirementsView({
     if (rnfIndex >= 0) startEdit("rnf", rnfIndex, nonFunctional[rnfIndex]);
   };
 
-  const editingAnchor = editing && !editing.isNew ? (editing.draft?.identificador || editing.draft?.id) : "";
-  useEffect(() => {
-    if (!editingAnchor) return;
-    document.getElementById(`requisito-${editingAnchor}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [editingAnchor]);
-
   const startAdd = (type) => {
     setEditing({ type, index: null, isNew: true, draft: emptyRequirement(type) });
     setPendingDelete(null);
@@ -73,8 +70,8 @@ export default function RequirementsView({
     setFormError("");
   };
 
-  const saveRequirement = () => {
-    if (!editing) return;
+  const saveRequirement = async () => {
+    if (!editing || saving) return;
     const { type, index, isNew, draft } = editing;
     const title = type === "rf" ? draft.name : draft.category;
     if (!String(title || "").trim() || !String(draft.description || "").trim()) {
@@ -137,13 +134,17 @@ export default function RequirementsView({
       if (isNew) updatedNonFunctional.push(normalized); else updatedNonFunctional[index] = normalized;
     }
 
-    onUpdateRequirements?.({ functional: updatedFunctional, nonFunctional: updatedNonFunctional });
+    setSaving(true);
+    try {
+    await onUpdateRequirements?.({ functional: updatedFunctional, nonFunctional: updatedNonFunctional });
     setEditing(null);
     setFormError("");
     addToast({
       type: "success",
-      message: `${isNew ? "Requisito añadido" : "Requisito actualizado"} (${chosenId}). Debes aprobar nuevamente el análisis antes de continuar.`
+      message: `${isNew ? "Requisito añadido" : "Requisito actualizado"} (${chosenId}). Revisa y aprueba los requisitos antes de continuar.`
     });
+    } catch (error) { setFormError(error.message || 'No se pudo guardar el requisito. Tus cambios se conservan en el formulario.'); }
+    finally { setSaving(false); }
   };
 
   const deleteRequirement = (type, index) => {
@@ -217,21 +218,22 @@ export default function RequirementsView({
   };
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-white">
-      <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-6 pb-4 pt-6 md:px-12">
-        <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col">
-          <div className="mb-6 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <span className="block text-[11px] font-semibold uppercase tracking-wider text-[#7C3AED]">Fase 1: Análisis de Requerimientos</span>
-              <h2 className="mt-0.5 text-xl font-normal tracking-tight text-slate-900">Especificación de Requerimientos del Sistema</h2>
+    <div className="flex h-full min-h-0 w-full flex-col bg-[#f8f9fc]">
+      <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto p-4 md:p-8">
+        <div className="initial-analysis__content flex min-h-0 flex-1 flex-col">
+          <header className="initial-analysis__header">
+            <div className="initial-analysis__icon"><ClipboardCheck size={24} /></div>
+            <div><p className="text-xs font-bold tracking-wide text-violet-700">FASE 3 · REQUISITOS</p>
+              <h1 className="font-bold text-slate-900">Especificación de requisitos del sistema</h1>
+              <p className="initial-analysis__intro">Revisa los comportamientos y cualidades definidos desde el análisis aprobado antes de continuar al modelado.</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="initial-analysis__metadata"><span>{functional.length} RF · {nonFunctional.length} RNF</span><span>{isApproved ? 'Aprobados' : readOnly ? 'Solo lectura' : 'En revisión'}</span>{audit?.referencia_analisis_inicial && <span>Base: análisis v{audit.referencia_analisis_inicial.version}</span>}</div>
+          </header>
+            <div className="mb-5 flex flex-wrap items-center justify-end gap-2">
               {onRegenerate && !isApproved && !readOnly && <button type="button" onClick={onRegenerate} disabled={regenerating || isFixing || isReviewing || Boolean(editing)} className="rounded-full border border-[#CFC0F1] bg-[#F2EDFF] px-3.5 py-1.5 text-xs font-semibold text-[#6D28D9] transition-colors hover:bg-[#E9DDFE] disabled:opacity-40">{regenerating ? "Regenerando…" : "Regenerar desde el análisis"}</button>}
               {isApproved && <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={13} />Fase Aprobada</span>}
             </div>
-          </div>
-
-          <div className="flex-1 space-y-8 text-[15px] leading-relaxed text-slate-800">
+          <div className="flex-1 space-y-6 text-sm leading-relaxed text-slate-800">
             {/* SECCIÓN PRIMERO: Requerimientos Funcionales y No Funcionales (Punto 3) */}
             <RequirementSection
               title="Requerimientos Funcionales del Sistema"
@@ -347,10 +349,14 @@ export default function RequirementsView({
               <input type="text" value={prompt} onChange={event => setPrompt(event.target.value)} disabled={isFixing} placeholder="Pide un ajuste a los requerimientos con IA..." className="min-w-0 flex-1 bg-transparent text-xs text-slate-800 outline-none placeholder:text-slate-400" />
               <button type="submit" disabled={!prompt.trim() || isFixing} className="ml-1 shrink-0 p-1 text-[#7C3AED] hover:text-[#6D28D9] disabled:text-slate-300" title="Aplicar ajuste con IA">{isFixing ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-[#7C3AED]" /> : <Send size={14} />}</button>
             </form>
-            <button type="button" onClick={onApprovePhase} disabled={Boolean(editing) || isReviewing || isFixing} className="flex w-full shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#6D28D9] disabled:opacity-40 md:w-auto"><Check size={14} /><span>{isApproved ? "Ir a Fase 2 · Modelado" : "Aprobar y pasar a Modelado"}</span></button>
+            <button type="button" onClick={onApprovePhase} disabled={Boolean(editing) || isReviewing || isFixing} className="flex w-full shrink-0 items-center justify-center gap-1.5 rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-all hover:bg-[#6D28D9] disabled:opacity-40 md:w-auto"><Check size={14} /><span>{isApproved ? "Ir a Modelado" : "Aprobar y pasar a Modelado"}</span></button>
           </div>
         </div>
       </div>}
+      <AnalysisModal open={Boolean(editing)} title={`${editing?.isNew ? 'Añadir' : 'Editar'} requisito ${editing?.type === 'rf' ? 'funcional' : 'no funcional'}${editing?.draft?.id ? ` · ${editing.draft.id}` : ''}`} onClose={cancelEdit} busy={saving}
+        footer={<div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={saving} onClick={cancelEdit}>Cancelar</button><button type="button" disabled={saving} className="initial-analysis__primary" onClick={saveRequirement}><Save size={15} />{saving ? 'Guardando…' : 'Guardar requisito'}</button></div>}>
+        {editing && <RequirementEditor type={editing.type} draft={editing.draft} actorCatalog={actorCatalog} error={formError} onChange={updateDraft} onSave={saveRequirement} busy={saving} />}
+      </AnalysisModal>
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
@@ -360,16 +366,14 @@ function RequirementSection({
   title, type, items, numberOffset, editing, pendingDelete, formError, actorCatalog = [],
   onEdit, onDeleteRequest, onDelete, onCancelDelete, onDraftChange, onSave, onCancelEdit, onAdd, readOnly = false
 }) {
-  const newHere = editing?.type === type && editing.isNew;
   return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-        <h3 className="text-base font-semibold tracking-tight text-slate-900">{title}</h3>
+    <details open className="group/requirements min-w-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <span className="flex min-w-0 items-center gap-3"><ChevronDown size={16} className="shrink-0 -rotate-90 text-slate-400 transition-transform group-open/requirements:rotate-0" /><span className="font-semibold text-slate-900">{title}</span><span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">{items.length}</span></span>
         <div className="flex shrink-0 items-center gap-3">
-          <span className="text-xs text-slate-400">{items.length} {items.length === 1 ? "requisito" : "requisitos"}</span>
           {!readOnly && <button
             type="button"
-            onClick={onAdd}
+            onClick={event => { event.preventDefault(); event.stopPropagation(); onAdd(); }}
             disabled={Boolean(editing)}
             className="flex items-center gap-1.5 rounded-full border border-[#CFC0F1] bg-[#F2EDFF] px-3 py-1.5 text-xs font-semibold text-[#6D28D9] transition-colors hover:bg-[#E9DDFE] disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -377,29 +381,28 @@ function RequirementSection({
             {type === "rf" ? "Añadir RF" : "Añadir RNF"}
           </button>}
         </div>
-      </div>
+      </summary>
+      <div className="mt-5 space-y-3">
       {items.map((item, index) => {
         const key = `${type}-${index}`;
-        const editingThis = editing?.type === type && editing?.index === index && !editing.isNew;
         const deletingThis = pendingDelete === key;
         const anchor = item.identificador || item.id;
-        if (editingThis) return <RequirementEditor key={item.id || key} anchor={anchor} type={type} draft={editing.draft} actorCatalog={actorCatalog} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} />;
         return (
-          <article id={anchor ? `requisito-${anchor}` : undefined} key={item.id || key} className="group flex items-start gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-[#E7E3EE] hover:bg-[#FAF9FC]">
+          <article id={anchor ? `requisito-${anchor}` : undefined} key={item.id || key} className="group flex flex-wrap items-start gap-3 rounded-xl border border-slate-100 bg-[#fcfcff] p-4 md:flex-nowrap">
             <span className="mt-0.5 min-w-5 text-sm font-semibold text-slate-800">{numberOffset + index + 1}.</span>
             <div className="min-w-0 flex-1 space-y-1">
               {type === "rf" ? <FunctionalDisplay item={item} /> : <NonFunctionalDisplay item={item} />}
               {item.acceptanceCriteria?.length > 0 && <details className="pt-1 text-xs text-slate-600"><summary className="cursor-pointer font-medium">Criterios de aceptación ({item.acceptanceCriteria.length})</summary><ol className="mt-1 list-decimal space-y-1 pl-5">{item.acceptanceCriteria.map((criterion, criterionIndex) => <li key={criterionIndex}>{criterion.descripcion}</li>)}</ol></details>}
             </div>
-            {!readOnly && <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+            {!readOnly && <div className="flex shrink-0 items-center gap-1">
               {deletingThis ? <><span className="mr-1 text-[11px] text-red-600">¿Eliminar?</span><button type="button" onClick={() => onDelete(type, index)} className="rounded-lg bg-red-600 px-2 py-1 text-[11px] font-semibold text-white">Sí</button><button type="button" onClick={onCancelDelete} className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-600">No</button></> : <><button type="button" disabled={Boolean(editing)} onClick={() => onEdit(type, index, item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-[#F2EDFF] hover:text-[#7C3AED] disabled:opacity-30" title="Editar este requisito"><Pencil size={14} /></button><button type="button" disabled={Boolean(editing)} onClick={() => onDeleteRequest(key)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30" title="Eliminar este requisito"><Trash2 size={14} /></button></>}
             </div>}
           </article>
         );
       })}
-      {newHere && <RequirementEditor type={type} draft={editing.draft} actorCatalog={actorCatalog} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} isNew />}
-      {!items.length && !newHere && <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-xs text-slate-400">No hay requisitos de este tipo.</p>}
-    </section>
+      {!items.length && <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-xs text-slate-400">No hay requisitos de este tipo.</p>}
+      </div>
+    </details>
   );
 }
 
@@ -440,13 +443,12 @@ function RequirementProvenance({ item }) {
   </div>;
 }
 
-function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isNew = false, anchor, actorCatalog = [] }) {
+function RequirementEditor({ type, draft, error, onChange, onSave, busy, actorCatalog = [] }) {
   const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#7C3AED] focus:ring-2 focus:ring-violet-100";
   const criteria = draft.acceptanceCriteria || [];
   const splitIds = (text) => [...new Set(text.split(',').map((item) => item.trim()).filter(Boolean))];
   return (
-    <div id={anchor ? `requisito-${anchor}` : undefined} className="rounded-xl border border-[#CFC0F1] bg-[#FCFBFE] p-4 shadow-sm" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); onSave(); } if (event.key === "Escape") onCancel(); }}>
-      <div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-[#6D28D9]">{isNew ? "Nuevo" : "Editar"} {type === "rf" ? "requisito funcional" : "requisito no funcional"}</p><button type="button" onClick={onCancel} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X size={14} /></button></div>
+    <fieldset disabled={busy} className="min-w-0 border-0 p-0" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); onSave(); } }}>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="space-y-1 md:col-span-1">
           <span className="text-[11px] font-semibold text-slate-600">Identificador / Código *</span>
@@ -468,7 +470,7 @@ function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isN
           <label className="space-y-1"><span className="text-[11px] font-semibold text-slate-600">Precondición</span><input value={draft.precondition || ""} onChange={event => onChange("precondition", event.target.value)} className={inputClass} /></label>
           <label className="space-y-1"><span className="text-[11px] font-semibold text-slate-600">Poscondición</span><input value={draft.postcondition || ""} onChange={event => onChange("postcondition", event.target.value)} className={inputClass} /></label>
         </> : <>
-          <label className="space-y-1 md:col-span-2"><span className="text-[11px] font-semibold text-slate-600">Métrica cuantitativa verificable *</span><input value={draft.metric || ""} onChange={event => onChange("metric", event.target.value)} className={inputClass} placeholder="Ej.: respuesta menor a 1 segundo en el percentil 95" /></label>
+          <label className="space-y-1 md:col-span-2"><span className="text-[11px] font-semibold text-slate-600">Métrica o condición verificable *</span><input value={draft.metric || ""} onChange={event => onChange("metric", event.target.value)} className={inputClass} placeholder="Condición cuantitativa o cualitativa acordada" /></label>
           <label className="space-y-1 md:col-span-2"><span className="text-[11px] font-semibold text-slate-600">Criterio de cumplimiento</span><input value={draft.compliance || ""} onChange={event => onChange("compliance", event.target.value)} className={inputClass} /></label>
         </>}
       </div>
@@ -482,8 +484,7 @@ function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isN
         </div>)}
         <button type="button" className="text-xs font-semibold text-violet-700" onClick={() => onChange('acceptanceCriteria', [...criteria, { descripcion: '', necesidades_origen: draft.needIds || [] }])}>Añadir criterio de aceptación</button>
       </div>
-      {error && <p className="mt-3 text-xs font-medium text-red-600">{error}</p>}
-      <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Cancelar</button><button type="button" onClick={onSave} className="flex items-center gap-1.5 rounded-lg bg-[#7C3AED] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#6D28D9]"><Save size={13} />Guardar requisito</button></div>
-    </div>
+      {error && <p role="alert" className="mt-3 text-xs font-medium text-red-600">{error}</p>}
+    </fieldset>
   );
 }
