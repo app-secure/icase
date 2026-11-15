@@ -206,8 +206,9 @@ test('trabajo pausado reanuda sin repetir etapas válidas tras recrear el servic
   const job = await f.service.start('p', 'u'); await f.service.run(job.id);
   expect(f.rows.get(job.id).estado).toBe('esperando_proveedor');
   pause = false;
-  const next = new Jobs(f.options); next.launch = () => {};
-  await next.resume(job.id, 'u'); await next.run(job.id);
+  const next = new Jobs(f.options); let resumed;
+  next.launch = (id, probe, claimed) => { resumed = next.run(id, probe, claimed); };
+  await next.resume(job.id, 'u'); await resumed;
   expect(f.rows.get(job.id).estado).toBe('completado');
   expect(extract).toHaveBeenCalledTimes(1);
 });

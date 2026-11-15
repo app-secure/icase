@@ -1,5 +1,17 @@
 # Generación resiliente de requisitos
 
+## Redacción desde análisis aprobado
+
+En el flujo separado, cada lote recibe los objetivos aprobados correspondientes y únicamente sus reglas, preguntas y actores enlazados. No recibe otra vez el documento completo ni el prompt de extracción. Gemini, OpenRouter, Groq y Ollama utilizan el mismo contrato de redacción RF/RNF. Los fragmentos citados se verifican localmente contra las fuentes originales: reducir el contexto enviado no desactiva la evidencia.
+
+La redacción conserva títulos breves, declaraciones, métricas y criterios generados; no se reconstruyen desde la primera necesidad mediante el formateador heurístico heredado. La revisión semántica contrasta la conversión con todo el análisis aprobado y sus citas, sin volver a extraer obligaciones del documento. Los defectos de esa base requieren revisión explícita, no cambios silenciosos. Las generaciones guardadas no se modifican automáticamente.
+
+Los lotes del flujo aprobado separan RF y RNF y agrupan como máximo cuatro objetivos por solicitud (o menos según el presupuesto/contexto del adaptador). Esto no limita el número total de requisitos. Cada objetivo declara sus propias reglas permitidas; el contexto de un mismo lote no autoriza mezclar reglas entre objetivos. Los IDs ACT se resuelven a los nombres del catálogo antes de guardar requisitos.
+
+Si un lote no responde, se conservan los checkpoints válidos y el borrador queda como `redaccion_incompleta`, sin ejecutar una auditoría sobre una especificación truncada. El trabajo se pausa y permite reanudar; no sustituye requisitos guardados por ese resultado incompleto ni se etiqueta como completado. Los límites globales de solicitudes y tiempo siguen vigentes: esta medida no promete completar todos los proyectos en una sola ejecución.
+
+Regresión: `npx jest tests/approved-requirement-drafting.test.js --runInBand`. Estas pruebas verifican selección contextual, ausencia de reextracción y conservación de la redacción; no acreditan por sí solas calidad semántica ni mejoras de latencia con proveedores reales.
+
 ## Orden global de proveedores de texto
 
 `AI_PROVIDER_ORDER=openrouter,gemini,groq` controla el orden automático de requisitos, análisis, diagramas, código y demás solicitudes de texto. Los mockups usan ese mismo orden con `MOCKUP_IA_PROVIDER=auto`. Una selección explícita no cambia de proveedor. Transcripción y extracción especializada conservan sus adaptadores.

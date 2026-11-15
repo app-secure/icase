@@ -103,7 +103,7 @@ class RequirementCoverageService {
     return { valid, invalid };
   }
 
-  problems(data, inventory, input) {
+  problems(data, inventory, input, approved = false) {
     const problems = [];
     const covered = new Set();
     const identifiers = new Set();
@@ -120,6 +120,11 @@ class RequirementCoverageService {
       const refs = Array.isArray(req.necesidades_origen) ? [...new Set(req.necesidades_origen)] : [];
       if (!refs.length) problems.push(`${id}: falta trazabilidad a un objetivo del inventario.`);
       const referenced = refs.map((ref) => inventory.find((entry) => entry.id === ref)).filter(Boolean);
+      if (approved) {
+        const allowedRules = new Set(require('./ApprovedRequirementContext').select(referenced, inventory).objetivos.flatMap(n => n.reglas_permitidas));
+        for (const idRule of req.reglas_relacionadas || []) if (!allowedRules.has(idRule)) problems.push(`${id}: regla ${idRule} ajena a los objetivos aprobados de este requisito; no tomar reglas de otros objetivos del lote.`);
+        if ((req.actores || []).some(actor => /^ACT-\d+$/i.test(actor))) problems.push(`${id}: actor sin nombre canónico; no guardar IDs ACT como nombres.`);
+      }
       if (new Set(referenced.filter(isRequirementNeed).map(objectiveOf)).size > 1) problems.push(`${id}: debe cubrir un único objetivo de negocio; separa resultados independientes, no sus detalles.`);
       const criteria = Array.isArray(req.criterios_aceptacion) ? req.criterios_aceptacion : [];
       if (referenced.some((item) => item.objetivo_id) && !criteria.length) problems.push(`${id}: faltan criterios de aceptación para el objetivo consolidado.`);
@@ -182,7 +187,7 @@ class RequirementCoverageService {
     if (!approvedAnalysis?.aprobado || !Array.isArray(approvedAnalysis.inventario)) {
       throw Object.assign(new Error('Se requiere un análisis inicial aprobado para redactar requisitos.'), { code: 'INITIAL_ANALYSIS_REQUIRED', status: 409 });
     }
-    return this.generate({ ...options, approvedAnalysis });
+    return this.generate({ ...options, prompt: require('./ApprovedRequirementContext').templates, approvedAnalysis });
   }
 
   async generate({ input, prompt, request, semanticReview = false, groqInputBudget = null, maxObjectivesPerBatch = null, sourceHints = [], analysisOnly = false, approvedAnalysis = null, analysisInstruction = '', analysisPrevious = null }) {
@@ -334,7 +339,21 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
       diagnostico_inventario: { errores_iniciales: initial.invalid, errores_pendientes: report.invalid,
         reparaciones: inventoryRepairs, elementos_validos: inventory.length, reparacion: repairDiagnostic }
       } };
-      const reviewed = semanticReview ? await new (require('./RequirementSemanticReviewService'))().run({ input, result: enriched, request, coverage: this, allowCorrection: !approvedAnalysis }) : enriched;
+      if (approvedAnalysis && enriched.auditoria_requisitos.diagnostico_generacion.necesidades_pendientes.length) {
+        // A valid first batch is not a complete specification. Keep its validated
+        // checkpoints, but do not audit or commit it as the final generation.
+        enriched.auditoria_requisitos.estado = 'redaccion_incompleta';
+        enriched.auditoria_requisitos.revision_semantica = { estado: 'pendiente_redaccion', hallazgos: [] };
+        const ctx = Execution.current();
+        if (ctx) {
+          ctx.pending = true;
+          ctx.draft = enriched;
+          ctx.pauseMessage = `Redacción incompleta: quedan ${enriched.auditoria_requisitos.diagnostico_generacion.necesidades_pendientes.length} necesidades pendientes. Reanuda para continuar sin repetir los lotes válidos.`;
+        }
+        return enriched;
+      }
+      const reviewed = semanticReview ? await new (require('./RequirementSemanticReviewService'))().run({ input, result: enriched, request, coverage: this, allowCorrection: !approvedAnalysis,
+        approvedAnalysis: Boolean(approvedAnalysis) }) : enriched;
       return approvedAnalysis?.requisitos_previos?.length ? reviewed : require('../../core/services/RequirementIdentifiers')(reviewed);
     };
     const batchDiagnostics = [];
@@ -363,10 +382,12 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
     const batches = [];
     let current = [], cost = 0;
     const modern = active.some((item) => item.objetivo_id);
-    for (const group of grouped.values()) {
+    const groupsToDraft = [...grouped.values()];
+    if (approvedAnalysis) groupsToDraft.sort((a, b) => a[0].tipo.localeCompare(b[0].tipo));
+    for (const group of groupsToDraft) {
       const estimate = 450 + Math.ceil(JSON.stringify(group).length / 4);
-      const compactTooLarge = groqInputBudget && Math.ceil(compactPrompts.draft(input, [...current.flat(), ...group]).length / 4) > groqInputBudget;
-      if (current.length && (cost + estimate > (groqInputBudget ? 3200 : 5500) || compactTooLarge || (!modern && current.length >= 5) || (maxObjectivesPerBatch && current.length >= maxObjectivesPerBatch))) {
+      const compactTooLarge = groqInputBudget && Math.ceil((approvedAnalysis ? require('./ApprovedRequirementContext').draft([...current.flat(), ...group], inventory, actors) : compactPrompts.draft(input, [...current.flat(), ...group])).length / 4) > groqInputBudget;
+      if (current.length && (approvedAnalysis && (current[0][0].tipo !== group[0].tipo || current.length >= Math.min(maxObjectivesPerBatch || 4, 4)) || cost + estimate > (groqInputBudget ? 3200 : 5500) || compactTooLarge || (!modern && current.length >= 5) || (maxObjectivesPerBatch && current.length >= maxObjectivesPerBatch))) {
         batches.push(current.flat()); current = []; cost = 0;
       }
       current.push(group); cost += estimate;
@@ -376,11 +397,13 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
     let data = null;
     for (let offset = 0; offset < batches.length; offset++) {
       const batch = batches[offset];
-      const batchPrompt = `${prompt}\n${instructions}\nLOTE ${offset + 1}: genera SOLO los requisitos correspondientes a estos objetivos, manteniendo TODO el insumo como contexto:\n${JSON.stringify(batch)}\nContexto, reglas y decisiones (no generar requisitos para estos elementos):\n${JSON.stringify(decisions)}\nINSUMO ORIGINAL:\n${input}\nUsa identificadores temporales únicos dentro del lote. El sistema los renumerará. No generes requisitos de otros lotes. ${offset ? 'Omite metadatos del proyecto: devuelve solo requerimientos y diagramas: [].' : 'Incluye los metadatos del proyecto una sola vez.'}`;
-      const response = await ask(`redaccion_lote_${offset + 1}`, batchPrompt, { promptGroq: compactPrompts.draft(input, batch, offset === 0) });
+      const batchPrompt = approvedAnalysis ? require('./ApprovedRequirementContext').draft(batch, inventory, actors, approvedAnalysis.instruccion_redaccion) : `${prompt}\n${instructions}\nLOTE ${offset + 1}: genera SOLO los requisitos correspondientes a estos objetivos, manteniendo TODO el insumo como contexto:\n${JSON.stringify(batch)}\nContexto, reglas y decisiones (no generar requisitos para estos elementos):\n${JSON.stringify(decisions)}\nINSUMO ORIGINAL:\n${input}\nUsa identificadores temporales únicos dentro del lote. El sistema los renumerará. No generes requisitos de otros lotes. ${offset ? 'Omite metadatos del proyecto: devuelve solo requerimientos y diagramas: [].' : 'Incluye los metadatos del proyecto una sola vez.'}`;
+      const response = await ask(`redaccion_lote_${offset + 1}`, batchPrompt, { promptGroq: approvedAnalysis ? batchPrompt : compactPrompts.draft(input, batch, offset === 0) });
       const candidates = Array.isArray(response?.requerimientos) ? response.requerimientos : [];
       const usable = candidates
         .filter((req) => req && typeof req === 'object' && req.nombre && req.descripcion)
+        .filter(req => !approvedAnalysis || (req.necesidades_origen?.length && req.necesidades_origen.every(id => batch.some(n => n.id === id && n.tipo === req.tipo))))
+        .map(req => approvedAnalysis ? require('./ApprovedRequirementContext').normalizeActors(req, batch, actors) : req)
         .map(req => this._preserveEvidence(req, inventory, input));
       const requested = batch.map(item => item.id);
       // En local un lote pequeño debe devolver exactamente un requisito por objetivo.
@@ -408,7 +431,7 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
       }
       const referenced = new Set(usable.flatMap(req => Array.isArray(req.necesidades_origen) ? req.necesidades_origen : []));
       const missing = requested.filter(id => !referenced.has(id));
-      if (usable.length && !this.problems({ requerimientos: usable }, [...batch, ...decisions], input).length) {
+      if (usable.length && !this.problems({ requerimientos: usable }, [...batch, ...decisions], input, Boolean(approvedAnalysis)).length) {
         await Execution.validated(`redaccion_lote_${offset + 1}`, { ...response, requerimientos: usable });
       }
       batchDiagnostics.push({ lote: offset + 1, necesidades_solicitadas: requested,
@@ -440,14 +463,18 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
       const located = inspectEvidence(req, input);
       return located.valido ? { ...req, evidencia: located.valid[0].texto, evidencias: located.valid } : req;
     });
-    const prepare = payload => previousRequirements.length ? payload : require('../../core/services/RequirementIdentifiers')({
+    const prepare = payload => approvedAnalysis ? (previousRequirements.length ? payload : require('../../core/services/RequirementIdentifiers')(payload)) : previousRequirements.length ? payload : require('../../core/services/RequirementIdentifiers')({
       ...payload, requerimientos: require('../../core/services/RequirementStatement').shape(payload.requerimientos || [], inventory, approvedAnalysis?.actores || [])
     });
     data = prepare(data);
+    if (approvedAnalysis && batchDiagnostics.some(batch => batch.estado === 'sin_requisitos_utilizables' || batch.estado === 'respuesta_fuera_de_lote')) {
+      return finish(this.reviewDraft(data, inventory, [...inventoryWarnings,
+        'No terminaron todos los lotes de redacción; se conservan los válidos para reanudar, sin gastar una reparación en el fallo de proveedor.'], 0));
+    }
     if (!approvedAnalysis) objectiveDiagnostic = await new RequirementObjectiveRepair().run({ data, inventory, input,
       request: (text, options) => ask(options.etapa, text), coverage: this });
-    const generationPrompt = `${prompt}\n${instructions}\nInventario de referencia:\n${JSON.stringify(inventory)}\nINSUMO ORIGINAL:\n${input}`;
-    let problems = this.problems(data, inventory, input);
+    const generationPrompt = approvedAnalysis ? require('./ApprovedRequirementContext').draft(active, inventory, actors, approvedAnalysis.instruccion_redaccion) : `${prompt}\n${instructions}\nInventario de referencia:\n${JSON.stringify(inventory)}\nINSUMO ORIGINAL:\n${input}`;
+    let problems = this.problems(data, inventory, input, Boolean(approvedAnalysis));
     if (objectiveDiagnostic.conflictos.length && objectiveDiagnostic.estado !== 'aplicada') {
       return finish(this.reviewDraft(data, inventory, [...inventoryWarnings, ...problems,
         'La asignación de objetivos compartidos sigue pendiente; no se fusionaron requisitos para quitar el bloqueo.'], 1));
@@ -480,7 +507,7 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
         .filter((id) => invalidIds.has(id)));
       const replaced = new Set(corrections.map((req) => req.identificador));
       const candidate = prepare({ ...data, requerimientos: [...previous.filter((req) => !removed.has(req.identificador) && !replaced.has(req.identificador)), ...corrections] });
-      const candidateProblems = this.problems(candidate, inventory, input);
+      const candidateProblems = this.problems(candidate, inventory, input, Boolean(approvedAnalysis));
       const coveredBefore = new Set(previous.flatMap(r => r.necesidades_origen || []));
       const coveredAfter = new Set(candidate.requerimientos.flatMap(r => r.necesidades_origen || []));
       const lostCoverage = [...coveredBefore].some(id => !coveredAfter.has(id));

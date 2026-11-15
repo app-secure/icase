@@ -58,7 +58,7 @@ test('divide una agrupación sin perder ninguna necesidad', async () => {
     .mockResolvedValueOnce({ eliminar_identificadores: ['RF-01'], requerimientos_corregidos: [rf, rnf] });
   const result = await new Coverage().generate({ input, prompt: 'Analiza', request });
   expect(result.requerimientos).toEqual([
-    { ...rf, nombre: 'Gestionar usuarios', descripcion: 'El sistema deberá gestionar usuarios.', criterios_aceptacion: [{ descripcion: 'Queda comprobado: gestionar usuarios.', necesidades_origen: ['N-01'] }], precondiciones: '', poscondiciones: '', reglas_relacionadas: [] },
+    { ...rf, actores: ['Sistema'], nombre: 'Gestionar usuarios', descripcion: 'El sistema deberá gestionar usuarios.', criterios_aceptacion: [{ descripcion: 'Queda comprobado: gestionar usuarios.', necesidades_origen: ['N-01'] }], precondiciones: '', poscondiciones: '', reglas_relacionadas: [] },
     { ...rnf, nombre: 'Proteger contraseñas', descripcion: 'El sistema deberá proteger contraseñas.', criterios_aceptacion: [{ descripcion: 'Queda comprobado: proteger contraseñas.', necesidades_origen: ['N-02'] }], precondiciones: '', poscondiciones: '', reglas_relacionadas: [], estado_decision: 'pendiente', requiere_confirmacion: true }
   ]);
 });

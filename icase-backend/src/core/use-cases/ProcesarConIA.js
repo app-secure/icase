@@ -759,6 +759,18 @@ class ProcesarConIA {
     }
 
     await this.proyectoRepository.actualizar(proyectoId, updates);
+    const execution = require('../../infrastructure/services/RequirementExecutionContext').current();
+    if (initial && objetivoNormalizado === 'requisitos' && execution?.jobId && updates.auditoria_requisitos) {
+      // Commit receipt lives with the persisted audit, not only in the worker.
+      // A restart after this write must not interpret its own output as an edit.
+      const savedRequirements = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      updates.auditoria_requisitos.registro_generacion = {
+        trabajo_id: execution.jobId, entrada_snapshot: execution.inputSnapshot,
+        requisitos_hash: require('../../infrastructure/services/RequirementExecutionContext').hash(savedRequirements),
+        salida_hash: await execution.outputSnapshot()
+      };
+      await this.proyectoRepository.actualizar(proyectoId, { auditoria_requisitos: updates.auditoria_requisitos });
+    }
     console.log(`[ProcesarConIA] Proyecto actualizado en MongoDB: "${nombreFinal}"`);
 
     const diagramasActuales = await this.diagramaRepository.listarPorProyecto(proyectoId);

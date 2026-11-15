@@ -451,7 +451,8 @@ class ModelosIaService {
       const ctx = RequirementExecution.current();
       ctx.draft = respuestaData;
       const reviewState = respuestaData.auditoria_requisitos?.revision_semantica?.estado;
-      ctx.pending = !payload.approvedInitialAnalysis && ['no_completada', 'parcial'].includes(reviewState);
+      ctx.pending = Boolean(ctx.pending) || reviewState === 'pendiente_redaccion' || reviewState === 'no_completada' ||
+        !payload.approvedInitialAnalysis && reviewState === 'parcial';
       if (reviewState === 'completada') await RequirementExecution.confirm('revision_semantica');
     }
 

@@ -5,10 +5,10 @@ class RequirementGenerationJobs {
     Object.assign(this, { jobs, projects, requirements, sources, execute, mutationLease });
     this.running = new Set();
   }
-  async snapshot(projectId, userId, operation = 'legacy') {
+  async snapshot(projectId, userId, operation = 'legacy', requirementsOverride) {
     const project = await this.projects.obtenerPorId(projectId);
     if (!project || String(project.usuario_id) !== String(userId)) throw fail('Proyecto no encontrado.', 404);
-    const requirements = await this.requirements.listarPorProyecto(projectId);
+    const requirements = requirementsOverride ?? await this.requirements.listarPorProyecto(projectId);
     const sources = await this.sources.listarPorProyecto(projectId);
     if (!(project.version_flujo_analisis === 2 && operation !== 'legacy') && (requirements.some(r => r.aprobado) || ['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'codificacion_pendiente'].includes(project.estado_fase))) throw fail('El análisis está aprobado. No se reemplazará con una generación tardía.');
     const sorted = rows => [...rows].sort((a, b) => String(a.id || a._id).localeCompare(String(b.id || b._id)));
@@ -66,7 +66,11 @@ class RequirementGenerationJobs {
   async resume(id, userId) {
     const job = await this.get(id, userId);
     if (['completado', 'fallido', 'cancelado'].includes(job.estado)) return this.public(job);
-    if (await this.snapshot(job.proyecto_id, userId, job.operacion_requisitos) !== job.entrada_requisitos.snapshot) throw fail('La entrada cambió. Inicia una nueva generación para no perder los cambios.');
+    if (await this.snapshot(job.proyecto_id, userId, job.operacion_requisitos) !== job.entrada_requisitos.snapshot) {
+      const recovered = await this.recoverCommitted(job, userId);
+      if (recovered) return recovered;
+      throw fail('La entrada cambió. Inicia una nueva generación para no perder los cambios.');
+    }
     if (['encolado', 'procesando'].includes(job.estado)) return this.public(job);
     // Claim before replying: returning the old interrupted state made clients
     // stop polling immediately, even though setImmediate had queued the worker.
@@ -74,6 +78,62 @@ class RequirementGenerationJobs {
     if (!claimed) return this.public(await this.get(id, userId));
     this.launch(id, true, claimed);
     return this.public(claimed);
+  }
+  async recoverCommitted(job, userId) {
+    if (job.operacion_requisitos !== 'redaccion_requisitos' || !['interrumpido', 'esperando_proveedor'].includes(job.estado)) return null;
+    const lock = await this.mutationLease.acquire(job.proyecto_id);
+    try {
+      const project = await this.projects.obtenerPorId(job.proyecto_id);
+      const rows = await this.requirements.listarPorProyecto(job.proyecto_id);
+      const audit = project?.auditoria_requisitos;
+      const receipt = audit?.registro_generacion;
+      if (String(project?.usuario_id) !== String(userId) || !rows.length ||
+          project.analisis_inicial_aprobado_id !== job.entrada_requisitos.payload.analisisId ||
+          audit?.referencia_analisis_inicial?.id !== project.analisis_inicial_aprobado_id) return null;
+      const outputHash = await this.snapshot(job.proyecto_id, userId, job.operacion_requisitos);
+      const rowsHash = Execution.hash(rows);
+      let proven = receipt?.trabajo_id === job.id && receipt.entrada_snapshot === job.entrada_requisitos.snapshot &&
+        receipt.requisitos_hash === rowsHash && receipt.salida_hash === outputHash;
+      // Compatibility for jobs saved before receipts existed. Only recover a first
+      // generation whose entire saved output still matches its own response. An
+      // unvalidated checkpoint is NOT promoted to a validated semantic review.
+      if (!receipt && await this.snapshot(job.proyecto_id, userId, job.operacion_requisitos, []) === job.entrada_requisitos.snapshot) {
+        const fields = ['tipo', 'identificador', 'nombre', 'descripcion', 'prioridad', 'actores', 'precondiciones', 'poscondiciones', 'metrica_medible', 'origen', 'evidencia', 'fuentes_origen', 'necesidades_origen', 'criterios_aceptacion', 'reglas_relacionadas', 'requiere_confirmacion', 'estado_decision', 'restricciones_excluidas'];
+        const matches = response => rows.length === response?.length && rows.every(row => {
+          const original = response.find(item => item.identificador === row.identificador);
+          return original && !row.aprobado && !row.historial_versiones?.length &&
+            new Date(row.createdAt) >= new Date(job.createdAt) && +new Date(row.updatedAt) === +new Date(row.createdAt) &&
+            fields.every(field => Execution.hash(row[field] ?? '') === Execution.hash(original[field] ?? ''));
+        });
+        proven = Object.values(job.checkpoints_requisitos || {}).some(entry =>
+          /^redaccion_lote_/.test(entry.stage) && matches(entry.data?.requerimientos));
+        // Older executions could normalize/reorder the response before saving,
+        // without checkpointing that final representation. Recover the persisted
+        // draft (not the raw response) only when its matching audit was saved in
+        // the interrupted execution's time window and no row was edited since.
+        const control = audit.control_aprobacion;
+        const links = control?.calidad?.vinculos || [];
+        const savedAt = +new Date(project.updatedAt);
+        proven ||= control?.requisitos === rows.length && links.length === rows.length &&
+          savedAt >= +new Date(job.createdAt) && savedAt <= +new Date(job.updatedAt) &&
+          rows.every(row => !row.aprobado && !row.historial_versiones?.length &&
+            +new Date(row.createdAt) >= +new Date(job.createdAt) && +new Date(row.createdAt) <= savedAt &&
+            +new Date(row.updatedAt) === +new Date(row.createdAt) &&
+            links.some(link => link.requisito === row.identificador &&
+              Execution.hash(link.necesidades || []) === Execution.hash(row.necesidades_origen || [])));
+      }
+      if (!proven) return null;
+      lock.assert();
+      const claimed = await this.jobs.requirementsClaim(job.id);
+      if (!claimed) return this.public(await this.get(job.id, userId));
+      const changes = { estado: 'completado', progreso: 100, error: null, salida_hash: outputHash,
+        mensaje: 'Borrador guardado recuperado sin repetir IA. Consulta su cobertura y revisión pendientes.',
+        progreso_requisitos: { ...job.progreso_requisitos, etapa: 'resultado_guardado_recuperado', recuperada: true },
+        resultado_requisitos: { proyecto_id: String(job.proyecto_id), objetivo: 'requisitos', nombre_proyecto: project.nombre,
+          descripcion_proyecto: project.descripcion, auditoria_requisitos: audit, requerimientos: rows } };
+      await this.jobs.requirementsSave(job.id, changes, true);
+      return this.public({ ...claimed, ...changes });
+    } finally { await lock.release(); }
   }
   async cancel(id, userId) {
     const job = await this.get(id, userId);
@@ -96,6 +156,9 @@ class RequirementGenerationJobs {
       timer = setInterval(() => { save({}).catch(() => { lost = true; }); }, 30000);
       timer.unref?.();
       const context = {
+        jobId: job.id,
+        inputSnapshot: job.entrada_requisitos.snapshot,
+        outputSnapshot: () => this.snapshot(job.proyecto_id, job.usuario_id, job.operacion_requisitos),
         cacheNamespace: job.entrada_requisitos.payload.desdeCero ? job.id : '',
         probeUnknownReset,
         checkpoints,
@@ -108,7 +171,7 @@ class RequirementGenerationJobs {
         save: () => save({ checkpoints_requisitos: checkpoints }),
         commit: async operation => {
           await context.assertCurrent();
-          if (context.pending) throw fail('La auditoría está pendiente; conserva el borrador y reanuda.', 503, 'AI_REQUIREMENTS_PENDING');
+          if (context.pending) throw fail(context.pauseMessage || 'La auditoría está pendiente; conserva el borrador y reanuda.', 503, 'AI_REQUIREMENTS_PENDING');
           const lock = await this.mutationLease.acquire(job.proyecto_id);
           try { await context.assertCurrent(); lock.assert(); return await operation(); }
           finally { await lock.release(); }
@@ -124,7 +187,7 @@ class RequirementGenerationJobs {
         const conflict = error.status === 409 || error.code === 'REQUIREMENTS_CONFLICT' || error.code === 'REQUIREMENTS_LEASE_LOST';
         await this.jobs.requirementsSave(id, { estado: conflict ? 'fallido' : 'esperando_proveedor',
           resultado_requisitos: context.draft || null, checkpoints_requisitos: checkpoints, progreso_requisitos: progress,
-          mensaje: conflict ? 'La entrada cambió o se perdió el trabajo. No se sobrescribió el proyecto.' : 'Generación pausada. Reanuda para continuar las etapas pendientes.',
+          mensaje: conflict ? 'La entrada cambió o se perdió el trabajo. No se sobrescribió el proyecto.' : context.pauseMessage || 'Generación pausada. Reanuda para continuar las etapas pendientes.',
           error: conflict ? 'REQUIREMENTS_CONFLICT' : 'AI_REQUIREMENTS_PENDING' }, true);
       }
     } finally { clearInterval(timer); this.running.delete(id); }
