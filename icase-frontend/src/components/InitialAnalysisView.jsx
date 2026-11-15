@@ -91,6 +91,10 @@ export default function InitialAnalysisView({ sources = [], state, onSave, onApp
   React.useEffect(() => { editingBaseline.current = editing ? JSON.stringify(editing) : null; elementBaseline.current = editing ? inventory.find(item => item.id === (editing.dividir_de || editing.id)) || null : null; }, [editing?.id, editing?.dividir_de]);
   const closeEditor = () => {
     if (editing && JSON.stringify(editing) !== editingBaseline.current && !window.confirm('¿Descartar los cambios del elemento sin guardar?')) return;
+    if (toolsOpen === 'information' && additional.trim()) {
+      if (!window.confirm('¿Descartar la información que todavía no guardaste?')) return;
+      setAdditional(''); setReason('');
+    }
     setToolsOpen(false); setEditing(null); setError('');
   };
   const dirty = Boolean(summary || additional.trim() || editing || summaryDirty);
@@ -133,6 +137,7 @@ export default function InitialAnalysisView({ sources = [], state, onSave, onApp
   return <div className="initial-analysis flex-1 min-h-0 overflow-y-auto p-4 md:p-8"><div className="initial-analysis__content">
     <header className="initial-analysis__header"><div className="initial-analysis__icon"><FileSearch size={24} /></div><div><p className="text-xs font-bold tracking-wide text-violet-700">FASE 2 · ANÁLISIS INICIAL</p><h1 className="text-2xl font-bold">Comprender el proyecto antes de redactar requisitos</h1><p className="initial-analysis__intro">Revisa la interpretación del proyecto y sus evidencias. Los requisitos se redactarán después de tu aprobación.</p></div><div className="initial-analysis__metadata"><span>Versión {row?.version || 'heredada'}</span><span>{row?.estado === 'aprobado' ? 'Aprobado · solo lectura' : row?.estado === 'borrador' ? 'Borrador en revisión' : 'Sin aprobación inicial'}</span><span>Proveedor: {provider === 'auto' ? 'Automático' : provider}</span></div></header>
     {editable && <section className="initial-analysis__actions my-4" aria-label="Acciones del análisis"><div className="flex flex-wrap gap-2">
+      <button type="button" disabled={busy || dirty} onClick={() => { setError(''); setReason(''); setToolsOpen('information'); }}><FilePlus2 size={15} aria-hidden="true" />Añadir información</button>
       <button onClick={() => { setError(''); setEditing({ id: nextId('N', inventory.map(n => n.id)), tipo: 'RF', objetivo_id: nextId('O', inventory.map(n => n.objetivo_id)), estado: 'pendiente', necesidad: '', cita: '', fuente: 'insumo_directo' }); }} disabled={busy}><Plus size={15} aria-hidden="true" />Añadir necesidad</button>
       {onReviewQuality && <button disabled={busy || dirty} onClick={() => { setError(''); setQualityConfirmOpen(true); }}><ShieldCheck size={15} aria-hidden="true" />Revisar calidad del análisis</button>}
       {rejectedToggle}
@@ -157,7 +162,7 @@ export default function InitialAnalysisView({ sources = [], state, onSave, onApp
         {error && <p role="alert" className="mt-3 text-red-700">{error}</p>}
       </AnalysisModal>
     </div>}
-    <AnalysisModal open={Boolean(toolsOpen || editing)} title={editing ? editorTitle : ({ information: 'Añadir información al proyecto', ai: 'Solicitar corrección con IA' }[toolsOpen])} busy={busy || savingElement} onClose={closeEditor} footer={editing && <div className="flex justify-end gap-3"><button type="button" disabled={busy || savingElement} onClick={closeEditor}>Cancelar</button><button type="submit" form={editorFormId} className="initial-analysis__primary" disabled={busy || savingElement}>{savingElement ? 'Guardando…' : creating ? 'Crear necesidad' : 'Guardar elemento'}</button></div>}><fieldset disabled={busy} className="space-y-3">
+    <AnalysisModal open={Boolean(toolsOpen || editing)} title={editing ? editorTitle : ({ information: 'Añadir información al proyecto', ai: 'Solicitar corrección con IA' }[toolsOpen])} busy={busy || savingElement} onClose={closeEditor} footer={editing ? <div className="flex justify-end gap-3"><button type="button" disabled={busy || savingElement} onClick={closeEditor}>Cancelar</button><button type="submit" form={editorFormId} className="initial-analysis__primary" disabled={busy || savingElement}>{savingElement ? 'Guardando…' : creating ? 'Crear necesidad' : 'Guardar elemento'}</button></div> : toolsOpen === 'information' ? <div className="flex justify-end gap-3"><button type="button" disabled={busy || savingElement} onClick={closeEditor}>Cancelar</button><button type="button" className="initial-analysis__primary" disabled={busy || savingElement || !additional.trim() || !reason.trim()} onClick={() => run(async () => { setSavingElement(true); try { await save(content); setToolsOpen(false); } finally { setSavingElement(false); } })}>{savingElement ? 'Guardando…' : 'Guardar información'}</button></div> : null}><fieldset disabled={busy} className="space-y-3">
       {error && <p role="alert" className="text-red-700">{error}</p>}
       {editing && error && /borrador cambió|versión|recarga/i.test(error) && onRefresh && <button type="button" disabled={busy || savingElement} onClick={() => run(async () => {
         const latest = await onRefresh();
@@ -170,11 +175,9 @@ export default function InitialAnalysisView({ sources = [], state, onSave, onApp
         if ((!elementBaseline.current || editing.dividir_de) && items.some(item => item.id === editing.id)) setEditing(previous => ({ ...previous, id: nextId('N', items.map(item => item.id)), objetivo_id: nextId('O', items.map(item => item.objetivo_id)) }));
       })}>Actualizar versión conservando el formulario</button>}
       {!editing && toolsOpen === 'information' && <>
-      <p className="initial-analysis__intro">Registra acuerdos o datos que no aparezcan en los archivos. Se guardarán como insumo adicional explícito, no como requisitos automáticos. Después puedes añadir una necesidad o pedir una corrección puntual a la IA.</p>
+      <p className="initial-analysis__intro">Registra acuerdos o aclaraciones como insumo adicional explícito. No se llama a la IA ni se modifican las necesidades existentes. Después podrás incorporarlos mediante edición puntual. La revisión de calidad quedará pendiente.</p>
       <label className="block">Insumo adicional explícito (si deseas añadir obligaciones nuevas)<textarea className="block w-full border p-2" value={additional} onChange={e => setAdditional(e.target.value)} /></label>
       <label className="block">Justificación de los cambios<textarea value={reason} onChange={e => setReason(e.target.value)} /></label>
-      <button disabled={!additional.trim() || !reason.trim()} onClick={() => run(async () => { await save(content); setToolsOpen(false); })}>Guardar información</button>
-      {additional && <button onClick={() => { setAdditional(''); setToolsOpen(false); }}>Descartar información sin guardar</button>}
       </>}
       {editing && <form id={editorFormId} onSubmit={submitElement} noValidate role="region" aria-label={editorTitle} className="initial-analysis__editor space-y-2 rounded bg-slate-50 p-3"><label className="block">Contenido<textarea autoFocus aria-label="Contenido" name="necesidad" aria-invalid={Boolean(fieldErrors.necesidad)} aria-describedby={fieldErrors.necesidad ? `${editorFormId}-necesidad` : undefined} className="block w-full border p-2" value={editing.necesidad} onChange={e => setEditing({ ...editing, necesidad: e.target.value })} /></label>{fieldError('necesidad')}
         {editing.dividir_de && <label className="block">Resultado que conserva {editing.dividir_de}<textarea className="block w-full border p-2" value={editing.resultado_original} name="resultado_original" aria-invalid={Boolean(fieldErrors.resultado_original)} aria-describedby={fieldErrors.resultado_original ? `${editorFormId}-resultado_original` : undefined} onChange={e => setEditing({ ...editing, resultado_original: e.target.value })} /></label>}{fieldError('resultado_original')}

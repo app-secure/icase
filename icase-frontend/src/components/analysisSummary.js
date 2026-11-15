@@ -2,6 +2,7 @@
 export function objectiveGroups(inventory = []) {
   const groups = new Map();
   for (const item of inventory) {
+    if (['rechazado', 'fuera_de_alcance'].includes(item?.estado)) continue;
     if (!['RF', 'RNF'].includes(item?.tipo) || !/^O-\d+$/i.test(String(item.objetivo_id || ''))) continue;
     const id = String(item.objetivo_id);
     groups.set(id, [...(groups.get(id) || []), item]);
@@ -16,6 +17,9 @@ export function objectiveCatalog(inventory = []) {
 export function objectiveLines(value, inventory = []) {
   const catalog = objectiveCatalog(inventory);
   if (catalog) return catalog.split('\n');
+  // An existing inventory is authoritative even when all objectives are inactive.
+  // Do not resurrect rejected objectives from a legacy summary as a fallback.
+  if (inventory.some(item => ['RF', 'RNF'].includes(item?.tipo) && item.objetivo_id)) return [];
   const values = Array.isArray(value) ? value : [value];
   return values.flatMap(item => {
     if (item && typeof item === 'object') return [item.descripcion || item.contenido || item.nombre || item.id || ''];
