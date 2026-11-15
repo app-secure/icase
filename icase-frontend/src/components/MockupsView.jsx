@@ -9,7 +9,7 @@ import {
   startMockupJobApi, suggestMockupDesignSystemApi, updateMockupDesignSystemApi
 } from "../services/api";
 import { DEFAULT_DESIGN_SYSTEM, prepareMockupHtml } from "../utils/mockupHtml";
-import DiagramProgressModal from "./DiagramProgressModal";
+import DiagramProgressIndicator from "./DiagramProgressModal";
 
 const formatName = (value = "") => value.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const SANITIZATION_NOTICES = /script peligroso|script no autorizado|manejadores inline|enlaces javascript|etiqueta potencialmente insegura|referencia a archivo local/i;
@@ -277,7 +277,9 @@ export default function MockupsView({
         {showDetails && <aside className="w-60 shrink-0 overflow-y-auto border-l border-slate-200 p-3"><div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-slate-800">Detalles de pantalla</p><button onClick={() => setShowDetails(false)} className="text-lg leading-none text-slate-400">×</button></div>{currentEntry && <div className="space-y-3 text-[11px]"><Info label="Plataforma" value={currentEntry.plataforma} icon={platformIcon(currentEntry.plataforma, 12)} /><Info label="Flujo" value={currentEntry.flujo} /><Info label="Módulo" value={currentEntry.modulo} /><Info label="Tipo" value={currentEntry.tipo} /><Info label="Roles" value={(currentEntry.roles || []).join(', ')} /><Info label="Shell compartido" value={currentEntry.shell} />{currentMockup && <><Info label="Estado" value={`${currentMockup.estado || 'generado'} · v${currentMockup.version || 1}`} /><div className={`rounded-lg border p-2 ${quality(currentMockup) === 'invalido' ? 'border-red-200 bg-red-50 text-red-700' : quality(currentMockup) === 'advertencia' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}><p className="font-semibold">Calidad: {quality(currentMockup)}</p>{validationIssues(currentMockup).map((warning, i) => <p key={i} className="mt-1">• {warning}</p>)}</div>{sanitizationNotices(currentMockup).length > 0 && <div className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-sky-700"><p className="font-semibold">Ajustes de seguridad aplicados</p>{sanitizationNotices(currentMockup).map((notice, i) => <p key={i} className="mt-1">• {notice}</p>)}</div>}<div className="flex flex-wrap gap-1"><button disabled={busy} onClick={() => startGeneration([currentEntry.slug], 'Regeneración')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5"><RotateCcw size={11} />Regenerar</button><button onClick={() => navigator.clipboard.writeText(currentMockup.preview_code)} className="rounded-lg border border-slate-200 p-1.5" title="Copiar HTML"><Copy size={12} /></button><button onClick={() => { const url = URL.createObjectURL(new Blob([currentMockup.preview_code], { type: 'text/html' })); const a = document.createElement('a'); a.href = url; a.download = `${currentEntry.slug}.html`; a.click(); URL.revokeObjectURL(url); }} className="rounded-lg border border-slate-200 p-1.5" title="Descargar HTML"><Download size={12} /></button></div></>}</div>}</aside>}
       </div>
 
-      <DiagramProgressModal
+      <DiagramProgressIndicator
+        job={activeJob}
+        diagramLabel="mockups"
         isOpen={Boolean(busy && !isModalDismissed)}
         title="Generando wireframes y mockups"
         statusMessage={activeJob?.mensaje || ""}

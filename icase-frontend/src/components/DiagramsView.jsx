@@ -19,7 +19,7 @@ import BrainGearsIcon from "./BrainGearsIcon";
 import PlantUMLViewer from "./PlantUMLViewer";
 import MockupsView from "./MockupsView";
 import RegenerateDiagramDialog from "./RegenerateDiagramDialog";
-import DiagramProgressModal from "./DiagramProgressModal";
+import DiagramProgressIndicator from "./DiagramProgressModal";
 import { ToastContainer, useToasts } from "./Toast";
 import { generateMockupsApi } from "../services/api";
 
@@ -859,8 +859,9 @@ export default function DiagramsView({
       <RegenerateDiagramDialog target={regenerateTarget} busy={isRegenerating}
         onCancel={() => setRegenerateTarget(null)} onConfirm={handleRegenerate} />
 
-      {/* Modal interactivo de progreso para generación con IA o regeneración por chat */}
-      <DiagramProgressModal
+      {/* Indicador flotante no bloqueante para generación o corrección con IA */}
+      <DiagramProgressIndicator
+        job={diagramJob}
         isOpen={Boolean(
           (selectedKey !== "mockups" && isFixing) ||
           (diagramJob && ['encolado', 'procesando', 'fallido'].includes(diagramJob.estado) && !isModalDismissed)
