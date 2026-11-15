@@ -6,6 +6,7 @@ const DiagramSemanticValidatorService = require('./DiagramSemanticValidatorServi
 const CrossDiagramConsistencyValidatorService = require('./CrossDiagramConsistencyValidatorService');
 const { useCaseLimits } = require('../../core/constants/UseCaseDiagramPolicy');
 const DomainModelQualityService = require('./DomainModelQualityService');
+const { reviewUseCasePresentation } = require('./UseCasePresentationReview');
 
 class PlantUMLValidatorService {
   constructor() {
@@ -125,7 +126,9 @@ class PlantUMLValidatorService {
       const limits = useCaseLimits(opts.requisitos);
       metricas.limite_casos_uso = limits.max;
       if (casos < limits.min || casos > limits.max) errores.push(`Casos de uso debe contener entre ${limits.min} y ${limits.max} casos para este alcance (${limits.rf} RF). Agrupa visualmente por módulos, sin eliminar funciones aprobadas.`);
-      if (casos > 14 && (trimmed.match(/^\s*package\s+/gim) || []).length < 2) advertencias.push('La vista es extensa: organiza los casos en módulos para facilitar su lectura, sin reducir cobertura.');
+      const presentation = reviewUseCasePresentation(trimmed, casos);
+      advertencias.push(...presentation.advertencias);
+      Object.assign(metricas, presentation.metricas);
       if (!/^\s*(?:rectangle|package)\s+/im.test(trimmed)) errores.push('Los casos de uso deben estar delimitados por el sistema o por módulos.');
       if (relaciones < actores) advertencias.push('Algunos actores podrían no estar relacionados con casos de uso.');
     }

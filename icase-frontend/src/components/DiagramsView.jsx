@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import BrainGearsIcon from "./BrainGearsIcon";
 import PlantUMLViewer from "./PlantUMLViewer";
+import DiagramCodeEditor from "./DiagramCodeEditor";
 import MockupsView from "./MockupsView";
 import RegenerateDiagramDialog from "./RegenerateDiagramDialog";
 import DiagramProgressIndicator from "./DiagramProgressModal";
@@ -537,7 +538,8 @@ export default function DiagramsView({
 
           {/* Fila: Selector Vista Gráfica / Código (izquierda) y Control de Calidad (derecha) */}
           {selectedKey !== "mockups" && (
-            <div className="flex items-center justify-between gap-3 mb-2 shrink-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center bg-slate-100 p-0.5 rounded-full shrink-0">
                 <button
                   type="button"
@@ -561,6 +563,8 @@ export default function DiagramsView({
                 >
                   Código
                 </button>
+              </div>
+              {currentDiagram && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700">Versión {currentDiagram.version || currentFlowItem?.diagrama?.version || 1}</span>}
               </div>
 
               {qualityStatus && (
@@ -587,20 +591,11 @@ export default function DiagramsView({
             </div>
           )}
 
-          {/* Descripción del Diagrama (para diagramas PlantUML) */}
+          {/* Procedencia y validación (sin descripción para aprovechar el espacio) */}
           {selectedKey !== "mockups" && (
-            <div className="pb-3 text-xs text-slate-600 border-b border-slate-100 mb-3 shrink-0">
-              <p className="leading-relaxed whitespace-normal break-words">
-                <strong className="text-slate-800 font-semibold">{currentDiagram?.title || currentOption?.label}:</strong>{" "}
-                {currentDiagram?.description || (currentState === "disponible"
-                  ? "Este diagrama ya puede generarse porque sus dependencias fueron aprobadas."
-                  : "Aprueba los artefactos anteriores para habilitar su generación.")}
-              </p>
+            <div className="text-xs text-slate-600 mb-3 shrink-0">
               {currentDiagram && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-700">
-                    Versión {currentDiagram.version || currentFlowItem?.diagrama?.version || 1}
-                  </span>
                   {(currentFlowItem?.diagrama?.restaurada_desde_version || currentDiagram.restoredFromVersion) && (
                     <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700">
                       Restaurada desde v{currentFlowItem?.diagrama?.restaurada_desde_version || currentDiagram.restoredFromVersion}
@@ -732,12 +727,10 @@ export default function DiagramsView({
                     )) : <p className="py-2 text-[11px] text-slate-400">Todavía no hay versiones anteriores.</p>}
                   </div>
                 )}
-                <textarea
+                <DiagramCodeEditor
+                  key={selectedKey}
                   value={codeDraft}
                   onChange={(e) => setCodeDrafts((drafts) => ({ ...drafts, [selectedKey]: e.target.value }))}
-                  rows={16}
-                  className="flex-1 w-full bg-white border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 focus:outline-none focus:border-blue-600 resize-none leading-relaxed"
-                  spellCheck="false"
                 />
               </div>
             )}
