@@ -111,7 +111,11 @@ export default function PlantUMLViewer({ code, title }) {
               }
             }
           } else if (isMounted) {
-            setRenderError(`El servidor de PlantUML no pudo renderizar el diagrama (HTTP ${res.status}). Revisa el código generado.`);
+            setRenderError(res.status === 414 || res.status === 431
+              ? `El servidor rechazó el tamaño de la petición (HTTP ${res.status}). Esto no demuestra un error de sintaxis; no borres contenido del diagrama para corregirlo.`
+              : res.status >= 500
+                ? `El servidor de renderizado falló (HTTP ${res.status}). Puede ser indisponibilidad o un límite de recursos; no confirma un error de sintaxis.`
+                : `El servidor de PlantUML rechazó el renderizado (HTTP ${res.status}). Es necesario revisar la respuesta del servidor para distinguir sintaxis, tamaño y otras restricciones.`);
             setSvgUrl("");
           }
         } catch (fetchErr) {
@@ -218,7 +222,7 @@ export default function PlantUMLViewer({ code, title }) {
                 src={svgUrl}
                 alt={title}
                 onError={() => {
-                  setRenderError("No se pudo cargar la imagen del diagrama. Revisa la sintaxis PlantUML o vuelve a intentar.");
+                  setRenderError(previous => previous || "No se pudo cargar la imagen desde el servidor de PlantUML. El navegador no informó una causa verificable: puede ser conectividad, bloqueo de red, tamaño o un fallo de renderizado. Este aviso no confirma un error de sintaxis. Conserva el código y consulta el estado de la petición en Red del navegador.");
                   setSvgUrl("");
                 }}
                 onLoad={(event) => {

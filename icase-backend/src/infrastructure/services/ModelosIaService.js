@@ -29,6 +29,11 @@ function normalizarCodigoPlantUML(value) {
   if (/^\s*@start(?:uml|wbs|mindmap)\\n/i.test(codigo)) {
     codigo = codigo.replace(/\\n/g, '\n').replace(/\\t/g, '  ');
   }
+  // Alias de dispositivo inventado por modelos: conserva argumentos, alias y contenido.
+  // No sobrescribe una macro personalizada que sí esté definida por el documento.
+  if (/!include\s+<C4\/C4_Deployment>/i.test(codigo) && !/!\s*(?:define|definelong|procedure|function)\s+\$?kiosk_or_tablet\b/i.test(codigo)) {
+    codigo = codigo.replace(/^(\s*)kiosk_or_tablet\s*\(/gim, '$1Deployment_Node(');
+  }
 
   return codigo.split(/\r?\n/).reduce((lineas, linea) => {
     if (/^\s*(?:Origen|Trazabilidad)\s*:/i.test(linea) && /^\s*note\s+.+\s*:/i.test(lineas.at(-1) || '')) {

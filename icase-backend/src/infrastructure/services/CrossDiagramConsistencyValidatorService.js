@@ -91,8 +91,17 @@ class CrossDiagramConsistencyValidatorService {
       ...String(codigo || '').matchAll(/"([^"]+)"/g),
       ...String(codigo || '').matchAll(/(?:Container|Component|System|Boundary)\s*\([^,]+,\s*([^,)]+)/gim)
     ].map((match) => match[1]).filter(Boolean);
+    // Las responsabilidades pueden estar en notas de contenedores existentes.
+    // No cuentan títulos, comentarios ni notas huérfanas para fingir cobertura.
+    const aliases = require('./ArchitectureTraceabilityService').aliasesFromCode(codigo);
+    for (const match of String(codigo || '').matchAll(/^\s*note\s+(?:right|left|top|bottom)\s+of\s+([\w.]+)(?:\s+as\s+\w+)?\s*\n([\s\S]*?)^\s*end\s*note\b/gim)) {
+      if (aliases.has(match[1].toLowerCase())) candidatos.push(match[2].replace(/\b(?:RF|RNF)-\d+\b/gi, ''));
+    }
+    for (const match of String(codigo || '').matchAll(/^\s*note\s+(?:right|left|top|bottom)\s+of\s+([\w.]+)\s*:\s*(.+)$/gim)) {
+      if (aliases.has(match[1].toLowerCase())) candidatos.push(match[2].replace(/\b(?:RF|RNF)-\d+\b/gi, ''));
+    }
     return this.resultadoCobertura({
-      elementos: extractUseCases(origen.codigo_plantuml),
+      elementos: extractUseCases(origen.codigo_plantuml).map(label => label.replace(/\bRF-\d+\b/gi, '')),
       candidatos,
       metrica: 'casos_uso_representados_arquitectura',
       etiqueta: 'los módulos funcionales de los casos de uso aprobados',

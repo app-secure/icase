@@ -6,6 +6,14 @@ class ClasesDisenoValidatorService {
 
     const trimmed = codigo.trim();
     const advertencias = [];
+    const defined = new Set([...trimmed.matchAll(/^\s*(?:abstract\s+)?(?:class|interface|enum)\s+(?:"[^"]+"\s+as\s+(\w+)|([\w.]+))/gim)].map(m => m[1] || m[2]));
+    const referencedDTOs = new Set();
+    for (const block of trimmed.matchAll(/^\s*(?:abstract\s+)?(?:class|interface)\s+[^\n{]+\{([^}]*)}/gim)) {
+      const body = block[1].replace(/\/'[\s\S]*?'\//g, '').replace(/'[^\n]*/g, '');
+      for (const dto of body.matchAll(/\b([A-Za-z_]\w*DTO)\b/g)) referencedDTOs.add(dto[1]);
+    }
+    const missingDTOs = [...referencedDTOs].filter(name => !defined.has(name));
+    if (missingDTOs.length) advertencias.push(`Diseño por verificar: DTO referenciados sin declaración: ${missingDTOs.join(', ')}. Declara sus campos de entrada/salida y detalles de colecciones según el dominio y criterios aprobados; no inventes rellenos para completar las firmas.`);
     const dtos = [...trimmed.matchAll(/class\s+\w+DTO\b[^\n{]*\{([^}]+)}/gi)];
     const placeholders = dtos.filter(match => {
       const fields = match[1].split(/\r?\n/).map(line => line.trim()).filter(Boolean);
@@ -130,11 +138,13 @@ class ClasesDisenoValidatorService {
 
     const outgoing = new Set([...trimmed.matchAll(/^\s*(\w+)\s+(?:\.\.>|-->)\s*\w+/gm)].map(match => match[1]));
     const explained = new Set([...trimmed.matchAll(/^\s*note\s+(?:top|bottom|left|right)\s+of\s+(\w+)\s*:\s*(.+)$/gim)]
-      .filter(match => /sin puerto propio|no necesita dependencias|no declara persistencia/i.test(match[2]))
+      .filter(match => /operaci[oó]n pura|c[aá]lculo puro|transformaci[oó]n pura/i.test(match[2]) && !/persistencia adicional|sin puerto propio/i.test(match[2]))
       .map(match => match[1]));
     for (const match of trimmed.matchAll(/^\s*class\s+(\w+)(?:\s+<<([^>]+)>>)?/gim)) {
       if (/(?:UseCase|CasoUso)$/i.test(match[1]) || /UseCase|CasoUso/i.test(match[2] || '')) {
-        if (!outgoing.has(match[1]) && !explained.has(match[1])) advertencias.push(`Diseño por verificar: ${match[1]} no declara dependencias de salida hacia entidades, puertos u otros servicios. Comprueba cómo realiza la operación; si es pura, explica que no necesita dependencias. No inventes un repositorio por clase.`);
+        const declaration = trimmed.match(new RegExp(`class\\s+${match[1]}\\b[^\\n{]*\\{([^}]*)}`, 'i'));
+        const injected = (declaration?.[1] || '').split(/\r?\n/).some(line => !line.includes('(') && [...defined].some(name => /Repository|Repositorio|Port|Puerto|Service|Gateway|UnitOfWork|Transaction/i.test(name) && new RegExp(`\\b${name}\\b`).test(line)));
+        if (!outgoing.has(match[1]) && !explained.has(match[1]) && !injected) advertencias.push(`Diseño por verificar: ${match[1]} no declara dependencias de salida hacia entidades, puertos u otros servicios. Una consulta requiere acceso a datos y una modificación puede requerir persistencia aunque no cree un almacén nuevo. «Sin puerto propio» no acredita su realización. Si es una operación pura, explica su cálculo; reutiliza puertos y no inventes un repositorio por clase.`);
       }
     }
 

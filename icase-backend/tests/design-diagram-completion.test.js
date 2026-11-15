@@ -69,14 +69,14 @@ test('conserva entidades, atributos, enumeraciones y asociaciones del dominio si
   expect(warnings.join(' ')).not.toContain('perdió atributos');
 });
 
-test('enlaza el caso de uso con el puerto que ya menciona la entidad y explica el que no tiene', () => {
+test('no inventa dependencias por nombres ni oculta su ausencia con notas automáticas', () => {
   const result = new Completion().complete(design, domain);
-  expect(result).toContain('ConsultarExpedienteUseCase --> IExpedienteRepository : usa');
+  expect(result).not.toContain('ConsultarExpedienteUseCase --> IExpedienteRepository : usa');
   expect(result).not.toContain('ConsultarExpedienteUseCase --> SqlExpedienteRepository');
-  expect(result).toContain('note bottom of GuardarNotaUseCase : Sin puerto propio: la operación no declara persistencia adicional.');
+  expect(result).not.toContain('Sin puerto propio');
 
   const checked = new Validator().validar(result, { tipo: 'clases_diseno', diagramasDependencia: [{ tipo: 'clases_dominio', codigo_plantuml: domain, aprobado: true, version: 1 }] });
-  expect(checked.advertencias.join(' ')).not.toContain('no declara dependencias');
+  expect(checked.advertencias.join(' ')).toContain('GuardarNotaUseCase no declara dependencias');
   expect(checked.advertencias.join(' ')).not.toContain('Diagrama extenso');
 });
 

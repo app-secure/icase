@@ -20,9 +20,12 @@ No agregues información de otros proyectos ni componentes por costumbre arquite
 - Representa los canales de usuario que los RF exijan (por ejemplo, móvil o web únicamente cuando estén indicados).
 - Deriva los límites y responsabilidades funcionales desde TODOS los casos de uso aprobados. Cada grupo funcional principal debe reconocerse en el nombre o descripción de al menos un contenedor o componente; no produzcas una arquitectura que sólo enumere tecnologías y RNF.
 - Antes de responder, construye internamente una matriz caso de uso -> contenedor responsable y comprueba que ningún módulo principal quede sin asignación.
+- Haz visible el resultado: cada contenedor describe sus capacidades concretas. Si su descripción queda muy larga, usa `note right of alias` / `end note` con responsabilidades breves agrupadas y sus RF, sin duplicar casos ni crear servicios adicionales. «Lógica de negocio», «Servicios» o «Interfaz para los roles» no sustituyen esa asignación. Las funciones transversales de autenticación o tiempo real tampoco explican por sí solas las capacidades de negocio.
+- Comprueba por separado las responsabilidades del cliente móvil, de la interfaz web y del backend según los actores/canales aprobados. No asignes una función a un canal que no la ofrece. Las notas deben explicar acciones y objetos, no solo enumerar RF.
 - Agrupa capacidades relacionadas en pocos contenedores legibles; no crees un servicio por cada RF.
 - Representa almacenamiento, comunicación en tiempo real, mensajería, autenticación o integraciones solo cuando los artefactos autorizados exijan esa responsabilidad.
 - Conserva literalmente tecnologías, frameworks, motores de datos y protocolos aprobados.
+- Coloca cada tecnología en su responsabilidad correcta: el ORM/cliente de persistencia se ejecuta en el backend que lo utiliza, no dentro del motor de base de datos. La base de datos indica su motor y versión aprobados. Una caché confirmada se conserva, sin asumir que sustituye las validaciones transaccionales de las operaciones.
 - Cuando una responsabilidad sea necesaria pero su tecnología no esté decidida, usa `Tecnología por definir` o `Mecanismo por definir`.
 - No añadas gateway, caché, broker, CDN, proveedor cloud, identidad externa, auditoría ni observabilidad para completar una arquitectura de referencia.
 
@@ -52,6 +55,7 @@ No agregues información de otros proyectos ni componentes por costumbre arquite
 - `requisitos_relacionados` enumera los RF/RNF efectivamente representados.
 - `trazabilidad_rnf` contiene objetos con `rnf_id`, `elemento_id`, `elemento` y `justificacion` únicamente para RNF aplicables. `elemento_id` debe ser el alias exacto usado en PlantUML.
 - Incluye en PlantUML una nota breve junto al elemento responsable con el identificador y la métrica aprobada.
+- Recorre los RNF uno a uno: para los aplicables describe el mecanismo/responsabilidad y usa alias existentes en `trazabilidad_rnf`. Para los principalmente de infraestructura, señala la parte lógica que corresponda y su realización pendiente en arquitectura de sistema, sin inventar nodos ni afirmar cumplimiento probado. No añadas caché, réplicas o productos solo para eliminar un aviso. La presencia de una nota no acredita cumplimiento en ejecución.
 - Si no existe un RNF aplicable, devuelve `trazabilidad_rnf: []`.
 
 Antes de responder, verifica que todo contenedor tenga una responsabilidad derivable, que no haya productos inventados y que cada tecnología concreta aparezca en los artefactos autorizados.

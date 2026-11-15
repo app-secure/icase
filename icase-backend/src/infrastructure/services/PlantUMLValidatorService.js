@@ -76,6 +76,8 @@ class PlantUMLValidatorService {
     if (tipoNormalizado === DIAGRAM_TYPES.SYSTEM_ARCHITECTURE) {
       detalles = this.sistemaValidator.validar({
         codigo: trimmed,
+        analisisRequisitos: opts.analisisRequisitos,
+        diagramasDependencia: opts.diagramasDependencia,
         requisitos: opts.requisitos,
         rnfList: opts.rnfList,
         trazabilidad_rnf: opts.trazabilidad_rnf

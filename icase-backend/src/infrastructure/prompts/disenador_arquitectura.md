@@ -37,7 +37,7 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
   `Rel(origen, destino, "Descripción de la interacción", "Protocolo")`
 - IMPORTANTE: NO uses la macro `AddElementTag` ya que produce incompatibilidades en servidores de PlantUML. Usa los contenedores nativos C4: `Container` y `ContainerDb`.
 - LEGIBILIDAD: no impongas un máximo fijo de actores, contenedores o sistemas externos. Representa el alcance aprobado completo. Agrupa roles solo si sus responsabilidades son equivalentes; no dupliques un contenedor por cada RF.
-- Los nombres deben tener máximo 32 caracteres, la tecnología máximo 28 y las descripciones máximo 80. Las etiquetas de `Rel` deben tener máximo 5 palabras y el protocolo debe ir únicamente en el cuarto parámetro.
+- Usa nombres y tecnologías breves, pero no recortes tecnologías confirmadas ni responsabilidades para cumplir cuotas de caracteres. Mantén descripciones legibles; cuando varias capacidades comparten un contenedor, añade notas vinculadas a su alias para detallar su realización sin crear otro contenedor. Las relaciones deben describir su interacción y el protocolo va únicamente en el cuarto parámetro.
 - Evita relaciones cruzadas innecesarias y conserva el flujo real descrito por los requisitos; no insertes un gateway u otra capa solo para completar una cadena de referencia.
 - Reflexión de RNF: refleja cada RNF aprobado en la responsabilidad que lo satisface, sin asumir productos o patrones concretos que no hayan sido seleccionados.
 - Trazabilidad RNF: Incluye trazabilidad explícita `RNF -> elemento arquitectónico` en notas y en `trazabilidad_rnf`.

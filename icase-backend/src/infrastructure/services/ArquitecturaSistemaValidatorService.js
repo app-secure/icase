@@ -32,7 +32,7 @@ class ArquitecturaSistemaValidatorService {
    * @param {Array} [params.trazabilidad_rnf] - Mapeo RNF -> elemento
    * @returns {Object} { valido, errores, advertencias, trazabilidad, alta_disponibilidad_solicitada, alta_disponibilidad_detectada }
    */
-  validar({ codigo, rnfList = [], trazabilidad_rnf = [], requisitos = [] } = {}) {
+  validar({ codigo, rnfList = [], trazabilidad_rnf = [], requisitos = [], analisisRequisitos = {}, diagramasDependencia = [] } = {}) {
     const errores = [];
     const advertencias = [];
 
@@ -58,6 +58,9 @@ class ArquitecturaSistemaValidatorService {
     }
 
     const lowerCode = trimmed.toLowerCase();
+    if (/^\s*kiosk_or_tablet\s*\(/im.test(trimmed) && !/!\s*(?:define|definelong|procedure|function)\s+\$?kiosk_or_tablet\b/i.test(trimmed)) {
+      errores.push('Macro PlantUML no definida: kiosk_or_tablet. Usa Deployment_Node para el dispositivo, conservando su alias y contenedores internos.');
+    }
     const orm = /\b(?:prisma|typeorm|hibernate|sequelize|entity framework)\b/i;
     for (const match of trimmed.matchAll(/\bContainerDb\s*\(\s*([^,]+),\s*"([^"]*)"\s*,\s*"([^"]*)"/gim)) {
       if (orm.test(match[3])) advertencias.push(`Despliegue por verificar: "${match[2]}" incluye un ORM en la tecnología del almacén. El ORM pertenece al backend; conserva aquí el motor de datos aprobado.`);
@@ -76,6 +79,12 @@ class ArquitecturaSistemaValidatorService {
     if (backupRequested && !/respaldo|backup|copia[s]? de seguridad/i.test(operational)) {
       advertencias.push('Despliegue por verificar: hay un requisito aprobado de respaldos sin una responsabilidad visible de copia y recuperación. Indica el mecanismo o destino por definir; no agregues alta disponibilidad ni frecuencias no acordadas.');
     }
+    const approvedText = [
+      ...[...requisitos, ...rnfList].filter(r => r.aprobado !== false && !['rechazado', 'fuera_de_alcance', 'pendiente'].includes(r.estado_decision)).map(r => `${r.nombre || ''} ${r.descripcion || ''}`),
+      ...['restricciones_tecnicas', 'decisiones', 'contexto'].flatMap(section => (analisisRequisitos?.[section] || []).filter(i => i.estado === 'confirmado').map(i => i.necesidad || '')),
+      ...diagramasDependencia.filter(d => d.aprobado !== false && d.tipo === 'arquitectura_software').map(d => d.codigo_plantuml || '')
+    ].join('\n');
+    advertencias.push(...require('./DeploymentCompletenessReview').review({ code: trimmed, backupRequested, approvedText }));
 
     // 2. Elementos de Infraestructura (nodos, servidores, despliegue)
     const tieneNodos = /deployment_node|node\s+|server|servidor|host|instance|cloud|vps|cluster/i.test(trimmed);

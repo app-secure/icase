@@ -14,6 +14,6 @@ test('respaldo aprobado sin representación pide revisión, no inventa HA', () =
   expect(result.advertencias.join(' ')).toContain('respaldos');
   expect(result.valido).toBe(true);
   expect(result.alta_disponibilidad_solicitada).toBe(false);
-  expect(validator.validar({ codigo: base('note right of api : Respaldo y recuperación: destino por definir'), requisitos }).advertencias).toEqual([]);
+  expect(validator.validar({ codigo: base('note right of api : Respaldo y recuperación: destino por definir'), requisitos }).advertencias.join(' ')).toContain('proceso o tarea');
   expect(validator.validar({ codigo: base(''), requisitos: [{ ...requisitos[0], aprobado: false }] }).advertencias).toEqual([]);
 });

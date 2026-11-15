@@ -54,8 +54,8 @@ function attributeName(line) {
 class DesignDiagramCompletion {
   /**
    * Copia al diseño las clases, atributos y asociaciones que el dominio aprobado
-   * ya declaró, y enlaza un caso de uso con un puerto existente cuando ese puerto
-   * ya menciona la entidad. No crea repositorios.
+   * ya declaró. No infiere dependencias de aplicación ni justifica su ausencia:
+   * coincidir en el nombre de una entidad no acredita un puerto adecuado.
    */
   complete(designCode, domainCode) {
     const code = String(designCode || '');
@@ -126,31 +126,7 @@ class DesignDiagramCompletion {
       pendingRelations.push(line);
     }
 
-    const current = lines.join('\n');
-    const outgoing = new Set([...current.matchAll(/^\s*(\w+)\s+(?:\.\.>|-->)\s+\w+/gm)].map((match) => match[1]));
-    const explained = new Set([...current.matchAll(/^\s*note\s+(?:top|bottom|left|right)\s+of\s+(\w+)\s*:\s*(.+)$/gim)]
-      .filter((match) => /sin puerto propio|no necesita dependencias|no declara persistencia/i.test(match[2]))
-      .map((match) => match[1]));
-    const repositories = blocks(current).filter((item) => /Repository|Repositorio/i.test(item.name) || /<<[^>]*(?:Repository|Repositorio)/i.test(item.header));
-    const ports = repositories.some((item) => item.kind === 'interface')
-      ? repositories.filter((item) => item.kind === 'interface')
-      : repositories;
-    const entityNames = source.entities.map((entity) => entity.name);
-    const links = [];
-    for (const block of blocks(current)) {
-      if (!/(?:UseCase|CasoUso)$/i.test(block.name) && !/<<[^>]*(?:UseCase|CasoUso)/i.test(block.header)) continue;
-      if (outgoing.has(block.name) || explained.has(block.name)) continue;
-      const body = block.lines.join('\n');
-      const needed = entityNames.filter((name) => block.name.includes(name) || new RegExp(`\\b${name}\\b`).test(body));
-      const chosen = ports.filter((port) => needed.some((name) => port.name.includes(name) || port.lines.join('\n').includes(name)));
-      if (chosen.length) {
-        for (const port of chosen) links.push(`${block.name} --> ${port.name} : usa`);
-      } else {
-        links.push(`note bottom of ${block.name} : Sin puerto propio: la operación no declara persistencia adicional.`);
-      }
-    }
-
-    if (!changed && !pendingClasses.length && !pendingRelations.length && !links.length) return code;
+    if (!changed && !pendingClasses.length && !pendingRelations.length) return code;
 
     const addition = [];
     if (pendingClasses.length) {
@@ -173,7 +149,7 @@ class DesignDiagramCompletion {
       if (packageEnd >= 0) lines.splice(packageEnd, 0, ...pendingClasses.flatMap((item) => item.split('\n')));
       else addition.push('package "Dominio" {', ...pendingClasses, '}');
     }
-    addition.push(...pendingRelations, ...links);
+    addition.push(...pendingRelations);
 
     const end = lines.findIndex((line) => /^\s*@enduml\b/i.test(line));
     if (end >= 0) lines.splice(end, 0, ...addition);

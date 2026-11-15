@@ -102,6 +102,14 @@ class DomainModelQualityService {
       }
       const missing = entity.attributes.filter(attribute => !realization.attributes.some(item => item.name === attribute.name));
       if (missing.length) advertencias.push(`Diseño por verificar: ${entity.name} perdió atributos del dominio aprobado: ${missing.map(item => item.name).join(', ')}. Consérvalos en la entidad o representa explícitamente su realización, sin reemplazarlos por id/estado genéricos.`);
+      const methodsOf = (code, name) => {
+        const declaration = [...String(code).matchAll(/^\s*(?:abstract\s+)?(?:class|entity)\s+(?:"[^"]+"\s+as\s+(\w+)|([\w.]+))[^\n{]*\{([^}]*)}/gim)]
+          .find(m => (m[1] || m[2]) === name);
+        return [...(declaration?.[3] || '').matchAll(/^\s*[+\-#~]?\s*(\w+)\s*\(/gm)].map(m => m[1]);
+      };
+      const targetMethods = methodsOf(designCode, realization.name);
+      const lostMethods = methodsOf(domainCode, entity.name).filter(method => !targetMethods.includes(method));
+      if (lostMethods.length) advertencias.push(`Diseño por verificar: ${entity.name} no conserva las operaciones del dominio aprobado: ${lostMethods.join(', ')}. Conserva su comportamiento o documenta su realización explícita en otra clase, sin asumir que copiar atributos realiza esas reglas.`);
     }
     const canonical = name => source.entities.some(entity => `${entity.name}Entity` === name) ? name.slice(0, -6) : name;
     for (const relation of source.relations) {

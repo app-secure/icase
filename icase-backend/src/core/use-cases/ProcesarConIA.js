@@ -142,7 +142,7 @@ class ProcesarConIA {
     });
     if (!result.valido) return (result.errores || [result.error]).filter(Boolean).join(' | ');
     if (tipo === 'arquitectura_software') return (result.advertencias || [])
-      .filter(message => message.startsWith('Tecnología aprobada por verificar:')).join(' | ');
+      .filter(message => /^(?:Tecnología aprobada por verificar:|Claridad de arquitectura por verificar:|El RNF .* no tiene trazabilidad|La trazabilidad de|Revisa elementos del artefacto origen)/.test(message)).join(' | ');
     if (tipo === 'arquitectura_sistema') return (result.advertencias || [])
       .filter(message => message.startsWith('Despliegue por verificar:')).join(' | ');
     // Una revisión acotada, no una regeneración ilimitada ni un bloqueo por léxico.
@@ -400,7 +400,7 @@ class ProcesarConIA {
           );
           const anterior = resultadoIA;
           resultadoIA = await this.aiOrchestratorService.procesar(repairPayload);
-          if (tipoDiagramaNormalizado === 'clases_dominio') {
+          if (['clases_dominio', 'arquitectura_software', 'arquitectura_sistema'].includes(tipoDiagramaNormalizado)) {
             const before = anterior?.diagramas?.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
             const after = resultadoIA?.diagramas?.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
             const options = { tipo: tipoDiagramaNormalizado, requisitos: requerimientosAprobados, analisisRequisitos: contextoProyecto.analisis_requisitos, diagramasDependencia: diagramasAprobados };
@@ -409,7 +409,7 @@ class ProcesarConIA {
             // Una reparación de advertencias no puede destruir un borrador válido.
             // Conserva sus advertencias: no equivale a aprobarlo ni a corregirlas.
             if (previousValid && !nextValid) {
-              console.warn('[ProcesarConIA] Reparación de dominio descartada: no devolvió un diagrama estructuralmente válido; se conserva el borrador anterior con sus advertencias.');
+              console.warn(`[ProcesarConIA] Reparación de ${tipoDiagramaNormalizado} descartada: no devolvió un diagrama estructuralmente válido; se conserva el borrador anterior con sus advertencias.`);
               resultadoIA = anterior;
             }
           }
