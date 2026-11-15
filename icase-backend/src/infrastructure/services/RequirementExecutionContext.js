@@ -19,6 +19,7 @@ module.exports = {
     ctx.stageKeys[stage] = key;
     const cached = ctx.checkpoints[key];
     if (cached?.validated) {
+      new (require('./AiRequestBudget'))().recoveredStage(stage);
       await ctx.progress({ etapa: stage, recuperada: true });
       return structuredClone(cached.data);
     }

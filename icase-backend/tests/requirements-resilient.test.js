@@ -3,6 +3,19 @@ const Router = require('../src/infrastructure/services/RequirementProviderRouter
 const Execution = require('../src/infrastructure/services/RequirementExecutionContext');
 const Jobs = require('../src/core/services/RequirementGenerationJobs');
 const clone = value => structuredClone(value);
+
+test('el modo automático no vuelve a gastar etapas en rutas inválidas de la misma ejecución; reanudar permite probarlas otra vez', async () => {
+  const service = router({ AI_FREE_TIER_PROVIDERS: 'gemini,groq', GEMINI_API_KEY: 'test', GROQ_API_KEY: 'test' });
+  service.call = jest.fn(async provider => ({ text: provider === 'gemini' ? 'not json' : '{"ok":true}' }));
+  const context = () => ({ progress: async () => {} });
+  await Execution.run(context(), async () => {
+    expect(await service.generate('uno')).toEqual({ ok: true });
+    expect(await service.generate('dos')).toEqual({ ok: true });
+  });
+  expect(service.call.mock.calls.map(c => c[0])).toEqual(['gemini', 'gemini', 'groq', 'groq']);
+  await Execution.run(context(), () => service.generate('reanudar'));
+  expect(service.call.mock.calls.slice(4).map(c => c[0])).toEqual(['gemini', 'gemini', 'groq']);
+});
 class StateRepo {
   constructor() { this.rows = new Map(); }
   async get(id) { return this.rows.get(id); }

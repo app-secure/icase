@@ -8,7 +8,7 @@ JSON {"requerimientos":[{"tipo":"RF o RNF","identificador":"RF-01 o RNF-01","nom
 Un requisito por objetivo y tipo; incluye todos sus IDs N en necesidades_origen y conserva todos sus detalles y evidencias. No generes requisitos para reglas, contexto, preguntas, tecnologías ni exclusiones. Las preguntas no crean obligaciones confirmadas. No copies los valores de ejemplo. No cambies los requisitos existentes no seleccionados.`;
 
 function compact(n) {
-  return Object.fromEntries(['id', 'tipo', 'objetivo_id', 'necesidad', 'estado', 'origen', 'actor_id', 'reglas_ids', 'preguntas_ids', 'objetivos_relacionados', 'prioridad'].filter(key => n[key] !== undefined).map(key => [key, n[key]]).concat([
+  return Object.fromEntries(['id', 'tipo', 'objetivo_id', 'necesidad', 'estado', 'origen', 'actor_id', 'reglas_ids', 'preguntas_ids', 'objetivos_relacionados', 'prioridad', 'respuesta'].filter(key => n[key] !== undefined).map(key => [key, n[key]]).concat([
     ['evidencias', n.evidencias?.length ? n.evidencias.map(({ texto, fuente }) => ({ texto, fuente })) : n.evidencia ? [{ texto: n.evidencia, fuente: n.fuente }] : []]
   ]));
 }
@@ -41,4 +41,25 @@ function normalizeActors(req, batch, actors) {
   }
   return { ...req, actores: [...new Set(names)] };
 }
-module.exports = { draft, select, evidence, templates, normalizeActors };
+function auditView(result, inventory) {
+  const actors = (result.auditoria_requisitos?.actores || []).map(({ id, nombre, descripcion, tipo, estado, alias, origen }) => ({ id, nombre, descripcion, tipo, estado, alias, origen }));
+  const needs = inventory.map(n => { const { evidencias, ...item } = compact(n); return item; });
+  const requirements = (result.requerimientos || []).map(r => Object.fromEntries([
+    'identificador', 'tipo', 'nombre', 'descripcion', 'actores', 'necesidades_origen', 'reglas_relacionadas',
+    'criterios_aceptacion', 'precondiciones', 'poscondiciones', 'metrica_medible', 'estado_decision', 'requiere_confirmacion'
+  ].filter(key => r[key] !== undefined).map(key => [key, key === 'criterios_aceptacion' ? (r[key] || []).map(({ descripcion, necesidades_origen }) => ({ descripcion, necesidades_origen })) : r[key]])));
+  const quotes = new Map();
+  for (const n of [...inventory, ...(result.auditoria_requisitos?.actores || []), ...(result.requerimientos || [])]) {
+    for (const quote of compact(n).evidencias) {
+      const key = JSON.stringify(quote);
+      if (!quotes.has(key)) quotes.set(key, { ...quote, elementos: [] });
+      quotes.get(key).elementos.push(n.id || n.identificador);
+    }
+  }
+  return { actors, inventory: needs, requirements, quotes: [...quotes.values()] };
+}
+function initialAuditView(data) {
+  return { sintesis: data.sintesis, inventario: (data.inventario || []).map(compact),
+    actores: (data.actores || []).map(a => ({ ...Object.fromEntries(['id', 'nombre', 'descripcion', 'tipo', 'estado', 'origen', 'alias'].filter(k => a[k] !== undefined).map(k => [k, a[k]])), evidencias: compact(a).evidencias })) };
+}
+module.exports = { draft, select, evidence, templates, normalizeActors, auditView, initialAuditView };

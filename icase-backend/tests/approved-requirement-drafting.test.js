@@ -21,6 +21,18 @@ test('selecciona solo relaciones declaradas y actores pertinentes, sin inferir p
   expect(Context.draft([inventory[0]], inventory, actors)).not.toContain('REGLA_AJENA_DE_COBRO');
 });
 
+test('la auditoría conserva todas las obligaciones sin historial de persistencia ni citas repetidas', () => {
+  const data = { requerimientos: reqs.map(r => ({ ...r, historial_versiones: [{ texto: 'HISTORIAL_NO_PERTINENTE'.repeat(1000) }] })), auditoria_requisitos: { actores: actors } };
+  const projected = Context.auditView(data, inventory);
+  expect(projected.requirements.map(r => r.descripcion)).toEqual(reqs.map(r => r.descripcion));
+  expect(projected.inventory.map(n => n.necesidad)).toEqual(inventory.map(n => n.necesidad));
+  expect(JSON.stringify(projected)).not.toContain('HISTORIAL_NO_PERTINENTE');
+  expect(projected.quotes.map(q => q.texto)).toEqual(inventory.map(n => n.evidencia));
+  const prompt = new Semantic().reviewPrompt(source, data, inventory, [], true);
+  expect(prompt).not.toContain('HISTORIAL_NO_PERTINENTE');
+  for (const n of inventory) expect(prompt.split(n.evidencia)).toHaveLength(2);
+});
+
 test('redacta desde lo aprobado sin extraer ni reenviar originales, conservando prosa, métricas y criterios', async () => {
   const request = jest.fn(async prompt => ({ requerimientos: structuredClone(prompt.includes('"id":"N-02"') ? [reqs[1]] : [reqs[0]]) }));
   const result = await new Coverage().draftFromAnalysis({ input: source, prompt: 'PROMPT_ANTIGUO_CON_ORIGINAL', request }, { aprobado: true, inventario: inventory, actores: actors });

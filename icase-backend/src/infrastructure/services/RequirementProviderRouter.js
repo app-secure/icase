@@ -87,6 +87,11 @@ class RequirementProviderRouter {
       for (const model of catalog.models[candidate] || []) {
         if (!auto && specificModel && model.id !== specificModel) continue;
         if (auto && calls >= 2) break; // no agotar toda la generación en un proveedor
+        const routeKey = `${candidate}:${model.id}`;
+        if (auto && execution?.failedRoutes?.has(routeKey)) {
+          events.push({ provider: candidate, model: model.id, cause: 'ruta_fallida_en_ejecucion' });
+          continue;
+        }
         if (candidate !== 'ollama' && this.budget.exhausted()) break;
         if (!await this.eligible(candidate, model)) {
           events.push({ provider: candidate, model: model.id, cause: 'no_elegible_gratis' });
@@ -140,7 +145,18 @@ class RequirementProviderRouter {
             else this.preferred = candidate;
             return value;
           } catch (error) {
+            if (error.code === 'AI_BUDGET_EXHAUSTED') {
+              events.push({ provider: candidate, model: model.id, cause: 'presupuesto_agotado' });
+              await this.recordTrace({ stage, provider: candidate, model: model.id, outcome: 'omitida', cause: 'presupuesto_agotado' });
+              break;
+            }
             const failure = await this.failures.record(candidate, model.id, this.key(candidate), error);
+            // Do not spend the same generation's budget rediscovering an invalid
+            // or timing-out route at every stage. Resume is an explicit new probe.
+            if (auto && execution && ['respuesta_invalida', 'transitorio'].includes(failure.cause)) {
+              execution.failedRoutes ||= new Set();
+              execution.failedRoutes.add(routeKey);
+            }
             await this.recordTrace({ stage, provider: candidate, model: model.id, outcome: 'fallida', cause: failure.cause,
               inputTokens: error.usage?.input, outputTokens: error.usage?.output,
               finishReason: error.finishReason, outputLimit: output, durationMs: Date.now() - start });

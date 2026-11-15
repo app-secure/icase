@@ -1,5 +1,13 @@
 # Generación resiliente de requisitos
 
+### Presupuesto y pausas
+
+El plazo cloud predeterminado es de 420 segundos y el máximo por solicitud es de 45 segundos; se mantienen ocho intentos HTTP por ejecución. Los valores explícitos de `AI_REQUIREMENTS_TIMEOUT_MS` y `AI_REQUIREMENTS_REQUEST_TIMEOUT_MS` prevalecen. Ollama conserva un margen local separado: no amplía las llamadas cloud. Las métricas distinguen `limite_cloud_ms`, `limite_ms` total y `limite_solicitud_ms`.
+
+Dentro de una ejecución automática, las rutas que devuelven JSON inválido o fallos transitorios no vuelven a consumirse en cada etapa. Se mantiene el orden configurado entre las rutas restantes. Una reanudación explícita puede volver a comprobarlas; no se deshabilitan permanentemente. La auditoría recibe proyecciones sin historiales técnicos ni citas duplicadas, conservando obligaciones, criterios y evidencias. Una etapa recuperada de un checkpoint válido satisface su reserva de presupuesto sin consumir HTTP.
+
+Esto reduce causas evitables de pausas, pero no elimina las debidas a cuota, saturación, reinicio del backend o respuestas que no superan la validación. No se ejecutan continuaciones automáticas ilimitadas ni se da por aprobada una auditoría fallida.
+
 ## Redacción desde análisis aprobado
 
 En el flujo separado, cada lote recibe los objetivos aprobados correspondientes y únicamente sus reglas, preguntas y actores enlazados. No recibe otra vez el documento completo ni el prompt de extracción. Gemini, OpenRouter, Groq y Ollama utilizan el mismo contrato de redacción RF/RNF. Los fragmentos citados se verifican localmente contra las fuentes originales: reducir el contexto enviado no desactiva la evidencia.

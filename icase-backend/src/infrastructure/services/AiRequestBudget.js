@@ -7,8 +7,8 @@ class AiRequestBudget {
   async run(task, env = process.env, { allowLocal = false } = {}) {
     const controller = new AbortController();
     const state = {
-      started: Date.now(), duration: bounded(env.AI_REQUIREMENTS_TIMEOUT_MS, 180000, 1000, 600000),
-      requestTimeout: bounded(env.AI_REQUIREMENTS_REQUEST_TIMEOUT_MS, 35000, 100, 60000),
+      started: Date.now(), duration: bounded(env.AI_REQUIREMENTS_TIMEOUT_MS, 420000, 1000, 600000),
+      requestTimeout: bounded(env.AI_REQUIREMENTS_REQUEST_TIMEOUT_MS, 45000, 100, 60000),
       maxAttempts: bounded(env.AI_REQUIREMENTS_MAX_ATTEMPTS, 8, 1, 30),
       attempts: 0, calls: [], signal: controller.signal, rejected: false, providerFailures: new Map()
     };
@@ -21,9 +21,10 @@ class AiRequestBudget {
     const timer = setTimeout(() => controller.abort(), state.duration);
     timer.unref?.();
     const metrics = () => ({ duracion_ms: Date.now() - state.started, limite_ms: state.duration,
+      limite_cloud_ms: state.cloudDuration, limite_solicitud_ms: state.requestTimeout,
       intentos_http: state.attempts, max_intentos_http: state.maxAttempts,
       intentos_locales: state.localAttempts,
-      presupuesto_agotado: state.rejected || state.signal.aborted || state.attempts >= state.maxAttempts, etapas: state.calls, proveedores: [...state.providerFailures.values()] });
+      presupuesto_agotado: state.rejected || state.signal.aborted || this.exhausted(), etapas: state.calls, proveedores: [...state.providerFailures.values()] });
     try {
       return await contexts.run(state, async () => {
         const result = await task();
@@ -54,6 +55,12 @@ class AiRequestBudget {
   reserveStage(stage) {
     const state = contexts.getStore();
     if (state && state.maxAttempts >= 3) state.reservedStage = stage;
+  }
+  recoveredStage(stage) {
+    const state = contexts.getStore();
+    if (state && !state.calls.some(call => call.etapa === stage)) {
+      state.calls.push({ etapa: stage, duracion_ms: 0, resultado: 'recuperada', recuperada: true });
+    }
   }
 
   canTryLocal() {
@@ -134,7 +141,8 @@ class AiRequestBudget {
       throw Object.assign(new Error('Se agotó el presupuesto de generación de requisitos.'), { code: 'AI_BUDGET_EXHAUSTED' });
     }
     state.attempts++;
-    const remaining = Math.max(1, state.duration - (Date.now() - state.started));
+    // Local fallback has a separate allowance; it must not extend a cloud call.
+    const remaining = Math.max(1, state.cloudDuration - (Date.now() - state.started));
     const config = { ...options, signal: state.signal, timeout: Math.min(options.timeout || 60000, state.requestTimeout, remaining) };
     return method === 'get' ? axios.get(url, config) : axios.post(url, data, config);
   }

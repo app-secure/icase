@@ -2,6 +2,42 @@ const axios = require('axios');
 const Budget = require('../src/infrastructure/services/AiRequestBudget');
 const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
+
+test('una revisión recuperada libera la reserva de solicitud sin consumir HTTP', async () => {
+  const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} });
+  const Execution = require('../src/infrastructure/services/RequirementExecutionContext');
+  const stage = 'revision_analisis_inicial', prompt = 'Revisar';
+  const key = Execution.hash({ version: 'requirements-stages-v7-grounded-summary', stage, prompt });
+  const budget = new Budget();
+  const result = await budget.run(() => Execution.run({ checkpoints: { [key]: { validated: true, data: { completa: true } } }, progress: async () => {} }, async () => {
+    budget.reserveStage(stage);
+    await budget.logical('primera', () => budget.post('https://example.test', {}));
+    await budget.logical('segunda', () => budget.post('https://example.test', {}));
+    const unexpected = jest.fn();
+    await Execution.request(stage, prompt, unexpected);
+    expect(unexpected).not.toHaveBeenCalled();
+    expect(await budget.logical('verificacion', () => budget.post('https://example.test', {}))).not.toBeNull();
+    return {};
+  }), { AI_REQUIREMENTS_MAX_ATTEMPTS: 3 });
+  expect(post).toHaveBeenCalledTimes(3);
+  expect(result.auditoria_requisitos.metricas_ejecucion.etapas).toContainEqual(expect.objectContaining({ etapa: stage, recuperada: true }));
+});
+
+test('el margen de Ollama no prolonga HTTP cloud ni oculta su límite real', async () => {
+  jest.useFakeTimers();
+  const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} });
+  const budget = new Budget();
+  const result = await budget.run(async () => {
+    await jest.advanceTimersByTimeAsync(800);
+    await budget.logical('revision_semantica', () => budget.post('https://example.test', {}, { timeout: 60000 }));
+    await jest.advanceTimersByTimeAsync(201);
+    expect(budget.exhausted()).toBe(true);
+    expect(budget.canTryLocal()).toBe(true);
+    return {};
+  }, { AI_REQUIREMENTS_TIMEOUT_MS: 1000 }, { allowLocal: true });
+  expect(post.mock.calls[0][2].timeout).toBe(200);
+  expect(result.auditoria_requisitos.metricas_ejecucion).toMatchObject({ limite_ms: 121000, limite_cloud_ms: 1000, presupuesto_agotado: true });
+});
 test('reserva revisión inicial y después verificación sin multiplicar solicitudes', async () => {
   const post = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} });
   const budget = new Budget();
