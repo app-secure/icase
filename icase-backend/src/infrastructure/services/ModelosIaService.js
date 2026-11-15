@@ -50,10 +50,12 @@ function textoComparable(value) {
 }
 
 function numerosDe(value) {
-  return String(value || '').match(/\d+(?:[.,]\d+)?/g)?.map((numero) => numero.replace(',', '.')) || [];
+  const words = { un: '1', uno: '1', una: '1', dos: '2', tres: '3', cuatro: '4', cinco: '5', seis: '6', siete: '7', ocho: '8', nueve: '9', diez: '10' };
+  const text = String(value || '').replace(/\b(un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/gi, word => words[word.toLowerCase()]);
+  return text.match(/\d+(?:[.,]\d+)?/g)?.map((numero) => numero.replace(',', '.')) || [];
 }
 
-function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
+function normalizarTrazabilidadRequerimientos(requerimientos, insumo, approvedAnalysis = null) {
   const semantics = new RequirementSemanticsService();
 
   return (requerimientos || []).map((requisito) => {
@@ -61,6 +63,7 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
       const { _locked, ...conserved } = requisito;
       return conserved;
     }
+    if (approvedAnalysis) requisito = require('./ApprovedRequirementGrounding').ground(requisito, approvedAnalysis, insumo);
     const evidenceReport = inspectEvidence(requisito, insumo);
     const multi = (Array.isArray(requisito.evidencias) && requisito.evidencias.length > 0) ||
       (requisito.evidencia && typeof requisito.evidencia === 'object') ||
@@ -77,7 +80,7 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
     const origen = evidenciaValida && !metricaNoSustentada && origenSolicitado !== 'inferido'
       ? 'explicito'
       : 'inferido';
-    const requiereConfirmacion = Boolean(requisito.requiere_confirmacion) || origen === 'inferido' ||
+    const requiereConfirmacion = Boolean(requisito.requiere_confirmacion) || (origen === 'inferido' && !approvedAnalysis) ||
       (tipo === 'RNF' && (!metricaMedible || /por confirmar con el usuario/i.test(metricaMedible)));
 
     if (tipo === 'RNF' && (!metricaMedible || metricaNoSustentada)) {
@@ -460,7 +463,8 @@ class ModelosIaService {
       nombreProyecto: payload.nombre_proyecto,
       requerimientos: reqsContexto,
       diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || [],
-      insumo: evidenceInput
+      insumo: evidenceInput,
+      approvedAnalysis: payload.approvedInitialAnalysis || null
     });
   }
 
@@ -864,8 +868,17 @@ class ModelosIaService {
       ? []
       : normalizarTrazabilidadRequerimientos(
         Array.isArray(data?.requerimientos) ? data.requerimientos : [],
-        contexto.insumo || ''
+        contexto.insumo || '', contexto.approvedAnalysis || null
       );
+    let audit = data?.auditoria_requisitos || null;
+    if (contexto.approvedAnalysis && objetivo === 'requisitos') {
+      // Coverage is measured against the actual immutable approval, never a
+      // smaller inventory returned/rewritten by a provider or intermediary.
+      const inventory = structuredClone(contexto.approvedAnalysis.inventario || []);
+      audit = { ...audit, version: Math.max(2, Number(audit?.version) || 0), inventario: inventory,
+        ...require('../../core/constants/RequirementAnalysisContract').analysisSections(inventory),
+        actores: structuredClone(contexto.approvedAnalysis.actores || audit?.actores || []) };
+    }
 
     let palabrasClave = Array.isArray(data?.palabras_clave)
       ? data.palabras_clave.filter(k => typeof k === 'string' && k.trim())
@@ -947,8 +960,8 @@ class ModelosIaService {
       objetivos: data?.objetivos || { general: '', especificos: [] },
       alcance_sistema: data?.alcance_sistema || '',
       palabras_clave: palabrasClave,
-      auditoria_requisitos: data?.auditoria_requisitos ? { ...data.auditoria_requisitos,
-        control_aprobacion: new RequirementApprovalService().evaluate(requerimientos, data.auditoria_requisitos)
+      auditoria_requisitos: audit ? { ...audit,
+        control_aprobacion: new RequirementApprovalService().evaluate(requerimientos, audit)
       } : null,
       requerimientos,
       diagramas

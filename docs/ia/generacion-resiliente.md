@@ -10,6 +10,10 @@ Esto reduce causas evitables de pausas, pero no elimina las debidas a cuota, sat
 
 ## Redacción desde análisis aprobado
 
+El inventario aprobado no pasa por `NeedGranularity.align`: esa heurística es una ayuda al análisis, no una autorización para eliminar o reclasificar acuerdos durante la redacción. El control final vuelve a tomar el inventario de la aprobación para detectar omisiones incluso si un intermediario devuelve una lista reducida.
+
+Las condiciones cuantitativas o cualitativas verificables ya presentes en necesidades confirmadas pueden completar `metrica_medible` cuando el modelo la deja vacía o pendiente. Se conserva su texto, sin inventar porcentajes ni copiar condiciones de otro objetivo. Las preguntas y necesidades pendientes continúan pendientes. La notación numérica reconoce equivalencias básicas con números escritos en palabras. No se presenta «Sistema» como actor sustituto de una asociación vacía: se muestra «Sin actor asociado».
+
 En el flujo separado, cada lote recibe los objetivos aprobados correspondientes y únicamente sus reglas, preguntas y actores enlazados. No recibe otra vez el documento completo ni el prompt de extracción. Gemini, OpenRouter, Groq y Ollama utilizan el mismo contrato de redacción RF/RNF. Los fragmentos citados se verifican localmente contra las fuentes originales: reducir el contexto enviado no desactiva la evidencia.
 
 La redacción conserva títulos breves, declaraciones, métricas y criterios generados; no se reconstruyen desde la primera necesidad mediante el formateador heurístico heredado. La revisión semántica contrasta la conversión con todo el análisis aprobado y sus citas, sin volver a extraer obligaciones del documento. Los defectos de esa base requieren revisión explícita, no cambios silenciosos. Las generaciones guardadas no se modifican automáticamente.

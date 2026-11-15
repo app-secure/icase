@@ -28,6 +28,7 @@ class RequirementQualityService {
       const refs = Array.isArray(req.necesidades_origen) ? req.necesidades_origen : [];
       const criteria = Array.isArray(req.criterios_aceptacion) ? req.criterios_aceptacion : [];
       if (!criteria.length) add('CRITERIOS_AUSENTES', req, 'No hay criterios de aceptación.', 'Expresa condiciones observables sin inventar reglas ni métricas.');
+      if (criteria.some(c => /\b(?:exitosamente|de forma adecuada|seg[uú]n lo solicitado)\b/i.test(c?.descripcion || ''))) add('CRITERIO_NO_OBSERVABLE', req, 'Un criterio afirma éxito sin describir el resultado comprobable.', 'Indica los datos, cambios o resultados acordados que se comprobarán. Si el alcance de gestionar no está definido, registra esa aclaración; no inventes operaciones.');
       else if (criteria.every(c => [normalize(req.nombre), normalize(req.descripcion)].includes(normalize(c?.descripcion)))) {
         const needs = expected.filter(n => refs.includes(n.id));
         const covered = `${req.nombre || ''} ${req.descripcion || ''} ${criteria.map(c => c?.descripcion || '').join(' ')}`;

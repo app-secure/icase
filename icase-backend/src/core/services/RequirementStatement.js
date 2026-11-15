@@ -210,7 +210,7 @@ function oneRequirement(req, group, inventory, rules, replaceEvidence, actorsCat
   const people = !named.length && !given.length && /segun el rol|roles del sistema/i.test(strip(primary.necesidad))
     ? (actorsCatalog || []).filter(actor => actor.tipo !== 'sistema_externo' && actor.nombre).map(actor => actorLabel(actor.nombre)) : [];
   const actors = named.length ? named : given.length ? given : people;
-  const assigned = tipo === 'RF' && !actors.length ? ['Sistema'] : actors;
+  const assigned = actors;
   const metric = tipo === 'RNF' ? statedMetric(group) : '';
   const quotes = group.flatMap(need => (need.evidencias?.length ? need.evidencias : (need.evidencia ? [{ texto: need.evidencia, fuente: need.fuente }] : [])));
   const dropped = (req.necesidades_origen || []).some(id => !group.some(need => need.id === id));

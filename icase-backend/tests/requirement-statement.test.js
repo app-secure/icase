@@ -35,7 +35,7 @@ test('separa la prohibición que ya es regla y no trata la tecnología como regl
   expect(auth.reglas_relacionadas).toEqual([]);
   expect(auth.precondiciones).toBe('');
   expect(backups.descripcion).toBe('El sistema deberá permitir respaldos de la base de datos y recuperación de información.');
-  expect(backups.actores).toEqual(['Sistema']);
+  expect(backups.actores || []).toEqual([]);
   expect(backups.precondiciones).toBe('');
 });
 

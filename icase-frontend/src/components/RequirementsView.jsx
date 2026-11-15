@@ -4,10 +4,11 @@ import BrainGearsIcon from "./BrainGearsIcon";
 import RequirementReviewPanel from './RequirementReviewPanel';
 import RequirementDiagnostics from './RequirementDiagnostics';
 import RequirementActorsPanel from './RequirementActorsPanel';
+import ActorAutocomplete from './ActorAutocomplete';
 import { ToastContainer, useToasts } from "./Toast";
 
 const emptyRequirement = (type) => type === "rf" ? {
-  name: "", description: "", actors: ["Usuario"], priority: "Alta",
+  name: "", description: "", actors: [], priority: "Alta",
   precondition: "", postcondition: "", origin: "manual", evidence: "",
   requiresConfirmation: false, approved: false
 } : {
@@ -36,12 +37,13 @@ export default function RequirementsView({
   const [formError, setFormError] = useState("");
 
   const functional = requirements?.functional || [];
+  const actorCatalog = audit?.actores?.length ? audit.actores : [...new Set(functional.flatMap(r => r.actors || []))].filter(Boolean).map(nombre => ({ nombre, heredado: true }));
   const nonFunctional = (requirements?.nonFunctional || []).filter(
     r => !r.category?.includes("Ajuste Validado por Experto") && !r.description?.includes("Requisito incorporado por corrección")
   );
 
   const startEdit = (type, index, item) => {
-    setEditing({ type, index, isNew: false, draft: { ...item, actors: Array.isArray(item.actors) ? item.actors : [item.actors || "Usuario"] } });
+    setEditing({ type, index, isNew: false, draft: { ...item, actors: Array.isArray(item.actors) ? item.actors : [item.actors].filter(Boolean) } });
     setPendingDelete(null);
     setFormError("");
   };
@@ -246,6 +248,7 @@ export default function RequirementsView({
               onDraftChange={updateDraft}
               onSave={saveRequirement}
               onCancelEdit={cancelEdit}
+              actorCatalog={actorCatalog}
               onAdd={() => startAdd("rf")}
               readOnly={readOnly || isReviewing}
             />
@@ -264,6 +267,7 @@ export default function RequirementsView({
               onDraftChange={updateDraft}
               onSave={saveRequirement}
               onCancelEdit={cancelEdit}
+              actorCatalog={actorCatalog}
               onAdd={() => startAdd("rnf")}
               readOnly={readOnly || isReviewing}
             />
@@ -353,7 +357,7 @@ export default function RequirementsView({
 }
 
 function RequirementSection({
-  title, type, items, numberOffset, editing, pendingDelete, formError,
+  title, type, items, numberOffset, editing, pendingDelete, formError, actorCatalog = [],
   onEdit, onDeleteRequest, onDelete, onCancelDelete, onDraftChange, onSave, onCancelEdit, onAdd, readOnly = false
 }) {
   const newHere = editing?.type === type && editing.isNew;
@@ -379,7 +383,7 @@ function RequirementSection({
         const editingThis = editing?.type === type && editing?.index === index && !editing.isNew;
         const deletingThis = pendingDelete === key;
         const anchor = item.identificador || item.id;
-        if (editingThis) return <RequirementEditor key={item.id || key} anchor={anchor} type={type} draft={editing.draft} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} />;
+        if (editingThis) return <RequirementEditor key={item.id || key} anchor={anchor} type={type} draft={editing.draft} actorCatalog={actorCatalog} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} />;
         return (
           <article id={anchor ? `requisito-${anchor}` : undefined} key={item.id || key} className="group flex items-start gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-[#E7E3EE] hover:bg-[#FAF9FC]">
             <span className="mt-0.5 min-w-5 text-sm font-semibold text-slate-800">{numberOffset + index + 1}.</span>
@@ -393,7 +397,7 @@ function RequirementSection({
           </article>
         );
       })}
-      {newHere && <RequirementEditor type={type} draft={editing.draft} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} isNew />}
+      {newHere && <RequirementEditor type={type} draft={editing.draft} actorCatalog={actorCatalog} error={formError} onChange={onDraftChange} onSave={onSave} onCancel={onCancelEdit} isNew />}
       {!items.length && !newHere && <p className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-xs text-slate-400">No hay requisitos de este tipo.</p>}
     </section>
   );
@@ -406,7 +410,7 @@ function FunctionalDisplay({ item }) {
       {reqId && <span className="inline-block px-1.5 py-0.5 mr-1.5 rounded bg-violet-100 text-[#7C3AED] font-mono text-[11px] font-bold">{reqId}</span>}
       <strong className="font-semibold text-slate-900">{item.name}</strong>: {item.description}
     </p>
-    <p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {(Array.isArray(item.actors) && item.actors.filter(Boolean).length ? item.actors : ['Sistema']).join(', ')} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>
+    <p className="text-xs text-slate-500"><strong className="text-slate-700">Actores:</strong> {(Array.isArray(item.actors) && item.actors.filter(Boolean).length ? item.actors : ['Sin actor asociado']).join(', ')} <span>•</span> <strong className="text-slate-700">Prioridad:</strong> {item.priority}</p>
     {item.precondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Precondición:</strong> {item.precondition}</p>}
     {item.postcondition && <p className="text-xs text-slate-500"><strong className="text-slate-600">Poscondición:</strong> {item.postcondition}</p>}
     <RequirementProvenance item={item} />
@@ -436,7 +440,7 @@ function RequirementProvenance({ item }) {
   </div>;
 }
 
-function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isNew = false, anchor }) {
+function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isNew = false, anchor, actorCatalog = [] }) {
   const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800 outline-none focus:border-[#7C3AED] focus:ring-2 focus:ring-violet-100";
   const criteria = draft.acceptanceCriteria || [];
   const splitIds = (text) => [...new Set(text.split(',').map((item) => item.trim()).filter(Boolean))];
@@ -459,7 +463,7 @@ function RequirementEditor({ type, draft, error, onChange, onSave, onCancel, isN
         </label>
         <label className="space-y-1 md:col-span-2"><span className="text-[11px] font-semibold text-slate-600">Descripción normativa *</span><textarea value={draft.description || ""} onChange={event => onChange("description", event.target.value)} rows={3} className={`${inputClass} resize-y`} /></label>
         {type === "rf" ? <>
-          <label className="space-y-1"><span className="text-[11px] font-semibold text-slate-600">Actores, separados por coma</span><input value={Array.isArray(draft.actors) ? draft.actors.join(", ") : draft.actors || ""} onChange={event => onChange("actors", event.target.value.split(","))} className={inputClass} /></label>
+          <ActorAutocomplete value={draft.actors} actors={actorCatalog} onChange={value => onChange('actors', value)} />
           <label className="space-y-1"><span className="text-[11px] font-semibold text-slate-600">Prioridad</span><select value={draft.priority || "Alta"} onChange={event => onChange("priority", event.target.value)} className={inputClass}><option>Alta</option><option>Media</option><option>Baja</option></select></label>
           <label className="space-y-1"><span className="text-[11px] font-semibold text-slate-600">Precondición</span><input value={draft.precondition || ""} onChange={event => onChange("precondition", event.target.value)} className={inputClass} /></label>
           <label className="space-y-1"><span className="text-[11px] font-semibold text-slate-600">Poscondición</span><input value={draft.postcondition || ""} onChange={event => onChange("postcondition", event.target.value)} className={inputClass} /></label>

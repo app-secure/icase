@@ -4,6 +4,7 @@ const templates = `CONTRATO DE REDACCIÓN APROBADA v2. Redacta requisitos exclus
 RF: Cuando [evento o condición de activación], el sistema deberá [acción específica] sobre [datos u objeto], conforme a [regla aplicable], de modo que [resultado observable].
 RNF: El sistema deberá [propiedad o restricción específica] en [función, componente o datos], bajo [condiciones], cumpliendo [métrica, umbral o condición verificable].
 Usa estas plantillas con lenguaje natural: omite cláusulas sin sustento, nunca inventes disparadores, reglas, resultados ni métricas para rellenarlas. Conserva condiciones de certeza como idealmente o por confirmar. nombre es un título breve, no una copia de la necesidad. descripcion contiene la declaración completa. Los criterios son comprobaciones observables del objetivo y sus detalles, no una repetición del título. Una métrica de seguridad no puede incluir usabilidad ni controles ajenos.
+Especifica cada comprobación independiente acordada en criterios: entrada o condición, resultado visible y restricciones pertinentes. No basta 'se gestiona exitosamente' o repetir la declaración; no inventes operaciones cuando el análisis solo dice gestionar. Para cierres u operaciones compuestas conserva los datos registrados, cálculos acordados, exclusiones y conservación del resultado, sin inventar fórmulas. Una sola prueba puede verificar varios detalles relacionados; no hay una cantidad mínima de criterios. metrica_medible admite una condición cualitativa verificable, además de cifras; si ya existen en la necesidad una frecuencia, retención, tiempo de recuperación o proporción de éxito, consérvalos y no pongas Por confirmar con el usuario. actores puede quedar vacío si el análisis no asigna actor: no lo sustituyas por Sistema ni por todos los roles. Las reglas deben expresarse en lenguaje natural en la declaración; sus IDs pertenecen a reglas_relacionadas, no sustituyen la explicación.
 JSON {"requerimientos":[{"tipo":"RF o RNF","identificador":"RF-01 o RNF-01","nombre":"Título breve","descripcion":"Declaración","prioridad":"Alta o Media o Baja","actores":[],"precondiciones":"","poscondiciones":"","metrica_medible":"","origen":"explicito o inferido","estado_decision":"confirmado o pendiente","requiere_confirmacion":false,"necesidades_origen":[],"reglas_relacionadas":[],"criterios_aceptacion":[{"descripcion":"Resultado comprobable","necesidades_origen":[]}],"evidencias":[{"texto":"Fragmento literal","fuente":"Archivo"}]}],"diagramas":[]}.
 Un requisito por objetivo y tipo; incluye todos sus IDs N en necesidades_origen y conserva todos sus detalles y evidencias. No generes requisitos para reglas, contexto, preguntas, tecnologías ni exclusiones. Las preguntas no crean obligaciones confirmadas. No copies los valores de ejemplo. No cambies los requisitos existentes no seleccionados.`;
 
@@ -33,7 +34,8 @@ function evidence(inventory) {
 }
 function normalizeActors(req, batch, actors) {
   const byId = new Map(actors.map(actor => [actor.id, actor.nombre]));
-  const names = (Array.isArray(req.actores) ? req.actores : []).map(name => byId.get(name) || name);
+  const names = (Array.isArray(req.actores) ? req.actores : []).map(name => byId.get(name) || name)
+    .filter(name => !/^sistema$/i.test(name) || actors.some(a => a.nombre?.toLowerCase() === String(name).toLowerCase()));
   if (!names.length && req.tipo === 'RF') {
     for (const need of batch.filter(n => (req.necesidades_origen || []).includes(n.id))) {
       if (byId.has(need.actor_id)) names.push(byId.get(need.actor_id));
