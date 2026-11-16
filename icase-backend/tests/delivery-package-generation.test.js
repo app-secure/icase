@@ -1,5 +1,9 @@
 const DeliveryPackageGenerator = require('../src/infrastructure/services/DeliveryPackageGenerator');
 const ZipArchiveService = require('../src/infrastructure/services/ZipArchiveService');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 describe('paquete final de entrega', () => {
   const artifact = (tipo, version, ruta, contenido) => ({
@@ -23,7 +27,7 @@ describe('paquete final de entrega', () => {
       }) }
     );
     const result = await new DeliveryPackageGenerator().generar({ proyecto: { nombre: 'Demo' }, insumos: { artefactos: artifacts }, versionesOrigen: {} });
-    expect(result.archivos.map((item) => item.ruta)).toEqual(expect.arrayContaining(['DELIVERY.md', 'delivery-manifest.json', 'backend/app.js']));
+    expect(result.archivos.map((item) => item.ruta)).toEqual(expect.arrayContaining(['DELIVERY.md', 'delivery-manifest.json', 'backend/app.js', 'tools/preview-local.cjs']));
     expect(result.dependencias).toHaveLength(5);
     const manifest = JSON.parse(result.archivos.find((item) => item.ruta === 'delivery-manifest.json').contenido);
     expect(manifest.artefactos.find((item) => item.tipo === 'pipeline_ci_cd').version).toBe(5);
@@ -45,5 +49,30 @@ describe('paquete final de entrega', () => {
     expect(zip.includes(Buffer.from('documentación/inicio.txt'))).toBe(true);
     expect(zip.readUInt32LE(zip.length - 22)).toBe(0x06054b50);
     expect(() => service.crear([{ ruta: '../secreto.txt', contenido: 'x' }])).toThrow('Ruta no válida');
+  });
+
+  test('la vista previa local crea secretos una vez, muestra la URL y conserva datos al detener', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'icase-preview-'));
+    try {
+      const script = fs.readFileSync(path.join(__dirname, '../src/infrastructure/templates/verification/preview-local.cjs'), 'utf8');
+      for (const folder of ['tools', 'ops', 'frontend', 'bin']) fs.mkdirSync(path.join(directory, folder));
+      fs.writeFileSync(path.join(directory, 'tools/preview-local.cjs'), script);
+      fs.writeFileSync(path.join(directory, 'ops/docker-compose.yml'), 'services: {}\n');
+      fs.writeFileSync(path.join(directory, 'ops/.env.example'), 'WEB_PORT=8091\nJWT_SECRET=replace\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=replace\nDB_PASSWORD=replace\n');
+      fs.writeFileSync(path.join(directory, 'frontend/package.json'), '{}');
+      fs.writeFileSync(path.join(directory, 'bin/docker'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$ICASE_DOCKER_LOG"\n', { mode: 0o755 });
+      const env = { ...process.env, PATH: `${path.join(directory, 'bin')}:${process.env.PATH}`, ICASE_DOCKER_LOG: path.join(directory, 'docker.log') };
+      const output = execFileSync(process.execPath, [path.join(directory, 'tools/preview-local.cjs'), 'start'], { env, encoding: 'utf8' });
+      expect(output).toContain('http://localhost:8091');
+      const secrets = fs.readFileSync(path.join(directory, 'ops/.env'), 'utf8');
+      expect(secrets).not.toContain('replace');
+      expect(fs.statSync(path.join(directory, 'ops/.env')).mode & 0o777).toBe(0o600);
+      execFileSync(process.execPath, [path.join(directory, 'tools/preview-local.cjs'), 'stop'], { env });
+      expect(fs.readFileSync(path.join(directory, 'ops/.env'), 'utf8')).toBe(secrets);
+      const calls = fs.readFileSync(path.join(directory, 'docker.log'), 'utf8');
+      expect(calls).toContain('up -d --build --wait');
+      expect(calls).toContain('down --remove-orphans');
+      expect(calls).not.toContain('down -v');
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   });
 });

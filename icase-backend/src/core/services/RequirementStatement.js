@@ -211,7 +211,9 @@ function oneRequirement(req, group, inventory, rules, replaceEvidence, actorsCat
     ? (actorsCatalog || []).filter(actor => actor.tipo !== 'sistema_externo' && actor.nombre).map(actor => actorLabel(actor.nombre)) : [];
   const actors = named.length ? named : given.length ? given : people;
   const assigned = actors;
-  const metric = tipo === 'RNF' ? statedMetric(group) : '';
+  const stated = String(req.metrica_medible || '').trim();
+  const source = strip(group.map(evidenceText).join(' '));
+  const metric = tipo === 'RNF' ? (stated && source.includes(strip(stated)) ? stated : statedMetric(group)) : '';
   const quotes = group.flatMap(need => (need.evidencias?.length ? need.evidencias : (need.evidencia ? [{ texto: need.evidencia, fuente: need.fuente }] : [])));
   const dropped = (req.necesidades_origen || []).some(id => !group.some(need => need.id === id));
   const next = {

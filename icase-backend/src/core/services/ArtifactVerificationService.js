@@ -61,6 +61,15 @@ class ArtifactVerificationService {
         if (files.has('mobile/package.json')) {
           requireJson('mobile/package.json');
           requireFile('mobile/App.js');
+          requireJson('mobile/icase.manifest.json');
+          try {
+            const mobile = JSON.parse(files.get('mobile/icase.manifest.json') || '{}');
+            if (!Array.isArray(mobile.pantallas) || !mobile.pantallas.length) {
+              errores.push('La aplicación móvil no contiene pantallas del árbol aprobado.');
+            } else if (mobile.pantallas.some((screen) => !screen.id || !(screen.operations || []).length)) {
+              errores.push('La aplicación móvil contiene pantallas sin operaciones RF conectadas.');
+            }
+          } catch { /* requireJson ya registra el error. */ }
           if (!files.has('frontend/package.json')) break;
         }
         requireJson('frontend/package.json');
@@ -79,7 +88,13 @@ class ArtifactVerificationService {
           const isAuthScreen = (item) => /inicio.*sesion|login|autentic/i.test(item.id || item.name || item.nombre || item.route || '');
           const disconnected = (manifest.pantallas || []).filter((screen) => !(screen.operations || []).length && !isAuthScreen(screen));
           if (disconnected.length) errores.push(`Hay pantallas sin operaciones RF conectadas: ${disconnected.map((item) => item.name || item.nombre || item.id).join(', ')}.`);
-          // Enlaces de la vista diseñada: las inconsistencias son un error; lo que quedó sin conectar, un aviso por pantalla.
+          if (files.has('mobile/icase.manifest.json')) {
+            const mobile = JSON.parse(files.get('mobile/icase.manifest.json'));
+            const webIds = new Set((manifest.pantallas || []).map((screen) => screen.id));
+            const shared = (mobile.pantallas || []).filter((screen) => webIds.has(screen.id));
+            if (shared.length) errores.push(`Hay pantallas mezcladas entre web y móvil: ${shared.map((screen) => screen.name || screen.id).join(', ')}.`);
+          }
+          // Una vista diseñada con controles sin destino no debe aprobarse como aplicación funcional.
           for (const screen of manifest.pantallas || []) {
             const links = screen.enlaces;
             if (!links) continue;
@@ -95,11 +110,11 @@ class ArtifactVerificationService {
             const names = (links.sin_enlace || []).slice(0, 5).join(', ');
             const unlinkedText = `${unlinked} control${unlinked === 1 ? '' : 'es'} sin enlace${names ? ` (${names})` : ''}`;
             if (!links.cableados && (unlinked || links.invalidos)) {
-              advertencias.push(`La vista diseñada de «${label}» no ejecuta ninguna acción del backend${unlinked ? `: ${unlinkedText}` : ''}.`);
-            } else if (links.cableados && unlinked) {
-              advertencias.push(`La vista diseñada de «${label}» tiene ${unlinkedText}.`);
+              errores.push(`La vista diseñada de «${label}» no ejecuta ninguna acción del backend${unlinked ? `: ${unlinkedText}` : ''}.`);
+            } else if (unlinked) {
+              errores.push(`La vista diseñada de «${label}» tiene ${unlinkedText}.`);
             }
-            if (links.invalidos) advertencias.push(`La vista diseñada de «${label}» tiene ${links.invalidos} enlace${links.invalidos === 1 ? '' : 's'} inválido${links.invalidos === 1 ? '' : 's'}.`);
+            if (links.invalidos) errores.push(`La vista diseñada de «${label}» tiene ${links.invalidos} enlace${links.invalidos === 1 ? '' : 's'} inválido${links.invalidos === 1 ? '' : 's'}.`);
           }
           if ((manifest.plataformas_solicitadas || []).some((item) => /m[oó]vil|android|ios|react native/i.test(item)) && !files.has('mobile/package.json')) {
             errores.push('El alcance aprobado incluye una aplicación móvil, pero no se generó un proyecto React Native.');

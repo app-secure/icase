@@ -47,21 +47,20 @@ describe('verificación estructural del frontend: enlaces por pantalla', () => {
     expect(verify([...base([screen(summary())], [api]).filter((item) => item.ruta !== 'frontend/src/pages/reservas.jsx'), page]).errores).toEqual([]);
   });
 
-  test('una vista diseñada sin ninguna acción conectada avisa y nombra los controles sin enlace, sin bloquear', () => {
+  test('una vista diseñada sin ninguna acción conectada bloquea la aprobación y nombra los controles', () => {
     const result = verify(base([screen(summary({ validos: 0, cableados: 0, acciones: [], sin_enlace: ['Confirmar reserva', 'Cancelar'], sin_enlace_total: 2 }))], [api]));
-    expect(result.errores).toEqual([]);
-    expect(result.estado).toBe('apta_estructuralmente');
-    expect(result.advertencias.join('\n')).toContain('«Reservas» no ejecuta ninguna acción del backend');
-    expect(result.advertencias.join('\n')).toContain('Confirmar reserva');
+    expect(result.estado).toBe('fallida');
+    expect(result.errores.join('\n')).toContain('«Reservas» no ejecuta ninguna acción del backend');
+    expect(result.errores.join('\n')).toContain('Confirmar reserva');
   });
 
-  test('con acciones conectadas avisa solo de los controles que quedaron sin enlace y de los enlaces inválidos', () => {
+  test('con acciones conectadas bloquea controles sin enlace y enlaces inválidos', () => {
     const page = file('frontend/src/pages/reservas.jsx', 'handleAction(e, "rf-01", "crear")');
     const result = verify([...base([screen(summary({ sin_enlace: ['Exportar'], sin_enlace_total: 3, invalidos: 2 }))], [api]).filter((item) => item.ruta !== 'frontend/src/pages/reservas.jsx'), page]);
-    expect(result.errores).toEqual([]);
-    expect(result.advertencias.join('\n')).toContain('3 controles sin enlace');
-    expect(result.advertencias.join('\n')).toContain('2 enlaces inválidos');
-    expect(result.advertencias.join('\n')).not.toContain('no ejecuta ninguna acción');
+    expect(result.estado).toBe('fallida');
+    expect(result.errores.join('\n')).toContain('3 controles sin enlace');
+    expect(result.errores.join('\n')).toContain('2 enlaces inválidos');
+    expect(result.errores.join('\n')).not.toContain('no ejecuta ninguna acción');
   });
 
   test('comportamiento previo: un manifiesto sin resumen de enlaces no genera avisos nuevos', () => {

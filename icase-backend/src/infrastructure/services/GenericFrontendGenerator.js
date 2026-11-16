@@ -19,6 +19,7 @@ const component = (value) => slug(value).split('-').map((part) => part.charAt(0)
 const STOPWORDS = new Set(['vista', 'pantalla', 'panel', 'modulo', 'seccion', 'pagina', 'inicio', 'listado', 'detalle', 'gestion', 'registro', 'edicion', 'consulta', 'para', 'del', 'las', 'los', 'una', 'con', 'por']);
 const tokensOf = (value) => slug(value).split('-').filter((w) => w.length >= 3 && !STOPWORDS.has(w));
 const isAuthScreen = (screen) => /inicio.*sesion|login|autentic/i.test(screen?.slug || screen?.nombre || screen?.nombre_visible || screen?.nombre_pantalla || screen?.ruta || '');
+const platformOf = (screen) => /mobile|m[oó]vil|android|ios/i.test(String(screen?.plataforma || '')) ? 'móvil' : 'web';
 
 // Estilos del módulo de formularios por campo y diseño moderno tipo Dashboard.
 const TYPED_FORMS_CSS = '.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}.form-row{display:flex;flex-direction:column;gap:.35rem}.input{width:100%;padding:.65rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;transition:border-color .15s,box-shadow .15s;outline:none}.input:focus{border-color:var(--primary);background:white;box-shadow:0 0 0 3px rgba(99,102,241,.15)}.input[aria-invalid="true"]{border-color:#ef4444;background:#fef2f2}.field-error{color:#dc2626;font-size:.8rem;font-weight:500}.secondary{background:#f1f5f9!important;color:#334155!important;border:1px solid #cbd5e1!important}.secondary:hover{background:#e2e8f0!important}.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;margin-top:.75rem}.records{width:100%;border-collapse:collapse;font-size:.875rem}.records th{background:#f8fafc;color:#475569;font-weight:600;text-transform:uppercase;font-size:.75rem;letter-spacing:.05em;padding:.75rem 1rem;border-bottom:1px solid #e2e8f0}.records td{padding:.85rem 1rem;border-bottom:1px solid #f1f5f9;color:#1e293b;vertical-align:middle}.records tr:last-child td{border-bottom:none}.records tr:hover{background:#f8fafc}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}';
@@ -35,8 +36,22 @@ class GenericFrontendGenerator {
       usuarios: [...new Set((identidad?.usuarios || []).map((id) => String(id).toUpperCase()))]
     };
     const loginIds = new Set(identity.login);
-    const views = screens.map((screen) => this._view(screen, screens, requerimientos))
-      .filter((view, index) => !(auth && isAuthScreen(screens[index]) && view.requirements.every((id) => loginIds.has(String(id).toUpperCase()))));
+    const allViews = screens.map((screen) => this._view(screen, screens, requerimientos))
+      .filter((view, index) => !(auth && (
+        (isAuthScreen(screens[index]) && view.requirements.every((id) => loginIds.has(String(id).toUpperCase())))
+        || (view.platform === 'web' && (view.route === '/usuarios' || view.id === 'usuarios'))
+      )));
+    const views = allViews.filter((view) => view.platform === 'web');
+    const explicitMobile = screens.some((screen) => /mobile|m[oó]vil|android|ios/i.test(String(screen?.plataforma || '')));
+    const mobileViews = allViews.filter((view) => view.platform === 'móvil' || (!explicitMobile && !view.platformDeclared));
+    const selectedWeb = platforms.includes('web') || platforms.includes('tablet');
+    const selectedMobile = platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item));
+    if (screens.some((screen) => screen.plataforma) && selectedWeb && !views.length) {
+      throw new Error('No hay pantallas web en el árbol aprobado. Revisa las plataformas antes de generar.');
+    }
+    if (screens.some((screen) => screen.plataforma) && selectedMobile && !mobileViews.length) {
+      throw new Error('No hay pantallas móviles en el árbol aprobado. Revisa las plataformas antes de generar.');
+    }
     const usedRoutes = new Set();
     for (const view of views) {
       let candidate = view.route;
@@ -140,7 +155,7 @@ class GenericFrontendGenerator {
     }
     const first = views[0]?.route || '/';
     files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone) : this._app(proyecto, views, imports, routes, first, standalone) });
-    if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth));
+    if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth, mobileViews));
     if(new ModuleService().activos(decisiones.modulos).includes('procesos_negocio')){
       if(!auth)throw new Error('La bandeja de procesos requiere JWT');
       if(views.some(view=>view.route==='/procesos'))throw new Error('La ruta /procesos está reservada para la bandeja de procesos');
@@ -155,8 +170,9 @@ class GenericFrontendGenerator {
       if(mobileApp){
         files.push({ruta:'mobile/ProcessScreen.js',lenguaje:'javascript',contenido:template('mobile-ProcessScreen.js')});
         mobileApp.contenido="import ProcessScreen from './ProcessScreen';\n"+mobileApp.contenido
-          .replace("const [error, setError] = useState('');","const [error, setError] = useState('');\n  const [screen, setScreen] = useState('crud');")
-          .replace('{AUTH && <Button title="Cerrar sesión" onPress={() => { setToken(null); setPermisos(null); }} />}','{AUTH && <Button title="Procesos" onPress={() => setScreen(screen === \'procesos\' ? \'crud\' : \'procesos\')} />}\n    {screen === \'procesos\' ? <ProcessScreen api={call} token={token} /> : null}\n    {AUTH && <Button title="Cerrar sesión" onPress={() => { setToken(null); setPermisos(null); setScreen(\'crud\'); }} />}');
+          .replace("const [error, setError] = useState('');","const [error, setError] = useState('');\n  const [processScreen, setProcessScreen] = useState(false);")
+          .replace('const clearBusinessState = () => { setScreen(null); setOperation(null); setRecords([]); };', 'const clearBusinessState = () => { setScreen(null); setOperation(null); setRecords([]); setProcessScreen(false); };')
+          .replace('{AUTH && <Button title="Cerrar sesión" onPress={() => { setToken(null); setPermisos(null); clearBusinessState(); }} />}','{AUTH && <Button title="Procesos" onPress={() => setProcessScreen((value) => !value)} />}\n    {processScreen ? <ProcessScreen api={call} token={token} /> : null}\n    {AUTH && <Button title="Cerrar sesión" onPress={() => { setToken(null); setPermisos(null); clearBusinessState(); }} />}');
       }
     }
     const extended = new (require('./SpecializedFrontendGenerator'))().apply(new (require('./ExtendedFrontendGenerator'))().apply(files,{decisiones}),{decisiones});
@@ -178,7 +194,7 @@ class GenericFrontendGenerator {
     const modulo = screen.flujo || screen.mockup?.flujo || screen.modulo || screen.mockup?.modulo || 'General';
     // La ruta del árbol de navegación ("Sistema / Flujo / Pantalla") agrupa el menú, pero no es una URL: se usa una corta.
     const simple = /^\/[a-z0-9_-]+(?:\/[a-z0-9_-]+)?$/i.test(route);
-    return { id, name: screen.nombre || screen.nombre_visible || screen.nombre_pantalla || id, route: simple ? route : `/${id}`, roles: screen.roles || [], requirements: rf, operations: rf.map(slug), modulo };
+    return { id, name: screen.nombre || screen.nombre_visible || screen.nombre_pantalla || id, route: simple ? route : `/${id}`, roles: screen.roles || [], requirements: rf, operations: rf.map(slug), modulo, platform: platformOf(screen), platformDeclared: Boolean(screen.plataforma) };
   }
 
   _inferScreenRfs(screen, screens = [], requerimientos = []) {
@@ -265,7 +281,13 @@ import LoginScreen from './LoginScreen';
 import UsersScreen from './UsersScreen';
 ${imports.join('\n')}
 
-const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: view.name, operations: view.operations, modulo: view.modulo || 'General' })))};
+const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: view.name, operations: view.operations, roles: view.roles, modulo: view.modulo || 'General' })))};
+const normalizarRol = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const puedeAbrirPantalla = (view, user, can) => {
+  const roles = view.roles || [];
+  const rolPermitido = !roles.length || roles.some((rol) => ['usuario', normalizarRol(user.rol)].includes(normalizarRol(rol)));
+  return rolPermitido && (!view.operations.length || view.operations.some((operation) => can(operation, 'GET')));
+};
 
 export default function App() {
   const { user, loading, can, logout } = useSession();
@@ -278,10 +300,10 @@ export default function App() {
 
   const visible = views
     .filter((view) => view.route !== '/usuarios' && view.id !== 'usuarios' && view.name?.toLowerCase() !== 'usuarios')
-    .filter((view) => !view.operations.length || view.operations.some((operation) => can(operation, 'GET')));
+    .filter((view) => puedeAbrirPantalla(view, user, can));
 
   const modules = Array.from(new Set(visible.map((v) => v.modulo || 'General')));
-  const home = visible[0]?.route || (user.administrador ? '/usuarios' : '/');
+  const home = visible[0]?.route || (user.administrador ? '/usuarios' : '/sin-acceso');
 
   return (
     <div className="app-shell" style={{ background: '#f8fafc', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -393,8 +415,9 @@ export default function App() {
 
       <main style={{ flex: 1 }}>
         <Routes>
-          ${routes.join('\n          ')}
+          ${views.map((view, index) => `<Route path=${JSON.stringify(view.route)} element={visible.some((item) => item.route === ${JSON.stringify(view.route)}) ? <${component(view.id)}/> : <Navigate to={home} replace />}/>`).join('\n          ')}
           {user.administrador && <Route path="/usuarios" element={<UsersScreen />} />}
+          <Route path="/sin-acceso" element={<section className="screen" role="status"><h1>Sin pantallas disponibles</h1><p>Tu rol no tiene acceso a ninguna pantalla de esta aplicación. Solicita los permisos necesarios al administrador.</p></section>} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Routes>
       </main>
@@ -404,12 +427,14 @@ export default function App() {
 `;
   }
 
-  _mobile(name, auth = false) {
+  _mobile(name, auth = false, views = []) {
     return [
       { ruta: 'mobile/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${slug(name)}-mobile`, version: '1.0.0', private: true, engines: { node: MobileRuntime.node }, main: 'node_modules/expo/AppEntry.js', scripts: { start: 'expo start', 'export:android': 'expo export --platform android' }, dependencies: { expo: MobileRuntime.expo, react: MobileRuntime.react, 'react-native': MobileRuntime.reactNative } }, null, 2) },
       { ruta: 'mobile/app.json', lenguaje: 'json', contenido: JSON.stringify({ expo: { name, slug: slug(name), version: '1.0.0', platforms: ['android', 'ios'] } }, null, 2) },
       { ruta: 'mobile/.env.example', lenguaje: 'dotenv', contenido: 'EXPO_PUBLIC_API_URL=http://YOUR_LAN_IP:3000\n' },
-      { ruta: 'mobile/App.js', lenguaje: 'javascript', contenido: renderTemplate(template('mobile-App.js'), { AUTH: String(auth), TITLE: JSON.stringify(name) }) }
+      { ruta: 'mobile/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: name, pantallas: views.map(({ id, name, roles, operations }) => ({ id, name, roles, operations })) }, null, 2) },
+      { ruta: 'mobile/README.md', lenguaje: 'markdown', contenido: '# Aplicación móvil\n\n1. Copia `.env.example` a `.env` y sustituye `YOUR_LAN_IP` por una dirección accesible desde el emulador o dispositivo.\n2. Ejecuta `npm install` y `npm start` en esta carpeta.\n3. Inicia el backend y verifica la conexión desde el dispositivo.\n\nEste proyecto Expo no es un APK o IPA firmado. Las pantallas y operaciones incluidas constan en `icase.manifest.json`.\n' },
+      { ruta: 'mobile/App.js', lenguaje: 'javascript', contenido: renderTemplate(template('mobile-App.js'), { AUTH: String(auth), TITLE: JSON.stringify(name), SCREENS: JSON.stringify(views.map(({ id, name, roles, operations }) => ({ id, name, roles, operations }))) }) }
     ];
   }
 

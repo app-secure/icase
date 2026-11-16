@@ -22,6 +22,8 @@ class DeliveryPackageGenerator extends IGeneradorArtefacto {
     byPath.set('tools/update.cjs',{ruta:'tools/update.cjs',lenguaje:'javascript',contenido:updater});
     const backfill=fs.readFileSync(tp.join(__dirname,'../templates/verification/backfill-owners.cjs'),'utf8');
     byPath.set('tools/backfill-owners.cjs',{ruta:'tools/backfill-owners.cjs',lenguaje:'javascript',contenido:backfill});
+    const preview=fs.readFileSync(tp.join(__dirname,'../templates/verification/preview-local.cjs'),'utf8');
+    byPath.set('tools/preview-local.cjs',{ruta:'tools/preview-local.cjs',lenguaje:'javascript',contenido:preview});
     const manifest = {
       alcance: cobertura,
       proyecto: proyecto.nombre,
@@ -47,7 +49,7 @@ class DeliveryPackageGenerator extends IGeneradorArtefacto {
   }
 
   _readme(name, artifacts, mobile = false) {
-    return `# ${name}\n\nPaquete generado por I-CASE a partir de artefactos aprobados y verificados.\n\n${artifacts.map((item) => `- ${item.tipo}: versión ${item.version}`).join('\n')}\n\n## Inicio rápido\n\n1. Revisa \`delivery-manifest.json\` y la evidencia de verificación de cada artefacto.\n2. Configura \`ops/.env\` desde \`ops/.env.example\`.\n3. Ejecuta \`docker compose -f ops/docker-compose.yml up --build\`.\n4. Consulta los detalles de pruebas y CI/CD en sus respectivos README.\n5. La API está documentada en \`backend/openapi.json\` (OpenAPI 3.1), \`GET /api/openapi.json\` y el explorador en \`GET /api/docs\` (con autenticación habilitada requieren el token de sesión).\n6. Lee \`backend/GENERATION-REPORT.md\`: indica qué se generó completo de cada requisito, qué quedó solo con datos y qué no se generó.\n${mobile ? '7. Para la app móvil, configura `mobile/.env` desde `mobile/.env.example` con una URL accesible desde el dispositivo y sigue `mobile/README.md`. El bundle Expo no es un APK/IPA firmado.\n' : ''}`;
+    return `# ${name}\n\nPaquete generado por I-CASE a partir de artefactos aprobados y verificados.\n\n${artifacts.map((item) => `- ${item.tipo}: versión ${item.version}`).join('\n')}\n\n## Inicio rápido\n\n1. Revisa \`delivery-manifest.json\` y la evidencia de verificación de cada artefacto.\n2. Desde la raíz del paquete ejecuta \`node tools/preview-local.cjs start\`. La primera vez crea \`ops/.env\` con secretos locales y levanta los servicios con Docker. Si ya configuraste \`ops/.env\`, lo conserva.\n3. Abre la URL que muestra el comando. Para detener sin borrar los datos ejecuta \`node tools/preview-local.cjs stop\`.\n4. Consulta los detalles de pruebas y CI/CD en sus respectivos README.\n5. La API está documentada en \`backend/openapi.json\` (OpenAPI 3.1), \`GET /api/openapi.json\` y el explorador en \`GET /api/docs\` (con autenticación habilitada requieren el token de sesión).\n6. Lee \`backend/GENERATION-REPORT.md\`: indica qué se generó completo de cada requisito, qué quedó solo con datos y qué no se generó.\n${mobile ? '7. Para la app móvil, configura `mobile/.env` desde `mobile/.env.example` con una URL accesible desde el dispositivo y sigue `mobile/README.md`. El bundle Expo no es un APK/IPA firmado.\n' : ''}`;
   }
 }
 
