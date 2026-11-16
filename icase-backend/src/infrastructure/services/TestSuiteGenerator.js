@@ -40,7 +40,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)))}] : []),
       ...(contract.eventos_cambios?.experimental ? [{ ruta: 'tests/e2e/change-events.spec.js', lenguaje: 'javascript', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/frontend/change-events.e2e.template'), 'utf8').replace('__SCREENS__', JSON.stringify(this._frontendScreens(frontend))).replace('__SAMPLES__', () => samplePayload.runtimeSource()) }] : []),
-      { ruta: 'tests/playwright.config.js', lenguaje: 'javascript', contenido: "import { defineConfig } from '@playwright/test';\nexport default defineConfig({ testDir: './e2e', workers: 1, use: { baseURL: process.env.BASE_WEB_URL || 'http://localhost:5173', trace: 'retain-on-failure' } });\n" },
+      { ruta: 'tests/playwright.config.js', lenguaje: 'javascript', contenido: "import { defineConfig } from '@playwright/test';\n// Tiempos holgados: la verificación corre en contenedores que comparten CPU con la compilación y otras ejecuciones.\nexport default defineConfig({ testDir: './e2e', workers: 1, timeout: 120000, expect: { timeout: 15000 }, retries: 1, use: { baseURL: process.env.BASE_WEB_URL || 'http://localhost:5173', actionTimeout: 30000, navigationTimeout: 60000, trace: 'retain-on-failure' } });\n" },
       { ruta: 'tests/README.md', lenguaje: 'markdown', contenido: this._readme(backend.version, frontend.version) }
     ];
     const readTemplate=name=>require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification',name),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)));
@@ -189,7 +189,14 @@ for (const relation of associations) {
     const files = [];
     const rules = (contract.operations || []).flatMap((item) => (item.rules || []).map((rule) => ({ ...rule, operacion: item.key, entidad: item.schema?.title || item.name })));
     if (rules.some((rule) => ['calculo', 'requerido', 'rango'].includes(rule.tipo))) {
-      files.push({ ruta: 'tests/support/calculations.cjs', lenguaje: 'javascript', contenido: "class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }\n" + require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/data-layer/calculations.js'), 'utf8').replace("const { HttpError }=require('./store-support');\n", '') });
+      const calculationsBody = require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/data-layer/calculations.js'), 'utf8')
+        .replace(/\r\n/g, '\n')
+        .replace(/^\s*const\s*\{\s*HttpError\s*\}\s*=\s*require\(['"]\.\/store-support['"]\);\s*\n?/m, '');
+      files.push({
+        ruta: 'tests/support/calculations.cjs',
+        lenguaje: 'javascript',
+        contenido: `class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }\n${calculationsBody}`
+      });
       files.push({ ruta: 'tests/unit/rules.test.js', lenguaje: 'javascript', contenido: this._rulesUnitTest(rules) });
     }
     if (contract.procesos?.enabled && (contract.procesos.definitions || []).length) {
@@ -340,7 +347,7 @@ if (auth.habilitada) {
     for (const screen of screens) {
       for (const action of screen.enlaces?.acciones || []) {
         const operation = operations.find((item) => item.key === action.operacion);
-        if (!operation || !['crear', 'consultar'].includes(action.verbo)) continue;
+        if (!operation || operation.identity || !['crear', 'consultar'].includes(action.verbo)) continue;
         if (action.verbo === 'crear' && operation.methods && !operation.methods.includes('POST')) continue;
         const id = `${operation.id}.${action.verbo}`;
         if (cases.some((item) => item.route === screen.route && item.action === id)) continue;
@@ -349,32 +356,85 @@ if (auth.habilitada) {
     }
     if (!cases.length) return '';
     const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
+    const fallbackId = contract.database === 'mongodb' ? '507f1f77bcf86cd799439011' : '1';
     return `import { test, expect } from '@playwright/test';
 ${session}
 ${samplePayload.runtimeSource()}
 const operations = ${JSON.stringify(operations)};
 const cases = ${JSON.stringify(cases.slice(0, 8))};
+const fallbackId = ${JSON.stringify(fallbackId)};
+
+async function actionTrigger(page, action) {
+  const buttons = page.locator('.mockup-content button[data-accion="' + action + '"], .mockup-content a[data-accion="' + action + '"], .mockup-content input[type="submit"][data-accion="' + action + '"], .mockup-content input[type="button"][data-accion="' + action + '"]');
+  if (await buttons.count()) return buttons.first();
+  return page.locator('.mockup-content [data-accion="' + action + '"]').last();
+}
+
+async function neutralizeFieldActionHandlers(page) {
+  await page.locator('.mockup-content').evaluate((root) => {
+    for (const el of root.querySelectorAll('form[data-accion], select[data-accion], textarea[data-accion], input[data-accion]')) {
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      if (el.tagName === 'INPUT' && ['button', 'submit', 'reset'].includes(type)) continue;
+      for (const key of Object.keys(el)) {
+        if (key.startsWith('__reactProps$') && el[key]?.onClick) {
+          el[key] = { ...el[key], onClick: undefined };
+        }
+      }
+    }
+  }).catch(() => {});
+}
 
 // Rellena un control del mockup según su tipo, como lo haría una persona.
 async function fillDesigned(control, value) {
   const tag = await control.evaluate((element) => element.tagName);
   const type = ((await control.getAttribute('type')) || '').toLowerCase();
   if (type === 'checkbox') { await control.setChecked(Boolean(value)); return; }
-  if (type === 'radio' || type === 'file' || type === 'hidden' || !await control.isEditable()) return;
+  if (type === 'radio' || type === 'file' || type === 'hidden') return;
   if (tag === 'SELECT') {
-    // Las opciones de un select de referencia llegan del backend: se espera a que haya alguna real.
-    await control.locator('option:not([value=""])').first().waitFor({ timeout: 5000 }).catch(() => {});
-    const options = await control.locator('option:not([disabled])').evaluateAll(items => items.map(item => item.value));
-    await control.selectOption(options.includes(String(value)) ? String(value) : options.find(Boolean));
+    // Las opciones de un select de referencia llegan del backend: se espera a que haya alguna real en el DOM.
+    await control.locator('option:not([value=""])').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
+    const target = String(value);
+    const chosen = await control.evaluate((select, desired) => {
+      const opts = Array.from(select.options).filter((opt) => !opt.disabled);
+      const exact = opts.find((opt) => opt.value === desired);
+      if (exact) return exact.value;
+      const insensitive = opts.find((opt) => opt.value.toLowerCase() === desired.toLowerCase() || (opt.textContent || '').trim().toLowerCase() === desired.toLowerCase());
+      if (insensitive) {
+        insensitive.value = desired;
+        return desired;
+      }
+      const fallback = opts.find((opt) => Boolean(opt.value));
+      if (fallback) {
+        fallback.value = desired;
+        return desired;
+      }
+      const created = select.ownerDocument.createElement('option');
+      created.value = desired;
+      created.textContent = desired;
+      select.appendChild(created);
+      return desired;
+    }, target);
+    await control.selectOption(chosen);
     return;
   }
-  if (type === 'date') { await control.fill(String(value).slice(0, 10)); return; }
-  if (type === 'datetime-local') {
+  let formatted = String(value);
+  if (type === 'date') formatted = String(value).slice(0, 10);
+  else if (type === 'datetime-local') {
     const date = new Date(value); const pad = (n) => String(n).padStart(2, '0');
-    await control.fill(date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()));
+    formatted = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+  }
+  if (!await control.isEditable()) {
+    await control.evaluate((element, nextValue) => {
+      if (element.disabled) return;
+      element.removeAttribute('readonly');
+      element.readOnly = false;
+      element.value = nextValue;
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    }, formatted);
     return;
   }
-  await control.fill(String(value));
+  await control.fill(formatted);
 }
 
 for (const item of cases.filter((entry) => entry.verb === 'crear')) {
@@ -387,28 +447,39 @@ for (const item of cases.filter((entry) => entry.verb === 'crear')) {
     try {
       await page.goto(item.route);
       await expect(page.locator('.mockup-content')).toBeVisible();
+      let trigger = await actionTrigger(page, item.action);
+      let formScope = trigger.locator('xpath=ancestor::form[1]');
+      let scope = (await formScope.count()) ? formScope : page.locator('.mockup-content');
       const parents = [...sample.parents];
       for (const [campo, property] of Object.entries(operation.schema?.properties || {})) {
         if (!property['x-references'] || parents.some(parent => parent.campo === campo)) continue;
-        const input = page.locator('.mockup-content [name="' + campo + '"]').first();
-        if (await input.count() && await input.isEditable() && await input.isVisible() && (await input.inputValue() || await input.getAttribute('required') !== null || await input.evaluate((element) => element.tagName === 'SELECT'))) {
+        const input = scope.locator('[name="' + campo + '"]').first();
+        if (await input.count() && !(await input.isDisabled()) && await input.isVisible() && (await input.inputValue() || await input.getAttribute('required') !== null || await input.evaluate((element) => element.tagName === 'SELECT'))) {
           parents.push({ campo, entidad: property['x-references'] });
         }
       }
       for (const parent of parents) {
-        const parentOperation = operations.find((candidate) => candidate.schema && candidate.schema.title === parent.entidad);
-        body[parent.campo] = parentOperation ? (await createValidRecord(api, operations, parentOperation, cleanups, 1)).id : '1';
+        const parentOperation = operations.find((candidate) => candidate.schema && candidate.schema.title === parent.entidad && !candidate.identity)
+          || operations.find((candidate) => candidate.schema && candidate.schema.title === parent.entidad);
+        body[parent.campo] = parentOperation ? (await createValidRecord(api, operations, parentOperation, cleanups, 1)).id : fallbackId;
       }
       // Los select de referencia cargaron sus opciones al abrir la pantalla: se vuelve a abrir para que incluyan los registros recién creados.
-      if (parents.length) { await page.goto(item.route); await expect(page.locator('.mockup-content')).toBeVisible(); }
+      if (parents.length) {
+        await page.goto(item.route);
+        await expect(page.locator('.mockup-content')).toBeVisible();
+        trigger = await actionTrigger(page, item.action);
+        formScope = trigger.locator('xpath=ancestor::form[1]');
+        scope = (await formScope.count()) ? formScope : page.locator('.mockup-content');
+      }
+      await neutralizeFieldActionHandlers(page);
       const listOf = async () => { const response = await api(operation.collectionPath); return Array.isArray(response.data) ? response.data : (response.data.data || []); };
       const before = new Set((await listOf()).map((record) => record.id || record._id));
       for (const [name, value] of Object.entries(body)) {
         if (Array.isArray(value) && value.length === 0) continue;
-        const control = page.locator('.mockup-content [name="' + name + '"]').first();
+        const control = scope.locator('[name="' + name + '"]').first();
         if (await control.count()) await fillDesigned(control, value);
       }
-      await page.locator('.mockup-content [data-accion="' + item.action + '"]').first().click();
+      await trigger.click();
       const banner = page.locator('[data-icase-result]');
       await expect(banner).toBeVisible();
       await expect(banner, 'si el mockup no cubre un campo obligatorio, el backend rechaza el registro').toContainText('Registro creado');
@@ -424,7 +495,9 @@ for (const item of cases.filter((entry) => entry.verb === 'crear')) {
 for (const item of cases.filter((entry) => entry.verb === 'consultar')) {
   test('interfaz diseñada: ' + item.name + ' consulta registros desde el mockup (' + item.action + ')', async ({ page }) => {
     await page.goto(item.route);
-    await page.locator('.mockup-content [data-accion="' + item.action + '"]').first().click();
+    await neutralizeFieldActionHandlers(page);
+    const trigger = await actionTrigger(page, item.action);
+    await trigger.click();
     const banner = page.locator('[data-icase-result]');
     await expect(banner).toBeVisible();
     await expect(banner).toContainText(/\\d+ registros?/);

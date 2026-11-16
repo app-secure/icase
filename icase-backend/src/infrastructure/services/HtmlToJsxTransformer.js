@@ -58,6 +58,9 @@ const ACTION = /^(RF-\d+)\.(consultar|crear|editar|eliminar)$/i;
 /** `onClick` solo para un `data-accion` válido cuya operación existe; cualquier otro control queda inerte. */
 function actionHandler(node, context) {
   if (!context?.operaciones?.size) return '';
+  const tag = String(node.tagName || '').toLowerCase();
+  if (['form', 'select', 'textarea'].includes(tag)) return '';
+  if (tag === 'input' && !['button', 'submit', 'reset'].includes(String(typeAttr(node)).toLowerCase())) return '';
   const declared = (node.attrs || []).find((attr) => attr.name === 'data-accion')?.value.trim() || '';
   const match = ACTION.exec(declared);
   const operation = match && match[1].toLowerCase();

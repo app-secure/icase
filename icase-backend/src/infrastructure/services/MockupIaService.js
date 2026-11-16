@@ -30,8 +30,10 @@ class MockupIaService {
     }
   }
 
-  async generarMockups({ contextoProyecto, pantallas = [], insumoAdicional = '' }) {
-    const promptBase = this.leerPrompt(process.env.MOCKUP_PROMPT_FILE || 'disenador_mockups_compacto.md');
+  async generarMockups({ contextoProyecto, pantallas = [], insumoAdicional = '', modoEdicion = false }) {
+    const promptBase = modoEdicion
+      ? 'Edita el HTML existente aplicando la petición del usuario y su diagnóstico. Conserva el diseño, navegación, campos y acciones que no requieren corrección. Devuelve SOLO JSON {"mockups":[{"nombre_pantalla":"slug exacto","preview_code":"documento HTML5 completo corregido"}]}. No reemplaces contenido por resúmenes ni puntos suspensivos.\nCONTEXTO:\n{{CONTEXTO_PROYECTO}}'
+      : this.leerPrompt(process.env.MOCKUP_PROMPT_FILE || 'disenador_mockups_compacto.md');
     const promptCompleto = this._construirPromptCompleto(promptBase, contextoProyecto, pantallas, insumoAdicional);
 
     let resultado = null;
@@ -46,12 +48,14 @@ class MockupIaService {
       let tokensProveedor = tokensEstimados;
       if (proveedor === 'groq') {
         const presupuestoGroq = Number(process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000);
-        if (tokensProveedor > presupuestoGroq) {
+        // Una edición necesita todo el HTML y el diagnóstico. Si no caben, probar
+        // otro proveedor; recortar el documento produce cambios incompletos.
+        if (tokensProveedor > presupuestoGroq && !modoEdicion) {
           promptProveedor = this._construirPromptCompactoGroq(contextoProyecto, pantallas, insumoAdicional, presupuestoGroq);
           tokensProveedor = this._estimarTokens(promptProveedor);
         }
       }
-      const intento = await this._intentarProveedor(proveedor, promptProveedor, tokensProveedor);
+      const intento = await this._intentarProveedor(proveedor, promptProveedor, tokensProveedor, { modoEdicion });
       advertencias.push(...intento.advertencias);
       if (intento.texto) {
         resultado = intento.texto;
@@ -70,7 +74,7 @@ class MockupIaService {
       }
       if (reabiertos) {
         for (const proveedor of this._ordenProveedores()) {
-          const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados);
+          const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados, { modoEdicion });
           advertencias.push(...intento.advertencias);
           if (intento.texto) {
             resultado = intento.texto;
@@ -172,7 +176,7 @@ class MockupIaService {
     return { tipo: 'transitorio', reintentable: true };
   }
 
-  async _intentarProveedor(proveedor, prompt, tokensEstimados) {
+  async _intentarProveedor(proveedor, prompt, tokensEstimados, { modoEdicion = false } = {}) {
     const advertencias = [];
     const modelos = this.models[proveedor] || [];
     if (modelos.length === 0) return { texto: null, modelo: null, advertencias: [`${proveedor}: sin modelos configurados`] };
@@ -186,7 +190,9 @@ class MockupIaService {
     }
 
     if (proveedor === 'groq') {
-      const presupuesto = Number(process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000);
+      const presupuesto = Number(modoEdicion
+        ? (process.env.GROQ_MOCKUP_EDIT_INPUT_BUDGET || 7000)
+        : (process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000));
       if (tokensEstimados > presupuesto) {
         return { texto: null, modelo: null, advertencias: [`Groq omitido: entrada estimada ${tokensEstimados} > presupuesto ${presupuesto}`] };
       }
@@ -200,7 +206,7 @@ class MockupIaService {
       }
       try {
         console.log(`[MockupIaService] Generando con ${clave} (~${tokensEstimados} tokens de entrada)...`);
-        const texto = await this._solicitar(proveedor, modelo, prompt);
+        const texto = await this._solicitar(proveedor, modelo, prompt, { modoEdicion });
         if (texto) {
           this.circuitos.delete(clave);
           return { texto, modelo, advertencias };
@@ -217,7 +223,7 @@ class MockupIaService {
     return { texto: null, modelo: null, advertencias };
   }
 
-  async _solicitar(proveedor, modelo, prompt) {
+  async _solicitar(proveedor, modelo, prompt, { modoEdicion = false } = {}) {
     if (proveedor === 'gemini') {
       if (!this.geminiApiKey) throw Object.assign(new Error('GEMINI_API_KEY no configurada'), { response: { status: 401 } });
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${this.geminiApiKey}`;
@@ -237,7 +243,7 @@ class MockupIaService {
       : 'https://openrouter.ai/api/v1/chat/completions';
     const maxTokens = proveedor === 'groq'
       ? Number(process.env.GROQ_MOCKUP_MAX_OUTPUT_TOKENS || 4800)
-      : Number(process.env.OPENROUTER_MOCKUP_MAX_OUTPUT_TOKENS || 8000);
+      : Number(modoEdicion ? (process.env.OPENROUTER_MOCKUP_EDIT_MAX_OUTPUT_TOKENS || 12000) : (process.env.OPENROUTER_MOCKUP_MAX_OUTPUT_TOKENS || 8000));
     const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
     if (proveedor === 'openrouter') Object.assign(headers, { 'HTTP-Referer': 'https://icase.app', 'X-Title': 'I-CASE Mockups' });
     const res = await axios.post(url, {

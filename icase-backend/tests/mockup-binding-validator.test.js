@@ -15,6 +15,26 @@ const page = (body) => `<!DOCTYPE html><html><body><main>${body}</main></body></
 const check = (body, options = {}) => new MockupBindingValidator().validar({ html: page(body), requerimientos, contrato, ...options });
 
 describe('MockupBindingValidator', () => {
+  test('el nombre del formulario no depende de sus labels, opciones o valores', () => {
+    const before = check('<form data-accion="RF-03.crear"><label>Sala<input name="sala"></label><button type="submit" data-accion="ui">Reservar</button></form>');
+    const after = check('<form data-accion="RF-03.crear"><label>Fecha<input name="fecha"></label><label>Sala<input name="sala"></label><button type="submit" data-accion="ui">Reservar</button></form>');
+    expect(before.enlaces[0].control).toBe('Reservar');
+    expect(after.enlaces[0].control).toBe('Reservar');
+    expect(after.enlaces[0].campos_faltantes).toEqual([]);
+  });
+
+  test('formulario y submit con la misma operación generan un solo diagnóstico', () => {
+    const result = check('<form id="reserva" data-accion="RF-03.crear"><input name="sala"><button id="guardar" data-accion="RF-03.crear">Reservar</button></form>');
+    expect(result.enlaces).toHaveLength(1);
+    expect(result.advertencias).toHaveLength(1);
+    expect(result.enlaces[0]).toEqual(expect.objectContaining({ control_id: 'guardar', formulario_id: 'reserva', tipo_control: 'button' }));
+  });
+
+  test('no une formularios distintos que ejecutan la misma operación', () => {
+    const content = '<form data-accion="RF-03.crear"><input name="sala"><button data-accion="RF-03.crear">Reservar</button></form>';
+    expect(check(content + content).enlaces).toHaveLength(2);
+  });
+
   test('un formulario con enlace válido y campos del esquema no genera advertencias', () => {
     const result = check('<form><input name="sala"><input name="fecha"><button data-accion="RF-03.crear">Confirmar reserva</button></form>');
     expect(result.advertencias).toEqual([]);

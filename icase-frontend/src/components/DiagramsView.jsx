@@ -23,6 +23,7 @@ import RegenerateDiagramDialog from "./RegenerateDiagramDialog";
 import DiagramProgressIndicator from "./DiagramProgressModal";
 import { ToastContainer, useToasts } from "./Toast";
 import { generateMockupsApi } from "../services/api";
+import { mockupCorrectionResult } from "../utils/mockupCorrectionResult";
 
 export default function DiagramsView({
   diagrams,
@@ -379,6 +380,7 @@ export default function DiagramsView({
           throw new Error("No se encontró el ID del proyecto para procesar mockups.");
         }
         const targetSlug = activeMockupEntry?.slug || activeMockup?.nombre_pantalla || "";
+        if (!targetSlug) throw new Error("Selecciona la pantalla que quieres corregir.");
         const targetTitle = activeMockupEntry?.nombre || activeMockup?.nombre_visible || activeMockup?.nombre_pantalla || "la pantalla seleccionada";
         const pantallasTarget = targetSlug ? [targetSlug] : [];
         if (processingToastIdRef.current) removeToast(processingToastIdRef.current);
@@ -395,7 +397,8 @@ export default function DiagramsView({
           removeToast(loadingToastId);
           processingToastIdRef.current = null;
         }
-        if (result && result.mockups && result.mockups.length > 0) {
+        const correction = mockupCorrectionResult(result, activeMockup, targetSlug);
+        if (correction.applied) {
           setCorrectionProgress(100);
           if (onUpdateMockups) {
             onUpdateMockups(result.mockups);
@@ -404,11 +407,20 @@ export default function DiagramsView({
           setIsFixing(false);
           setActiveCorrectionPrompt(null);
           setCorrectionProgress(0);
-          addToast({
-            type: "success",
-            title: "Mockup actualizado",
-            message: `Se aplicó el ajuste en "${targetTitle}": "${text}"`
-          });
+          const remainingWarnings = correction.remainingWarnings;
+          if (remainingWarnings.length > 0) {
+            addToast({
+              type: "warning",
+              title: "Mockup actualizado con advertencias pendientes",
+              message: `${correction.resolvedWarnings.length ? 'Se verificó la corrección solicitada' : 'Se guardaron cambios'} en "${targetTitle}". Quedan ${remainingWarnings.length} advertencia(s) por revisar.`
+            });
+          } else {
+            addToast({
+              type: "success",
+              title: "Mockup actualizado",
+              message: `Se aplicó el ajuste en "${targetTitle}": "${text}"`
+            });
+          }
         } else {
           setIsFixing(false);
           setActiveCorrectionPrompt(null);
@@ -416,7 +428,7 @@ export default function DiagramsView({
           addToast({
             type: "error",
             title: "No se pudo actualizar el mockup",
-            message: result?.error || "La IA no devolvió mockups para este ajuste. Intenta reformular tu instrucción."
+            message: correction.error
           });
         }
       } else {

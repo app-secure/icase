@@ -91,7 +91,10 @@ function samplePayload(schema, rules, salt) {
   for (const rule of rules) {
     const field = rule.campo;
     const base = { regla: rule.id, tipo: rule.tipo };
-    if (rule.tipo === 'requerido' && (payload[field] !== undefined || parents.some((parent) => parent.campo === field))) cases.push({ ...base, accion: 'crear', omitir: [field], esperado: 422 });
+    if (rule.tipo === 'requerido' && !defaulted.has(field) && !ruleFor('maquina_estados', field) && !ruleFor('calculo', field)
+      && (payload[field] !== undefined || parents.some((parent) => parent.campo === field))) {
+      cases.push({ ...base, accion: 'crear', omitir: [field], esperado: 422 });
+    }
     if (rule.tipo === 'rango' && payload[field] !== undefined) cases.push({ ...base, accion: 'crear', cuerpo: { [field]: rule.max !== undefined ? rule.max + 1 : rule.min - 1 }, esperado: 422 });
     if (rule.tipo === 'longitud' && payload[field] !== undefined) {
       if (rule.max !== undefined) cases.push({ ...base, accion: 'crear', cuerpo: { [field]: 'x'.repeat(rule.max + 1) }, esperado: 422 });
@@ -405,8 +408,9 @@ async function exerciseOpenApi(api, operations, auth) {
     if (declared('DELETE') !== Boolean(item && item.delete)) fail(declared('DELETE') ? 'falta documentar eliminar en ' + operation.collectionPath + '/{id}' : 'se documenta eliminar en ' + operation.collectionPath + '/{id} pero la operación no lo declara');
     const required = collection.post ? ((((collection.post.requestBody || {}).content || {})['application/json'] || {}).schema || {}).$ref : undefined;
     const schema = required ? doc.components.schemas[required.split('/').pop()] : null;
+    const defaulted = new Set((operation.rules || []).filter((rule) => ['valor_por_defecto', 'maquina_estados'].includes(rule.tipo)).map((rule) => rule.campo));
     for (const rule of operation.rules || []) {
-      if (rule.tipo === 'requerido' && schema && !(schema.required || []).includes(rule.campo)) fail(operation.id + ': la regla ' + rule.id + ' no figura como campo obligatorio');
+      if (rule.tipo === 'requerido' && schema && !defaulted.has(rule.campo) && !(schema.required || []).includes(rule.campo)) fail(operation.id + ': la regla ' + rule.id + ' no figura como campo obligatorio');
       if (rule.tipo === 'rango' && schema && schema.properties[rule.campo].maximum !== rule.max) fail(operation.id + ': la regla ' + rule.id + ' no figura como máximo');
     }
   }

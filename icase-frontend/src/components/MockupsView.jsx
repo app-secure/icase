@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Download,
   Info as InfoIcon, Layout, ListTree, Loader2, Monitor, Palette,
-  RotateCcw, Smartphone, Tablet, WandSparkles
+  RotateCcw, Smartphone, Tablet, Trash2, WandSparkles
 } from "lucide-react";
 import {
-  fetchLatestMockupJobApi, fetchMockupJobApi, fetchMockupsApi,
+  deleteMockupApi, fetchLatestMockupJobApi, fetchMockupJobApi, fetchMockupsApi,
   startMockupJobApi, suggestMockupDesignSystemApi, updateMockupDesignSystemApi
 } from "../services/api";
 import { DEFAULT_DESIGN_SYSTEM, prepareMockupHtml } from "../utils/mockupHtml";
@@ -48,6 +48,7 @@ export default function MockupsView({
   const [activeJob, setActiveJob] = useState(null);
   const [savingPalette, setSavingPalette] = useState(false);
   const [suggestingPalette, setSuggestingPalette] = useState(false);
+  const [cleaningOrphans, setCleaningOrphans] = useState(false);
   const [traceability, setTraceability] = useState(null);
   const handledJobRef = useRef(null);
   const initializedSelection = useRef(false);
@@ -141,6 +142,29 @@ export default function MockupsView({
   const currentMockup = currentEntry ? mockupMap.get(currentEntry.slug) : null;
   const currentPosition = currentEntry ? screens.findIndex(p => p.slug === currentEntry.slug) : -1;
   const busy = ["encolado", "procesando"].includes(activeJob?.estado);
+  const orphanMockups = useMemo(() => {
+    if (!manifest.length) return [];
+    const validIds = new Set(manifest.flatMap(item => [item.slug, item.pantalla_id]).filter(Boolean));
+    return mockups.filter(m => ![m.nombre_pantalla, m.pantalla_id].some(id => validIds.has(id)));
+  }, [manifest, mockups]);
+
+  const removeOrphanMockups = async () => {
+    if (!projectId || !orphanMockups.length || cleaningOrphans) return;
+    try {
+      setCleaningOrphans(true);
+      for (const orphan of orphanMockups) {
+        await deleteMockupApi(projectId, orphan.nombre_pantalla);
+      }
+      const remaining = mockups.filter(m => !orphanMockups.some(o => o.nombre_pantalla === m.nombre_pantalla));
+      onUpdateMockup?.(remaining);
+      await loadCatalog();
+      notify({ type: "success", message: `Se eliminaron ${orphanMockups.length} mockup(s) fuera del árbol aprobado.` });
+    } catch (error) {
+      notify({ type: "error", message: error.message || "No se pudieron eliminar los mockups obsoletos." });
+    } finally {
+      setCleaningOrphans(false);
+    }
+  };
 
   useEffect(() => {
     if (currentEntry) {
@@ -217,6 +241,19 @@ export default function MockupsView({
           </span></summary>
           <p className="mt-1">{traceability.metricas?.criterios_ui_con_evidencia || 0}/{traceability.metricas?.criterios_ui_evaluados || 0} criterios UI específicos con evidencia. Vincular un RF no garantiza su implementación completa.</p>
           {[...(traceability.errores || []), ...(traceability.advertencias || [])].map((message, index) => <p key={index} className="mt-1">• {message}</p>)}
+          {orphanMockups.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={busy || cleaningOrphans}
+                onClick={removeOrphanMockups}
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+              >
+                <Trash2 size={12} />
+                {cleaningOrphans ? "Eliminando obsoletos…" : `Eliminar mockups fuera del árbol (${orphanMockups.length})`}
+              </button>
+            </div>
+          )}
         </details>
       )}
 

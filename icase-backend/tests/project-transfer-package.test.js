@@ -41,3 +41,21 @@ test('informe manipulado no determina integridad y no permite contaminación de 
   expect(() => P.verify(JSON.stringify(b).replace('"nombre":"Proyecto"', '"__proto__":{"admin":true},"nombre":"Proyecto"'), 'schema-test')).toThrow('claves');
   expect({}.admin).toBeUndefined();
 });
+
+test('al importar un proyecto depura mockups huérfanos fuera del árbol de navegación', () => {
+  const TransferService = require('../src/infrastructure/services/ProjectTransferService');
+  const service = new TransferService({ models: Object.fromEntries(P.GROUPS.map(k => [k, { schema: { paths: {} } }])) });
+  const remapped = {
+    diagramas: [{ tipo: 'arbol_navegacion', codigo_plantuml: '@startwbs\n* App\n** Módulo\n*** Paquetes Adquiridos\n@endwbs' }],
+    disenos: [{
+      mockups: [
+        { nombre_pantalla: 'pantalla-obsoleta', pantalla_id: 'pantalla-obsoleta' },
+        { nombre_pantalla: 'paquetes-adquiridos', pantalla_id: 'paquetes-adquiridos' }
+      ],
+      trazabilidad_mockups: { valido: false, errores: ['huérfano'] }
+    }]
+  };
+  service._depurarMockupsImportados(remapped);
+  expect(remapped.disenos[0].mockups).toEqual([{ nombre_pantalla: 'paquetes-adquiridos', pantalla_id: 'paquetes-adquiridos' }]);
+  expect(remapped.disenos[0].trazabilidad_mockups).toEqual({});
+});

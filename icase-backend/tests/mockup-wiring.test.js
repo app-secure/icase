@@ -35,6 +35,13 @@ describe('HtmlToJsxTransformer: enlaces data-accion', () => {
     expect(jsx).not.toContain('onclick');
     expect(jsx).not.toContain('handleAction');
   });
+
+  test('no cablea onClick en form, select, textarea ni input de datos aunque traigan data-accion', () => {
+    const html = '<form data-accion="RF-03.crear"><input type="text" name="sala" data-accion="RF-03.crear"><select name="estado" data-accion="RF-03.crear"><option>A</option></select><button type="submit" data-accion="RF-03.crear">Guardar</button></form>';
+    const jsx = HtmlToJsxTransformer.transform(body(html), { operaciones });
+    expect((jsx.match(/handleAction\(/g) || [])).toHaveLength(1);
+    expect(jsx).toContain('<button type="submit" data-accion="RF-03.crear" onClick={(event) => handleAction(event, "rf-03", "crear")}>Guardar</button>');
+  });
 });
 
 describe('GenericFrontendGenerator: páginas con enlaces', () => {

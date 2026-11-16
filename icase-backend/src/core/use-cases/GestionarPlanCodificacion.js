@@ -64,6 +64,12 @@ class GestionarPlanCodificacion {
         etapas: this.workflow.crearEtapasIniciales()
       });
     }
+    plan = await this.workflow.reconciliarPlan({
+      plan,
+      proyectoId,
+      planRepository: this.planCodificacionRepository,
+      artefactoRepository: this.artefactoRepository
+    });
     const result = { proyecto: { id: proyecto.id, nombre: proyecto.nombre }, ...this._conModulos(this.workflow.enriquecer(plan)) };
     const requirements = this.requerimientoRepository ? await this.requerimientoRepository.listarPorProyecto(proyectoId) : [];
     const coverage = new GenerationCoverageService();

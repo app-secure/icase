@@ -3,13 +3,25 @@ const METHODS = { consultar: 'GET', crear: 'POST', editar: 'PATCH', eliminar: 'D
 const NOT_FIELDS = new Set(['submit', 'button', 'reset', 'file', 'image']);
 
 const scopeOf = (control) => control.closest('form') || control.closest('main') || control.ownerDocument.body;
+const formOf = (control) => {
+  if (control.tagName === 'FORM') return control;
+  if (control.hasAttribute('form')) {
+    const form = control.ownerDocument.getElementById(control.getAttribute('form'));
+    return form?.tagName === 'FORM' ? form : null;
+  }
+  return control.form || control.closest('form');
+};
 const recordId = (control) => control.closest('[data-id]')?.getAttribute('data-id') || '';
 
-/** Campos con `name` del formulario del control; sin formulario, los de la pantalla. Los vacíos se omiten. */
-export function collectFields(control) {
+/** Campos del formulario asociado, incluidos los externos. Solo las consultas admiten filtros de pantalla. */
+export function collectFields(control, { requireForm = false } = {}) {
   const fields = {};
-  for (const field of scopeOf(control).querySelectorAll('input[name], select[name], textarea[name]')) {
+  const form = formOf(control);
+  if (requireForm && !form) return fields;
+  const controls = form ? Array.from(form.elements) : scopeOf(control).querySelectorAll('input[name], select[name], textarea[name]');
+  for (const field of controls) {
     const name = field.getAttribute('name');
+    if (!name || !['INPUT', 'SELECT', 'TEXTAREA'].includes(field.tagName)) continue;
     const type = field.tagName === 'INPUT' ? (field.getAttribute('type') || 'text').toLowerCase() : '';
     if (field.disabled || NOT_FIELDS.has(type)) continue;
     if (type === 'checkbox') { fields[name] = field.checked; continue; }
@@ -63,16 +75,25 @@ export function fillFields(container, data) {
  */
 export async function runAction({ event, operation, verb, api, can, onResult, confirmar, selected, onSelect, identidad }) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const control = event && event.currentTarget;
+  if (control) {
+    const tag = String(control.tagName || '').toUpperCase();
+    const type = tag === 'INPUT' ? String(control.getAttribute('type') || 'text').toLowerCase() : '';
+    if (['FORM', 'SELECT', 'TEXTAREA'].includes(tag) || (tag === 'INPUT' && !['button', 'submit', 'reset'].includes(type))) return;
+  }
   const method = METHODS[verb];
   if (!method) return onResult({ estado: 'error', mensaje: `Acción desconocida: ${verb}` });
   if (can && !can(operation, method)) return onResult({ estado: 'error', mensaje: 'No tienes permiso para esta acción.' });
-  const control = event && event.currentTarget;
   // Las cuentas de usuario viven en /api/users (con la contraseña protegida), no en una tabla de datos.
   const accounts = identidad && identidad[operation] === 'usuarios';
   const base = accounts ? '/api/users' : `/api/operations/${encodeURIComponent(operation)}`;
-  const read = (target) => (accounts ? accountFields(collectFields(target)) : collectFields(target));
+  const read = (target) => (accounts ? accountFields(collectFields(target, { requireForm: true })) : collectFields(target, { requireForm: true }));
   const ask = confirmar || ((message) => (typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true));
   try {
+    if (['crear', 'editar'].includes(verb) && (!control || !formOf(control))) {
+      return onResult({ estado: 'aviso', mensaje: 'Esta acción necesita un formulario asociado antes de guardar.' });
+    }
     if (verb === 'consultar') {
       const fields = control ? collectFields(control) : {};
       const params = new URLSearchParams({ limit: '20' });

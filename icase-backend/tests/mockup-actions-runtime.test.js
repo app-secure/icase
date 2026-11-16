@@ -174,4 +174,15 @@ describe('mockup-actions: ejecución', () => {
     expect(api).not.toHaveBeenCalled();
     expect(results.at(-1).estado).toBe('error');
   });
+
+  test('ignora disparos sobre form, select o input de datos y detiene la propagación del evento', async () => {
+    const api = jest.fn().mockResolvedValue({ id: 1 });
+    const doc = page('<form id="f"><input id="i" name="sala" value="A"><select id="s" name="turno"><option value="m">M</option></select><button id="b" type="submit">Enviar</button></form>');
+    for (const id of ['f', 'i', 's']) {
+      const stopPropagation = jest.fn();
+      await runtime.runAction({ event: { preventDefault: jest.fn(), stopPropagation, currentTarget: doc.getElementById(id) }, operation: 'rf-03', verb: 'crear', api, onResult: () => {} });
+      expect(stopPropagation).toHaveBeenCalled();
+    }
+    expect(api).not.toHaveBeenCalled();
+  });
 });

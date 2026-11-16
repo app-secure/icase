@@ -262,4 +262,14 @@ describe('motor de reglas y ejercitador sobre el código generado', () => {
     const created = await api('/api/operations/rf-01', 'POST', { nombre: 'Ana', email: 'ana@example.com' });
     expect(created.data.data.activo).toBe(true);
   });
+
+  test('un campo con máquina de estados y regla requerido del dominio se cumple en el motor y en OpenAPI', async () => {
+    const reglasConDomEstado = [...RULES, { ...base, id: 'DOM-reserva-estado', tipo: 'requerido', campo: 'estado', mensaje: 'estado es obligatorio.' }];
+    const loaded = await cargar(reglasConDomEstado);
+    const api = apiEnMemoria({ ...loaded, model: { ...loaded.model, tables: Object.fromEntries(Object.entries(loaded.model.tables).map(([name, table]) => [name, { ...table, name }])) } });
+    for (const operation of loaded.operations) await samplePayload.exerciseOperation(api, loaded.operations, operation);
+    const reserva = loaded.operations.find((item) => item.id === 'RF-02');
+    const sample = samplePayload(reserva.schema, reserva.rules, 'dom');
+    expect(sample.cases.some((item) => item.regla === 'DOM-reserva-estado' && item.omitir?.includes('estado'))).toBe(false);
+  });
 });

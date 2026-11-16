@@ -97,6 +97,7 @@ networks:
       return result;
     };
     let safe = false;
+    let smokeDeployed = false;
     try {
       const resolved = await execute(['config', '--format', 'json'], 'Aislamiento del Compose exportado', 60000, true);
       this.validate(JSON.parse(resolved.stdout), root, project, !mobileOnly);
@@ -107,6 +108,7 @@ networks:
       const probe = `const targets=${JSON.stringify(targets)};let last='';for(let i=0;i<90;i++){try{for(const url of targets){const response=await fetch(url,{signal:AbortSignal.timeout(2000)});if(!response.ok||(url.endsWith('/health')&&(await response.json()).status!=='ok'))throw new Error('Servicio no listo: '+url)}console.log('Backend, réplicas y frontend exportados listos');process.exit(0)}catch(e){last=e.message}await new Promise(r=>setTimeout(r,1000))}throw new Error('La entrega no está lista: '+last)`;
       await execute(['run', '--rm', '--no-deps', 'smoke', 'node', '--input-type=module', '-e', probe], 'Disponibilidad HTTP de la entrega', 150000);
       await execute(['run', '--rm', '--no-deps', 'smoke'], 'CRUD, permisos y N:M sobre el despliegue exportado');
+      smokeDeployed = true;
       await execute(['run', '--rm', '--no-deps', 'tests'], 'Integración y navegador sobre el despliegue exportado');
       return { protocolo_despliegue: 'compose-exportado-v1', pruebas: checks };
     } catch (error) {
@@ -118,6 +120,7 @@ networks:
       }
       error.stdout = redact(error.stdout); error.stderr = redact(error.stderr); error.message = redact(error.message);
       error.pruebas_despliegue = checks;
+      if (smokeDeployed) error.protocolo_despliegue = 'compose-exportado-v1';
       throw error;
     } finally {
       // Solo tras resolver y validar nombres, volúmenes y montajes de este proyecto exclusivo.

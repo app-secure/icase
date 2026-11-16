@@ -772,7 +772,7 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
         if (data.trabajo.estado === 'completado') {
           setLoading(false);
           setResult(data.verificacion);
-          onArtifactChange({ ...artifact, verificacion: data.verificacion });
+          onArtifactChange((prev) => ({ ...(prev || artifact), verificacion: data.verificacion }));
         } else if (data.trabajo.estado === 'fallido') {
           setLoading(false);
           setError(data.trabajo.error || 'La verificación falló en el contenedor aislado.');

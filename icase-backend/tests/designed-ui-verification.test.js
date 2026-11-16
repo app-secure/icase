@@ -153,4 +153,12 @@ describe('prueba de navegador sobre la interfaz diseñada', () => {
     const narrowed = { ...operation('RF-03', 'rf-03'), methods: ['GET'] };
     expect(spec(await build([withLinks([{ operacion: 'rf-03', verbo: 'crear', control: 'Crear' }])], { operations: [narrowed] }))).toBeUndefined();
   });
+
+  test('espera opciones attached en select, rellena campos readOnly del formulario y acota al form del botón', async () => {
+    const text = spec(await build([withLinks([{ operacion: 'rf-03', verbo: 'crear', control: 'Confirmar reserva' }])]));
+    expect(text).toContain("waitFor({ state: 'attached', timeout: 5000 })");
+    expect(text).toContain("xpath=ancestor::form[1]");
+    expect(text).toContain("element.removeAttribute('readonly')");
+    expect(text).toContain('neutralizeFieldActionHandlers');
+  });
 });

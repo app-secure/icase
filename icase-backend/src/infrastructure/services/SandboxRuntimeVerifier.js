@@ -24,9 +24,11 @@ class SandboxRuntimeVerifier {
     const project = `icasev${path.basename(temporary).replace(/[^a-z0-9]/gi, '').toLowerCase()}`;
     const checks = [];
     let deployment = {};
+    let context = {};
+    let smokePassed = false;
     try {
       await this._stage(temporary, artefacto.archivos || []);
-      const context = await this._helpers(temporary, artefacto.tipo);
+      context = await this._helpers(temporary, artefacto.tipo);
       const docker = async (args, label, timeout = 360000) => {
         const { stdout, stderr } = await this.run('docker', args, { cwd: temporary, timeout, maxBuffer: 2 * 1024 * 1024 });
         checks.push({ paso: label, resultado: 'correcto', salida: `${stdout || ''}${stderr || ''}`.slice(-2000) });
@@ -41,6 +43,7 @@ class SandboxRuntimeVerifier {
           await docker(['compose', '--env-file', 'ops/.env.example', '-f', 'ops/docker-compose.yml', 'config', '--quiet'], 'Validación de Compose exportado');
         }
         const compose = ['compose', '-p', project, '-f', 'verify.compose.yml'];
+        let testError = null;
         try {
           const integrated = ['pruebas', 'paquete_entrega'].includes(artefacto.tipo);
           await docker([...compose, 'build', ...(!context.java ? ['--build-arg', 'ICASE_AUDIT_NONCE=' + randomUUID()] : []), 'backend', 'smoke', ...(integrated ? [...(context.web ? ['frontend'] : []), 'tests'] : [])], integrated ? 'Compilación de backend, frontend y pruebas en Docker' : 'Compilación backend en Docker', 900000);
@@ -49,15 +52,29 @@ class SandboxRuntimeVerifier {
           }
           await docker([...compose, 'up', '-d', '--wait', 'database', 'backend', ...(context.replicas?['backend_peer']:[]), ...(integrated && context.web ? ['frontend'] : [])], integrated ? 'Arranque de base de datos, backend y frontend con health checks' : 'Arranque de base de datos y backend con health checks', 240000);
           await docker([...compose, 'run', '--rm', 'smoke'], 'Prueba CRUD y N:M HTTP derivada del contrato', 240000);
-          if (integrated) await docker([...compose, 'run', '--rm', 'tests'], 'Pruebas de integración del paquete', 240000);
+          smokePassed = true;
+          if (integrated) {
+            try {
+              await docker([...compose, 'run', '--rm', 'tests'], 'Pruebas de integración del paquete', 240000);
+            } catch (err) {
+              testError = err;
+            }
+          }
         } finally {
           try { await this.run('docker', [...compose, 'down', '-v', '--rmi', 'local', '--remove-orphans'], { cwd: temporary, timeout: 120000 }); }
           catch { /* El directorio temporal y el nombre de proyecto son exclusivos de esta verificación. */ }
         }
-      }
-      if (artefacto.tipo === 'paquete_entrega') {
-        deployment = await new ExportedComposeVerifier({ run: this.run }).verificar(temporary, project);
-        checks.push(...deployment.pruebas);
+        if (artefacto.tipo === 'paquete_entrega') {
+          try {
+            deployment = await new ExportedComposeVerifier({ run: this.run }).verificar(temporary, project);
+            checks.push(...deployment.pruebas);
+          } catch (deployError) {
+            if (deployError.protocolo_despliegue) deployment.protocolo_despliegue = deployError.protocolo_despliegue;
+            if (!testError) throw deployError;
+            checks.push(...(deployError.pruebas_despliegue || []));
+          }
+        }
+        if (testError) throw testError;
       }
       return { estado: 'apta', nivel: 'ejecucion_aislada', protocolo: 'runtime-v2-associations', ...(!context.java && artefacto.tipo !== 'codigo_frontend' ? { protocolo_dependencias: DependencyAudit.protocol } : {}), ...(deployment.protocolo_despliegue ? { protocolo_despliegue: deployment.protocolo_despliegue } : {}), pruebas: checks, errores: [] };
     } catch (error) {
@@ -66,8 +83,15 @@ class SandboxRuntimeVerifier {
       const lines = diagnostic.split(/\r?\n/);
       const audit = lines.filter((line) => /Severity:\s*(?:high|critical)|high severity|critical severity|\d+ vulnerabilities.*high/i.test(line));
       const primary = [...new Set([...audit, ...lines.filter((line) => /error TS|error:|failed to solve|npm error|Caused by:|FAIL |Error:/.test(line))])].slice(0, 12).join('\n').slice(0, 2000);
-      return { estado: 'fallida', nivel: 'ejecucion_aislada', pruebas: checks,
-        errores: [`No pasó la ejecución aislada: ${primary ? primary + '\n' : ''}${diagnostic.slice(primary ? -2000 : -4000)}`] };
+      return {
+        estado: 'fallida',
+        nivel: 'ejecucion_aislada',
+        ...(smokePassed ? { protocolo: 'runtime-v2-associations' } : {}),
+        ...(smokePassed && !context.java && artefacto.tipo !== 'codigo_frontend' ? { protocolo_dependencias: DependencyAudit.protocol } : {}),
+        ...(deployment.protocolo_despliegue ? { protocolo_despliegue: deployment.protocolo_despliegue } : {}),
+        pruebas: checks,
+        errores: [`No pasó la ejecución aislada: ${primary ? primary + '\n' : ''}${diagnostic.slice(primary ? -2000 : -4000)}`]
+      };
     } finally {
       try { await this.run('docker', ['image', 'rm', `${project}-frontend`], { cwd: temporary, timeout: 30000 }); }
       catch { /* Imagen de esta verificación inexistente o ya eliminada. */ }

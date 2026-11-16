@@ -134,6 +134,8 @@ class MockupController {
 
       res.json({
         mockups,
+        totalProcesados: resultado?.totalProcesados ?? 0,
+        ajustes: resultado?.ajustes || [],
         proveedorUsado,
         advertencias
       });

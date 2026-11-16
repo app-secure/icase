@@ -269,25 +269,10 @@ class GestionarArtefactosCodigo {
   }
 
   async revisarBackend({ proyectoId, artefactoId, decision, observaciones = '', modo_permisivo = false }) {
-    if (!['aprobar', 'rechazar'].includes(decision)) throw new Error('Decisión de artefacto no válida.');
-    if (decision === 'rechazar' && !String(observaciones).trim()) throw new Error('Debes indicar observaciones para rechazar el backend.');
-    const plan = await this.planRepository.obtenerPorProyecto(proyectoId);
-    const artefacto = await this.artefactoRepository.obtenerPorId(artefactoId);
-    if (!plan || !artefacto || String(artefacto.proyecto_id) !== String(proyectoId) || artefacto.tipo !== 'codigo_backend') {
-      throw new Error('Artefacto backend no encontrado para este proyecto.');
-    }
-    const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_backend');
-    if (String(ultimo?.id) !== String(artefactoId)) throw new Error('Solo se puede revisar la versión más reciente del backend.');
-    if (artefacto.estado !== 'en_revision') throw new Error('El artefacto backend ya fue revisado.');
-    const verificacion = decision === 'aprobar' ? this._exigirVerificacion(artefacto, { permisivo: modo_permisivo === true }) : undefined;
-    const estado = decision === 'aprobar' ? 'aprobado' : 'rechazado';
-    const actualizado = await this.artefactoRepository.actualizar(artefactoId, {
-      estado, aprobado: decision === 'aprobar',
-      ...(verificacion ? { verificacion } : {}),
-      ...(decision === 'rechazar' ? { errores: [...(artefacto.errores || []), String(observaciones).trim()] } : {})
+    return this._revisarArtefacto({
+      proyectoId, artefactoId, decision, observaciones, modo_permisivo,
+      tipo: 'codigo_backend', etapa: 'generacion_backend', nombre: 'backend'
     });
-    await this._actualizarEtapa(plan, 'generacion_backend', decision === 'aprobar' ? CODE_PHASE_STATES.APPROVED : CODE_PHASE_STATES.REJECTED, observaciones);
-    return actualizado;
   }
 
   async revisarFrontend({ proyectoId, artefactoId, decision, observaciones = '' }) {
@@ -295,19 +280,20 @@ class GestionarArtefactosCodigo {
   }
 
   async generarPruebas(proyectoId) {
-    const [proyecto, plan, requerimientos, backend, frontend] = await Promise.all([
+    let [proyecto, plan, requerimientos, backend, frontend] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId), this.planRepository.obtenerPorProyecto(proyectoId),
       this.requerimientoRepository.listarPorProyecto(proyectoId),
       this.artefactoRepository.obtenerUltimoAprobado(proyectoId, 'codigo_backend'),
       this.artefactoRepository.obtenerUltimoAprobado(proyectoId, 'codigo_frontend')
     ]);
     if (!proyecto || !plan) throw new Error('Proyecto o plan de codificación no encontrado.');
+    plan = await this.workflow.reconciliarPlan({ plan, proyectoId, planRepository: this.planRepository, artefactoRepository: this.artefactoRepository });
     this.workflow.validarDependencias(plan, 'generacion_pruebas');
     if (!backend || !frontend) throw new Error('Debes aprobar backend y frontend antes de generar las pruebas.');
     const versionesOrigen = { codigo_backend: backend.version, codigo_frontend: frontend.version };
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pruebas-v11-identidad-rutas', versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({ contrato_generacion: 'pruebas-v14-designed-ui-resilient', versionesOrigen, rf: requerimientos.filter((item) => item.aprobado) })).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'pruebas');
-    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
+    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
     const generado = await this.testGenerator.generar({ proyecto, insumos: { requerimientos, backend, frontend }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({ proyecto_id: proyectoId, tipo: 'pruebas', version: (ultimo?.version || 0) + 1, estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, modulos: backend.modulos || this._modulosDelPlan(plan), ...generado });
     if (ultimo?.aprobado) await this.artefactoRepository.actualizar(ultimo.id, { estado: 'desactualizado', aprobado: false });
@@ -320,13 +306,14 @@ class GestionarArtefactosCodigo {
   }
 
   async generarInfraestructura(proyectoId) {
-    const [proyecto, plan, requerimientos, diagramas, backend, frontend] = await Promise.all([
+    let [proyecto, plan, requerimientos, diagramas, backend, frontend] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId), this.planRepository.obtenerPorProyecto(proyectoId),
       this.requerimientoRepository.listarPorProyecto(proyectoId), this.diagramaRepository.listarPorProyecto(proyectoId),
       this.artefactoRepository.obtenerUltimoAprobado(proyectoId, 'codigo_backend'),
       this.artefactoRepository.obtenerUltimoAprobado(proyectoId, 'codigo_frontend')
     ]);
     if (!proyecto || !plan) throw new Error('Proyecto o plan de codificación no encontrado.');
+    plan = await this.workflow.reconciliarPlan({ plan, proyectoId, planRepository: this.planRepository, artefactoRepository: this.artefactoRepository });
     this.workflow.validarDependencias(plan, 'generacion_infraestructura');
     if (!backend || !frontend) throw new Error('Debes aprobar backend y frontend antes de generar infraestructura.');
     const aprobados = diagramas.filter((item) => item.aprobado && item.estado === 'aprobado' && !item.desactualizado);
@@ -348,12 +335,13 @@ class GestionarArtefactosCodigo {
   }
 
   async generarPipeline(proyectoId) {
-    const [proyecto, plan, tests, infrastructure] = await Promise.all([
+    let [proyecto, plan, tests, infrastructure] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId), this.planRepository.obtenerPorProyecto(proyectoId),
       this.artefactoRepository.obtenerUltimoAprobado(proyectoId, 'pruebas'),
       this.artefactoRepository.obtenerUltimoAprobado(proyectoId, 'infraestructura')
     ]);
     if (!proyecto || !plan) throw new Error('Proyecto o plan de codificación no encontrado.');
+    plan = await this.workflow.reconciliarPlan({ plan, proyectoId, planRepository: this.planRepository, artefactoRepository: this.artefactoRepository });
     this.workflow.validarDependencias(plan, 'generacion_ci_cd');
     if (!tests || !infrastructure) throw new Error('Debes aprobar pruebas e infraestructura antes de generar CI/CD.');
     const decisiones = Object.fromEntries(plan.etapas.filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta).map((item) => [item.etapa, item.propuesta]));
@@ -377,20 +365,21 @@ class GestionarArtefactosCodigo {
 
   async generarPaquete(proyectoId) {
     const tipos = ['codigo_backend', 'codigo_frontend', 'pruebas', 'infraestructura', 'pipeline_ci_cd'];
-    const [proyecto, plan, ...artefactos] = await Promise.all([
+    let [proyecto, plan, ...artefactos] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId), this.planRepository.obtenerPorProyecto(proyectoId),
       ...tipos.map((tipo) => this.artefactoRepository.obtenerUltimoAprobado(proyectoId, tipo))
     ]);
     if (!proyecto || !plan) throw new Error('Proyecto o plan de codificación no encontrado.');
+    plan = await this.workflow.reconciliarPlan({ plan, proyectoId, planRepository: this.planRepository, artefactoRepository: this.artefactoRepository });
     this.workflow.validarDependencias(plan, 'paquete_entrega');
     const faltantes = tipos.filter((_tipo, index) => !artefactos[index]);
     if (faltantes.length) throw new Error(`Faltan artefactos aprobados para la entrega: ${faltantes.join(', ')}.`);
     new GenerationCoverageService().exigirEntrega(artefactos[0]);
     for (const artefacto of artefactos) this._exigirVerificacion(artefacto);
     const versionesOrigen = Object.fromEntries(artefactos.map((item) => [item.tipo, item.version]));
-    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({contrato_generacion:'entrega-v3-resilient-links',versionesOrigen})).digest('hex');
+    const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({contrato_generacion:'entrega-v4-designed-ui-resilient',versionesOrigen})).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'paquete_entrega');
-    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado)) return { artefacto: ultimo, reutilizado: true };
+    if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
     const generado = await this.deliveryGenerator.generar({ proyecto, insumos: { artefactos }, versionesOrigen });
     const artefacto = await this.artefactoRepository.crear({ proyecto_id: proyectoId, tipo: 'paquete_entrega', version: (ultimo?.version || 0) + 1, estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, modulos: artefactos[0].modulos || this._modulosDelPlan(plan), ...generado });
     if (ultimo?.aprobado) await this.artefactoRepository.actualizar(ultimo.id, { estado: 'desactualizado', aprobado: false });
@@ -421,16 +410,46 @@ class GestionarArtefactosCodigo {
       if (faltan.length) throw new Error('Falta generar: ' + faltan.join(', '));
     }
     const verificacion = decision === 'aprobar' ? this._exigirVerificacion(artefacto, { permisivo: modo_permisivo === true }) : undefined;
+    const estadoAnterior = artefacto.estado;
+    const aprobadoAnterior = artefacto.aprobado;
     const actualizado = await this.artefactoRepository.actualizar(artefactoId, { estado: decision === 'aprobar' ? 'aprobado' : 'rechazado', aprobado: decision === 'aprobar', ...(verificacion ? { verificacion } : {}), ...(decision === 'rechazar' ? { errores: [...(artefacto.errores || []), String(observaciones).trim()] } : {}) });
-    await this._actualizarEtapa(plan, etapa, decision === 'aprobar' ? CODE_PHASE_STATES.APPROVED : CODE_PHASE_STATES.REJECTED, observaciones);
+    try {
+      await this._actualizarEtapa(plan, etapa, decision === 'aprobar' ? CODE_PHASE_STATES.APPROVED : CODE_PHASE_STATES.REJECTED, observaciones);
+    } catch (error) {
+      try {
+        await this.artefactoRepository.actualizar(artefactoId, { estado: estadoAnterior, aprobado: aprobadoAnterior });
+      } catch { /* Si tampoco se puede revertir, la reconciliación del plan reparará la etapa. */ }
+      throw error;
+    }
     return actualizado;
   }
 
   async _actualizarEtapa(plan, etapa, estado, observaciones) {
-    let etapas = plan.etapas.map((item) => item.etapa === etapa ? { ...item, estado, observaciones } : item);
-    if (estado === CODE_PHASE_STATES.IN_REVIEW) etapas = this.workflow.invalidarDependientes(etapas, etapa);
+    const proyectoId = plan?.proyecto_id;
+    const actualPlan = (proyectoId && typeof this.planRepository?.obtenerPorProyecto === 'function'
+      ? await this.planRepository.obtenerPorProyecto(proyectoId)
+      : null) || plan;
+    const etapasBase = (actualPlan.etapas || []).map((item) => item.etapa === etapa
+      ? {
+          ...item,
+          estado,
+          observaciones,
+          ...(estado === CODE_PHASE_STATES.APPROVED
+            ? { aprobada_en: new Date() }
+            : [CODE_PHASE_STATES.IN_REVIEW, CODE_PHASE_STATES.REJECTED].includes(estado)
+              ? { aprobada_por: null, aprobada_en: null }
+              : {})
+        }
+      : item);
+    let etapas = estado === CODE_PHASE_STATES.IN_REVIEW
+      ? this.workflow.invalidarDependientes(etapasBase, etapa)
+      : etapasBase;
     etapas = this.workflow.sincronizarBloqueos(etapas);
-    return this.planRepository.guardar(plan.proyecto_id, { etapas, version: (plan.version || 0) + 1 });
+    if (proyectoId && typeof this.artefactoRepository?.listarPorProyecto === 'function') {
+      const artefactos = await this.artefactoRepository.listarPorProyecto(proyectoId);
+      ({ etapas } = this.workflow.reconciliarEtapasConArtefactos(etapas, artefactos));
+    }
+    return this.planRepository.guardar(proyectoId, { etapas, version: (actualPlan.version || 0) + 1 });
   }
 }
 

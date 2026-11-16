@@ -283,4 +283,18 @@ describe('conformidad: el backend real cumple lo que documenta', () => {
     wrongBound.components.schemas.Reserva.properties.comensales.maximum = 5;
     expect(checker(wrongBound)(records).join('\n')).toContain('la petición enviada incumple el esquema documentado');
   }, 120000);
+
+  test('exerciseOpenApi acepta reglas requerido sobre un campo con máquina de estados o valor por defecto', async () => {
+    const reglasConDomEstado = [...reglas, { ...base, id: 'DOM-reserva-estado', tipo: 'requerido', campo: 'estado', mensaje: 'estado es obligatorio.' }];
+    const booted = await arrancar(acceso(), { decisiones: { reglas_negocio: { reglas: reglasConDomEstado }, control_acceso: acceso() } });
+    const access = await runtime.setupAccess(booted.base, {
+      base: booted.base, adminEmail: ENV.ADMIN_EMAIL, adminPassword: ENV.ADMIN_PASSWORD,
+      roles: Object.entries(booted.manifest.auth.roles).map(([id, role]) => ({ id, autoregistro: role.autoregistro === true }))
+    });
+    try {
+      await expect(runtime.exerciseOpenApi(access.admin, booted.manifest.operations, booted.manifest.auth)).resolves.toBeUndefined();
+    } finally {
+      await access.cleanup();
+    }
+  });
 });

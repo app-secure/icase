@@ -39,6 +39,23 @@ describe('generación del artefacto de pruebas', () => {
       }
     });
     expect(result.archivos.map((item) => item.ruta)).toEqual(expect.arrayContaining(['tests/unit/rules.test.js', 'tests/unit/processes.test.js', 'tests/support/calculations.cjs']));
+    const calculations = result.archivos.find((item) => item.ruta === 'tests/support/calculations.cjs').contenido;
+    expect(calculations).not.toContain('./store-support');
+    expect(calculations.match(/\bHttpError\b/g)?.length).toBeGreaterThan(1);
+    const loaded = { exports: {} };
+    new Function('module', 'exports', calculations)(loaded, loaded.exports);
+    expect(loaded.exports.derive([{ tipo: 'calculo', campo: 'total', expresion: { op: '*', izquierda: { campo: 'precio' }, derecha: { campo: 'cantidad' } } }], { precio: 3, cantidad: 4 }).total).toBe(12);
+  });
+
+  test('la configuración de Playwright tolera la carga de los contenedores de verificación', async () => {
+    const result = await new TestSuiteGenerator().generar({
+      proyecto: { nombre: 'Demo' }, versionesOrigen: {},
+      insumos: { requerimientos: [], backend: { version: 1, archivos: [] }, frontend: { version: 1, archivos: [] } }
+    });
+    const config = result.archivos.find((item) => item.ruta === 'tests/playwright.config.js').contenido;
+    expect(config).toContain('timeout: 120000');
+    expect(config).toContain('expect: { timeout: 15000 }');
+    expect(config).toContain('retries: 1');
   });
 
   test('reporta RF que no aparecen en ninguno de los códigos aprobados', async () => {

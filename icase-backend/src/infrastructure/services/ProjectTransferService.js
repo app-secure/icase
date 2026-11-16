@@ -101,6 +101,7 @@ class ProjectTransferService {
       analysis.contenido_hash = newHash;
     }
     const remapped = rewrite(data, mapping);
+    this._depurarMockupsImportados(remapped);
     // source hashes depend on original text/file names, not storage paths or owner IDs.
     for (const source of remapped.fuentes) source.ruta_archivo = source.ruta_archivo ? path.join(directory, `${source._id}.bin`) : '';
     for (const plan of remapped.plan_codigo) plan.modo_un_clic = null;
@@ -171,6 +172,21 @@ class ProjectTransferService {
       failure.cause = error;
       throw failure;
     } finally { clearInterval(heartbeat); }
+  }
+  /** Retira de un paquete importado los mockups huérfanos fuera de su árbol de navegación. */
+  _depurarMockupsImportados(remapped) {
+    const GenerarMockups = require('../../core/use-cases/GenerarMockups');
+    const navScreens = new GenerarMockups({})._pantallasDelProyecto(remapped?.diagramas || []).pantallas;
+    if (!navScreens.length) return;
+    const validIds = new Set(navScreens.flatMap(p => [p.slug, p.pantalla_id]).filter(Boolean));
+    for (const diseno of remapped.disenos || []) {
+      if (!Array.isArray(diseno.mockups) || !diseno.mockups.length) continue;
+      const depurados = diseno.mockups.filter(m => [m.nombre_pantalla, m.pantalla_id].some(id => validIds.has(id)));
+      if (depurados.length !== diseno.mockups.length) {
+        diseno.mockups = depurados;
+        diseno.trazabilidad_mockups = {};
+      }
+    }
   }
   async recover() {
     const stale = await this.journal.find({ estado: { $in: ['escribiendo', 'limpiando'] }, until: { $lt: new Date() } }).limit(20).lean();
