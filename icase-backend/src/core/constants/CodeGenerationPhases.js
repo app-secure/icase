@@ -38,12 +38,17 @@ const CODE_PHASES = Object.freeze({
     titulo: 'Módulos',
     descripcion: 'Elige qué funcionalidades opcionales incluye la aplicación. Si omites este paso, se incluyen los módulos sugeridos por el análisis.'
   }),
+  spec: Object.freeze({
+    id: 'especificacion_aplicacion', orden: 48, tipo: 'decision', dependencias: ['reglas_negocio'], opcional: true,
+    titulo: 'Comportamiento de la aplicación',
+    descripcion: 'Revisa qué operación ejecuta cada requisito (qué filtra, qué escribe, qué devuelve) y qué componentes tiene cada pantalla. Si la omites, cada requisito usa un CRUD genérico.'
+  }),
   backend: Object.freeze({
-    id: 'generacion_backend', orden: 50, tipo: 'generacion', dependencias: ['estructura_carpetas', 'reglas_negocio', 'control_acceso'], influyen: ['modulos'],
+    id: 'generacion_backend', orden: 50, tipo: 'generacion', dependencias: ['estructura_carpetas', 'reglas_negocio', 'control_acceso'], influyen: ['modulos', 'especificacion_aplicacion'],
     titulo: 'Generación del backend', artefacto: 'codigo_backend'
   }),
   frontend: Object.freeze({
-    id: 'generacion_frontend', orden: 60, tipo: 'generacion', dependencias: ['estructura_carpetas', 'control_acceso'], influyen: ['modulos'],
+    id: 'generacion_frontend', orden: 60, tipo: 'generacion', dependencias: ['estructura_carpetas', 'control_acceso'], influyen: ['modulos', 'especificacion_aplicacion'],
     titulo: 'Generación del frontend', artefacto: 'codigo_frontend'
   }),
   tests: Object.freeze({

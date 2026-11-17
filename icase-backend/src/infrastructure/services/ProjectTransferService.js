@@ -104,7 +104,7 @@ class ProjectTransferService {
     this._depurarMockupsImportados(remapped);
     // source hashes depend on original text/file names, not storage paths or owner IDs.
     for (const source of remapped.fuentes) source.ruta_archivo = source.ruta_archivo ? path.join(directory, `${source._id}.bin`) : '';
-    for (const plan of remapped.plan_codigo) plan.modo_un_clic = null;
+    for (const plan of remapped.plan_codigo) { plan.modo_un_clic = null; plan.puerta_funcional = null; }
     for (const artifact of remapped.artefactos_codigo) artifact.verificacion = null;
     const docs = {};
     for (const key of Package.GROUPS) docs[key] = remapped[key].map(row => {

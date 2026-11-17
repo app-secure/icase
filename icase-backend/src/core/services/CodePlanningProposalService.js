@@ -23,8 +23,9 @@ const clean = (value) => String(value || '').trim();
 const unique = (values) => [...new Set(values.map(clean).filter(Boolean))];
 
 class CodePlanningProposalService {
-  constructor({ ruleInferenceService = null } = {}) {
+  constructor({ ruleInferenceService = null, specService = null } = {}) {
     this.ruleInferenceService = ruleInferenceService;
+    this.specService = specService;
   }
 
   generar({ etapa, proyecto, requerimientos = [], diagramas = [], diseno = {}, plan, inicial = false }) {
@@ -115,6 +116,26 @@ class CodePlanningProposalService {
         notas: `Reglas propuestas desde los RF y el modelo de dominio aprobados. ${pendientes} requieren tu decisión (confirmar o rechazar) antes de aprobar la etapa.`
       },
       advertencias: [...advertencias, ...(reglas.length ? [] : ['No se propuso ninguna regla: puedes aprobar la etapa vacía o redactarlas manualmente.'])]
+    };
+  }
+
+  /** Operaciones de negocio por RF y componentes por pantalla; la IA propone y el servicio valida contra el dominio aprobado. */
+  async _especificacion_aplicacion({ requisitosAprobados, diagramasAprobados, plan, analisis, diseno }) {
+    const vacio = { operaciones: [], pantallas: [], version: 1 };
+    if (!this.specService) return { valor: vacio, advertencias: ['El servicio de especificación no está configurado.'] };
+    const anterior = plan?.etapas?.find((item) => item.etapa === 'especificacion_aplicacion');
+    const { especificacion, advertencias } = await this.specService.inferir({
+      requerimientos: requisitosAprobados,
+      diagramas: diagramasAprobados,
+      pantallas: Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [],
+      analisis,
+      retroalimentacion: anterior?.estado === 'rechazada' ? anterior.observaciones : ''
+    });
+    if (!especificacion) return { valor: vacio, advertencias };
+    const derivadas = especificacion.operaciones.filter((op) => op.origen === 'derivado').length;
+    return {
+      valor: { ...especificacion, notas: `${especificacion.operaciones.length} operaciones (${derivadas} derivadas sin IA) y ${especificacion.pantallas.length} pantallas. Confirma o rechaza cada operación antes de aprobar.` },
+      advertencias
     };
   }
 

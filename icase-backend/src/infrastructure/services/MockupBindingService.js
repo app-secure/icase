@@ -12,10 +12,10 @@ class MockupBindingService {
   }
 
   /** Contrato de operaciones, o null si no se puede construir: los enlaces nunca deben romper la generación de mockups. */
-  contrato({ proyecto, requerimientos, diagramas } = {}) {
+  contrato({ proyecto, requerimientos, diagramas, spec = null } = {}) {
     try {
       const domainModel = new DomainModelExtractor().fromDiagrams(diagramas || []);
-      return new ApplicationContractBuilder().build({ proyecto, requerimientos, domainModel });
+      return new ApplicationContractBuilder().build({ proyecto, requerimientos, domainModel, spec });
     } catch (error) {
       console.warn('[MockupBindingService] No se pudo construir el contrato de operaciones:', error.message);
       return null;

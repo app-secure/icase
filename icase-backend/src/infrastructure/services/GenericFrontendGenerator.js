@@ -25,7 +25,7 @@ const platformOf = (screen) => /mobile|m[oó]vil|android|ios/i.test(String(scree
 const TYPED_FORMS_CSS = '.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}.form-row{display:flex;flex-direction:column;gap:.35rem}.input{width:100%;padding:.65rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;transition:border-color .15s,box-shadow .15s;outline:none}.input:focus{border-color:var(--primary);background:white;box-shadow:0 0 0 3px rgba(99,102,241,.15)}.input[aria-invalid="true"]{border-color:#ef4444;background:#fef2f2}.field-error{color:#dc2626;font-size:.8rem;font-weight:500}.secondary{background:#f1f5f9!important;color:#334155!important;border:1px solid #cbd5e1!important}.secondary:hover{background:#e2e8f0!important}.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;margin-top:.75rem}.records{width:100%;border-collapse:collapse;font-size:.875rem}.records th{background:#f8fafc;color:#475569;font-weight:600;text-transform:uppercase;font-size:.75rem;letter-spacing:.05em;padding:.75rem 1rem;border-bottom:1px solid #e2e8f0}.records td{padding:.85rem 1rem;border-bottom:1px solid #f1f5f9;color:#1e293b;vertical-align:middle}.records tr:last-child td{border-bottom:none}.records tr:hover{background:#f8fafc}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}';
 
 class GenericFrontendGenerator {
-  generate({ proyecto, screens, decisiones = {}, sistemaDiseno = {}, requerimientos = [], identidad = null, referencias = null }) {
+  generate({ proyecto, screens, decisiones = {}, sistemaDiseno = {}, requerimientos = [], identidad = null, referencias = null, spec = null }) {
     const platforms = decisiones.stack_tecnologico?.plataformas || decisiones.alcance_plataforma?.plataformas || ['web'];
     const colors = sistemaDiseno.colores || {};
     const acceso = decisiones.control_acceso || null;
@@ -89,6 +89,7 @@ class GenericFrontendGenerator {
     const usersMap = Object.fromEntries(identity.usuarios.map((id) => [slug(id), 'usuarios']).filter(([key]) => allowedOperations.has(key)));
     let anyWired = false;
     let anyReferences = false;
+    const specSummaries = new Map(); // pantallas construidas desde la especificación, para el manifiesto
     const routeSet = new Set(views.map((view) => view.route));
     const standalone = []; // rutas cuyo mockup trae su propio menú
     const tailwindConfigs = [];
@@ -99,6 +100,14 @@ class GenericFrontendGenerator {
       imports.push(`import ${name} from './pages/${view.id}';`);
       routes.push(`<Route path=${JSON.stringify(view.route)} element={<${name}/>}/>`);
       const screen = screens.find((item) => this._view(item, screens, requerimientos).id === view.id);
+      // Una pantalla con componentes aprobados en la especificación se construye con ellos, no con el HTML del mockup.
+      const specPage = this._specPage(view, name, spec);
+      if (specPage) {
+        files.push({ ruta: `frontend/src/pages/${view.id}.jsx`, lenguaje: 'javascript', contenido: specPage.contenido });
+        if (screen?.mockup?.preview_code) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: screen.mockup.preview_code });
+        specSummaries.set(view.id, specPage.resumen);
+        continue;
+      }
       const reference = this._plainText(screen?.mockup?.preview_code || '').slice(0, 600);
       const mockupCode = screen?.mockup?.preview_code;
       const analysis = mockupCode ? HtmlToJsxTransformer.analyze(mockupCode, { operaciones: allowedOperations, routes: routeSet, referencias: referencias || {} }) : null;
@@ -141,7 +150,20 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') }
       );
     }
+    if (specSummaries.size) {
+      anyReferences = true;
+      files.push(
+        { ruta: 'frontend/src/SpecComponents.jsx', lenguaje: 'javascript', contenido: `import './spec.css';\n${template('SpecComponents.jsx')}` },
+        { ruta: 'frontend/src/spec.css', lenguaje: 'css', contenido: template('spec.css') }
+      );
+    }
     if (anyReferences) files.push({ ruta: 'frontend/src/ReferenceOptions.jsx', lenguaje: 'javascript', contenido: template('ReferenceOptions.jsx') });
+    if (specSummaries.size) {
+      const manifestFile = files.find((file) => file.ruta === 'frontend/icase.manifest.json');
+      const manifest = JSON.parse(manifestFile.contenido);
+      manifest.pantallas = manifest.pantallas.map((screen) => (specSummaries.has(screen.id) ? { ...screen, origen: 'especificacion', especificacion: specSummaries.get(screen.id) } : screen));
+      manifestFile.contenido = JSON.stringify(manifest, null, 2);
+    }
     if (linkSummaries.size) {
       const manifestFile = files.find((file) => file.ruta === 'frontend/icase.manifest.json');
       const manifest = JSON.parse(manifestFile.contenido);
@@ -183,6 +205,27 @@ class GenericFrontendGenerator {
       index.contenido = index.contenido.replace('<script src="https://cdn.tailwindcss.com"></script>', '');
     }
     return generated.filter(file => file.ruta.startsWith('mobile/') || platforms.includes('web') || platforms.includes('tablet'));
+  }
+
+  /**
+   * Página de una pantalla descrita por la especificación aprobada: una lista de bloques (tabla, tarjetas, formulario,
+   * detalle, indicador) y las operaciones que usan. Devuelve null si la pantalla no tiene componentes resolubles.
+   */
+  _specPage(view, name, spec) {
+    const screen = (spec?.pantallas || []).find((item) => item.id === view.id);
+    if (!screen) return null;
+    const byName = new Map((spec.acciones || []).map((action) => [action.name, action]));
+    const blocks = screen.componentes
+      .filter((component) => byName.has(component.operacion))
+      .map((component) => ({ ...component, acciones: (component.acciones || []).filter((action) => byName.has(action.operacion)) }));
+    if (!blocks.length) return null;
+    const used = new Set(blocks.flatMap((block) => [block.operacion, ...block.acciones.map((action) => action.operacion)]));
+    const actions = Object.fromEntries([...used].map((operation) => {
+      const action = byName.get(operation);
+      return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output }];
+    }));
+    const contenido = `import React from 'react';\nimport { SpecBlock } from '../SpecComponents';\n\nconst actions = ${JSON.stringify(actions, null, 2)};\nconst blocks = ${JSON.stringify(blocks, null, 2)};\n\nexport default function ${name}() {\n  return (\n    <main className="spec-page" data-screen=${JSON.stringify(view.id)}>\n      <h1>{${JSON.stringify(view.name)}}</h1>\n      {blocks.map((block, index) => <SpecBlock key={index} block={block} actions={actions} />)}\n    </main>\n  );\n}\n`;
+    return { contenido, resumen: { componentes: blocks.length, operaciones: [...used] } };
   }
 
   _view(screen, screens = [], requerimientos = []) {

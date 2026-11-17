@@ -825,6 +825,20 @@ export async function reviewPipelineArtifactApi(projectId, artifactId, decision,
   return data;
 }
 
+export async function fetchFunctionalGateApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/puerta-funcional`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo evaluar la puerta de calidad.');
+  return data;
+}
+
+export async function acceptFunctionalGateApi(projectId, excepciones) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/puerta-funcional/aceptar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ excepciones }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo guardar la aceptación.');
+  return data;
+}
+
 export async function generateDeliveryArtifactApi(projectId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
   const data = await res.json().catch(() => ({}));

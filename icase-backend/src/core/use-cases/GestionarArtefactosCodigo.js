@@ -178,7 +178,10 @@ class GestionarArtefactosCodigo {
     const requisitosAprobados = (requerimientos || []).filter((item) => item.aprobado);
     // Identidad (RF de acceso y de cuentas de usuario): sale del contrato de operaciones, que necesita el modelo de dominio.
     const diagramas = this.diagramaRepository ? await this.diagramaRepository.listarPorProyecto(proyectoId) : [];
-    const contratoOperaciones = new (require('../../infrastructure/services/MockupBindingService'))().contrato({ proyecto, requerimientos: requisitosAprobados, diagramas });
+    const especificacion = require('../../infrastructure/services/ApplicationSpecService').confirmada(decisiones.especificacion_aplicacion);
+    const contratoOperaciones = new (require('../../infrastructure/services/MockupBindingService'))().contrato({ proyecto, requerimientos: requisitosAprobados, diagramas, spec: especificacion });
+    // Operaciones de negocio ya enlazadas a su almacén, con el tipo de cada campo: el frontend las llama por nombre.
+    const acciones = (contratoOperaciones?.operations || []).flatMap((operation) => operation.actions || []);
     const identidad = contratoOperaciones?.identity || null;
     const referencias = contratoOperaciones?.references || null;
     const input = { contrato_generacion: 'frontend-v20-referencias', identidad, referencias, analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
@@ -194,7 +197,7 @@ class GestionarArtefactosCodigo {
       return { artefacto: ultimo, reutilizado: true };
     }
     const decisionesParte = { ...decisiones, stack_tecnologico: { ...decisiones.stack_tecnologico, plataformas: solicitadas } };
-    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones: decisionesParte, diseno, requerimientos: requisitosAprobados, identidad, referencias }, versionesOrigen });
+    const generado = await this.frontendGenerator.generar({ proyecto, insumos: { decisiones: decisionesParte, diseno, requerimientos: requisitosAprobados, identidad, referencias, especificacion, acciones }, versionesOrigen });
     generado.archivos = generado.archivos.filter(f => solicitadas.some(p => f.ruta.startsWith(carpeta(p))));
     if (vigente) generado.archivos.push(...ultimo.archivos.filter(f => !solicitadas.some(p => f.ruta.startsWith(carpeta(p)))));
     const artefacto = await this.artefactoRepository.crear({ proyecto_id: proyectoId, tipo: 'codigo_frontend', version: (ultimo?.version || 0) + 1, estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, modulos: this._modulosDelPlan(plan, decisiones.modulos), ...generado });
@@ -375,6 +378,7 @@ class GestionarArtefactosCodigo {
     const faltantes = tipos.filter((_tipo, index) => !artefactos[index]);
     if (faltantes.length) throw new Error(`Faltan artefactos aprobados para la entrega: ${faltantes.join(', ')}.`);
     new GenerationCoverageService().exigirEntrega(artefactos[0]);
+    this._exigirPuertaFuncional(artefactos, plan);
     for (const artefacto of artefactos) this._exigirVerificacion(artefacto);
     const versionesOrigen = Object.fromEntries(artefactos.map((item) => [item.tipo, item.version]));
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({contrato_generacion:'entrega-v4-designed-ui-resilient',versionesOrigen})).digest('hex');
@@ -385,6 +389,36 @@ class GestionarArtefactosCodigo {
     if (ultimo?.aprobado) await this.artefactoRepository.actualizar(ultimo.id, { estado: 'desactualizado', aprobado: false });
     await this._actualizarEtapa(plan, 'paquete_entrega', CODE_PHASE_STATES.IN_REVIEW, `Paquete de entrega v${artefacto.version} generado.`);
     return { artefacto, reutilizado: false };
+  }
+
+  /** Hallazgos que la persona aceptó de forma explícita; una aceptación vieja no cubre un problema nuevo. */
+  _excepcionesPuerta(plan) {
+    return Array.isArray(plan?.puerta_funcional?.excepciones) ? plan.puerta_funcional.excepciones : [];
+  }
+
+  /** Acepta (o deja de aceptar) bloqueos concretos. Solo se aceptan los que existen ahora; el resto se rechaza. */
+  async aceptarPuertaFuncional({ proyectoId, excepciones, aceptadoPor = null }) {
+    if (!Array.isArray(excepciones) || excepciones.some((item) => typeof item !== 'string')) throw new Error('Las excepciones deben ser una lista de identificadores de hallazgo.');
+    const actual = await this.evaluarPuertaFuncional(proyectoId, { sinExcepciones: true });
+    const bloqueos = new Set(actual.hallazgos.filter((item) => item.severidad === 'bloqueo').map((item) => item.id));
+    const desconocidas = excepciones.filter((item) => !bloqueos.has(item));
+    if (desconocidas.length) throw new Error(`No existe un bloqueo con estos identificadores: ${desconocidas.join(', ')}.`);
+    await this.planRepository.guardar(proyectoId, { puerta_funcional: { excepciones: [...new Set(excepciones)].sort(), aceptado_por: aceptadoPor, aceptado_en: new Date() } });
+    return this.evaluarPuertaFuncional(proyectoId);
+  }
+
+  _exigirPuertaFuncional(artefactos, plan) {
+    const FunctionalGateService = require('../services/FunctionalGateService');
+    return new FunctionalGateService().exigir({ archivos: artefactos.flatMap((item) => item.archivos || []), excepciones: this._excepcionesPuerta(plan) });
+  }
+
+  /** Estado actual de la puerta de calidad funcional con los últimos artefactos (para mostrarlo antes de empaquetar). */
+  async evaluarPuertaFuncional(proyectoId, { sinExcepciones = false } = {}) {
+    const FunctionalGateService = require('../services/FunctionalGateService');
+    const plan = await this.planRepository.obtenerPorProyecto(proyectoId);
+    const artefactos = (await Promise.all(['codigo_backend', 'codigo_frontend', 'pruebas'].map((tipo) => this.artefactoRepository.obtenerUltimo(proyectoId, tipo)))).filter(Boolean);
+    if (!artefactos.length) return { version: 1, estado: 'sin_artefactos', hallazgos: [], pendientes: [], excepciones: [] };
+    return new FunctionalGateService().evaluar({ archivos: artefactos.flatMap((item) => item.archivos || []), excepciones: sinExcepciones ? [] : this._excepcionesPuerta(plan) });
   }
 
   async revisarPaquete({ proyectoId, artefactoId, decision, observaciones = '', modo_permisivo = false }) {
@@ -404,6 +438,7 @@ class GestionarArtefactosCodigo {
     if (!plan || !artefacto || String(artefacto.proyecto_id) !== String(proyectoId) || artefacto.tipo !== tipo) throw new Error(`Artefacto ${nombre} no encontrado para este proyecto.`);
     if (String(ultimo?.id) !== String(artefactoId)) throw new Error(`Solo se puede revisar la versión más reciente del ${nombre}.`);
     if (artefacto.estado !== 'en_revision') throw new Error(`El artefacto ${nombre} ya fue revisado.`);
+    if (decision === 'aprobar' && tipo === 'paquete_entrega') this._exigirPuertaFuncional([artefacto], plan);
     if (decision === 'aprobar' && tipo === 'codigo_frontend') {
       const stack = plan.etapas.find(item => item.etapa === 'stack_tecnologico')?.propuesta;
       const faltan = (stack?.plataformas || []).filter(p => !artefacto.archivos.some(f => f.ruta === (p === 'móvil' ? 'mobile/package.json' : 'frontend/package.json')));

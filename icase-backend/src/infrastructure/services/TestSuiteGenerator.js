@@ -33,6 +33,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...(functional ? [{ ruta: 'tests/integration/contract-flow.test.js', lenguaje: 'javascript', contenido: this._contractIntegrationTest(contract) }] : []),
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/integration/extensions.test.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.integration.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled))}] : []),
       { ruta: 'tests/e2e/navigation.spec.js', lenguaje: 'javascript', contenido: this._e2eTest(routes, auth) },
+      ...(this._hasActions(contract) ? [{ ruta: 'tests/integration/actions.test.js', lenguaje: 'javascript', contenido: this._actionsIntegrationTest(contract) }] : []),
       ...((contract.associations || []).length ? [{ ruta: 'tests/e2e/associations.spec.js', lenguaje: 'javascript', contenido: this._associationsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth, { screens: this._frontendScreens(frontend), contract }) }] : []),
       ...(functional && typedForms ? [{ ruta: 'tests/e2e/typed-forms.spec.js', lenguaje: 'javascript', contenido: this._typedFormsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
@@ -274,6 +275,47 @@ for (const route of routes) {
     await expect(page.locator('[data-screen]')).toBeVisible();
   });
 }
+`;
+  }
+
+  _hasActions(contract) {
+    return (contract.operations || []).some((operation) => operation.actions?.length);
+  }
+
+  /** Una prueba por operación de negocio de la especificación: la ejecuta contra el backend y comprueba su resultado. */
+  _actionsIntegrationTest(contract) {
+    const auth = contract.auth && contract.auth.habilitada ? contract.auth : { habilitada: false };
+    return `import test, { after, before } from 'node:test';
+import assert from 'node:assert/strict';
+
+const base = process.env.BASE_API_URL || 'http://localhost:3000';
+
+${samplePayload.runtimeSource()}
+
+const operations = ${JSON.stringify(contract.operations || [])};
+const auth = ${JSON.stringify(auth)};
+const roles = Object.entries(auth.roles || {}).map(([id, role]) => ({ id, autoregistro: role.autoregistro === true }));
+let access = null;
+let api = makeApi(base, null);
+
+before(async () => {
+  if (!auth.habilitada) return;
+  access = await setupAccess(base, { adminEmail: process.env.ADMIN_EMAIL, adminPassword: process.env.ADMIN_PASSWORD, roles });
+  api = access.admin;
+});
+after(async () => { if (access) await access.cleanup(); });
+
+for (const operation of operations) {
+  for (const action of operation.actions || []) {
+    test(action.name + ': operación de negocio (' + action.type + ', ' + operation.id + ')', async () => {
+      await exerciseAction(api, operations, action);
+    });
+  }
+}
+
+test('el contrato declara operaciones de negocio', () => {
+  assert.ok(operations.some((operation) => (operation.actions || []).length), 'El contrato no contiene operaciones de negocio');
+});
 `;
   }
 

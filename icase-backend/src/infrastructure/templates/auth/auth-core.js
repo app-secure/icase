@@ -180,6 +180,16 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
       }
       return;
     }
+    const action = /^\/api\/actions\/([^/]+)(\/[^/]+)?\/?$/.exec(path);
+    if (action) {
+      // Una operación de negocio exige el permiso equivalente del CRUD de su requisito.
+      const def = require('../actions/actions').find(action[1], method, Boolean(action[2]));
+      if (!def) return; // inexistente: responde 404 la ruta
+      const needed = { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' }[def.type];
+      const byRole = policy.operaciones?.[def.capability] || {};
+      if (user.rol !== ADMIN && !methodsOf(byRole[user.rol]).includes(needed)) throw new HttpError(403, 'No tienes permiso para esta operación.');
+      return;
+    }
     const operation = /^\/api\/operations\/([^/]+)/.exec(path);
     if (operation) {
       const byRole = Object.prototype.hasOwnProperty.call(policy.operaciones || {}, operation[1]) ? policy.operaciones[operation[1]] : null;

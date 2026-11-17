@@ -21,7 +21,7 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
     const { reglas, descartadas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf);
     const access = this._acceso(decisiones.control_acceso, rf);
-    const fresh = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos, verbosPorRf });
+    const fresh = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos, verbosPorRf, spec: this._especificacion(decisiones.especificacion_aplicacion) });
     const generados = new (require('./IncrementalMigrationGenerator'))().apply(fresh,insumos.backendAnterior);
     const informe = this._informe({ proyecto, insumos, decisiones, archivos: generados });
     const archivos = [
@@ -49,6 +49,11 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
       versiones_origen: versionesOrigen,
       generado_por: 'generador_backend_generico_v2'
     };
+  }
+
+  /** Solo las operaciones confirmadas por la persona llegan al contrato; las pendientes o rechazadas se ignoran. */
+  _especificacion(decision) {
+    return require('./ApplicationSpecService').confirmada(decision);
   }
 
   /** Avisa qué operaciones quedaron sin el CRUD completo porque los mockups aprobados solo declaran algunos verbos. */

@@ -563,12 +563,70 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
   }
 }
 
+/**
+ * Ejerce una operación de negocio de la especificación sobre el backend en marcha: consulta, creación, actualización,
+ * baja o cambio de estado. Crea sus propios datos y los limpia; cualquier discrepancia lanza un Error.
+ */
+async function exerciseAction(api, operations, action) {
+  const fail = (message) => { throw new Error(action.name + ': ' + message); };
+  const expectStatus = (response, status, label) => {
+    if (response.status !== status) fail(label + ' respondió ' + response.status + ' (se esperaba ' + status + '): ' + JSON.stringify(response.data));
+    return response;
+  };
+  const target = operations.find((item) => item.key === action.capability);
+  if (!target) fail('no tiene operación de almacén (' + action.capability + ')');
+  const pick = (source, names) => Object.fromEntries((names || []).filter((name) => source[name] !== undefined).map((name) => [name, source[name]]));
+  const cleanups = [];
+  const itemPath = (id) => target.itemPath.replace(':id', id);
+  const route = (id) => action.path.replace(':id', id);
+  try {
+    if (action.type === 'consulta') {
+      const created = await createValidRecord(api, operations, target, cleanups, 0);
+      const rows = expectStatus(await api(action.path, 'GET'), 200, 'consultar').data;
+      if (!Array.isArray(rows)) fail('la consulta debe devolver una lista');
+      const allowed = new Set(['id', ...(action.output || [])]);
+      for (const row of rows) {
+        if (row.id === undefined) fail('cada fila debe traer su id');
+        if ((action.output || []).length) for (const key of Object.keys(row)) if (!allowed.has(key)) fail('devolvió el campo no declarado «' + key + '»');
+      }
+      // Sin filtros, el registro recién creado debe aparecer: comprueba que la consulta lee datos reales.
+      if (!(action.filters || []).length && !rows.some((row) => String(row.id) === String(created.id))) fail('el registro creado no aparece en la consulta');
+    } else if (action.type === 'crear') {
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      await api(itemPath(seed.id), 'DELETE');
+      const body = pick(seed.body, action.inputs);
+      const response = expectStatus(await api(action.path, 'POST', body), 201, 'crear');
+      if (!response.data.id) fail('la creación no devolvió id');
+      cleanups.unshift(() => api(itemPath(response.data.id), 'DELETE'));
+    } else if (action.type === 'actualizar') {
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      const response = expectStatus(await api(route(seed.id), 'PATCH', pick(seed.body, action.inputs)), 200, 'actualizar');
+      if (String(response.data.id) !== String(seed.id)) fail('devolvió otro registro');
+      expectStatus(await api(route('no-existe-0'), 'PATCH', pick(seed.body, action.inputs)), 404, 'actualizar un registro inexistente');
+    } else if (action.type === 'eliminar') {
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      expectStatus(await api(route(seed.id), 'DELETE'), 200, 'eliminar');
+      expectStatus(await api(itemPath(seed.id), 'GET'), 404, 'leer el registro eliminado');
+    } else if (action.type === 'transicion') {
+      const { campo, de = [], a } = action.transition;
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      if (de.length) expectStatus(await api(itemPath(seed.id), 'PATCH', { [campo]: de[0] }), 200, 'preparar el estado de origen');
+      const response = expectStatus(await api(route(seed.id), 'POST', {}), 200, 'cambiar de estado');
+      if (response.data[campo] !== a) fail('el estado quedó en ' + response.data[campo] + ' (se esperaba ' + a + ')');
+      if (de.length && !de.includes(a)) expectStatus(await api(route(seed.id), 'POST', {}), 409, 'repetir una transición no permitida');
+    } else fail('tipo de operación desconocido: ' + action.type);
+  } finally {
+    for (const cleanup of cleanups) await Promise.resolve(cleanup()).catch(() => {});
+  }
+}
+
 function runtimeSource() {
-  return [salted, samplePayload, createValidRecord, exerciseOperation, makeApi, setupAccess, permissionMethods, permissionScope, exerciseAccess, exerciseOwnership, exerciseAuth, exerciseOpenApi, exerciseAssociation].map((fn) => fn.toString()).join('\n\n');
+  return [salted, samplePayload, createValidRecord, exerciseOperation, exerciseAction, makeApi, setupAccess, permissionMethods, permissionScope, exerciseAccess, exerciseOwnership, exerciseAuth, exerciseOpenApi, exerciseAssociation].map((fn) => fn.toString()).join('\n\n');
 }
 
 samplePayload.exerciseOperation = exerciseOperation;
 samplePayload.exerciseAccess = exerciseAccess;
+samplePayload.exerciseAction = exerciseAction;
 samplePayload.exerciseOwnership = exerciseOwnership;
 samplePayload.exerciseAuth = exerciseAuth;
 samplePayload.exerciseOpenApi = exerciseOpenApi;

@@ -22,13 +22,18 @@ class GenericBackendGenerator {
     return ['archivos_imagenes', 'pagos_prueba', 'procesos_negocio'].some((id) => active.includes(id));
   }
 
-  generate({ proyecto, requirements, stack, domainModel = null, rules = [], access = null, modules = null, verbosPorRf = null }) {
+  generate({ proyecto, requirements, stack, domainModel = null, rules = [], access = null, modules = null, verbosPorRf = null, spec = null }) {
     if(modules?.modo==='personalizado'&&modules.modulos?.some(item=>item.id==='procesos_negocio'&&item.activo)){
       const result=new (require('../../core/services/ModuleService'))().validar(modules);
       if(result.errores.length)throw new Error('Procesos de negocio: '+result.errores.join(' '));
     }
     const verbs = verbosPorRf && !this._moduleNeedsFullCrud(modules) ? verbosPorRf : null;
-    const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules, verbosPorRf: verbs });
+    const contract = new ApplicationContractBuilder().build({ proyecto, requerimientos: requirements, domainModel, rules, verbosPorRf: verbs, spec });
+    if (StackCatalog.resolve(stack).backend === 'spring' && contract.operations.some((operation) => operation.actions)) {
+      // Las operaciones de negocio solo existen en Express y NestJS: con Spring cada RF conserva su CRUD genérico.
+      for (const operation of contract.operations) delete operation.actions;
+      contract.warnings.push('Las operaciones de negocio de la especificación no se generan con Spring; se usa el CRUD genérico.');
+    }
     this._ensureAssociationOperations(contract, rules);
     const policy = new AccessControlService().politica(access, contract.operations);
     this._syncSupportPermissions(contract, policy);
@@ -55,6 +60,7 @@ class GenericBackendGenerator {
     const modelFile = data.files.shared.find((file) => file.ruta === 'backend/src/data/model.js');
     if (modelFile) modelFile.contenido = `module.exports = ${JSON.stringify(data.model, null, 2)};\n`;
     const openapi = new OpenApiGenerator().build({ proyecto, contract, model: data.model, policy });
+    this._actionPaths(openapi, contract, policy);
     if (associationApi && data.model.associations.length) {
       const idPattern = database === 'mongodb' ? '^[a-fA-F0-9]{24}$' : '^[1-9][0-9]{0,18}$';
       const pair = { type: 'object', additionalProperties: false, required: ['source_id', 'target_id'], properties: { source_id: { type: 'string', pattern: idPattern }, target_id: { type: 'string', pattern: idPattern } } };
@@ -112,7 +118,7 @@ class GenericBackendGenerator {
       docs: { openapi: '/api/openapi.json', docs: '/api/docs', archivo: 'backend/openapi.json' },
       storage: { layout: 'table_per_entity', operations: data.model.operations, tables, associations: data.model.associations || [], migrations: data.migrations.map((item) => item.id) },
       requisitos: contract.operations.map((item) => ({ id: item.id, nombre: item.name })),
-      endpoints: contract.operations.flatMap((item) => [item.collectionPath, item.itemPath])
+      endpoints: contract.operations.flatMap((item) => [item.collectionPath, item.itemPath, ...(item.actions || []).map((action) => action.path)])
     }, null, 2);
   }
 
@@ -139,6 +145,7 @@ class GenericBackendGenerator {
       { ruta: 'backend/src/record.store.ts', lenguaje: 'typescript', contenido: this._nestStore() },
       { ruta: 'backend/src/record.store.base.js', lenguaje: 'javascript', contenido: data.files.store },
       ...data.files.shared,
+      ...this._actionFiles(contract),
       ...this._authFiles(policy, 'nest'),
       ...(policy.habilitada ? [
         { ruta: 'backend/src/auth.service.ts', lenguaje: 'typescript', contenido: this._nestAuthService() },
@@ -159,6 +166,7 @@ class GenericBackendGenerator {
       { ruta: 'backend/src/app.js', lenguaje: 'javascript', contenido: this._expressApp(contract, policy) },
       { ruta: 'backend/src/record.store.js', lenguaje: 'javascript', contenido: data.files.store },
       ...data.files.shared,
+      ...this._actionFiles(contract),
       ...this._authFiles(policy, 'express'),
       ...contract.operations.map((item) => ({ ruta: `backend/src/modules/${item.key}/${item.key}.js`, lenguaje: 'javascript', contenido: `module.exports=${JSON.stringify(item, null, 2)};\n` }))
     ];
@@ -365,9 +373,74 @@ const associations=require('./data/associations');
  }
  @Post('api/operations/:capability') create(@Param('capability') capability:string,@Body() body:any,@Req() req:any){if(!body||Array.isArray(body)||typeof body!=='object')throw new BadRequestException('El cuerpo debe ser un objeto');const key=this.capability(capability);return this.store.create(key,body,scope(req.user,key));}
  @Patch('api/operations/:capability/:id') async update(@Param('capability') capability:string,@Param('id') id:string,@Body() body:any,@Req() req:any){const key=this.capability(capability);const value=await this.store.update(key,id,body,scope(req.user,key));if(!value)throw new NotFoundException('Registro inexistente');return value;}
- @Delete('api/operations/:capability/:id') async remove(@Param('capability') capability:string,@Param('id') id:string,@Req() req:any){const key=this.capability(capability);const removed=await this.store.remove(key,id,scope(req.user,key));if(!removed)throw new NotFoundException('Registro inexistente');return {deleted:true,id};}
+${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/operations/:capability/:id') async remove(@Param('capability') capability:string,@Param('id') id:string,@Req() req:any){const key=this.capability(capability);const removed=await this.store.remove(key,id,scope(req.user,key));if(!removed)throw new NotFoundException('Registro inexistente');return {deleted:true,id};}
 }
 `;
+  }
+
+  _hasActions(contract) {
+    return (contract.operations || []).some((operation) => operation.actions?.length);
+  }
+
+  /** Runtime de operaciones de negocio: las definiciones aprobadas van embebidas; la lógica es una plantilla fija. */
+  _actionFiles(contract) {
+    if (!this._hasActions(contract)) return [];
+    const definitions = contract.operations.flatMap((operation) => (operation.actions || []).map((action) => ({
+      name: action.name, type: action.type, method: action.method, byId: action.byId, capability: action.capability, entity: action.entity,
+      filters: action.filters, inputs: action.inputs, output: action.output, ...(action.transition ? { transition: action.transition } : {})
+    })));
+    const source = fs.readFileSync(path.join(__dirname, '..', 'templates', 'actions', 'actions-runtime.js'), 'utf8');
+    return [{ ruta: 'backend/src/actions/actions.js', lenguaje: 'javascript', contenido: renderTemplate(source, { DEFINITIONS: JSON.stringify(definitions, null, 2) }) }];
+  }
+
+  _expressActionRoutes() {
+    return `const actions=require('./actions/actions');
+const runAction=async(req,res,next)=>{try{const def=actions.find(req.params.name,req.method,req.params.id!==undefined);if(!def)return res.status(404).json({message:'Operación inexistente'});const result=await actions.run(store,def,{user:req.user,query:req.query,body:req.body,id:req.params.id,scope:scope(req,def.capability)});res.status(def.type==='crear'?201:200).json(result)}catch(e){next(e)}};
+app.get('/api/actions/:name',runAction);app.post('/api/actions/:name',runAction);app.post('/api/actions/:name/:id',runAction);app.patch('/api/actions/:name/:id',runAction);app.delete('/api/actions/:name/:id',runAction);
+`;
+  }
+
+  _nestActionRoutes() {
+    return ` private async runAction(method:string,name:string,id:string|undefined,query:any,body:any,req:any){const actions=require('./actions/actions');const def=actions.find(name,method,id!==undefined);if(!def)throw new NotFoundException('Operación inexistente');return actions.run(this.store,def,{user:req.user,query,body,id,scope:scope(req.user,def.capability)});}
+ @Get('api/actions/:name') actionGet(@Param('name') name:string,@Query() query:any,@Req() req:any){return this.runAction('GET',name,undefined,query,undefined,req);}
+ @Post('api/actions/:name') actionPost(@Param('name') name:string,@Body() body:any,@Req() req:any){return this.runAction('POST',name,undefined,{},body,req);}
+ @Post('api/actions/:name/:id') @HttpCode(200) actionPostId(@Param('name') name:string,@Param('id') id:string,@Body() body:any,@Req() req:any){return this.runAction('POST',name,id,{},body,req);}
+ @Patch('api/actions/:name/:id') actionPatch(@Param('name') name:string,@Param('id') id:string,@Body() body:any,@Req() req:any){return this.runAction('PATCH',name,id,{},body,req);}
+ @Delete('api/actions/:name/:id') actionDelete(@Param('name') name:string,@Param('id') id:string,@Req() req:any){return this.runAction('DELETE',name,id,{},undefined,req);}
+`;
+  }
+
+  /** Documenta en OpenAPI las operaciones de negocio con sus entradas, filtros y respuestas. */
+  _actionPaths(openapi, contract, policy) {
+    const secured = policy.habilitada === true;
+    const text = { type: 'string' };
+    for (const operation of contract.operations) {
+      for (const action of operation.actions || []) {
+        const entity = contract.entities.find((item) => item.key === action.entity);
+        const properties = entity?.schema?.properties || {};
+        const subset = (names) => Object.fromEntries((names?.length ? names : Object.keys(properties).filter((name) => name !== 'id')).filter((name) => properties[name]).map((name) => [name, properties[name]]));
+        const record = { type: 'object', properties: { id: text, ...subset(action.output) } };
+        const filterNotes = action.filters.map((filter) => `${filter.campo} ${filter.operador} ${filter.origen === 'sesion' ? `(${filter.valor} de la sesión)` : filter.valor}`);
+        const parameters = [
+          ...(action.byId ? [{ name: 'id', in: 'path', required: true, schema: text }] : []),
+          ...action.filters.filter((filter) => filter.origen === 'parametro').map((filter) => ({ name: String(filter.valor), in: 'query', required: false, schema: text }))
+        ];
+        const verb = action.method.toLowerCase();
+        const item = {
+          tags: [operation.id], summary: action.description || action.name, operationId: action.name,
+          description: [`Operación de negocio ${action.type}.`, filterNotes.length ? `Filtra por: ${filterNotes.join('; ')}.` : '', 'Requiere el mismo permiso que el CRUD de su requisito.'].filter(Boolean).join(' '),
+          ...(parameters.length ? { parameters } : {}),
+          ...(['crear', 'actualizar'].includes(action.type) ? { requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: subset(action.inputs) } } } } } : {}),
+          responses: {
+            [action.type === 'crear' ? 201 : 200]: { description: 'Operación completada.', content: { 'application/json': { schema: action.type === 'consulta' ? { type: 'array', items: record } : record } } },
+            400: { description: 'Datos inválidos' }, 404: { description: 'Registro inexistente' }, ...(action.type === 'transicion' ? { 409: { description: 'Transición de estado no permitida' } } : {}),
+            ...(secured ? { 401: { description: 'Sesión requerida' }, 403: { description: 'Sin permiso' } } : {})
+          }
+        };
+        const route = action.path.replace(':id', '{id}');
+        openapi.paths[route] = { ...(openapi.paths[route] || {}), [verb]: item };
+      }
+    }
   }
 
   _expressApp(contract, policy) {
@@ -405,7 +478,7 @@ app.get('/api/operations/:capability',capability,async(req,res,next)=>{
 app.post('/api/operations/:capability',capability,async(req,res,next)=>{try{if(!req.body||Array.isArray(req.body)||typeof req.body!=='object')return res.status(400).json({message:'El cuerpo debe ser un objeto'});res.status(201).json(await store.create(req.params.capability,req.body,scope(req,req.params.capability)))}catch(e){next(e)}});
 app.patch('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.update(req.params.capability,req.params.id,req.body,scope(req,req.params.capability));value?res.json(value):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
 app.delete('/api/operations/:capability/:id',capability,async(req,res,next)=>{try{const value=await store.remove(req.params.capability,req.params.id,scope(req,req.params.capability));value?res.json({deleted:true,id:req.params.id}):res.status(404).json({message:'Registro inexistente'})}catch(e){next(e)}});
-app.use((error,_req,res,_next)=>{const status=Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:500;res.status(status).json(status>=500?{message:'Error interno del servidor'}:{message:error.message||'Solicitud inválida',...(error.details?{details:error.details}:{})});});module.exports=app;
+${this._hasActions(contract) ? this._expressActionRoutes() : ''}app.use((error,_req,res,_next)=>{const status=Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:500;res.status(status).json(status>=500?{message:'Error interno del servidor'}:{message:error.message||'Solicitud inválida',...(error.details?{details:error.details}:{})});});module.exports=app;
 `;
   }
 

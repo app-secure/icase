@@ -13,6 +13,8 @@ import {
   executeOneClickModeApi, startArtifactVerificationJobApi, fetchArtifactVerificationJobApi, fetchLatestArtifactVerificationJobApi
 } from '../services/api';
 import GenerationReport from './GenerationReport';
+import SpecReviewPanel from './SpecReviewPanel';
+import FunctionalGatePanel from './FunctionalGatePanel';
 import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
@@ -25,7 +27,9 @@ function mockupFormWaiver(verification) {
     && specs.length > 0 && specs.every(spec => spec === 'designed-ui.spec.js')
     && passed(/Compilación/) && passed(/health checks/) && passed(/CRUD/);
 }
-const EDITABLE_PHASES = DECISION_PHASES;
+// El comportamiento de la aplicación es opcional: se edita y se aprueba, pero no cuenta para el avance obligatorio.
+const SPEC_PHASE = 'especificacion_aplicacion';
+const EDITABLE_PHASES = [...DECISION_PHASES, SPEC_PHASE];
 
 const DEFAULTS = {};
 
@@ -356,7 +360,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
 
         <nav className="flex-1 flex flex-col pb-4">
           {(() => {
-            const decisionItems = (plan?.etapas || []).filter((item) => DECISION_PHASES.includes(item.etapa));
+            const decisionItems = (plan?.etapas || []).filter((item) => EDITABLE_PHASES.includes(item.etapa));
             const generationGate = {
               etapa: 'generacion_entrega',
               titulo: 'Generación y entrega',
@@ -667,6 +671,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                     {pipelineArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewPipeline('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewPipeline('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pipeline</button></div>}
                   </div>}
                 </div>
+
+                <FunctionalGatePanel projectId={projectId} refreshKey={`${backendArtifact?.id}-${frontendArtifact?.id}-${testArtifact?.id}`} onError={(message) => addToast({ type: 'error', message })} />
 
                 <div className="border-t border-slate-200 pt-6">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1122,6 +1128,7 @@ function CoverageEditor({ value, onChange, disabled, modules }) {
 
 function PhaseForm({ phase, value, onChange, disabled, modules }) {
   if (phase === 'modulos') return <ModulesEditor value={value} onChange={onChange} disabled={disabled} modules={modules} />;
+  if (phase === SPEC_PHASE) return <SpecReviewPanel value={value} onChange={onChange} disabled={disabled} />;
   if (phase === 'control_acceso') return <AccessEditor value={value} onChange={onChange} disabled={disabled} />;
   if (phase === 'reglas_negocio') return <div className="space-y-3">
     {value.confirmadas?.map(item => <p key={item.id}><strong>{item.id}</strong> {item.necesidad} · Confirmada en el análisis</p>)}

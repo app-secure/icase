@@ -30,7 +30,7 @@ class ApplicationContractBuilder {
    * `verbosPorRf` ({ 'RF-01': ['consultar', 'crear'] }) son los verbos válidos que declaran los mockups para cada RF.
    * Sin ellos, o para un RF que no aparece, la operación mantiene el CRUD completo.
    */
-  build({ proyecto, requerimientos = [], screens = [], domainModel = null, rules = [], verbosPorRf = null }) {
+  build({ proyecto, requerimientos = [], screens = [], domainModel = null, rules = [], verbosPorRf = null, spec = null }) {
     const approved = requerimientos.filter((item) => item.aprobado === true && item.tipo === 'RF');
     const entities = domainModel?.entities || [];
     const warnings = [];
@@ -38,7 +38,12 @@ class ApplicationContractBuilder {
     const operations = approved.map((item, index) => {
       const key = this._uniqueKey(slug(item.identificador || item.nombre), approved, index);
       const id = item.identificador || `RF-${String(index + 1).padStart(2, '0')}`;
-      const match = this._entityFor(item, entities);
+      const specOps = (spec?.operaciones || []).filter((op) => String(op.rf).toUpperCase() === String(id).toUpperCase());
+      // La especificación aprobada manda sobre la heurística: la entidad la fija la operación, no el parecido de nombres.
+      const specEntity = specOps.length ? entities.find((entity) => entity.name === specOps[0].entidad) : null;
+      const match = specEntity
+        ? { primary: specEntity, inName: true, related: entities.filter((entity) => specOps.some((op) => op.entidad === entity.name) && entity !== specEntity) }
+        : this._entityFor(item, entities);
       if (entities.length && !match) warnings.push(`${id} no se asoció a ninguna entidad del modelo de dominio; usa un esquema genérico.`);
       else if (match && !match.inName) warnings.push(`${id} se asoció a ${match.primary.name} solo por su descripción o por coincidencia parcial; revisa que sea la entidad correcta.`);
       // Identidad: el acceso lo resuelve la sesión de la aplicación y las cuentas viven en /api/users, no en una tabla de datos.
@@ -56,7 +61,8 @@ class ApplicationContractBuilder {
         entity: match?.primary.key || null,
         relatedEntities: match?.related.map((entity) => entity.key) || [],
         rules: match ? rules.filter((rule) => rule.entidad === match.primary.name) : [],
-        schema: match ? match.primary.schema : { ...GENERIC_SCHEMA }
+        schema: match ? match.primary.schema : { ...GENERIC_SCHEMA },
+        ...(specOps.length ? { actions: specOps.map((op) => this._action(op, entities)) } : {})
       };
     });
     const used = new Set(operations.map((operation) => operation.entity).filter(Boolean));
@@ -85,17 +91,28 @@ class ApplicationContractBuilder {
       }
     }
     for (const field of ambiguous) delete references[field];
+    // Las operaciones de negocio de la especificación se atan a la operación (almacén) de su entidad.
+    for (const operation of operations) {
+      if (!operation.actions) continue;
+      operation.actions = operation.actions
+        .map((action) => this._bindAction(action, { operation, operationOf, operations, entities, warnings }))
+        .filter(Boolean);
+      if (!operation.actions.length) delete operation.actions;
+    }
     const byRequirement = new Map(operations.map((item) => [item.id, item]));
     const views = screens.map((screen) => {
       const rf = screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || [];
       const linked = rf.map((id) => byRequirement.get(id)).filter(Boolean);
+      const viewId = screen.pantalla_id || slug(screen.slug || screen.nombre);
+      const specView = (spec?.pantallas || []).find((item) => item.id === viewId);
       return {
-        id: screen.pantalla_id || slug(screen.slug || screen.nombre),
+        id: viewId,
         name: screen.nombre || screen.nombre_visible || screen.slug || 'Pantalla',
         route: this._route(screen),
         roles: screen.roles || [],
         requirements: rf,
-        operations: linked.map((item) => item.key)
+        operations: linked.map((item) => item.key),
+        ...(specView ? { components: specView.componentes } : {})
       };
     });
     return {
@@ -112,9 +129,71 @@ class ApplicationContractBuilder {
         usuarios: operations.filter((operation) => operation.identity === 'usuarios').map((operation) => operation.id)
       },
       views,
+      ...(spec ? { spec: { version: spec.version || 1, actions: operations.reduce((total, operation) => total + (operation.actions?.length || 0), 0) } } : {}),
       warnings,
       health: '/health'
     };
+  }
+
+  /** Tipo y opciones de cada campo que la operación lee, escribe o filtra: el frontend arma sus controles con esto. */
+  _fieldMeta(op, entities) {
+    const entity = entities.find((item) => item.name === op.entidad);
+    const names = [...new Set([...(op.entradas || []), ...(op.salida || []), ...(op.filtros || []).map((filter) => filter.campo), ...(op.transicion ? [op.transicion.campo] : [])])];
+    return Object.fromEntries(names.filter((name) => entity?.schema?.properties?.[name]).map((name) => {
+      const property = entity.schema.properties[name];
+      return [name, { type: property.type, ...(property.format ? { format: property.format } : {}), ...(property.enum ? { enum: property.enum } : {}), ...(property['x-references'] ? { entidad: property['x-references'] } : {}) }];
+    }));
+  }
+
+  /** Operación de negocio con nombre: método y ruta propios (`/api/actions/...`), separados del CRUD genérico. */
+  _action(op, entities = []) {
+    const kebab = String(op.nombre).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    const byId = ['actualizar', 'eliminar', 'transicion'].includes(op.tipo);
+    return {
+      id: op.id || null,
+      name: op.nombre,
+      type: op.tipo,
+      method: { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', eliminar: 'DELETE', transicion: 'POST' }[op.tipo],
+      path: `/api/actions/${kebab}${byId ? '/:id' : ''}`,
+      byId,
+      entity: op.entidadClave || entities.find((item) => item.name === op.entidad)?.key || null,
+      actors: op.actores || [],
+      filters: op.filtros || [],
+      fields: this._fieldMeta(op, entities),
+      inputs: op.entradas || [],
+      output: op.salida || [],
+      ...(op.transicion ? { transition: op.transicion } : {}),
+      description: op.descripcion || ''
+    };
+  }
+
+  /**
+   * Fija la capacidad (almacén) que ejecuta la acción y, en los filtros de sesión, cómo reconocer a la persona:
+   * si el campo apunta a una entidad con correo, se busca su registro por el correo de la sesión; si apunta a la
+   * entidad de cuentas (identidad), se compara con el id de la cuenta.
+   */
+  _bindAction(action, { operation, operationOf, operations, entities, warnings }) {
+    const capability = action.entity === operation.entity ? operation.key : operationOf.get(action.entity);
+    if (!capability) {
+      warnings.push(`La operación «${action.name}» usa la entidad ${action.entity}, que no tiene almacén en el contrato; no se generó.`);
+      return null;
+    }
+    const entity = entities.find((item) => item.key === action.entity);
+    const filters = action.filters.map((filter) => {
+      if (filter.origen !== 'sesion' || filter.valor !== 'usuario.id') return filter;
+      const target = entities.find((item) => item.name === entity?.schema?.properties?.[filter.campo]?.['x-references']);
+      if (!target) return filter;
+      const store = operations.find((item) => item.entity === target.key);
+      const email = ['email', 'correo'].find((name) => target.schema?.properties?.[name]);
+      if (!store || store.identity || !email) return filter;
+      return { ...filter, via: { capability: store.key, campo: email } };
+    });
+    const fields = Object.fromEntries(Object.entries(action.fields || {}).map(([name, meta]) => {
+      const target = meta.entidad ? entities.find((item) => item.name === meta.entidad) : null;
+      const reference = target ? operationOf.get(target.key) : null;
+      return [name, reference ? { ...meta, referencia: reference } : meta];
+    }));
+    return { ...action, capability, filters, fields };
   }
 
   /** GET más los métodos de los verbos válidos declarados, en orden canónico; sin verbos, CRUD completo. */

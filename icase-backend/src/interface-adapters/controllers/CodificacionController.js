@@ -275,6 +275,16 @@ class CodificacionController {
     } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
 
+  async puertaFuncional(req, res) {
+    try { res.json(await this.gestionarArtefactosCodigo.evaluarPuertaFuncional(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async aceptarPuertaFuncional(req, res) {
+    try { res.json(await this.gestionarArtefactosCodigo.aceptarPuertaFuncional({ proyectoId: req.params.id, excepciones: req.body?.excepciones, aceptadoPor: req.usuario?.id || null })); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
   async generarPaquete(req, res) {
     try { res.status(201).json(await this.gestionarArtefactosCodigo.generarPaquete(req.params.id)); }
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }

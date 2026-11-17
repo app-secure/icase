@@ -33,6 +33,7 @@ const FinalProjectAuditService = require('./infrastructure/services/FinalProject
 const RequirementChangeService = require('./core/services/RequirementChangeService');
 const CodePlanningProposalService = require('./core/services/CodePlanningProposalService');
 const BusinessRuleInferenceService = require('./infrastructure/services/BusinessRuleInferenceService');
+const ApplicationSpecService = require('./infrastructure/services/ApplicationSpecService');
 const BackendScaffoldGenerator = require('./infrastructure/services/BackendScaffoldGenerator');
 const FrontendScaffoldGenerator = require('./infrastructure/services/FrontendScaffoldGenerator');
 const TestSuiteGenerator = require('./infrastructure/services/TestSuiteGenerator');
@@ -124,7 +125,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const mockupTraceabilityService = new MockupTraceabilityService();
   const finalProjectAuditService = new FinalProjectAuditService({ mockupTraceabilityService });
   const codePlanningProposalService = new CodePlanningProposalService({
-    ruleInferenceService: new BusinessRuleInferenceService({ modelosIa: modelosIaService })
+    ruleInferenceService: new BusinessRuleInferenceService({ modelosIa: modelosIaService }),
+    specService: new ApplicationSpecService({ modelosIa: modelosIaService })
   });
   const backendScaffoldGenerator = new BackendScaffoldGenerator();
   const frontendScaffoldGenerator = new FrontendScaffoldGenerator();

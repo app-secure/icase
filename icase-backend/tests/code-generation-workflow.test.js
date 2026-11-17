@@ -119,7 +119,7 @@ describe('flujo base de generación de código', () => {
   test('no reactiva pruebas desactualizadas aunque exista un artefacto de pruebas previo aprobado', () => {
     const workflow = new CodeGenerationWorkflowService();
     const etapas = workflow.crearEtapasIniciales().map((item) => {
-      if (['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos', 'generacion_backend', 'generacion_frontend'].includes(item.etapa)) {
+      if (['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos', 'especificacion_aplicacion', 'generacion_backend', 'generacion_frontend'].includes(item.etapa)) {
         return { ...item, estado: CODE_PHASE_STATES.APPROVED };
       }
       if (item.etapa === 'generacion_pruebas') {

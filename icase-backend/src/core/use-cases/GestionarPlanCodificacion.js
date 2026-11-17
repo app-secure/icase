@@ -19,7 +19,8 @@ class GestionarPlanCodificacion {
     diagramaRepository = null,
     disenoRepository = null,
     artefactoRepository = null,
-    proposalService = null
+    proposalService = null,
+    specService = null
   }) {
     this.proyectoRepository = proyectoRepository;
     this.planCodificacionRepository = planCodificacionRepository;
@@ -28,6 +29,7 @@ class GestionarPlanCodificacion {
     this.disenoRepository = disenoRepository;
     this.artefactoRepository = artefactoRepository;
     this.proposalService = proposalService;
+    this.specService = specService || proposalService?.specService || null;
     this.workflow = new CodeGenerationWorkflowService();
     this.ruleService = new BusinessRuleService();
     this.accessService = new AccessControlService();
@@ -51,7 +53,7 @@ class GestionarPlanCodificacion {
       this.requerimientoRepository.listarPorProyecto(proyectoId),
       this.diagramaRepository.listarPorProyecto(proyectoId)
     ]);
-    const diseno = etapa === 'estructura_carpetas' ? await this.disenoRepository?.obtenerPorProyecto(proyectoId) : null;
+    const diseno = ['estructura_carpetas', 'especificacion_aplicacion'].includes(etapa) ? await this.disenoRepository?.obtenerPorProyecto(proyectoId) : null;
     return this.proposalService.generar({ etapa, proyecto, requerimientos, diagramas, diseno, plan, inicial });
   }
 
@@ -108,6 +110,7 @@ class GestionarPlanCodificacion {
     } // lanza un error claro si algo no está soportado
     if (etapa === 'reglas_negocio') propuesta = await this._normalizarReglas(proyectoId, propuesta);
     if (etapa === 'control_acceso') propuesta = await this._normalizarAcceso(proyectoId, propuesta);
+    if (etapa === 'especificacion_aplicacion') propuesta = await this._normalizarEspecificacion(proyectoId, propuesta);
     if (etapa === 'modulos') propuesta = await this._normalizarModulos(propuesta, proyectoId);
     const actual = plan.etapas.find((item) => item.etapa === etapa);
     const cambioReal = JSON.stringify(actual?.propuesta || null) !== JSON.stringify(propuesta);
@@ -162,6 +165,12 @@ class GestionarPlanCodificacion {
     if (etapa === 'control_acceso' && decision === 'aprobar') {
       // Los RF pudieron cambiar desde que se guardó la propuesta.
       await this._normalizarAcceso(proyectoId, actual.propuesta);
+    }
+    if (etapa === 'especificacion_aplicacion' && decision === 'aprobar') {
+      // El dominio o los RF pudieron cambiar desde que se guardó la propuesta.
+      const { operaciones } = await this._normalizarEspecificacion(proyectoId, actual.propuesta);
+      const pendientes = operaciones.filter((op) => op.estado_decision === 'pendiente').map((op) => op.nombre);
+      if (pendientes.length) throw new Error(`Confirma o rechaza las operaciones pendientes antes de aprobar la etapa: ${pendientes.join(', ')}.`);
     }
     if (etapa === 'modulos' && decision === 'aprobar') await this._normalizarModulos(actual.propuesta, proyectoId);
 
@@ -330,6 +339,17 @@ class GestionarPlanCodificacion {
     await this.revisar({ proyectoId, etapa: 'control_acceso', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
     etapasAprobadas.push('control_acceso');
 
+    // 6b. Comportamiento: se confirman las operaciones propuestas con IA; las derivadas sin IA quedan fuera y se reportan.
+    const sugEspec = await this.sugerir({ proyectoId, etapa: 'especificacion_aplicacion' });
+    const operacionesEspec = sugEspec.propuesta?.operaciones || [];
+    if (operacionesEspec.length) {
+      dudas.push(...(sugEspec.advertencias || []).map((adv) => ({ etapa: 'especificacion_aplicacion', tipo: 'advertencia', detalle: adv })));
+      const decididas = operacionesEspec.map((op) => ({ ...op, estado_decision: op.origen === 'ia' ? 'confirmado' : 'rechazado' }));
+      await this.proponer({ proyectoId, etapa: 'especificacion_aplicacion', propuesta: { ...sugEspec.propuesta, operaciones: decididas }, observaciones: 'Operaciones con IA confirmadas en modo un clic; las derivadas quedaron fuera.' });
+      await this.revisar({ proyectoId, etapa: 'especificacion_aplicacion', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+      etapasAprobadas.push('especificacion_aplicacion');
+    }
+
     // 7. Módulos: modo automático con valores recomendados por defecto
     const { propuesta: propModulos } = await this.sugerir({ proyectoId, etapa: 'modulos' });
     await this.proponer({ proyectoId, etapa: 'modulos', propuesta: propModulos, observaciones: 'Módulos sugeridos por los requisitos y las decisiones aprobadas.' });
@@ -371,6 +391,27 @@ class GestionarPlanCodificacion {
       plan: resultadoEnriquecido,
       informe
     };
+  }
+
+  /**
+   * Revalida la especificación contra el dominio y los RF aprobados vigentes. Conserva la decisión de cada operación
+   * (confirmada, rechazada o pendiente) y falla si alguna ya no es válida.
+   */
+  async _normalizarEspecificacion(proyectoId, propuesta) {
+    const operaciones = propuesta?.operaciones === undefined ? [] : propuesta.operaciones;
+    if (!Array.isArray(operaciones)) throw new Error('Las operaciones deben enviarse como una lista en "operaciones".');
+    if (!operaciones.length) return { ...propuesta, operaciones: [], pantallas: [] };
+    if (!this.specService) throw new Error('El servicio de especificación no está configurado.');
+    const [requerimientos, diagramas] = await Promise.all([
+      this.requerimientoRepository.listarPorProyecto(proyectoId),
+      this.diagramaRepository.listarPorProyecto(proyectoId)
+    ]);
+    const modelo = this.domainExtractor.fromDiagrams(diagramas);
+    if (!modelo) throw new Error('No hay un diagrama de clases de dominio aprobado y vigente.');
+    const rf = requerimientos.filter((item) => item.aprobado === true && String(item.tipo).toUpperCase() === 'RF');
+    const resultado = this.specService.validar({ operaciones, pantallas: propuesta.pantallas }, { modelo, rf });
+    if (resultado.errores.length) throw new Error(`Especificación inválida: ${resultado.errores.join(' ')}`);
+    return { ...propuesta, operaciones: resultado.operaciones, pantallas: resultado.pantallas };
   }
 
   /** Valida las reglas contra el modelo de dominio y los RF aprobados; devuelve la propuesta con reglas normalizadas. */
