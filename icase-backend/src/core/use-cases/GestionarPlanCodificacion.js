@@ -57,6 +57,25 @@ class GestionarPlanCodificacion {
     return this.proposalService.generar({ etapa, proyecto, requerimientos, diagramas, diseno, plan, inicial });
   }
 
+  /**
+   * Qué se va a generar, antes de generarlo: pantallas con sus componentes y botones, operaciones con su endpoint,
+   * requisitos sin cubrir y contenedores. Usa las decisiones vigentes aunque aún estén en revisión.
+   */
+  async vistaPrevia(proyectoId) {
+    const proyecto = await this._obtenerProyectoListo(proyectoId);
+    if (!this.requerimientoRepository || !this.diagramaRepository) throw new Error('La vista previa necesita requisitos y diagramas.');
+    const [plan, requerimientos, diagramas, diseno] = await Promise.all([
+      this._obtenerOCrear(proyectoId),
+      this.requerimientoRepository.listarPorProyecto(proyectoId),
+      this.diagramaRepository.listarPorProyecto(proyectoId),
+      this.disenoRepository?.obtenerPorProyecto(proyectoId)
+    ]);
+    const vigentes = (diagramas || []).filter((item) => item.aprobado === true && item.estado === 'aprobado' && !item.desactualizado);
+    const decisiones = Object.fromEntries((plan.etapas || []).filter((item) => item.propuesta && item.estado !== CODE_PHASE_STATES.REJECTED).map((item) => [item.etapa, item.propuesta]));
+    const GenerationPreviewService = require('../../infrastructure/services/GenerationPreviewService');
+    return new GenerationPreviewService().construir({ proyecto, requerimientos, diagramas: vigentes, diseno: diseno || {}, decisiones });
+  }
+
   async obtener(proyectoId) {
     const proyecto = await this._obtenerProyectoListo(proyectoId);
     let plan = await this.planCodificacionRepository.obtenerPorProyecto(proyectoId);

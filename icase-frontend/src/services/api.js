@@ -648,6 +648,13 @@ export async function proposeCodePhaseApi(projectId, phase, propuesta, observaci
   return data;
 }
 
+export async function fetchGenerationPreviewApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/vista-previa`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo calcular la vista previa.');
+  return data;
+}
+
 export async function suggestCodePhaseApi(projectId, phase, inicial = false) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}/sugerencia${inicial ? "?inicial=1" : ""}`, {
     method: 'POST',

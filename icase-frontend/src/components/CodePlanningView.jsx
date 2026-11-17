@@ -15,6 +15,7 @@ import {
 import GenerationReport from './GenerationReport';
 import SpecReviewPanel from './SpecReviewPanel';
 import FunctionalGatePanel from './FunctionalGatePanel';
+import GenerationPreviewPanel from './GenerationPreviewPanel';
 import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
@@ -370,7 +371,9 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                   ? 'en_revision'
                   : 'bloqueada'
             };
-            const roadmapItems = [...decisionItems, generationGate];
+            // La revisión previa no depende de ninguna aprobación: permite ver qué se generará mientras se toman las decisiones.
+            const previewItem = { etapa: 'revision_previa', titulo: 'Revisión previa', estado: 'pendiente' };
+            const roadmapItems = [...decisionItems, previewItem, generationGate];
 
             return roadmapItems.map((item, idx) => {
               const isSelected = selected === item.etapa;
@@ -567,6 +570,12 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
             <div className="flex py-16 items-center justify-center gap-2 text-sm text-slate-500">
               <Loader2 className="animate-spin" size={18} />
               Cargando plan de codificación…
+            </div>
+          ) : selected === 'revision_previa' ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-xs">
+              <h2 className="text-2xl font-bold text-slate-900">Revisión previa</h2>
+              <p className="mt-1 mb-6 text-sm text-slate-500">Qué pantallas, componentes, botones y operaciones se van a generar. Revísalo antes de generar el código.</p>
+              <GenerationPreviewPanel projectId={projectId} refreshKey={plan?.version} onError={(message) => addToast({ type: 'error', message })} />
             </div>
           ) : selected === 'generacion_entrega' ? (
             /* PANEL EXCLUSIVO PARA GENERACIÓN Y ENTREGA DE ARTEFACTOS */

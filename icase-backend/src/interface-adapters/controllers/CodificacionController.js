@@ -29,6 +29,11 @@ class CodificacionController {
     }
   }
 
+  async vistaPrevia(req, res) {
+    try { res.json(await this.gestionarPlanCodificacion.vistaPrevia(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
   async sugerirEtapa(req, res) {
     try {
       res.json(await this.gestionarPlanCodificacion.sugerir({
