@@ -11,7 +11,7 @@ export const DEFAULT_DESIGN_SYSTEM = {
 
 export const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM) => {
   if (!rawHtml) return "";
-  if (rawHtml.includes('data-icase-shell-version="1"') && typeof DOMParser !== 'undefined') {
+  if (/data-icase-shell-version="[12]"/.test(rawHtml) && typeof DOMParser !== 'undefined') {
     const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
     const header = doc.querySelector('.icase-shell > header');
     if (header) {

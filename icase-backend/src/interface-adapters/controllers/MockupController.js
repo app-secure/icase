@@ -192,7 +192,7 @@ class MockupController {
       const validator = this.generarMockupsUseCase.validator;
       const mockups = (actual?.mockups || []).map(mockup => {
         // Legacy HTML remains intact; only the versioned common shell is recomposed.
-        if (!String(mockup.preview_code).includes('data-icase-shell-version="1"')) return mockup;
+        if (!/data-icase-shell-version="[12]"/.test(String(mockup.preview_code))) return mockup;
         const html = composer.compose(mockup.preview_code, { screen: { ...mockup, slug: mockup.nombre_pantalla }, manifest: actual.manifiesto_navegacion || [], identity: normalizado });
         return { ...mockup, preview_code: validator.aplicarSistemaDiseno(validator.sanitizar(html).html, normalizado) };
       });

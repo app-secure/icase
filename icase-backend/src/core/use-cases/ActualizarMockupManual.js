@@ -46,7 +46,7 @@ class ActualizarMockupManual {
 
     const mockupActual = mockups[index];
     const enlazado = await this._enlaces(proyectoId, validacion.html);
-    const advertencias = [...new Set([...calidad.advertencias, ...(enlazado?.advertencias || [])])];
+    const advertencias = [...new Set([...calidad.advertencias, ...(enlazado?.advertencias || []), ...new (require('../../infrastructure/services/MockupLayoutLinter'))().mensajes(validacion.html, { screen: { ...mockupActual, slug: mockupActual.nombre_pantalla } })])];
     const mockupActualizado = {
       ...mockupActual,
       preview_code: validacion.html,

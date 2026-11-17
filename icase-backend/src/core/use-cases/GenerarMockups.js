@@ -3,6 +3,7 @@ const MockupTraceabilityService = require('../../infrastructure/services/MockupT
 const MockupRepairService = require('../../infrastructure/services/MockupRepairService');
 const MockupBindingService = require('../../infrastructure/services/MockupBindingService');
 const MockupVisualComposer = require('../../infrastructure/services/MockupVisualComposer');
+const MockupLayoutLinter = require('../../infrastructure/services/MockupLayoutLinter');
 const MockupChatCorrectionService = require('../../infrastructure/services/MockupChatCorrectionService');
 const MockupFormRepairService = require('../../infrastructure/services/MockupFormRepairService');
 
@@ -313,7 +314,7 @@ class GenerarMockups {
       // Los elementos que el sanitizador ya eliminó son ajustes informativos,
       // no problemas que sigan presentes en el mockup final.
       const ajustesSanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...sanitizado.advertencias])];
-      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias])];
+      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias, ...new MockupLayoutLinter().mensajes(htmlConSistemaDiseno, { screen: pantalla || {} })])];
       return {
         ...mockup,
         pantalla_id: pantalla?.pantalla_id || mockup.nombre_pantalla,
