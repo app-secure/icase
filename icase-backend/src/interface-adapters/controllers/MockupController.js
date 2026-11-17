@@ -8,6 +8,30 @@ function contraste(hexA, hexB) {
   return (mayor + 0.05) / (menor + 0.05);
 }
 
+const MOTIVOS_IA = {
+  salida_truncada: 'la respuesta se cortó por el límite de salida (la pantalla es muy larga para ese modelo)',
+  alta_demanda: 'el modelo está saturado por demanda',
+  cuota: 'se alcanzó el límite de uso por minuto o por día',
+  limite_contexto: 'el contexto excede lo que admite',
+  autenticacion: 'la clave de API no es válida',
+  modelo_no_disponible: 'el modelo ya no está disponible',
+  transitorio: 'falló de forma transitoria'
+};
+
+/** Resume por proveedor por qué no se pudo generar, a partir de las advertencias del servicio de IA. */
+function explicarFalloIa(advertencias = []) {
+  const porProveedor = new Map();
+  for (const aviso of advertencias) {
+    const match = /^([a-z]+):.*:\s*([a-z_]+)$/i.exec(String(aviso).trim());
+    if (!match || !MOTIVOS_IA[match[2]]) continue;
+    const motivos = porProveedor.get(match[1]) || new Set();
+    motivos.add(MOTIVOS_IA[match[2]]);
+    porProveedor.set(match[1], motivos);
+  }
+  const detalle = [...porProveedor].map(([proveedor, motivos]) => `${proveedor}: ${[...motivos].join('; ')}`).join('. ');
+  return `Ningún proveedor de IA pudo generar las pantallas${detalle ? ` (${detalle})` : ''}. Reintenta en unos minutos o genera de una en una.`;
+}
+
 class MockupController {
   constructor({
     generarMockupsUseCase,
@@ -93,13 +117,24 @@ class MockupController {
         ...payload,
         onProgress: (avance) => this.trabajoGeneracionRepository.actualizar(trabajoId, avance)
       });
+      const generados = resultado.totalProcesados ?? resultado.mockups?.length ?? 0;
+      const solicitadas = Array.isArray(payload.pantallas) ? payload.pantallas.length : 0;
+      // Cero pantallas generadas no es un éxito: se dice por qué (proveedores saturados, salida truncada, cuota) y se permite reintentar.
+      if (!payload.soloReparar && solicitadas > 0 && generados === 0) {
+        await this.trabajoGeneracionRepository.actualizar(trabajoId, {
+          estado: 'fallido', progreso: 100, mensaje: 'No se generó ninguna pantalla',
+          advertencias: resultado.advertencias || [], total_generados: 0,
+          error: explicarFalloIa(resultado.advertencias || [])
+        }, true);
+        return;
+      }
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'completado',
         progreso: 100,
-        mensaje: 'Generación completada',
+        mensaje: !payload.soloReparar && solicitadas > generados ? `Se generaron ${generados} de ${solicitadas} pantallas` : 'Generación completada',
         proveedor_usado: resultado.proveedorUsado,
         advertencias: resultado.advertencias || [],
-        total_generados: resultado.totalProcesados ?? resultado.mockups?.length ?? 0,
+        total_generados: generados,
         error: null
       }, true);
     } catch (err) {
@@ -266,4 +301,5 @@ class MockupController {
   }
 }
 
+MockupController.explicarFalloIa = explicarFalloIa;
 module.exports = MockupController;

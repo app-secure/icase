@@ -147,15 +147,31 @@ class MongoTrabajoGeneracionRepository {
     }
   }
 
+  /**
+   * Un trabajo de mockups sigue «procesando» si el servidor se reinició a mitad de la generación (por ejemplo, un cambio
+   * de código con --watch). Su lease vencido prueba que ya no hay quien lo ejecute: se cierra como fallido para que la
+   * pantalla deje de esperar y permita iniciar un nuevo intento.
+   */
+  async _cerrarSiHuerfano(trabajo) {
+    if (!trabajo || trabajo.tipo !== 'mockups' || !['encolado', 'procesando'].includes(trabajo.estado)) return trabajo;
+    const vencido = trabajo.lease_expires_at ? trabajo.lease_expires_at <= new Date() : Date.now() - new Date(trabajo.updatedAt).getTime() > this.leaseMs;
+    if (!vencido) return trabajo;
+    await TrabajoGeneracionModel.updateOne({ _id: trabajo._id, estado: { $in: ['encolado', 'procesando'] } }, {
+      $set: { estado: 'fallido', progreso: 100, lease_expires_at: null, mensaje: 'Generación interrumpida', error: 'El servidor se reinició mientras se generaban los mockups. Inicia un nuevo intento: lo ya guardado se conserva.' },
+      $unset: { clave_activa: 1 }
+    });
+    return TrabajoGeneracionModel.findById(trabajo._id);
+  }
+
   async obtenerPorId(id) {
-    const trabajo = await TrabajoGeneracionModel.findById(id);
+    const trabajo = await this._cerrarSiHuerfano(await TrabajoGeneracionModel.findById(id));
     return trabajo ? trabajo.toJSON() : null;
   }
 
   async obtenerUltimoPorProyecto(proyectoId) {
-    const trabajo = await TrabajoGeneracionModel
+    const trabajo = await this._cerrarSiHuerfano(await TrabajoGeneracionModel
       .findOne({ proyecto_id: proyectoId, tipo: 'mockups' })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 }));
     return trabajo ? trabajo.toJSON() : null;
   }
 

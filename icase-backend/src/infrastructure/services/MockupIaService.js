@@ -19,6 +19,8 @@ class MockupIaService {
     this.circuitos = new Map();
     this.failureThreshold = Number(process.env.MOCKUP_CIRCUIT_FAILURES || 2);
     this.cooldownMs = Number(process.env.MOCKUP_CIRCUIT_COOLDOWN_MS || 300000);
+    // Esperas (ms) entre reintentos del mismo modelo cuando responde «alta demanda».
+    this.esperasAltaDemanda = (process.env.MOCKUP_HIGH_DEMAND_WAITS_MS || '4000,10000').split(',').map(Number).filter((value) => value > 0);
   }
 
   leerPrompt(archivo) {
@@ -206,7 +208,15 @@ class MockupIaService {
       }
       try {
         console.log(`[MockupIaService] Generando con ${clave} (~${tokensEstimados} tokens de entrada)...`);
-        const texto = await this._solicitar(proveedor, modelo, prompt, { modoEdicion });
+        // «Alta demanda» (503) es momentánea: se reintenta el mismo modelo con una espera corta antes de pasar al siguiente.
+        let texto = null;
+        for (let intento = 0; ; intento += 1) {
+          try { texto = await this._solicitar(proveedor, modelo, prompt, { modoEdicion }); break; } catch (error) {
+            if (this._clasificarError(error).tipo !== 'alta_demanda' || intento >= this.esperasAltaDemanda.length) throw error;
+            console.warn(`[MockupIaService] ${clave} con alta demanda; reintento ${intento + 1} en ${this.esperasAltaDemanda[intento] / 1000} s.`);
+            await new Promise((resolve) => setTimeout(resolve, this.esperasAltaDemanda[intento]));
+          }
+        }
         if (texto) {
           this.circuitos.delete(clave);
           return { texto, modelo, advertencias };
@@ -243,7 +253,7 @@ class MockupIaService {
       : 'https://openrouter.ai/api/v1/chat/completions';
     const maxTokens = proveedor === 'groq'
       ? Number(process.env.GROQ_MOCKUP_MAX_OUTPUT_TOKENS || 4800)
-      : Number(modoEdicion ? (process.env.OPENROUTER_MOCKUP_EDIT_MAX_OUTPUT_TOKENS || 12000) : (process.env.OPENROUTER_MOCKUP_MAX_OUTPUT_TOKENS || 8000));
+      : Number(modoEdicion ? (process.env.OPENROUTER_MOCKUP_EDIT_MAX_OUTPUT_TOKENS || 12000) : (process.env.OPENROUTER_MOCKUP_MAX_OUTPUT_TOKENS || 12000));
     const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
     if (proveedor === 'openrouter') Object.assign(headers, { 'HTTP-Referer': 'https://icase.app', 'X-Title': 'I-CASE Mockups' });
     const res = await axios.post(url, {

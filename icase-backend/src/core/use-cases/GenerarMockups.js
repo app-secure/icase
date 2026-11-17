@@ -5,6 +5,7 @@ const MockupBindingService = require('../../infrastructure/services/MockupBindin
 const MockupVisualComposer = require('../../infrastructure/services/MockupVisualComposer');
 const MockupLayoutLinter = require('../../infrastructure/services/MockupLayoutLinter');
 const Compatibility = require('../services/RequirementScreenCompatibility');
+const PlatformPolicy = require('../services/PlatformPolicy');
 const MockupChatCorrectionService = require('../../infrastructure/services/MockupChatCorrectionService');
 const MockupFormRepairService = require('../../infrastructure/services/MockupFormRepairService');
 
@@ -653,8 +654,12 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     const rolesInferidos = this._inferirRoles(ruta);
     const textoNombre = this._textoRuta(nombre);
     const esAccesoCompartido = /inicio de sesion|iniciar sesion|login|portal de acceso/.test(textoNombre);
+    // Un acceso compartido se fusiona solo con el de su misma aplicación: cada app (móvil o web) conserva su propio inicio de sesión.
+    const plataformaAcceso = this._inferirPlataforma(ruta);
+    const aplicacionNombrada = ruta.slice(1).some((parte) => ['móvil', 'web'].includes(PlatformPolicy.marked(parte)));
     if (esAccesoCompartido) {
-      const existente = pantallas.find((pantalla) => pantalla.es_acceso_compartido);
+      // Sin aplicaciones nombradas en el árbol (formato anterior) se conserva un único acceso compartido.
+      const existente = pantallas.find((pantalla) => pantalla.es_acceso_compartido && (!(aplicacionNombrada || pantalla.plataforma_explicita) || pantalla.plataforma === plataformaAcceso));
       if (existente) {
         existente.roles = [...new Set([...(existente.roles || []), ...rolesInferidos])];
         existente.rutas_origen = [...new Set([...(existente.rutas_origen || [existente.ruta]), ruta.join(' / ')])];
@@ -664,8 +669,11 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     let slug = this._generarSlugPantalla(nombre) || `pantalla-${pantallas.length + 1}`;
 
     if (slugsUsados.has(slug)) {
+      // Pantallas con el mismo nombre en aplicaciones distintas (el acceso de cada app) se distinguen por la aplicación.
+      const aplicacion = partesRuta.find((parte) => PlatformPolicy.marked(parte) && PlatformPolicy.marked(parte) !== 'ambas') || '';
+      const conApp = aplicacion ? this._generarSlugPantalla(`${nombre} ${PlatformPolicy.marked(aplicacion) === 'móvil' ? 'movil' : 'web'}`) : '';
       const conModulo = this._generarSlugPantalla(`${modulo} ${nombre}`);
-      slug = conModulo && !slugsUsados.has(conModulo) ? conModulo : `${slug}-${pantallas.length + 1}`;
+      slug = conApp && !slugsUsados.has(conApp) ? conApp : (conModulo && !slugsUsados.has(conModulo) ? conModulo : `${slug}-${pantallas.length + 1}`);
     }
     slugsUsados.add(slug);
 
@@ -683,7 +691,8 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
       slug,
       orden: pantallas.length + 1,
       obligatoria: true,
-      es_acceso_compartido: esAccesoCompartido
+      es_acceso_compartido: esAccesoCompartido,
+      plataforma_explicita: aplicacionNombrada
     });
   }
 
@@ -693,6 +702,13 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
   }
 
   _inferirPlataforma(ruta) {
+    // Si la rama del árbol nombra su aplicación («Aplicación Móvil…», «Aplicación Web Interna»), esa manda.
+    const partes = Array.isArray(ruta) ? ruta.slice(1) : [];
+    for (const parte of partes) {
+      const marca = PlatformPolicy.marked(parte);
+      if (marca === 'móvil') return 'mobile';
+      if (marca === 'web') return 'web';
+    }
     const texto = this._textoRuta(ruta);
     if (/cliente|comensal|movil|mobile/.test(texto)) return 'mobile';
     if (/mesero|camarero|salon|tablet/.test(texto)) return 'tablet';
@@ -737,6 +753,8 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
       let plataforma = pantalla.plataforma;
       let roles = pantalla.roles;
       let shell = pantalla.shell;
+      const explicita = ['móvil', 'web'].includes(PlatformPolicy.marked(String(pantalla.ruta || '').split(' / ').slice(1).join(' / ')));
+      if (explicita) return { ...pantalla, plataforma, roles, shell };
 
       if (hayCliente && plataforma === 'web' && /menu digital|reserva|mis pedidos|mis puntos|paquete prepagado/.test(texto) && !/gestion|administracion/.test(texto)) {
         plataforma = 'mobile'; roles = ['Cliente']; shell = 'cliente-mobile';

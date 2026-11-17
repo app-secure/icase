@@ -97,7 +97,7 @@ export default function MockupsView({
           type: job.solo_reparar && !job.total_generados ? "error" : "success",
           message: job.solo_reparar
             ? `Reparación terminada: ${job.total_generados || 0} pantallas modificadas. ${repairWarnings.length ? repairWarnings.join(' ') : 'Revisa los controles antes de aprobar.'}`
-            : `Generación completada: ${job.total_generados || 0} mockups disponibles.`
+            : /^Se generaron \d+ de \d+/.test(job.mensaje || '') ? `${job.mensaje}. Vuelve a generar las que faltan.` : `Generación completada: ${job.total_generados || 0} mockups disponibles.`
         });
       }
       loadCatalog().catch(() => {});

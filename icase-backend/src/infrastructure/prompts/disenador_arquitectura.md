@@ -85,9 +85,9 @@ Genera los diagramas técnicos obligatorios en código PlantUML estricto, 100% c
 - PROHIBIDO usar la palabra "WBS" o "EDT" como nombre de nodo, en el título, la descripción o las viñetas. Las directivas de PlantUML `@startwbs` y `@endwbs` son obligatorias.
 - Jerarquía recomendada (amplíala si los flujos aprobados lo necesitan, sin omitir pantallas):
   * Nivel 1 (`*`): Nombre del sistema o producto.
-  * Nivel 2 (`**`): Flujos por rol/plataforma y módulos de navegación de primer nivel derivados del alcance.
-  * Nivel 3 (`***`): Vistas y pantallas dentro de cada módulo.
-  * Nivel 4 (`****`, opcional): Subvistas, pantallas de detalle, formularios de alta o edición, y modales de ruta.
+  * Nivel 2 (`**`): LA APLICACIÓN. Una por plataforma presente en los requisitos, con la plataforma en su nombre (por ejemplo `Aplicación Móvil de Clientes`, `Aplicación Web Interna`). Nunca un flujo ni un rol en este nivel.
+  * Nivel 3 (`***`): Módulos o flujos dentro de la aplicación (por ejemplo `Acceso`, `Módulo de Mesero`, `Menú y pedidos`).
+  * Nivel 4 (`****`): Las pantallas. Los detalles y formularios de alta o edición son pantallas hermanas en este mismo nivel; no agregues un quinto nivel.
 
 NODOS VÁLIDOS: únicamente pantallas, vistas o rutas alcanzables que puedan derivarse de los RF y casos de uso aprobados. No copies nombres de pantalla de otros dominios.
 
@@ -103,16 +103,18 @@ REGLA DE ORO: si un nodo no se puede alcanzar navegando (no corresponde a una pa
 - CONSISTENCIA CON CASOS DE USO: cada caso de uso que requiera interacción humana debe corresponder a una pantalla o ruta reconocible. Los procesos internos sin interfaz no se convierten en pantallas; documenta su omisión en la descripción.
 
 ROLES Y PLATAFORMAS (OBLIGATORIO):
-- Separa los recorridos cuando cambien el rol, el dispositivo o la navegación. Nombra cada módulo de nivel 2 con el formato `Flujo de <Rol> (<Plataforma>)`, sustituyendo ambos marcadores por valores presentes en los requisitos.
-- Todo actor con interacción de interfaz en los RF debe tener un flujo explícito en la plataforma indicada por el insumo. No asumas una plataforma cuando no fue definida.
-- Cada pantalla debe aparecer bajo el flujo del actor que realmente la utiliza. Si dos roles usan una función con navegación distinta, crea vistas diferenciadas con nombres inequívocos.
-- Las pantallas compartidas de acceso se declaran una sola vez bajo un módulo común. No dupliques "Inicio de sesión" por cada rol.
+- El nivel 2 son las APLICACIONES, una por plataforma que los requisitos nombren (móvil, web, tableta). Toda pantalla cuelga de exactamente una aplicación; la plataforma se deduce de la rama, no de palabras sueltas dentro del nombre de la pantalla.
+- PROHIBIDO nombrar dos plataformas en un mismo nodo («Aplicación Web Interna y Aplicación Móvil»). Si una función existe en ambas plataformas, crea la pantalla en cada aplicación.
+- Cada aplicación tiene su PROPIO acceso: una pantalla de inicio de sesión dentro de cada una (módulo `Acceso`), no una compartida. Un rol que usa dos aplicaciones inicia sesión en cada una.
+- Todo actor con interacción de interfaz en los RF debe tener sus pantallas dentro de la aplicación que los requisitos le asignan (por ejemplo, el cliente en la móvil y el personal interno en la web). No asumas una plataforma que los requisitos no definen.
+- Dentro de cada aplicación, agrupa por módulo o flujo del rol (`Módulo de Mesero`, `Módulo de Caja`). Cada pantalla debe aparecer bajo el módulo del actor que realmente la utiliza.
+- En una aplicación móvil agrupa en pocos destinos principales (máximo 5). Las pantallas de detalle y de formulario se nombran con esas palabras («Detalle de…», «Formulario de…») para distinguirlas de los destinos principales.
 - No inventes registro, recuperación de contraseña ni administración de usuarios si ningún RF aprobado los exige.
 
 COBERTURA MÍNIMA:
 - El árbol debe iniciar con el nombre del producto. Incluye acceso, recuperación, registro o panel principal únicamente si una necesidad aprobada exige esas pantallas.
 - Por cada módulo de primer nivel derivado de los RF de prioridad Alta, incluir al menos una vista de listado o consulta y una vista de registro o detalle.
-- Todo actor citado en los RF debe tener al menos un flujo explícito, con su plataforma indicada en el nombre del módulo.
+- Todo actor citado en los RF debe tener al menos un módulo explícito dentro de la aplicación que le corresponde.
 - Incluye los nodos necesarios para cubrir el alcance aprobado, sin un mínimo ni máximo artificial. No omitas funciones para reducir el árbol ni inventes pantallas genéricas vacías.
 
 ## EXPLICACIÓN DEL FUNCIONAMIENTO DEL SISTEMA EN CADA DIAGRAMA:

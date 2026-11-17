@@ -213,6 +213,10 @@ class PlantUMLValidatorService {
       advertencias.push(...(consistencia.advertencias || []));
       Object.assign(metricas, consistencia.metricas || {});
       detalles = { ...(detalles || {}), consistencia };
+      // Cada pantalla debe colgar de una aplicación (móvil o web) y cada aplicación tener su acceso.
+      const plataformas = require('../../core/services/NavigationTreeReview').review(trimmed);
+      advertencias.push(...plataformas.advertencias);
+      Object.assign(metricas, plataformas.metricas);
     }
 
     return { ...this.resultado([...new Set(errores)], [...new Set(advertencias)], metricas), detalles };

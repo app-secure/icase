@@ -21,6 +21,20 @@ function declared(screen) {
   return null;
 }
 
+/**
+ * Plataforma que un texto nombra explícitamente: 'móvil', 'web', 'ambas' (nombra las dos) o null (no nombra ninguna).
+ * Sirve para leer los nodos del árbol de navegación, donde el nivel 2 debe ser la aplicación.
+ */
+function marked(value) {
+  const text = strip(value);
+  const mobile = MOBILE_WORDS.test(text);
+  const web = /\b(?:web|escritorio|desktop)\b/.test(text);
+  if (mobile && web) return 'ambas';
+  if (mobile) return MOBILE;
+  if (web) return WEB;
+  return null;
+}
+
 /** Aplicación a la que pertenece la pantalla. */
 function of(screen) {
   const explicit = declared(screen);
@@ -42,4 +56,4 @@ function missing(screens = [], selected = [WEB]) {
   return [WEB, MOBILE].filter((app) => needed[app] > 0 && !chosen.has(app));
 }
 
-module.exports = { WEB, MOBILE, of, declared, count, missing };
+module.exports = { WEB, MOBILE, of, declared, count, missing, marked };

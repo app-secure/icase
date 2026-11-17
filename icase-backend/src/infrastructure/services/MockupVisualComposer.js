@@ -12,7 +12,7 @@ function strip(node) {
 }
 
 const SHELL_VERSION = '2';
-const TAB_LIMIT = 4;
+const TAB_LIMIT = 5;
 
 const textOf = (node) => (node.nodeName === '#text' ? node.value : (node.childNodes || []).map(textOf).join(' ')).replace(/\s+/g, ' ').trim();
 const attrOf = (node, name) => (node.attrs || []).find((item) => item.name === name)?.value || '';
@@ -111,7 +111,7 @@ const STYLE = `
 const link = (item, current) => `<a href="#${escape(item.slug)}" data-accion="ui" ${item.slug === current ? 'aria-current="page"' : ''}>${escape(item.nombre)}</a>`;
 
 /**
- * Hasta cuatro pestañas: solo los destinos de primer nivel del flujo. El resto de pantallas se alcanza desde botones
+ * Hasta cinco pestañas: solo los destinos de primer nivel del flujo. El resto de pantallas se alcanza desde botones
  * dentro de las pantallas (un flujo no es un menú), y las de segundo nivel traen botón «volver».
  */
 function tabs(items, current) {

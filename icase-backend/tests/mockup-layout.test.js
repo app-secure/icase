@@ -32,7 +32,7 @@ describe('estructura por tipo de pantalla', () => {
     expect(html.match(/<header>/g)).toHaveLength(1);
   });
 
-  test('las pantallas móviles usan barra inferior con solo cuatro destinos de primer nivel y sin las de acceso', () => {
+  test('las pantallas móviles usan barra inferior con hasta cinco destinos de primer nivel y sin las de acceso', () => {
     const html = compose(body, { screen: screenOf('reservas'), manifest, name: 'Demo' });
     expect(html).toContain('data-icase-kind="mobile"');
     expect(html).toContain('icase-mobile');
@@ -41,7 +41,7 @@ describe('estructura por tipo de pantalla', () => {
     expect(html).not.toContain('Iniciar sesión');
     // Seis pantallas en el flujo: la barra no las lista todas ni agrega un menú «Más».
     expect(html).not.toContain('Más');
-    expect(html.match(/<nav class="icase-tabbar"[\s\S]*?<\/nav>/)[0].match(/<a /g)).toHaveLength(4);
+    expect(html.match(/<nav class="icase-tabbar"[\s\S]*?<\/nav>/)[0].match(/<a /g)).toHaveLength(5);
   });
 
   test('la pantalla actual sigue visible aunque sea de las últimas', () => {
