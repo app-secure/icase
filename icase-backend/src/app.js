@@ -34,6 +34,7 @@ const RequirementChangeService = require('./core/services/RequirementChangeServi
 const CodePlanningProposalService = require('./core/services/CodePlanningProposalService');
 const BusinessRuleInferenceService = require('./infrastructure/services/BusinessRuleInferenceService');
 const ApplicationSpecService = require('./infrastructure/services/ApplicationSpecService');
+const LocalRunService = require('./infrastructure/services/LocalRunService');
 const BackendScaffoldGenerator = require('./infrastructure/services/BackendScaffoldGenerator');
 const FrontendScaffoldGenerator = require('./infrastructure/services/FrontendScaffoldGenerator');
 const TestSuiteGenerator = require('./infrastructure/services/TestSuiteGenerator');
@@ -135,6 +136,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const ciCdPipelineGenerator = new CiCdPipelineGenerator();
   const deliveryPackageGenerator = new DeliveryPackageGenerator();
   const zipArchiveService = new ZipArchiveService();
+  const localRunService = new LocalRunService();
   const requirementChangeService = new RequirementChangeService({
     proyectoRepository: proyectoRepo,
     diagramaRepository: diagramaRepo,
@@ -208,7 +210,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     testGenerator: testSuiteGenerator,
     infrastructureGenerator,
     pipelineGenerator: ciCdPipelineGenerator,
-    deliveryGenerator: deliveryPackageGenerator
+    deliveryGenerator: deliveryPackageGenerator,
+    localRunService
   });
 
   const proyectoController = new ProyectoController({

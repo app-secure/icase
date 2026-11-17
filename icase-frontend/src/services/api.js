@@ -846,6 +846,20 @@ export async function acceptFunctionalGateApi(projectId, excepciones) {
   return data;
 }
 
+export async function fetchLocalRunApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/ejecucion`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar la ejecución local.');
+  return data;
+}
+
+export async function controlLocalRunApi(projectId, action) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/ejecucion/${action}`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo completar la operación.');
+  return data;
+}
+
 export async function generateDeliveryArtifactApi(projectId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
   const data = await res.json().catch(() => ({}));

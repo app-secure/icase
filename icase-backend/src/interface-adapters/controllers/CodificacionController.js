@@ -290,6 +290,21 @@ class CodificacionController {
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
 
+  async estadoEjecucion(req, res) {
+    try { res.json(await this.gestionarArtefactosCodigo.estadoEjecucion(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async iniciarEjecucion(req, res) {
+    try { res.status(202).json(await this.gestionarArtefactosCodigo.iniciarEjecucion(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async detenerEjecucion(req, res) {
+    try { res.status(202).json(await this.gestionarArtefactosCodigo.detenerEjecucion(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
   async generarPaquete(req, res) {
     try { res.status(201).json(await this.gestionarArtefactosCodigo.generarPaquete(req.params.id)); }
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }

@@ -5,9 +5,10 @@ const ArtifactVerificationService = require('../services/ArtifactVerificationSer
 const SandboxRuntimeVerifier = require('../../infrastructure/services/SandboxRuntimeVerifier');
 const GenerationCoverageService = require('../services/GenerationCoverageService');
 const DependencyAudit = require('../constants/DependencyAudit');
+const VerificationDiagnosisService = require('../services/VerificationDiagnosisService');
 
 class GestionarArtefactosCodigo {
-  constructor({ proyectoRepository, requerimientoRepository, diagramaRepository, disenoRepository, planCodificacionRepository, artefactoRepository, backendGenerator, frontendGenerator, testGenerator, infrastructureGenerator, pipelineGenerator, deliveryGenerator }) {
+  constructor({ proyectoRepository, requerimientoRepository, diagramaRepository, disenoRepository, planCodificacionRepository, artefactoRepository, backendGenerator, frontendGenerator, testGenerator, infrastructureGenerator, pipelineGenerator, deliveryGenerator, localRunService = null }) {
     this.proyectoRepository = proyectoRepository;
     this.requerimientoRepository = requerimientoRepository;
     this.diagramaRepository = diagramaRepository;
@@ -20,6 +21,7 @@ class GestionarArtefactosCodigo {
     this.infrastructureGenerator = infrastructureGenerator;
     this.pipelineGenerator = pipelineGenerator;
     this.deliveryGenerator = deliveryGenerator;
+    this.localRunService = localRunService;
     this.workflow = new CodeGenerationWorkflowService();
     this.verifier = new ArtifactVerificationService();
     this.runtimeVerifier = new SandboxRuntimeVerifier();
@@ -50,6 +52,7 @@ class GestionarArtefactosCodigo {
     }
     const structural = this.verifier.verificar(artefacto);
     let verificacion = structural;
+    let ejecutados = artefacto.archivos || [];
     if (structural.estado === 'apta_estructuralmente' && ['codigo_backend', 'codigo_frontend', 'pruebas', 'paquete_entrega'].includes(artefacto.tipo)) {
       let runtimeArtifact = artefacto;
       if (artefacto.tipo === 'pruebas') {
@@ -60,6 +63,7 @@ class GestionarArtefactosCodigo {
         if (!backend || !frontend) throw new Error('Se requieren backend y frontend aprobados para probar la suite.');
         runtimeArtifact = { ...artefacto, archivos: [...backend.archivos, ...frontend.archivos, ...artefacto.archivos] };
       }
+      ejecutados = runtimeArtifact.archivos || ejecutados;
       const runtime = await this.runtimeVerifier.verificar(runtimeArtifact);
       verificacion = { ...structural, estado: runtime.estado, nivel: runtime.nivel,
         protocolo: runtime.protocolo,
@@ -71,6 +75,10 @@ class GestionarArtefactosCodigo {
         nota: runtime.estado === 'apta'
           ? 'Verificación técnica completada para esta huella de archivos. El alcance funcional se revisa por separado; no certifica todos los RF ni RNF.'
           : 'La ejecución aislada falló o Docker no está disponible. No se puede aprobar ni exportar este artefacto.' };
+    }
+    // Si falló, se indica dónde: archivo, línea y mensaje, para corregir solo eso sin regenerar el artefacto.
+    if ((verificacion.errores || []).length) {
+      verificacion = { ...verificacion, diagnostico: new VerificationDiagnosisService().diagnosticar({ errores: verificacion.errores, archivos: ejecutados, editables: (artefacto.archivos || []).map((file) => file.ruta) }) };
     }
     await this.artefactoRepository.actualizar(artefactoId, { verificacion });
     return verificacion;
@@ -156,6 +164,29 @@ class GestionarArtefactosCodigo {
   asegurarPaqueteEjecutable(artefacto) {
     if (artefacto?.tipo !== 'paquete_entrega') throw new Error('El artefacto no es un paquete de entrega.');
     return this._exigirVerificacion(artefacto);
+  }
+
+  _ejecucion() {
+    if (!this.localRunService) throw new Error('La ejecución local no está configurada.');
+    return this.localRunService;
+  }
+
+  /** Estado de la ejecución local del paquete: accesos, contenedores y si hay que volver a levantarlos. */
+  async estadoEjecucion(proyectoId) {
+    return this._ejecucion().estado(String(proyectoId));
+  }
+
+  /** Levanta (o vuelve a levantar) los contenedores del último paquete aprobado y verificado. */
+  async iniciarEjecucion(proyectoId) {
+    const servicio = this._ejecucion();
+    const paquete = await this.artefactoRepository.obtenerUltimoAprobado(proyectoId, 'paquete_entrega');
+    if (!paquete) throw new Error('Aprueba el paquete de entrega antes de ejecutar el proyecto.');
+    this.asegurarPaqueteEjecutable(paquete);
+    return servicio.iniciar({ proyectoId: String(proyectoId), archivos: paquete.archivos || [], version: paquete.version });
+  }
+
+  async detenerEjecucion(proyectoId) {
+    return this._ejecucion().detener(String(proyectoId));
   }
 
   async generarFrontend(proyectoId, plataforma) {

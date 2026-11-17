@@ -28,6 +28,9 @@ function buildCodificacionRoutes(controller, access) {
   router.post('/:id/codificacion/ci-cd/:artefactoId/revision', (req, res) => controller.revisarPipeline(req, res));
   router.get('/:id/codificacion/puerta-funcional', (req, res) => controller.puertaFuncional(req, res));
   router.post('/:id/codificacion/puerta-funcional/aceptar', (req, res) => controller.aceptarPuertaFuncional(req, res));
+  router.get('/:id/codificacion/ejecucion', (req, res) => controller.estadoEjecucion(req, res));
+  router.post('/:id/codificacion/ejecucion/iniciar', (req, res) => controller.iniciarEjecucion(req, res));
+  router.post('/:id/codificacion/ejecucion/detener', (req, res) => controller.detenerEjecucion(req, res));
   router.post('/:id/codificacion/paquete/generar', (req, res) => controller.generarPaquete(req, res));
   router.post('/:id/codificacion/paquete/:artefactoId/revision', (req, res) => controller.revisarPaquete(req, res));
   router.get('/:id/codificacion/paquete/:artefactoId/descargar', (req, res) => controller.descargarPaquete(req, res));

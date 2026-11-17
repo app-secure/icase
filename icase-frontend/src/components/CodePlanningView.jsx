@@ -16,6 +16,7 @@ import GenerationReport from './GenerationReport';
 import SpecReviewPanel from './SpecReviewPanel';
 import FunctionalGatePanel from './FunctionalGatePanel';
 import GenerationPreviewPanel from './GenerationPreviewPanel';
+import LocalRunPanel from './LocalRunPanel';
 import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
@@ -697,6 +698,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                       {deliveryArtifact.aprobado && <button disabled={busy} onClick={downloadDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-xs font-semibold text-white"><Download size={14} />Descargar ZIP</button>}
                     </div>
                   </div>}
+                  {deliveryArtifact?.aprobado && <div className="mt-4"><LocalRunPanel key={deliveryArtifact.id} projectId={projectId} onError={(message) => addToast({ type: 'error', message })} /></div>}
                 </div>
               </section>
             </div>
@@ -760,6 +762,16 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
   const [error, setError] = useState('');
   const [selectedFile, setSelectedFile] = useState('');
   const [source, setSource] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [line, setLine] = useState(null);
+
+  // Salta al archivo y la línea que indica el diagnóstico, sin buscar a mano.
+  const fixHere = (finding) => {
+    setSelectedFile(finding.archivo);
+    setSource(artifact.archivos?.find((file) => file.ruta === finding.archivo)?.contenido || '');
+    setLine(finding.linea);
+    setEditorOpen(true);
+  };
 
   // Reanudar polling si al montar existe un trabajo activo
   useEffect(() => {
@@ -850,10 +862,22 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
     {error && <p className="mt-2 text-red-700">{error}</p>}
     {result && <><p className="mt-2 text-slate-500">{result.nota}</p>
       {result.pruebas?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-emerald-700">{result.pruebas.map((check) => <li key={check.paso}>{check.paso}: {check.resultado}</li>)}</ul>}
-      {result.errores?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-red-700">{result.errores.map((item) => <li key={item}>{item}</li>)}</ul>}
+      {result.diagnostico?.ubicados?.length > 0 && <div className="mt-2 rounded-lg border border-red-200 bg-red-50/60 p-2" aria-label="Dónde está el error">
+        <p className="font-semibold text-red-800">Dónde está el error ({result.diagnostico.total})</p>
+        <ul className="mt-1 space-y-1.5">
+          {result.diagnostico.ubicados.map((item) => <li key={`${item.archivo}:${item.linea}:${item.mensaje}`} className="text-red-800">
+            <span className="font-mono font-semibold">{item.archivo}:{item.linea}</span>{item.afecta ? <span className="ml-1 text-red-600">({item.afecta.tipo}: {item.afecta.id})</span> : null}
+            <span className="block text-red-700">{item.mensaje}</span>
+            {item.corregible_aqui && artifact.estado === 'en_revision'
+              ? <button type="button" onClick={() => fixHere(item)} className="mt-0.5 font-semibold text-violet-700 underline">Corregir este archivo</button>
+              : <span className="text-[11px] text-slate-500">{item.corregible_aqui ? 'El artefacto ya está revisado.' : 'Pertenece a otro artefacto: corrígelo allí.'}</span>}
+          </li>)}
+        </ul>
+      </div>}
+      {result.errores?.length > 0 && <details className="mt-2" open={!result.diagnostico?.ubicados?.length}><summary className="cursor-pointer text-red-700">Salida completa del error</summary><ul className="mt-1 list-disc space-y-1 pl-4 text-red-700">{result.errores.map((item) => <li key={item}>{item}</li>)}</ul></details>}
       {result.advertencias?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">{result.advertencias.map((item) => <li key={item}>{item}</li>)}</ul>}
     </>}
-    {artifact.estado === 'en_revision' && <details className="mt-3 border-t border-slate-100 pt-2">
+    {artifact.estado === 'en_revision' && <details className="mt-3 border-t border-slate-100 pt-2" open={editorOpen} onToggle={(event) => setEditorOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-semibold text-violet-700">Revisar y corregir un archivo</summary>
       <select aria-label="Archivo a corregir" value={selectedFile} onChange={(event) => {
         const path = event.target.value;
@@ -863,6 +887,7 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
         <option value="">Selecciona un archivo</option>
         {(artifact.archivos || []).map((file) => <option key={file.ruta} value={file.ruta}>{file.ruta}</option>)}
       </select>
+      {selectedFile && line && <p className="mt-1 text-[11px] text-slate-500">El error está en la línea {line}.</p>}
       {selectedFile && <><textarea aria-label="Contenido del archivo" value={source} onChange={(event) => setSource(event.target.value)} rows={14} spellCheck={false} className="mt-2 w-full rounded border border-slate-300 p-2 font-mono text-xs" />
         <button type="button" disabled={loading} onClick={saveFile} className="mt-2 rounded bg-violet-700 px-3 py-2 font-semibold text-white disabled:opacity-50">Guardar archivo y volver a verificar</button></>}
     </details>}

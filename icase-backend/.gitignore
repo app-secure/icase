@@ -10,3 +10,5 @@ coverage/
 .DS_Store
 tests/.generated-*/
 verification-results/
+
+.icase-runs/
