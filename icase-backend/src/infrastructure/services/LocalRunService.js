@@ -105,12 +105,15 @@ class LocalRunService {
     const settings = parseEnv(materializado && fs.existsSync(path.join(base, 'ops/.env')) ? fs.readFileSync(path.join(base, 'ops/.env'), 'utf8') : '');
     const hasWeb = materializado && fs.existsSync(path.join(base, 'frontend/package.json'));
     const hasMobile = materializado && fs.existsSync(path.join(base, 'mobile/package.json'));
+    const mobileCompose = path.join(base, 'ops/docker-compose.mobile.yml');
+    const mobileContainer = hasMobile && fs.existsSync(mobileCompose);
+    const mobilePort = settings.MOBILE_PORT || '8082';
     const apiPort = settings.API_PORT || '3000';
     const webPort = settings.WEB_PORT || '8080';
 
     let contenedores = [];
     if (materializado && fs.existsSync(path.join(base, 'ops/.env')) && !['iniciando', 'deteniendo'].includes(state.estado)) {
-      const { error, stdout } = await this.docker(['compose', '--env-file', path.join(base, 'ops/.env'), '-f', path.join(base, 'ops/docker-compose.yml'), 'ps', '-a', '--format', 'json'], { cwd: base });
+      const { error, stdout } = await this.docker(['compose', '--env-file', path.join(base, 'ops/.env'), '-f', path.join(base, 'ops/docker-compose.yml'), ...(mobileContainer ? ['-f', mobileCompose] : []), 'ps', '-a', '--format', 'json'], { cwd: base });
       if (!error) {
         contenedores = stdout.split(/\r?\n/).filter(Boolean).map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean)
           .map((item) => ({ servicio: item.Service || item.Name, estado: item.State || 'desconocido', salud: item.Health || '' }));
@@ -125,7 +128,7 @@ class LocalRunService {
       requiere_levantar: materializado && !['iniciando', 'deteniendo', 'activo'].includes(efectivo),
       accesos: {
         web: hasWeb ? { url: `http://localhost:${webPort}`, disponible: efectivo === 'activo' } : null,
-        movil: hasMobile ? { disponible: false, instrucciones: `Entra en la carpeta mobile del paquete, ejecuta «npm install» y «npx expo start». La app usa EXPO_PUBLIC_API_URL=http://TU_IP:${apiPort}.`, api: `http://localhost:${apiPort}` } : null,
+        movil: hasMobile ? { url: mobileContainer ? `http://localhost:${mobilePort}` : null, disponible: Boolean(mobileContainer) && efectivo === 'activo', instrucciones: `Entra en la carpeta mobile del paquete, ejecuta «npm install» y «npx expo start». La app usa EXPO_PUBLIC_API_URL=http://TU_IP:${apiPort}.`, api: `http://localhost:${apiPort}` } : null,
         documentacion: materializado ? { url: `http://localhost:${apiPort}/api/docs`, disponible: efectivo === 'activo' } : null
       },
       credenciales_admin: efectivo === 'activo' && settings.ADMIN_PASSWORD ? { email: settings.ADMIN_EMAIL || 'admin@example.com', password: settings.ADMIN_PASSWORD } : null,

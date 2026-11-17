@@ -80,6 +80,7 @@ export default function LocalRunPanel({ projectId, onError }) {
         {run.credenciales_admin && <p>Administrador: <span className="font-mono">{run.credenciales_admin.email}</span> / <span className="font-mono">{run.credenciales_admin.password}</span></p>}
       </AccessCard>}
       {run.accesos.movil && <AccessCard icon={Smartphone} title="Aplicación móvil">
+        {run.accesos.movil.url && <><OpenLink url={run.accesos.movil.url} enabled={run.accesos.movil.disponible} /><p>Vista web de la app móvil, en su propio contenedor.</p></>}
         <p>{run.accesos.movil.instrucciones}</p>
         <p>API local: <span className="font-mono">{run.accesos.movil.api}</span></p>
       </AccessCard>}

@@ -178,7 +178,7 @@ class GenericFrontendGenerator {
     }
     const first = views[0]?.route || '/';
     files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone) : this._app(proyecto, views, imports, routes, first, standalone) });
-    if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth, mobileViews));
+    if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth, mobileViews, spec));
     if(new ModuleService().activos(decisiones.modulos).includes('procesos_negocio')){
       if(!auth)throw new Error('La bandeja de procesos requiere JWT');
       if(views.some(view=>view.route==='/procesos'))throw new Error('La ruta /procesos está reservada para la bandeja de procesos');
@@ -212,7 +212,7 @@ class GenericFrontendGenerator {
    * Página de una pantalla descrita por la especificación aprobada: una lista de bloques (tabla, tarjetas, formulario,
    * detalle, indicador) y las operaciones que usan. Devuelve null si la pantalla no tiene componentes resolubles.
    */
-  _specPage(view, name, spec) {
+  _specBlocks(view, spec) {
     const screen = (spec?.pantallas || []).find((item) => item.id === view.id);
     if (!screen) return null;
     const byName = new Map((spec.acciones || []).map((action) => [action.name, action]));
@@ -225,8 +225,15 @@ class GenericFrontendGenerator {
       const action = byName.get(operation);
       return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output }];
     }));
+    return { blocks, actions, used };
+  }
+
+  _specPage(view, name, spec) {
+    const found = this._specBlocks(view, spec);
+    if (!found) return null;
+    const { blocks, actions, used } = found;
     const contenido = `import React from 'react';\nimport { SpecBlock } from '../SpecComponents';\n\nconst actions = ${JSON.stringify(actions, null, 2)};\nconst blocks = ${JSON.stringify(blocks, null, 2)};\n\nexport default function ${name}() {\n  return (\n    <main className="spec-page" data-screen=${JSON.stringify(view.id)}>\n      <h1>{${JSON.stringify(view.name)}}</h1>\n      {blocks.map((block, index) => <SpecBlock key={index} block={block} actions={actions} />)}\n    </main>\n  );\n}\n`;
-    return { contenido, resumen: { componentes: blocks.length, operaciones: [...used] } };
+    return { contenido, resumen: { componentes: blocks.length, operaciones: [...used], bloques: blocks.map((block) => ({ tipo: block.tipo, operacion: block.operacion })) } };
   }
 
   _view(screen, screens = [], requerimientos = []) {
@@ -471,14 +478,19 @@ export default function App() {
 `;
   }
 
-  _mobile(name, auth = false, views = []) {
+  _mobile(name, auth = false, views = [], spec = null) {
+    const screens = views.map((view) => {
+      const found = this._specBlocks(view, spec);
+      return { id: view.id, name: view.name, roles: view.roles, operations: view.operations, ...(found ? { blocks: found.blocks, actions: found.actions } : {}) };
+    });
     return [
       { ruta: 'mobile/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${slug(name)}-mobile`, version: '1.0.0', private: true, engines: { node: MobileRuntime.node }, main: 'node_modules/expo/AppEntry.js', scripts: { start: 'expo start', 'export:android': 'expo export --platform android' }, dependencies: { expo: MobileRuntime.expo, react: MobileRuntime.react, 'react-native': MobileRuntime.reactNative } }, null, 2) },
       { ruta: 'mobile/app.json', lenguaje: 'json', contenido: JSON.stringify({ expo: { name, slug: slug(name), version: '1.0.0', platforms: ['android', 'ios'] } }, null, 2) },
       { ruta: 'mobile/.env.example', lenguaje: 'dotenv', contenido: 'EXPO_PUBLIC_API_URL=http://YOUR_LAN_IP:3000\n' },
-      { ruta: 'mobile/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: name, pantallas: views.map(({ id, name, roles, operations }) => ({ id, name, roles, operations })) }, null, 2) },
+      { ruta: 'mobile/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: name, pantallas: screens.map(({ id, name, roles, operations, blocks }) => ({ id, name, roles, operations, ...(blocks ? { origen: 'especificacion', componentes: blocks.length } : {}) })) }, null, 2) },
+      { ruta: 'mobile/SpecScreen.js', lenguaje: 'javascript', contenido: template('mobile-SpecScreen.js') },
       { ruta: 'mobile/README.md', lenguaje: 'markdown', contenido: '# Aplicación móvil\n\n1. Copia `.env.example` a `.env` y sustituye `YOUR_LAN_IP` por una dirección accesible desde el emulador o dispositivo.\n2. Ejecuta `npm install` y `npm start` en esta carpeta.\n3. Inicia el backend y verifica la conexión desde el dispositivo.\n\nEste proyecto Expo no es un APK o IPA firmado. Las pantallas y operaciones incluidas constan en `icase.manifest.json`.\n' },
-      { ruta: 'mobile/App.js', lenguaje: 'javascript', contenido: renderTemplate(template('mobile-App.js'), { AUTH: String(auth), TITLE: JSON.stringify(name), SCREENS: JSON.stringify(views.map(({ id, name, roles, operations }) => ({ id, name, roles, operations }))) }) }
+      { ruta: 'mobile/App.js', lenguaje: 'javascript', contenido: renderTemplate(template('mobile-App.js'), { AUTH: String(auth), TITLE: JSON.stringify(name), SCREENS: JSON.stringify(screens) }) }
     ];
   }
 

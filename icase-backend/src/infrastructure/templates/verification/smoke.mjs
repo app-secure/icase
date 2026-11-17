@@ -43,6 +43,14 @@ try {
     }
   }
 
+  // Operaciones de negocio de la especificación aprobada: se ejecutan contra el backend en marcha.
+  for (const operation of CONFIG.operations) {
+    for (const action of operation.actions || []) {
+      await exerciseAction(api, CONFIG.operations, action);
+      console.log('Operación de negocio correcta: ' + action.name + ' (' + action.type + ', ' + operation.id + ')');
+    }
+  }
+
   if (secured) {
     await exerciseAuth(access, { base, adminEmail, roles });
     console.log('Autenticación, usuarios, bloqueo y registro correctos');

@@ -40,7 +40,8 @@ test('la frase real del usuario corrige tres Canjear repetidos sin invocar la IA
   expect(result.proveedorUsado).toBe('icase-formularios');
   expect(result.ajustes[0].aplicado).toBe(true);
   expect(result.mockups[0].enlaces.filter(e => e.rf === 'RF-18')).toHaveLength(4);
-  expect(result.mockups[0].enlaces.every(e => e.campos_faltantes.length === 0)).toBe(true);
+  // El cliente sale de la sesión: ya no se exige ni se convierte en un control del formulario.
+  expect(result.mockups[0].enlaces.every(e => e.campos_faltantes.filter(name => name !== 'cliente_id').length === 0)).toBe(true);
   expect(ai.generarMockups).not.toHaveBeenCalled();
   expect(repository.guardarOActualizar).toHaveBeenCalledTimes(1);
   const code = result.mockups[0].preview_code;
@@ -54,7 +55,7 @@ test('la frase real del usuario corrige tres Canjear repetidos sin invocar la IA
     const form = forms[i];
     const data = new dom.window.FormData(form);
     for (const name of Object.keys(properties)) expect(form.querySelectorAll(`[name="${name}"]`)).toHaveLength(1);
-    expect(form.querySelector('[type="hidden"]')).toBeNull();
+    expect([...form.querySelectorAll('[type="hidden"]')].map(input => input.name)).toEqual(['cliente_id']); // solo el cliente de la sesión queda oculto
     expect(form.querySelector('[name="puntosCanjeados"]').type).toBe('number');
     expect(form.querySelector('[name="fechaCanje"]').type).toBe('datetime-local');
     expect(form.querySelector('[name="recompensa_id"]').tagName).toBe('SELECT');
@@ -136,7 +137,7 @@ test('añadir solo identificadores internos no se considera una corrección', ()
 test.each([
   ['corrige los aspectos que conviene revisar', [], []],
   ['Aspectos que conviene revisar • el formulario de "Cobrar" no tiene control para: fechaCanje', ['puntosCanjeados', 'cliente_id', 'recompensa_id', 'pedido_id'], ['Nuevo Canje']],
-  ['corrige esto: • campo "horaCreacion" de "Cobrar" no existe en la operación RF-18 • el formulario de "Cobrar" no tiene control para: fechaCanje, puntosCanjeados, cliente_id, recompensa_id, pedido_id', [], ['Nuevo Canje']]
+  ['corrige esto: • campo "horaCreacion" de "Cobrar" no existe en la operación RF-18 • el formulario de "Cobrar" no tiene control para: fechaCanje, puntosCanjeados, recompensa_id, pedido_id', [], ['Nuevo Canje']]
 ])('resuelve sin IA botones de tabla y encabezado fuera de formulario con frase real: %s', async (phrase, expectedMissingOnCobrar, expectedRemainingControls) => {
   const tableHtml = page('<button data-accion="RF-18.crear">Nuevo Canje</button><input name="horaCreacion"><table><tr><td><button data-accion="RF-18.crear">Cobrar</button></td></tr><tr><td><button data-accion="RF-18.crear">Cobrar</button></td></tr></table>');
   const previous = { nombre_pantalla: 'canjes', version: 1, rf_trazabilidad: ['RF-18'], preview_code: tableHtml, advertencias_validacion: ['campo "horaCreacion" de "Cobrar" no existe en la operación RF-18'] };
@@ -146,7 +147,8 @@ test.each([
   expect(result.proveedorUsado).toBe('icase-formularios');
   const cobrarLinks = result.mockups[0].enlaces.filter(e => e.control === 'Cobrar');
   expect(cobrarLinks).toHaveLength(2);
-  for (const link of cobrarLinks) expect(link.campos_faltantes).toEqual(expectedMissingOnCobrar);
+  // El cliente de la sesión no se pide en el formulario: si no está, no cuenta como faltante que la persona deba resolver.
+  for (const link of cobrarLinks) expect(link.campos_faltantes.filter(name => name !== 'cliente_id')).toEqual(expectedMissingOnCobrar.filter(name => name !== 'cliente_id'));
   for (const ctrl of expectedRemainingControls) {
     expect(result.mockups[0].advertencias_validacion.some(w => w.includes(ctrl))).toBe(true);
   }

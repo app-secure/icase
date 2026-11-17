@@ -32,22 +32,21 @@ describe('estructura por tipo de pantalla', () => {
     expect(html.match(/<header>/g)).toHaveLength(1);
   });
 
-  test('las pantallas móviles usan barra inferior de pestañas con la actual marcada y sin las de acceso', () => {
+  test('las pantallas móviles usan barra inferior con solo cuatro destinos de primer nivel y sin las de acceso', () => {
     const html = compose(body, { screen: screenOf('reservas'), manifest, name: 'Demo' });
     expect(html).toContain('data-icase-kind="mobile"');
     expect(html).toContain('icase-mobile');
     expect(html.match(/<nav /g)).toHaveLength(1);
     expect(html).toMatch(/aria-current="page"[^>]*>Reservas/);
     expect(html).not.toContain('Iniciar sesión');
-    // Seis pantallas del flujo: cuatro pestañas y «Más» con el resto, la actual siempre visible.
-    expect(html.match(/<summary>Más<\/summary>/g)).toHaveLength(1);
-    const visibles = html.split('<details>')[0];
-    expect(visibles.match(/<a /g).length).toBe(4);
+    // Seis pantallas en el flujo: la barra no las lista todas ni agrega un menú «Más».
+    expect(html).not.toContain('Más');
+    expect(html.match(/<nav class="icase-tabbar"[\s\S]*?<\/nav>/)[0].match(/<a /g)).toHaveLength(4);
   });
 
   test('la pantalla actual sigue visible aunque sea de las últimas', () => {
     const html = compose(body, { screen: screenOf('ayuda'), manifest, name: 'Demo' });
-    expect(html.split('<details>')[0]).toMatch(/aria-current="page"[^>]*>Ayuda/);
+    expect(html.match(/<nav class="icase-tabbar"[\s\S]*?<\/nav>/)[0]).toMatch(/aria-current="page"[^>]*>Ayuda/);
   });
 
   test('web usa barra lateral y tableta menú desplegable, solo con pantallas de su flujo', () => {

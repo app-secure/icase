@@ -11,7 +11,8 @@ const GROUPS = {
   recuperacion: ['restauracion', 'restaurar'],
   factura: ['comprobante', 'boleta'],
   plato: ['platillo'],
-  autenticacion: ['login', 'sesion', 'credencial']
+  // «sesión» no se unifica: «cierre de sesión de caja» no es autenticación. Las frases de acceso se resuelven en cada servicio.
+  autenticacion: ['login', 'credencial']
 };
 
 const SYNONYMS = new Map(Object.entries(GROUPS).flatMap(([canonical, words]) => words.map((word) => [word, canonical])));

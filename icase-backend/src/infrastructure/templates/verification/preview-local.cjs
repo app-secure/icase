@@ -38,7 +38,10 @@ if (action === 'stop' && !fs.existsSync(env)) {
   process.exit(1);
 }
 
-const args = ['compose', '--env-file', env, '-f', compose,
+// Si el paquete trae la app móvil, se levanta también su contenedor (vista web de la app Expo).
+const mobileCompose = path.join(root, 'ops/docker-compose.mobile.yml');
+const withMobile = fs.existsSync(mobileCompose) && fs.existsSync(path.join(root, 'mobile/package.json'));
+const args = ['compose', '--env-file', env, '-f', compose, ...(withMobile ? ['-f', mobileCompose] : []),
   ...(action === 'start' ? ['up', '-d', '--build', '--wait'] : ['down', '--remove-orphans'])];
 const result = spawnSync('docker', args, { cwd: root, stdio: 'inherit', timeout: 900000 });
 if (result.error || result.status !== 0) {
@@ -51,6 +54,7 @@ if (action === 'stop') {
   const settings = Object.fromEntries(fs.readFileSync(env, 'utf8').split(/\r?\n/).map((line) => line.match(/^([A-Z_]+)=(.*)$/)).filter(Boolean).map((match) => [match[1], match[2]]));
   const web = fs.existsSync(path.join(root, 'frontend/package.json'));
   console.log(`Vista previa disponible en http://localhost:${web ? settings.WEB_PORT || '8080' : settings.API_PORT || '3000'}`);
+  if (withMobile) console.log(`App móvil (vista web) disponible en http://localhost:${settings.MOBILE_PORT || '8082'}`);
   if (created) console.log(`Administrador local: ${settings.ADMIN_EMAIL || 'admin@example.com'} / ${settings.ADMIN_PASSWORD}`);
   console.log('Para detenerla: node tools/preview-local.cjs stop');
 }

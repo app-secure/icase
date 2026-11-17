@@ -8,8 +8,12 @@ Genera exclusivamente las pantallas solicitadas usando el contexto entregado. Re
 - Cada `preview_code` debe ser HTML5 completo, autocontenido y comenzar con `<!DOCTYPE html>`.
 - El primer carácter es un solo `<`: nunca `<<!DOCTYPE`. Termina exactamente con `</html>`, sin `>` adicional ni cercos Markdown. Mantén CSS y datos de ejemplo compactos para completar la pantalla dentro del límite de salida; no omitas cierres ni uses puntos suspensivos como sustituto de contenido.
 - Usa Tailwind CDN, tipografía Inter, fondo slate-50, superficies blancas, bordes slate-200 y azul `#0b57d0` como color primario.
-- Mantén el mismo shell entre pantallas que comparten `shell`: nombre/logo textual, color y ancho de navegación, opciones y orden del menú, topbar, usuario y un único texto de estado "Sistema en línea". No inventes ni omitas opciones en pantallas hermanas.
-- Respeta `plataforma`: mobile se diseña a 390 px con barra inferior o cabecera compacta; tablet a 768-1024 px con objetivos táctiles; web a 1280 px con sidebar. Nunca conviertas una pantalla de cliente o mesero en escritorio.
+- La estructura común la agrega el sistema: NO dibujes cabecera, barra lateral, menú, pestañas, topbar, breadcrumb, nombre de la aplicación, logo ni subtítulos que nombren el módulo o el flujo (por ejemplo «Aplicación Móvil de Clientes»). Entrega solo el contenido de la pantalla dentro de `<main>`, empezando por su título.
+- Cada pantalla contiene únicamente acciones de los RF asociados a ella en el contexto. No agregues botones de otros roles ni de otros RF (un cliente no ve «Escanear QR» del mesero ni «Reasignar mesas» del administrador).
+- Acceso y registro (login): solo un título corto de la acción («Iniciar sesión»), los campos, el botón principal y, si aplica, el enlace de recuperación. Sin nombre de la aplicación, sin subtítulos y sin botones de otras funciones.
+- Un indicador de estado es un punto pequeño con el texto AL LADO: nunca pongas texto dentro de un elemento de tamaño fijo como `w-3 h-3`.
+- En un formulario `crear` no pidas lo que el sistema completa: el cliente de la sesión, el estado inicial, códigos o QR generados, fechas de registro o cierre, y totales o diferencias calculados.
+- Respeta `plataforma`: mobile se diseña a 390 px en una sola columna; tablet a 768-1024 px con objetivos táctiles; web a 1280 px. Nunca conviertas una pantalla de cliente o mesero en escritorio.
 - No uses rutas locales (`C:\\`, `file:///`), imágenes externas ni `<img>` sin una URL HTTPS válida y texto `alt`. Prefiere iniciales o iconos CSS/SVG inline para el logo.
 - No devuelvas HTML sin estilos. El documento debe cerrar `body` y `html`, incluir Tailwind CDN y contener una composición visible completa.
 - Usa datos realistas del dominio. No uses lorem ipsum, emojis, scripts de navegación ni recursos pesados.

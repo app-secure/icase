@@ -80,8 +80,21 @@ class GestionarArtefactosCodigo {
     if ((verificacion.errores || []).length) {
       verificacion = { ...verificacion, diagnostico: new VerificationDiagnosisService().diagnosticar({ errores: verificacion.errores, archivos: ejecutados, editables: (artefacto.archivos || []).map((file) => file.ruta) }) };
     }
-    await this.artefactoRepository.actualizar(artefactoId, { verificacion });
-    return verificacion;
+    const reverificada = artefacto.pendiente_reverificacion === true;
+    const supera = ['codigo_backend', 'codigo_frontend', 'pruebas', 'paquete_entrega'].includes(artefacto.tipo)
+      ? verificacion.estado === 'apta' && verificacion.nivel === 'ejecucion_aislada'
+      : verificacion.estado === 'apta_estructuralmente';
+    if (reverificada && !supera) {
+      // La corrección no pasó: la aprobación se retira y el paso del plan vuelve a revisión (con sus dependientes).
+      await this.artefactoRepository.actualizar(artefactoId, { verificacion, estado: 'en_revision', aprobado: false, pendiente_reverificacion: false });
+      const etapa = require('../constants/CodeGenerationPhases').CODE_PHASE_DEFINITIONS;
+      const id = Object.values(etapa).find((item) => item.artefacto === artefacto.tipo)?.id;
+      const plan = await this.planRepository.obtenerPorProyecto(proyectoId);
+      if (id && plan) await this._actualizarEtapa(plan, id, CODE_PHASE_STATES.IN_REVIEW, 'La corrección puntual no pasó la verificación: se retiró la aprobación. Corrige y vuelve a verificar.');
+      return { ...verificacion, aprobacion_retirada: true };
+    }
+    await this.artefactoRepository.actualizar(artefactoId, { verificacion, ...(reverificada ? { pendiente_reverificacion: false } : {}) });
+    return reverificada ? { ...verificacion, aprobacion_mantenida: true } : verificacion;
   }
 
   async actualizarArchivo({ proyectoId, artefactoId, ruta, contenido }) {
@@ -92,14 +105,26 @@ class GestionarArtefactosCodigo {
     if (!artefacto || String(artefacto.proyecto_id) !== String(proyectoId)) {
       throw new Error('Artefacto no encontrado para este proyecto.');
     }
-    if (artefacto.estado !== 'en_revision') throw new Error('Solo se pueden editar archivos de un artefacto en revisión.');
+    if (!['en_revision', 'aprobado'].includes(artefacto.estado)) throw new Error('Solo se pueden editar archivos de un artefacto en revisión o aprobado.');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, artefacto.tipo);
     if (String(ultimo?.id) !== String(artefactoId)) throw new Error('Solo se puede editar la versión más reciente.');
     if (!(artefacto.archivos || []).some((file) => file.ruta === ruta)) throw new Error('El archivo no pertenece a este artefacto.');
     const archivos = artefacto.archivos.map((file) => file.ruta === ruta
       ? { ...file, contenido, huella: crypto.createHash('sha256').update(contenido).digest('hex') }
       : file);
-    return this.artefactoRepository.actualizar(artefactoId, { archivos, verificacion: null });
+    const anterior = artefacto.archivos.find((file) => file.ruta === ruta);
+    const nueva = archivos.find((file) => file.ruta === ruta);
+    if (anterior?.huella === nueva.huella) return artefacto; // sin cambios reales: no se pierde la verificación
+    // Sobre un artefacto aprobado la corrección es puntual: se registra y la aprobación se mantiene solo si la
+    // nueva verificación pasa (ver verificarArtefacto). Mientras tanto no puede empaquetarse sin verificación vigente.
+    const aprobado = artefacto.estado === 'aprobado';
+    return this.artefactoRepository.actualizar(artefactoId, {
+      archivos, verificacion: null,
+      ...(aprobado ? {
+        pendiente_reverificacion: true,
+        correcciones: [...(artefacto.correcciones || []), { ruta, huella_anterior: anterior?.huella || '', huella_nueva: nueva.huella, corregido_en: new Date().toISOString() }]
+      } : {})
+    });
   }
 
   _falloSoloInterfazDisenada(stored) {

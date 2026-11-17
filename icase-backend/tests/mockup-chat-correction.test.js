@@ -5,12 +5,13 @@ const GenerarMockups = require('../src/core/use-cases/GenerarMockups');
 const MockupController = require('../src/interface-adapters/controllers/MockupController');
 const MockupIaService = require('../src/infrastructure/services/MockupIaService');
 
-const campos = ['usosTotales', 'usosRestantes', 'fechaAdquisicion', 'inicioVigencia', 'finVigencia', 'cliente_id'];
+// Campos que la persona sí debe escribir (los que completa el sistema ya no se exigen en el formulario).
+const campos = ['cantidadUsos', 'semanas', 'medioPago', 'moneda', 'plan', 'sucursal_id'];
 const advertencia = `el formulario de "+ Comprar Paquete" no tiene control para: ${campos.join(', ')} (RF-03 los guarda y el backend puede exigirlos)`;
 const instruccion = `corrige esto: • ${advertencia}`;
 const controles = campos.map(name => name.endsWith('_id')
   ? `<label>Cliente<select name="${name}"><option>Cliente de ejemplo</option></select></label>`
-  : `<label>${name}<input name="${name}" type="${name.startsWith('usos') ? 'number' : 'date'}"></label>`).join('');
+  : `<label>${name}<input name="${name}" type="${/^(cantidad|semanas)/.test(name) ? 'number' : 'text'}"></label>`).join('');
 const html = (fields = '', extra = '<button data-accion="ui">Cerrar</button>') => `<!DOCTYPE html><html><head><style>body{color:black}</style></head><body><main><h1>Comprar Paquete</h1><form><label>Nombre<input name="nombre"></label>${fields}<button data-accion="RF-03.crear">+ Comprar Paquete</button></form>${extra}</main></body></html>`;
 const anterior = { nombre_pantalla: 'comprar-paquete', preview_code: html(), version: 4, rf_trazabilidad: ['RF-03'], advertencias_validacion: [advertencia] };
 const contrato = { operations: [{ id: 'RF-03', methods: ['GET', 'POST', 'PATCH'], schema: { properties: Object.fromEntries(['nombre', ...campos].map(name => [name, {}])) } }] };
@@ -111,10 +112,10 @@ describe('correcciones del mockup desde el chat', () => {
   });
 
   test('una petición de un campo se valida por ese campo, aunque no cambie el número de advertencias', async () => {
-    const { run } = setup([[candidato(html('<input name="usosTotales" type="number">'))]]);
-    const result = await run('agrega usosTotales al formulario');
+    const { run } = setup([[candidato(html('<input name="cantidadUsos" type="number">'))]]);
+    const result = await run('agrega cantidadUsos al formulario');
     expect(result.totalProcesados).toBe(1);
-    expect(result.mockups[0].enlaces[0].campos_faltantes).not.toContain('usosTotales');
+    expect(result.mockups[0].enlaces[0].campos_faltantes).not.toContain('cantidadUsos');
     expect(result.mockups[0].enlaces[0].campos_faltantes).toHaveLength(5);
     expect(result.ajustes[0].advertencias_resueltas).toEqual([]);
   });

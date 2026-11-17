@@ -12,7 +12,65 @@ function strip(node) {
 }
 
 const SHELL_VERSION = '2';
-const TAB_LIMIT = 5;
+const TAB_LIMIT = 4;
+
+const textOf = (node) => (node.nodeName === '#text' ? node.value : (node.childNodes || []).map(textOf).join(' ')).replace(/\s+/g, ' ').trim();
+const attrOf = (node, name) => (node.attrs || []).find((item) => item.name === name)?.value || '';
+function eachNode(node, visit, parent = null) {
+  [...(node.childNodes || [])].forEach((child) => eachNode(child, visit, node));
+  visit(node, parent);
+}
+
+/**
+ * Un indicador de estado es un círculo pequeño de tamaño fijo; el modelo a veces pone el texto DENTRO del círculo y la
+ * etiqueta se aplasta y se superpone. Se saca el contenido del círculo y queda a su lado.
+ */
+function repairIndicators(root) {
+  const small = /(?:^|\s)(?:w|h|size)-(?:[1-6]|\[(?:[0-9]|1[0-9]|2[0-4])px\])(?:\s|$)/;
+  eachNode(root, (node, parent) => {
+    if (!parent || !node.tagName || !/(?:^|\s)rounded-full(?:\s|$)/.test(attrOf(node, 'class')) || !small.test(attrOf(node, 'class'))) return;
+    if (!textOf(node)) return;
+    const children = node.childNodes || [];
+    node.childNodes = [];
+    const siblings = parent.childNodes;
+    siblings.splice(siblings.indexOf(node) + 1, 0, ...children.map((child) => Object.assign(child, { parentNode: parent })));
+  });
+}
+
+/**
+ * En el acceso la cabecera ya muestra el nombre de la aplicación: dentro de la tarjeta sobran el nombre repetido y el
+ * subtítulo que nombra el módulo o el flujo («Aplicación Móvil de Clientes»). Solo se quitan textos que coinciden exactamente.
+ */
+function scrubAccess(root, { brand = '', screen = {} } = {}) {
+  const unwanted = new Set([brand, screen.modulo, screen.flujo].map(plain).filter(Boolean));
+  if (!unwanted.size) return;
+  const tags = new Set(['h1', 'h2', 'h3', 'p', 'span', 'small', 'strong', 'div']);
+  eachNode(root, (node, parent) => {
+    if (!parent || !tags.has(node.tagName)) return;
+    const hasElements = (node.childNodes || []).some((child) => child.tagName);
+    if (hasElements && node.tagName === 'div') return;
+    if (unwanted.has(plain(textOf(node))) && !(node.childNodes || []).some((child) => ['input', 'button', 'form'].includes(child.tagName))) {
+      parent.childNodes = parent.childNodes.filter((child) => child !== node);
+    }
+  });
+  // Contenedores que se quedaron vacíos (el bloque centrado del título) también se quitan.
+  eachNode(root, (node, parent) => {
+    if (parent && node.tagName === 'div' && !textOf(node) && !(node.childNodes || []).some((child) => child.tagName)) parent.childNodes = parent.childNodes.filter((child) => child !== node);
+  });
+}
+
+// Pantallas de segundo nivel: se llega a ellas desde otra y no son un destino de la barra inferior.
+const SECONDARY = /\b(?:detalle|formulario|confirmacion|confirmar|editar|edicion|nuevo|nueva|crear|registro de)\b/;
+const isPrimary = (item) => !SECONDARY.test(plain(item.nombre));
+
+/** Etiqueta corta para una pestaña: sin «Vista de» / «Formulario de» y limitada en longitud. */
+function shortLabel(name) {
+  const text = String(name || '').replace(/^(?:vista|pantalla|formulario|listado)\s+de\s+(?:la\s+|el\s+|los\s+|las\s+)?/i, '').trim();
+  let label = text.charAt(0).toUpperCase() + text.slice(1);
+  // «Menú Digital con Precios y Disponibilidad» → «Menú Digital»: se corta en la primera conjunción si es larga.
+  if (label.length > 16) label = label.split(/\s+(?:con|y|para|por)\s+/i)[0] || label;
+  return label.length > 22 ? `${label.slice(0, 21).trim()}…` : label;
+}
 
 /**
  * Estructura de la pantalla según su tipo. La define el código, nunca el modelo:
@@ -23,7 +81,7 @@ const TAB_LIMIT = 5;
  */
 function kindOf(screen = {}) {
   const text = plain([screen.shell, screen.slug, screen.nombre, screen.nombre_pantalla, screen.nombre_visible].filter(Boolean).join(' '));
-  if (/(?:^|[\s-])auth(?:[\s-]|$)|iniciar sesion|inicio de sesion|\blogin\b|recuperar contrasena|restablecer contrasena|registro de usuario|crear cuenta/.test(text)) return 'auth';
+  if (/(?:^|[\s-])auth(?:[\s-]|$)|iniciar sesion|inicio de sesion|\blogin\b|\bautentic\w*|recuperar contrasena|restablecer contrasena|registro de usuario|crear cuenta/.test(text)) return 'auth';
   if (PlatformPolicy.declared(screen) === PlatformPolicy.MOBILE || screen.plataforma === 'mobile') return 'mobile';
   if (screen.plataforma === 'tablet') return 'tablet';
   return 'web';
@@ -47,17 +105,27 @@ const STYLE = `
   .icase-tabbar a[aria-current]{color:var(--icase-primary,#0b57d0);font-weight:600;box-shadow:inset 0 2px 0 var(--icase-primary,#0b57d0)}
   .icase-tabbar details{flex:1;position:relative}.icase-tabbar details[open]>div{position:absolute;bottom:100%;right:0;min-width:180px;background:var(--icase-surface,#fff);border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12)}
   .icase-tabbar details>div a{display:block;text-align:left;padding:10px 12px;font-size:13px;white-space:normal}
+  .icase-back{font-size:22px;line-height:1;text-decoration:none;padding:2px 10px 2px 0;color:var(--icase-primary,#0b57d0)}
 `;
 
 const link = (item, current) => `<a href="#${escape(item.slug)}" data-accion="ui" ${item.slug === current ? 'aria-current="page"' : ''}>${escape(item.nombre)}</a>`;
 
-/** Hasta cinco pestañas; la pantalla actual siempre está visible y el resto va bajo «Más». */
+/**
+ * Hasta cuatro pestañas: solo los destinos de primer nivel del flujo. El resto de pantallas se alcanza desde botones
+ * dentro de las pantallas (un flujo no es un menú), y las de segundo nivel traen botón «volver».
+ */
 function tabs(items, current) {
-  if (items.length <= TAB_LIMIT) return items.map(item => link(item, current)).join('');
-  const visible = items.slice(0, TAB_LIMIT - 1);
-  if (!visible.some(item => item.slug === current)) { const active = items.find(item => item.slug === current); if (active) visible[visible.length - 1] = active; }
-  const rest = items.filter(item => !visible.includes(item));
-  return `${visible.map(item => link(item, current)).join('')}<details><summary>Más</summary><div>${rest.map(item => link(item, current)).join('')}</div></details>`;
+  const primary = items.filter(isPrimary);
+  const visible = primary.slice(0, TAB_LIMIT);
+  if (!visible.some(item => item.slug === current)) { const active = primary.find(item => item.slug === current); if (active) visible[visible.length - 1] = active; }
+  return visible.map(item => `<a href="#${escape(item.slug)}" data-accion="ui" ${item.slug === current ? 'aria-current="page"' : ''}>${escape(shortLabel(item.nombre))}</a>`).join('');
+}
+
+/** Destino del botón «volver» de una pantalla de segundo nivel: el destino de primer nivel anterior en el flujo. */
+function backTarget(items, current) {
+  const index = items.findIndex(item => item.slug === current);
+  const before = items.slice(0, index < 0 ? 0 : index).filter(isPrimary);
+  return before[before.length - 1] || items.find(isPrimary) || null;
 }
 
 exports.kindOf = kindOf;
@@ -69,15 +137,20 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   const main = find(document, 'main');
   const content = main || find(document, 'body');
   strip(content);
+  repairIndicators(content);
+  const kind = kindOf(screen);
+  if (kind === 'auth') scrubAccess(content, { brand: identity.nombre_aplicacion || name, screen });
   const fragment = serialize(content);
   const styles = [];
   function collect(node) { if (node.tagName === 'style' && !(node.attrs || []).some(attr => attr.name === 'data-icase-shell')) styles.push(serialize(node)); (node.childNodes || []).forEach(collect); }
   collect(document);
-  const kind = kindOf(screen);
   const siblings = manifest.filter(item => item.shell === screen.shell && kindOf(item) !== 'auth');
   const brand = escape(identity.nombre_aplicacion || name);
   const logo = identity.logo ? `<img src="${escape(identity.logo)}" alt="" width="32" height="32">` : '';
-  const header = `<header>${logo}<strong>${brand}</strong></header>`;
+  // En móvil, las pantallas de segundo nivel traen un botón «volver» al destino anterior del flujo.
+  const back = kind === 'mobile' && !isPrimary(screen) ? backTarget(siblings, screen.slug) : null;
+  const backLink = back ? `<a class="icase-back" href="#${escape(back.slug)}" data-accion="ui" aria-label="Volver">‹</a>` : '';
+  const header = `<header>${backLink}${logo}<strong>${brand}</strong></header>`;
   const body = {
     auth: `${header}<main class="icase-content">${fragment}</main>`,
     mobile: `${header}<main class="icase-content">${fragment}</main><nav class="icase-tabbar" aria-label="Navegación principal">${tabs(siblings, screen.slug)}</nav>`,

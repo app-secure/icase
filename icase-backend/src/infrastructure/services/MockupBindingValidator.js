@@ -1,5 +1,6 @@
 const { parse } = require('parse5');
 const { formOf, rootOf } = require('./HtmlFormOwnership');
+const { systemManaged } = require('./MockupFieldPolicy');
 
 const VERBS = { consultar: 'GET', crear: 'POST', editar: 'PATCH', eliminar: 'DELETE' };
 const WRITE_VERBS = new Set(['crear', 'editar']);
@@ -115,7 +116,10 @@ class MockupBindingValidator {
     // Un formulario que crea registros sin control para algún campo de la operación no podrá guardarlos si el backend lo exige.
     const campos_faltantes = known && verbo === 'crear'
       ? Object.entries(properties).filter(([name, definition]) => !definition?.readOnly && !campos.includes(name)).map(([name]) => name) : [];
-    if (campos_faltantes.length) advertencias.push(`el formulario de "${control}" no tiene control para: ${campos_faltantes.join(', ')} (${rf} los guarda y el backend puede exigirlos)`);
+    // Solo se avisa de lo que la persona debería poder escribir: lo que completa el sistema (cliente de la sesión, estado
+    // inicial, códigos generados, fechas de registro, totales calculados) no se pide en el formulario.
+    const campos_a_avisar = campos_faltantes.filter((name) => !systemManaged(name, properties[name]));
+    if (campos_a_avisar.length) advertencias.push(`el formulario de "${control}" no tiene control para: ${campos_a_avisar.join(', ')} (${rf} los guarda y el backend puede exigirlos)`);
     return { control, rf, verbo, estado: 'valido', campos, campos_desconocidos, campos_faltantes, en_formulario: Boolean(this._formOf(node)) };
   }
 

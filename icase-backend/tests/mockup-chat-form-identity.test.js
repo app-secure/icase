@@ -64,11 +64,11 @@ describe('identidad de operaciones al corregir formularios de caja', () => {
   });
 
   test('permite cambiar el texto conservando otras advertencias pendientes del mismo formulario', async () => {
-    const { run } = setup(form({ title: 'Apertura' }), form({ title: 'Abrir caja', extra: fondo }), ['usuario_id']);
+    const { run } = setup(form({ title: 'Apertura' }), form({ title: 'Abrir caja', extra: fondo }), ['moneda']);
     const result = await run();
     expect(result.totalProcesados).toBe(1);
-    expect(result.ajustes[0].advertencias_pendientes).toEqual([expect.stringContaining('usuario_id')]);
-    expect(result.mockups[0].enlaces.find(e => e.rf === 'RF-08').campos_faltantes).toEqual(['usuario_id']);
+    expect(result.ajustes[0].advertencias_pendientes).toEqual([expect.stringContaining('moneda')]);
+    expect(result.mockups[0].enlaces.find(e => e.rf === 'RF-08').campos_faltantes).toEqual(['moneda']);
   });
 
   test('permite completar un formulario vacío aunque se mejore el texto del submit', async () => {
@@ -84,12 +84,12 @@ describe('identidad de operaciones al corregir formularios de caja', () => {
   });
 
   test('no atribuye a otro formulario una advertencia solo porque tienen el mismo texto', async () => {
-    const usuario = '<label>Usuario<input name="usuario_id"></label>';
+    const usuario = '<label>Usuario<input name="moneda"></label>';
     const before = form({ id: 'a', extra: usuario }) + form({ id: 'b', extra: fondo });
     const after = form({ id: 'a', extra: usuario + fondo }) + form({ id: 'b', extra: fondo });
-    const result = await setup(before, after, ['usuario_id']).run();
+    const result = await setup(before, after, ['moneda']).run();
     expect(result.totalProcesados).toBe(1);
-    expect(result.ajustes[0].advertencias_pendientes).toEqual([expect.stringContaining('usuario_id')]);
+    expect(result.ajustes[0].advertencias_pendientes).toEqual([expect.stringContaining('moneda')]);
   });
 
   const a = { id: 'caja-a', title: 'Sucursal A' };

@@ -38,6 +38,8 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
 
 3. **SISTEMA DE DISEÑO OBLIGATORIO (todas las pantallas del proyecto comparten el mismo lenguaje visual)**:
 
+   > **PREVALECE sobre 3.1 y el esqueleto de referencia:** la estructura común (cabecera, barra lateral o pestañas, topbar, breadcrumb, nombre de la aplicación) la agrega el sistema. NO la dibujes ni nombres el módulo o el flujo dentro de la pantalla: entrega solo el contenido de `<main>`, empezando por su título. Las pantallas de acceso llevan solo título corto, campos y botón. Cada pantalla contiene únicamente acciones de los RF asociados a ella.
+
    3.1 **Shell de la aplicación (idéntico en todas las pantallas, salvo Login y Recoverer Contraseña, que son centradas)**:
    - `<body class="min-h-screen bg-slate-50 font-sans antialiased text-slate-900">` y contenedor raíz `<div class="flex min-h-screen">`.
    - **Barra lateral** fija `w-60 shrink-0 border-r border-slate-200 bg-white flex flex-col`:

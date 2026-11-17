@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ArrowLeft, Files, FileText, Pencil, PanelLeft } from "lucide-react";
 import { RequirementsReferencePanel } from "./ApprovedRequirementsSidebar";
+import PhaseNav from "./PhaseNav";
 import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
 import SourcesDrawer from "./SourcesDrawer";
@@ -1403,6 +1404,24 @@ export default function ProjectWorkspace({
         <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
       )}
       <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
+        {projectBackendId && project.isProcessed && !isProcessing && <PhaseNav
+          project={project}
+          disabled={isProcessing}
+          sourcesAvailable={project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements}
+          requirementsAvailable={Boolean(project.isAnalysisApproved && project.currentPhase > 1 && !showInitial && !isManagingSources && !isReviewingRequirements)}
+          onToggleSources={() => setAnalysisSourcesOpen(open => !open)}
+          onToggleRequirements={() => setIsRequirementsSidebarOpen(open => !open)}
+          onSelect={(phase) => {
+            if (!canLeaveInitial()) return;
+            setShowInitial(false); setIsManagingSources(false);
+            if (phase === 1) {
+              if (project.isAnalysisApproved) { setIsReviewingRequirements(true); if (project.currentPhase > 1) onUpdateProject({ ...project, currentPhase: 1 }); }
+              else onUpdateProject({ ...project, currentPhase: 1 });
+              return;
+            }
+            setIsReviewingRequirements(false);
+            if (project.currentPhase !== phase) onUpdateProject({ ...project, currentPhase: phase });
+          }} />}
         <RequirementJobStatus key={requirementJob?.id} job={requirementJob} onResume={resumeRequirements} onCancel={async () => { const next = await cancelRequirementJobApi(requirementJob.id); setRequirementJob(next); }} />
         {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <AnalysisFlowProgress
           onBack={onBackToDashboard}

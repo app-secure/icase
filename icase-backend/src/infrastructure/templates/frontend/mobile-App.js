@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, SafeAreaView, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import SpecScreen from './SpecScreen';
 
 const API = process.env.EXPO_PUBLIC_API_URL;
 // El generador sustituye los dos valores siguientes.
@@ -41,7 +42,8 @@ export default function App() {
       const contract = await call('/api/contract');
       const current = visibleScreens.find((item) => item.id === screen) || visibleScreens[0];
       if (current && screen !== current.id) setScreen(current.id);
-      const first = contract.operations.find((item) => current?.operations.includes(item.key) && (!AUTH || (permisos?.operaciones?.[item.key] || []).includes('GET')));
+      // Una pantalla construida desde la especificación pide sus propios datos: no usa el listado genérico.
+      const first = current?.blocks ? null : contract.operations.find((item) => current?.operations.includes(item.key) && (!AUTH || (permisos?.operaciones?.[item.key] || []).includes('GET')));
       setOperation(first || null);
       const response = first ? await call(first.collectionPath) : [];
       setRecords(Array.isArray(response) ? response : (Array.isArray(response.data) ? response.data : []));
@@ -83,6 +85,7 @@ export default function App() {
     {visibleScreens.map((item) => <Button key={item.id} title={item.name} onPress={() => setScreen(item.id)} />)}
     {!visibleScreens.length && <Text>No hay pantallas móviles disponibles para este rol.</Text>}
     {screen && <Text style={styles.title}>{visibleScreens.find((item) => item.id === screen)?.name}</Text>}
+    {screen && visibleScreens.find((item) => item.id === screen)?.blocks && <SpecScreen screen={visibleScreens.find((item) => item.id === screen)} call={call} can={(key, method) => !AUTH || (permisos?.operaciones?.[key] || []).includes(method)} />}
     {can('POST') && <TextInput multiline style={styles.input} value={payload} onChangeText={setPayload} />}
     {can('POST') && <Button title="Crear" onPress={create} />}
     {records.map((item, index) => <Text key={item.id || item._id || index}>{JSON.stringify(item)}</Text>)}

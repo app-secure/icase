@@ -1,5 +1,6 @@
 const MockupFunctionalCoverageService = require('./MockupFunctionalCoverageService');
 const { SYNONYMS: SHARED_SYNONYMS } = require('./DomainSynonyms');
+const Compatibility = require('../../core/services/RequirementScreenCompatibility');
 
 const STOPWORDS = new Set([
   'accion', 'actualizar', 'administrar', 'aplicacion', 'crear', 'debe', 'digital',
@@ -20,7 +21,7 @@ const SYNONYMS = new Map([
   ['reporte', 'informe'], ['report', 'informe'],
   ['platillo', 'plato'], ['prepagado', 'paquete'], ['prepago', 'paquete'],
   ['pts', 'punto'], ['puntos', 'punto'],
-  ['login', 'autenticacion'], ['sesion', 'autenticacion'], ['sesiones', 'autenticacion'],
+  ['login', 'autenticacion'],
   ['credencial', 'autenticacion'], ['credenciales', 'autenticacion'],
   ['copia', 'respaldo'], ['restaurar', 'recuperacion'], ['restauracion', 'recuperacion'],
   ['disponible', 'disponibilidad'], ['agotado', 'disponibilidad']
@@ -37,8 +38,11 @@ function stem(value) {
   return SYNONYMS.get(token) || token;
 }
 
+// Solo las frases de acceso son autenticación: «iniciar sesión», «inicio de sesión», «cerrar sesión» (no «sesión de caja»).
+const ACCESS_PHRASE = /\b(?:inicio|iniciar|inicia|ingreso|ingresar)\s+(?:de\s+)?sesion(?:es)?\b|\bcerrar\s+sesion\b(?!\s+de\s+caja)/g;
+
 function tokens(value) {
-  return [...new Set(normalize(String(value || '').replace(/([a-z])([A-Z])/g, '$1 $2'))
+  return [...new Set(normalize(String(value || '').replace(/([a-z])([A-Z])/g, '$1 $2')).replace(ACCESS_PHRASE, ' autenticacion ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .split(/\s+/)
@@ -87,6 +91,10 @@ function screenText(screen) {
 }
 
 function hasSemanticEvidence(requirement, screen) {
+  // Compartir palabras no basta: quien ejecuta el requisito debe poder estar en la pantalla y la plataforma debe coincidir.
+  if (!Compatibility.compatible(requirement, screen)) return false;
+  // Un requisito de autenticación queda evidenciado por un formulario con contraseña, aunque el texto no diga «sesión».
+  if (screen?.preview_code && tokens(requirement?.nombre).includes('autenticacion') && /<input\b[^>]*type\s*=\s*["']?password/i.test(String(screen.preview_code))) return true;
   const titleExpected = tokens(requirement?.nombre);
   const fullExpected = tokens(requirementText(requirement));
   const local = screenText(screen);
@@ -115,6 +123,13 @@ function hasSemanticEvidence(requirement, screen) {
     return true;
   }
   return matches.length > 0 && (matches.length >= 2 || matches.length / fullExpected.length >= 0.5);
+}
+
+/** Por qué un requisito no se asocia a una pantalla, dicho de forma que se pueda actuar. */
+function explainDiscard(requirement, screen) {
+  const verdict = Compatibility.check(requirement, screen);
+  if (!verdict.compatible) return `no corresponde a esta pantalla: ${verdict.motivo}`;
+  return 'la pantalla no muestra nada de este requisito';
 }
 
 function isHighPriority(requirement) {
@@ -168,6 +183,11 @@ function uiEvidence(mockups, expected) {
 }
 
 class MockupTraceabilityService {
+  /** Motivo legible por el que `requirement` no se asocia a `screen` (para los avisos de calidad). */
+  explicarDescarte(requirement, screen) {
+    return explainDiscard(requirement, screen);
+  }
+
   constructor() {
     this.functionalCoverage = new MockupFunctionalCoverageService();
   }
@@ -256,16 +276,17 @@ class MockupTraceabilityService {
     if (unknownIds.length) errors.push(`Los mockups referencian requisitos inexistentes o no aprobados: ${unknownIds.join(', ')}.`);
 
     const rejectedReferences = [];
+    const rejectedReasons = new Map();
     generated = generated.map(mockup => ({
       ...mockup,
       rf_trazabilidad: (mockup.rf_trazabilidad || []).filter(id => {
         const requirement = functional.find(item => requirementId(item) === String(id).trim().toUpperCase());
         const supported = requirement && hasSemanticEvidence(requirement, mockup);
-        if (!supported && requirement) rejectedReferences.push({ pantalla: mockup.nombre_pantalla || mockup.pantalla_id, requisito: requirementId(requirement) });
+        if (!supported && requirement) rejectedReferences.push({ pantalla: mockup.nombre_pantalla || mockup.pantalla_id, requisito: requirementId(requirement) }), rejectedReasons.set(`${mockup.nombre_pantalla || mockup.pantalla_id}:${requirementId(requirement)}`, explainDiscard(requirement, mockup));
         return supported;
       })
     }));
-    if (rejectedReferences.length) warnings.push(`Referencias sin evidencia local, no contabilizadas como cobertura: ${rejectedReferences.map(item => `${item.pantalla}: ${item.requisito}`).join('; ')}.`);
+    if (rejectedReferences.length) warnings.push(`Referencias sin evidencia local, no contabilizadas como cobertura: ${rejectedReferences.map(item => `${item.pantalla}: ${item.requisito} (${rejectedReasons.get(`${item.pantalla}:${item.requisito}`)})`).join('; ')}.`);
 
     const highUiRequirements = functional.filter((requirement) => isHighPriority(requirement) && hasHumanActor(requirement));
     const uncoveredHigh = highUiRequirements

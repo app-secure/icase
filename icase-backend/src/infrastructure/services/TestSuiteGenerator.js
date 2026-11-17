@@ -37,6 +37,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...((contract.associations || []).length ? [{ ruta: 'tests/e2e/associations.spec.js', lenguaje: 'javascript', contenido: this._associationsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth, { screens: this._frontendScreens(frontend), contract }) }] : []),
       ...(functional && typedForms ? [{ ruta: 'tests/e2e/typed-forms.spec.js', lenguaje: 'javascript', contenido: this._typedFormsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
+      ...(functional && this._specScreensE2eTest({ screens: this._allFrontendScreens(frontend), contract, auth }) ? [{ ruta: 'tests/e2e/spec-screens.spec.js', lenguaje: 'javascript', contenido: this._specScreensE2eTest({ screens: this._allFrontendScreens(frontend), contract, auth }) }] : []),
       ...(designedUi ? [{ ruta: 'tests/e2e/designed-ui.spec.js', lenguaje: 'javascript', contenido: designedUi }] : []),
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)))}] : []),
@@ -90,10 +91,50 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     catch { return {}; }
   }
 
+  /** Pantallas con editor de registros o interfaz diseñada; las construidas desde la especificación se prueban aparte. */
   _frontendScreens(frontend) {
+    return this._allFrontendScreens(frontend).filter((screen) => screen.origen !== 'especificacion');
+  }
+
+  _allFrontendScreens(frontend) {
     const manifest = frontend.archivos?.find((file) => file.ruta === 'frontend/icase.manifest.json');
     try { return JSON.parse(manifest?.contenido || '{}').pantallas || []; }
     catch { return []; }
+  }
+
+  /** Una prueba de navegador por pantalla de la especificación: debe mostrar los datos reales de su operación de consulta. */
+  _specScreensE2eTest({ screens, contract, auth }) {
+    const actions = new Map((contract.operations || []).flatMap((operation) => (operation.actions || []).map((action) => [action.name, action])));
+    const cases = screens.filter((screen) => screen.origen === 'especificacion').map((screen) => {
+      const lists = (screen.especificacion?.bloques || []).filter((block) => ['tabla', 'tarjetas'].includes(block.tipo) && actions.get(block.operacion)?.type === 'consulta');
+      const first = lists[0] && actions.get(lists[0].operacion);
+      return { id: screen.id, route: screen.route || screen.ruta, name: screen.name, path: first?.path || null, action: first?.name || null, single: lists.length === 1 };
+    });
+    if (!cases.length) return '';
+    const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
+    return `import { test, expect } from '@playwright/test';
+${session}
+const cases = ${JSON.stringify(cases)};
+
+for (const item of cases) {
+  test(item.name + ': la pantalla de la especificación muestra los datos reales' + (item.action ? ' de ' + item.action : ''), async ({ page }) => {
+    let rows = null;
+    if (item.path) {
+      const response = await fetch(apiBase + item.path, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+      expect(response.status, 'la operación ' + item.action + ' debe responder 200').toBe(200);
+      rows = await response.json();
+      expect(Array.isArray(rows)).toBe(true);
+    }
+    await page.goto(item.route);
+    await expect(page.locator('[data-screen="' + item.id + '"]')).toBeVisible();
+    await expect(page.locator('[data-screen="' + item.id + '"] .error')).toHaveCount(0);
+    if (rows && item.single) {
+      if (rows.length) await expect(page.locator('[data-screen="' + item.id + '"] [data-id]')).toHaveCount(rows.length);
+      else await expect(page.getByText('No hay registros para mostrar.')).toBeVisible();
+    }
+  });
+}
+`;
   }
 
   /** Cabecera de las pruebas de navegador cuando la aplicación exige sesión: reutiliza la del administrador. */

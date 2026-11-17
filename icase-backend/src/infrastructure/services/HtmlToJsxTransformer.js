@@ -385,20 +385,25 @@ class HtmlToJsxTransformer {
     const context = operaciones || routes || referencias ? { operaciones: new Set(operaciones || []), routes: new Set(routes || []), referencias: referencias || {} } : null;
     const doc = parse(HtmlToJsxTransformer.unescapeQuotes(html));
     const body = walk(doc, (node) => node.tagName === 'body')[0] || doc;
+    // La estructura común del mockup (cabecera, menú, barra de pestañas) la aporta la propia aplicación: aquí solo se
+    // conserva el contenido de la pantalla. Así la aplicación generada no repite la cabecera ni el menú.
+    const composed = /data-icase-shell-version="[12]"/.test(html);
+    const content = composed ? walk(body, (node) => node.tagName === 'main' && /(?:^|\s)icase-content(?:\s|$)/.test(attrOf(node, 'class')))[0] : null;
     let tailwindConfig = null;
     for (const script of walk(doc, (node) => node.tagName === 'script')) {
       const source = textOf(script);
       if (source.includes('tailwind.config')) { tailwindConfig = parseTailwindConfig(source); if (tailwindConfig) break; }
     }
     return {
-      jsx: (body.childNodes || []).map((child) => nodeToJsx(child, context)).join('').trim(),
-      css: walk(doc, (node) => node.tagName === 'style').map(textOf).join('\n'),
+      jsx: ((content || body).childNodes || []).map((child) => nodeToJsx(child, context)).join('').trim(),
+      css: walk(doc, (node) => node.tagName === 'style' && !(content && node.attrs?.some((attr) => attr.name === 'data-icase-shell'))).map(textOf).join('\n'),
       bodyClassName: attrOf(body, 'class').replace(/\s+/g, ' ').trim(),
       bodyStyle: parseStyleString(attrOf(body, 'style')),
       tailwindConfig,
       // Menú propio: un <aside>, o un <nav> con enlaces a varias pantallas de la aplicación.
-      hasShell: walk(body, (node) => node.tagName === 'aside').length > 0
-        || walk(body, (node) => node.tagName === 'nav').some((nav) => walk(nav, (node) => node.tagName === 'a' && internalLink(node, context)).length >= 2)
+      hasShell: !content && (walk(body, (node) => node.tagName === 'aside').length > 0
+        || walk(body, (node) => node.tagName === 'nav').some((nav) => walk(nav, (node) => node.tagName === 'a' && internalLink(node, context)).length >= 2)),
+      shellRemoved: Boolean(content)
     };
   }
 

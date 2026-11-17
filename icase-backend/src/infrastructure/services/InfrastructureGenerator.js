@@ -68,6 +68,17 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
       compose.contenido = compose.contenido.replace(/^  frontend:\n(?:    .*\n)+/m, '');
       files.push({ ruta: 'ops/mobile-platform.json', lenguaje: 'json', contenido: '{"plataforma":"móvil"}' });
     }
+    // Contenedor móvil: la app Expo se exporta como web y se sirve con nginx. Va en un compose aparte para no alterar el
+    // despliegue base (backend, frontend, base de datos); el script de vista previa lo incluye si existe.
+    const hasMobile = frontend.archivos?.some((file) => file.ruta === 'mobile/package.json');
+    if (hasMobile) {
+      files.push(
+        { ruta: 'ops/docker/mobile.Dockerfile', lenguaje: 'dockerfile', contenido: this._mobileDockerfile() },
+        { ruta: 'ops/docker/mobile-nginx.conf', lenguaje: 'nginx', contenido: 'server { listen 80; root /usr/share/nginx/html; index index.html; location / { try_files $uri /index.html; } }\n' },
+        { ruta: 'ops/docker-compose.mobile.yml', lenguaje: 'yaml', contenido: this._mobileCompose() }
+      );
+      files.find((file) => file.ruta === 'ops/.env.example').contenido += '\n# Vista web de la app móvil (Expo exportada); se levanta con -f ops/docker-compose.mobile.yml.\nMOBILE_PORT=8082\n';
+    }
     const warnings = [];
     if(backendManifest.integraciones?.enabled?.length)warnings.push('Completa las credenciales y campos de las integraciones aprobadas. Un proveedor local simulado no acredita cuentas Stripe/SSO reales, TLS ni hardware de producción.');
     if(backendManifest.eventos_cambios?.replicas)warnings.push('Redis Pub/Sub coordina invalidaciones sin replay ni SLA. Aísla namespaces, configura seguridad de Redis y no combines estado local con varias réplicas.');
@@ -106,6 +117,14 @@ class InfrastructureGenerator extends IGeneradorArtefacto {
       : 'FROM node:22-alpine\nWORKDIR /app\nENV NODE_ENV=production\nCOPY backend/package*.json ./\nRUN npm install --omit=dev\nCOPY backend/ ./\nEXPOSE 3000\nCMD ["npm","start"]\n';
     const audit = `ARG ICASE_AUDIT_NONCE=manual\n${DependencyAudit.dockerRun}\n`;
     return dockerfile.replace('RUN npm install\n', `RUN npm install\n${audit}`).replace('RUN npm install --omit=dev\n', `RUN npm install --omit=dev\n${audit}`);
+  }
+
+  _mobileDockerfile() {
+    return 'FROM node:22-alpine AS build\nWORKDIR /app\nARG EXPO_PUBLIC_API_URL\nENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL\nCOPY mobile/package*.json ./\nRUN npm install && npx expo install react-dom react-native-web @expo/metro-runtime\nCOPY mobile/ ./\n# El proyecto móvil declara solo android e ios; la exportación web se habilita únicamente dentro de esta imagen.\nRUN node -e "const fs=require(\'fs\');const c=JSON.parse(fs.readFileSync(\'app.json\',\'utf8\'));c.expo.platforms=[...new Set([...(c.expo.platforms||[]),\'web\'])];c.expo.web={bundler:\'metro\',output:\'single\'};fs.writeFileSync(\'app.json\',JSON.stringify(c))"\nRUN npx expo export --platform web\n\nFROM nginx:1.27-alpine\nCOPY ops/docker/mobile-nginx.conf /etc/nginx/conf.d/default.conf\nCOPY --from=build /app/dist /usr/share/nginx/html\nEXPOSE 80\n';
+  }
+
+  _mobileCompose() {
+    return 'services:\n  backend:\n    environment:\n      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8080},http://localhost:${MOBILE_PORT:-8082}"\n  mobile:\n    build:\n      context: ..\n      dockerfile: ops/docker/mobile.Dockerfile\n      args:\n        EXPO_PUBLIC_API_URL: "http://localhost:${API_PORT:-3000}"\n    restart: unless-stopped\n    ports:\n      - "${MOBILE_PORT:-8082}:80"\n    depends_on:\n      - backend\n';
   }
 
   _frontendDockerfile() {

@@ -17,6 +17,8 @@ import SpecReviewPanel from './SpecReviewPanel';
 import FunctionalGatePanel from './FunctionalGatePanel';
 import GenerationPreviewPanel from './GenerationPreviewPanel';
 import LocalRunPanel from './LocalRunPanel';
+import FolderExplorer from './FolderExplorer';
+import CodeSummary from './CodeSummary';
 import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
@@ -732,7 +734,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                 {/* Formulario principal de decisión */}
                 <div className="rounded-xl border border-slate-100 bg-slate-50/40 p-5">
                   {loadingDraft && <p role="status">Preparando propuesta…</p>}
-                  <PhaseForm phase={selected} modules={plan?.modulos} value={drafts[selected] || {}} disabled={busy || current.estado === 'bloqueada'} onChange={(value) => setDrafts((old) => ({ ...old, [selected]: value }))} />
+                  <PhaseForm phase={selected} projectId={projectId} version={plan?.version} modules={plan?.modulos} value={drafts[selected] || {}} disabled={busy || current.estado === 'bloqueada'} onChange={(value) => setDrafts((old) => ({ ...old, [selected]: value }))} />
                 </div>
                 {suggestionMeta && <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                   <p className="font-semibold text-slate-800">Base de la sugerencia: {suggestionMeta.evidencias.length} artefactos aprobados</p>
@@ -799,7 +801,8 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
         if (data.trabajo.estado === 'completado') {
           setLoading(false);
           setResult(data.verificacion);
-          onArtifactChange((prev) => ({ ...(prev || artifact), verificacion: data.verificacion }));
+          // Si la verificación de una corrección no pasó, el servidor retiró la aprobación: la vista lo refleja.
+          onArtifactChange((prev) => ({ ...(prev || artifact), verificacion: data.verificacion, pendiente_reverificacion: false, ...(data.verificacion?.aprobacion_retirada ? { estado: 'en_revision', aprobado: false } : {}) }));
         } else if (data.trabajo.estado === 'fallido') {
           setLoading(false);
           setError(data.trabajo.error || 'La verificación falló en el contenedor aislado.');
@@ -828,8 +831,12 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
       const updated = await updateGeneratedArtifactFileApi(projectId, artifact.id, selectedFile, source);
       onArtifactChange(updated);
       setResult(null);
+      // Tras corregir se vuelve a verificar de inmediato: si pasa, la aprobación (si la había) se mantiene.
+      const data = await startArtifactVerificationJobApi(projectId, artifact.id);
+      setJob(data.trabajo);
+      return;
     } catch (failure) { setError(failure.message); }
-    finally { setLoading(false); }
+    setLoading(false);
   };
 
   const partes = artifact.tipo === 'codigo_frontend'
@@ -860,6 +867,9 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
     )}
 
     {error && <p className="mt-2 text-red-700">{error}</p>}
+    {artifact.pendiente_reverificacion && !loading && !result && <p role="status" className="mt-2 text-amber-700">Corrección pendiente de verificar: no se puede empaquetar hasta que pase.</p>}
+    {result?.aprobacion_mantenida && <p role="status" className="mt-2 font-semibold text-emerald-700">La corrección pasó la verificación: la aprobación se mantiene.</p>}
+    {result?.aprobacion_retirada && <p role="alert" className="mt-2 font-semibold text-red-700">La corrección no pasó la verificación: se retiró la aprobación. Corrige y vuelve a verificar.</p>}
     {result && <><p className="mt-2 text-slate-500">{result.nota}</p>
       {result.pruebas?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-emerald-700">{result.pruebas.map((check) => <li key={check.paso}>{check.paso}: {check.resultado}</li>)}</ul>}
       {result.diagnostico?.ubicados?.length > 0 && <div className="mt-2 rounded-lg border border-red-200 bg-red-50/60 p-2" aria-label="Dónde está el error">
@@ -868,7 +878,7 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
           {result.diagnostico.ubicados.map((item) => <li key={`${item.archivo}:${item.linea}:${item.mensaje}`} className="text-red-800">
             <span className="font-mono font-semibold">{item.archivo}:{item.linea}</span>{item.afecta ? <span className="ml-1 text-red-600">({item.afecta.tipo}: {item.afecta.id})</span> : null}
             <span className="block text-red-700">{item.mensaje}</span>
-            {item.corregible_aqui && artifact.estado === 'en_revision'
+            {item.corregible_aqui && ['en_revision', 'aprobado'].includes(artifact.estado)
               ? <button type="button" onClick={() => fixHere(item)} className="mt-0.5 font-semibold text-violet-700 underline">Corregir este archivo</button>
               : <span className="text-[11px] text-slate-500">{item.corregible_aqui ? 'El artefacto ya está revisado.' : 'Pertenece a otro artefacto: corrígelo allí.'}</span>}
           </li>)}
@@ -877,8 +887,9 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
       {result.errores?.length > 0 && <details className="mt-2" open={!result.diagnostico?.ubicados?.length}><summary className="cursor-pointer text-red-700">Salida completa del error</summary><ul className="mt-1 list-disc space-y-1 pl-4 text-red-700">{result.errores.map((item) => <li key={item}>{item}</li>)}</ul></details>}
       {result.advertencias?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">{result.advertencias.map((item) => <li key={item}>{item}</li>)}</ul>}
     </>}
-    {artifact.estado === 'en_revision' && <details className="mt-3 border-t border-slate-100 pt-2" open={editorOpen} onToggle={(event) => setEditorOpen(event.currentTarget.open)}>
+    {['en_revision', 'aprobado'].includes(artifact.estado) && <details className="mt-3 border-t border-slate-100 pt-2" open={editorOpen} onToggle={(event) => setEditorOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-semibold text-violet-700">Revisar y corregir un archivo</summary>
+      {artifact.aprobado && <p className="mt-2 text-[11px] text-slate-500">Este artefacto está aprobado. Al guardar se vuelve a verificar; si pasa, la aprobación se mantiene, y si no, se retira.</p>}
       <select aria-label="Archivo a corregir" value={selectedFile} onChange={(event) => {
         const path = event.target.value;
         setSelectedFile(path);
@@ -1160,7 +1171,7 @@ function CoverageEditor({ value, onChange, disabled, modules }) {
   </section>;
 }
 
-function PhaseForm({ phase, value, onChange, disabled, modules }) {
+function PhaseForm({ phase, value, onChange, disabled, modules, projectId, version }) {
   if (phase === 'modulos') return <ModulesEditor value={value} onChange={onChange} disabled={disabled} modules={modules} />;
   if (phase === SPEC_PHASE) return <SpecReviewPanel value={value} onChange={onChange} disabled={disabled} />;
   if (phase === 'control_acceso') return <AccessEditor value={value} onChange={onChange} disabled={disabled} />;
@@ -1185,5 +1196,5 @@ function PhaseForm({ phase, value, onChange, disabled, modules }) {
     </label>;
   };
   if (phase === 'stack_tecnologico') return <div className="grid gap-4 md:grid-cols-2">{choice('backend', 'Backend')}{choice('frontend', 'Frontend')}{choice('base_datos', 'Base de datos')}{stackProblem(value) && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700 md:col-span-2">{stackProblem(value)}</p>}{choice('gestor_paquetes', 'Gestor de paquetes')}{choice('tiempo_real', 'Tiempo real')}{choice('estilos', 'Estilos')}</div>;
-  return <pre className="max-h-96 overflow-auto text-xs">{value.arbol}</pre>;
+  return <div><CodeSummary projectId={projectId} refreshKey={version} /><FolderExplorer tree={value.arbol} /></div>;
 }

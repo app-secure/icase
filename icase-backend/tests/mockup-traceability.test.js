@@ -49,7 +49,8 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
 
   test('la auditoría avisa si la evidencia local pertenece a otro rol', () => {
     const result = service.validate({ manifest: [{ pantalla_id: 'pago' }], requirements: [requirements[2]], mockups: [{ pantalla_id: 'pago', nombre_pantalla: 'pago', roles: ['Cliente'], rf_trazabilidad: ['RF-03'], preview_code: '<main>Procesar pago <button>Pagar</button></main>' }] });
-    expect(result.advertencias.join(' ')).toContain('roles');
+    // Un requisito del cajero no se asocia a una pantalla del cliente, y el aviso dice por qué.
+    expect(result.advertencias.join(' ')).toContain('lo ejecuta cajero, y esta pantalla es de cliente');
   });
 
   test('funciona en otro dominio sin inferir préstamos desde la navegación del catálogo', () => {

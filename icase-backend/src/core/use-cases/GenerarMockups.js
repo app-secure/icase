@@ -4,6 +4,7 @@ const MockupRepairService = require('../../infrastructure/services/MockupRepairS
 const MockupBindingService = require('../../infrastructure/services/MockupBindingService');
 const MockupVisualComposer = require('../../infrastructure/services/MockupVisualComposer');
 const MockupLayoutLinter = require('../../infrastructure/services/MockupLayoutLinter');
+const Compatibility = require('../services/RequirementScreenCompatibility');
 const MockupChatCorrectionService = require('../../infrastructure/services/MockupChatCorrectionService');
 const MockupFormRepairService = require('../../infrastructure/services/MockupFormRepairService');
 
@@ -309,12 +310,24 @@ class GenerarMockups {
         ? []
         : ['No se pudo asociar esta pantalla con un requisito funcional aprobado.'];
       const descartadas = (mockup.rf_trazabilidad || []).filter(id => !rfTrazabilidad.includes(String(id).trim().toUpperCase()));
-      if (descartadas.length) advertenciasTrazabilidad.push(`Referencias descartadas por falta de evidencia local o por no ser RF aprobados: ${descartadas.join(', ')}.`);
+      if (descartadas.length) {
+        const detalle = descartadas.map((id) => {
+          const requisito = (requerimientos || []).find((item) => String(item.identificador).toUpperCase() === String(id).trim().toUpperCase() && item.aprobado !== false);
+          return requisito ? `${id} (${this.traceabilityService.explicarDescarte(requisito, { ...(pantalla || {}), ...mockup })})` : `${id} (no es un requisito aprobado)`;
+        });
+        advertenciasTrazabilidad.push(`Se quitaron referencias a requisitos que no corresponden a esta pantalla: ${detalle.join('; ')}.`);
+      }
       const erroresValidacion = [...validacion.errores, ...erroresTrazabilidad];
       // Los elementos que el sanitizador ya eliminó son ajustes informativos,
       // no problemas que sigan presentes en el mockup final.
       const ajustesSanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...sanitizado.advertencias])];
-      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias, ...new MockupLayoutLinter().mensajes(htmlConSistemaDiseno, { screen: pantalla || {} })])];
+      // Un botón que ejecuta un requisito de otro actor o de otra plataforma no pertenece a esta pantalla.
+      const controlesAjenos = (enlazado.enlaces || []).filter((enlace) => enlace.estado === 'valido').map((enlace) => {
+        const requisito = (requerimientos || []).find((item) => String(item.identificador).toUpperCase() === String(enlace.rf).toUpperCase());
+        const veredicto = requisito ? Compatibility.check(requisito, { ...(pantalla || {}), ...mockup }) : { compatible: true };
+        return veredicto.compatible ? null : `el control "${enlace.control}" ejecuta ${enlace.rf}, que no corresponde a esta pantalla (${veredicto.motivo}); quítalo o muévelo a su pantalla`;
+      }).filter(Boolean);
+      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias, ...controlesAjenos, ...new MockupLayoutLinter().mensajes(htmlConSistemaDiseno, { screen: pantalla || {} })])];
       return {
         ...mockup,
         pantalla_id: pantalla?.pantalla_id || mockup.nombre_pantalla,
@@ -700,7 +713,7 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
   _inferirShell(ruta) {
     const plataforma = this._inferirPlataforma(ruta);
     const texto = this._textoRuta(ruta);
-    if (/acceso|sesion|contrasena|registro/.test(texto)) return `auth-${plataforma}`;
+    if (/acceso|sesion|contrasena|registro|autentic|login/.test(texto)) return `auth-${plataforma}`;
     if (/cocina|kds/.test(texto)) return 'kds-web';
     if (/admin|configuracion|usuarios|roles|reportes/.test(texto)) return 'admin-web';
     if (plataforma === 'mobile') return 'cliente-mobile';
