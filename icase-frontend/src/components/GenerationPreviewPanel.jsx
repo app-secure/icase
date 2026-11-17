@@ -26,6 +26,7 @@ function ScreenCard({ screen }) {
       <span className="font-mono text-slate-500">{screen.ruta}</span>
       <span className={`rounded px-1.5 py-0.5 font-medium ${origin.style}`}>{origin.label}</span>
       {screen.rf.map((id) => <span key={id} className="rounded border border-slate-200 px-1.5 py-0.5 text-slate-500">{id}</span>)}
+      {screen.generada === false && <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">No se generará: su plataforma no está en el alcance</span>}
     </div>
 
     {screen.origen === 'especificacion' && <ul className="mt-3 space-y-2">
@@ -83,6 +84,7 @@ export default function GenerationPreviewPanel({ projectId, refreshKey = 0, onEr
       <Stat label="Desde el mockup" value={resumen.pantallas_por_origen.mockup} />
       <Stat label="Solo CRUD genérico" value={resumen.pantallas_por_origen.crud} warn={resumen.pantallas_por_origen.crud > 0} />
       <Stat label="Controles sin operación" value={resumen.controles_sin_operacion} warn={resumen.controles_sin_operacion > 0} />
+      <Stat label="Pantallas sin generar" value={resumen.pantallas_sin_generar} warn={resumen.pantallas_sin_generar > 0} />
     </div>
 
     <section aria-label="Contenedores">
@@ -100,10 +102,16 @@ export default function GenerationPreviewPanel({ projectId, refreshKey = 0, onEr
       <ul className="mt-2 space-y-1 text-xs text-slate-700">{preview.rf_sin_cubrir.map((item) => <li key={item.id}><span className="font-mono font-semibold">{item.id}</span> {item.nombre}. {item.motivo}</li>)}</ul>
     </section>}
 
-    <section aria-label="Pantallas" className="space-y-3">
-      <h3 className="text-sm font-semibold text-slate-900">Pantallas ({preview.pantallas.length})</h3>
-      {preview.pantallas.map((screen) => <ScreenCard key={screen.id} screen={screen} />)}
-    </section>
+    {[['web', 'Aplicación web', Monitor], ['móvil', 'Aplicación móvil', Smartphone]].map(([app, title, AppIcon]) => {
+      const own = preview.pantallas.filter((screen) => screen.plataforma === app);
+      if (!own.length) return null;
+      const info = preview.aplicaciones?.[app];
+      return <section key={app} aria-label={title} className="space-y-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><AppIcon size={15} className="text-slate-400" />{title} ({own.length} pantallas)
+          {info && !info.en_alcance && <span className="rounded bg-red-100 px-1.5 py-0.5 text-[11px] font-medium text-red-700">fuera del alcance</span>}</h3>
+        {own.map((screen) => <ScreenCard key={screen.id} screen={screen} />)}
+      </section>;
+    })}
 
     {preview.operaciones.length > 0 && <section aria-label="Operaciones" className="space-y-2">
       <h3 className="text-sm font-semibold text-slate-900">Operaciones de negocio ({preview.operaciones.length})</h3>

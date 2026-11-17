@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const IGeneradorArtefacto = require('../../core/services/IGeneradorArtefacto');
 const GenericFrontendGenerator = require('./GenericFrontendGenerator');
 const StackCatalog = require('../../core/services/StackCatalog');
+const PlatformPolicy = require('../../core/services/PlatformPolicy');
 
 const slug = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pantalla';
@@ -21,10 +22,13 @@ class FrontendScaffoldGenerator extends IGeneradorArtefacto {
       : mockups.map((mockup) => ({ ...mockup, nombre: mockup.nombre_visible, slug: mockup.nombre_pantalla, mockup }));
     const files = new GenericFrontendGenerator().generate({ proyecto, screens, decisiones, sistemaDiseno: diseno.sistema_diseno || {}, requerimientos, identidad, referencias, spec: especificacion && acciones.length ? { pantallas: especificacion.pantallas, acciones } : null });
     const missing = screens.filter((screen) => !screen.mockup).map((screen) => screen.nombre || screen.slug);
+    // Una pantalla de una aplicación que no está en el alcance no se genera: se avisa en lugar de omitirla en silencio.
+    const selected = decisiones.stack_tecnologico?.plataformas ?? decisiones.alcance_plataforma?.plataformas ?? ['web'];
+    const notGenerated = PlatformPolicy.missing(screens, selected).map((app) => `${PlatformPolicy.count(screens)[app]} pantalla(s) ${app === 'móvil' ? 'móviles' : 'web'} del árbol de navegación no se generaron porque la plataforma ${app} no está en el alcance.`);
     return {
       archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
       trazabilidad_rf: [...new Set(screens.flatMap((screen) => screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || []))],
-      advertencias: [...(missing.length ? [`Pantallas del árbol sin mockup asociado: ${missing.join(', ')}.`] : []), ...(!screens.length ? ['No existen pantallas aprobadas para conectar.'] : []), ...(screens.some((screen) => !(screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || []).length) ? ['Hay pantallas sin trazabilidad RF; no tendrán una operación de negocio asociada.'] : [])],
+      advertencias: [...notGenerated, ...(missing.length ? [`Pantallas del árbol sin mockup asociado: ${missing.join(', ')}.`] : []), ...(!screens.length ? ['No existen pantallas aprobadas para conectar.'] : []), ...(screens.some((screen) => !(screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || []).length) ? ['Hay pantallas sin trazabilidad RF; no tendrán una operación de negocio asociada.'] : [])],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_frontend_generico_v2'
     };

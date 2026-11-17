@@ -19,7 +19,8 @@ const component = (value) => slug(value).split('-').map((part) => part.charAt(0)
 const STOPWORDS = new Set(['vista', 'pantalla', 'panel', 'modulo', 'seccion', 'pagina', 'inicio', 'listado', 'detalle', 'gestion', 'registro', 'edicion', 'consulta', 'para', 'del', 'las', 'los', 'una', 'con', 'por']);
 const tokensOf = (value) => slug(value).split('-').filter((w) => w.length >= 3 && !STOPWORDS.has(w));
 const isAuthScreen = (screen) => /inicio.*sesion|login|autentic/i.test(screen?.slug || screen?.nombre || screen?.nombre_visible || screen?.nombre_pantalla || screen?.ruta || '');
-const platformOf = (screen) => /mobile|m[oó]vil|android|ios/i.test(String(screen?.plataforma || '')) ? 'móvil' : 'web';
+const PlatformPolicy = require('../../core/services/PlatformPolicy');
+const platformOf = (screen) => PlatformPolicy.of(screen);
 
 // Estilos del módulo de formularios por campo y diseño moderno tipo Dashboard.
 const TYPED_FORMS_CSS = '.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}.form-row{display:flex;flex-direction:column;gap:.35rem}.input{width:100%;padding:.65rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;transition:border-color .15s,box-shadow .15s;outline:none}.input:focus{border-color:var(--primary);background:white;box-shadow:0 0 0 3px rgba(99,102,241,.15)}.input[aria-invalid="true"]{border-color:#ef4444;background:#fef2f2}.field-error{color:#dc2626;font-size:.8rem;font-weight:500}.secondary{background:#f1f5f9!important;color:#334155!important;border:1px solid #cbd5e1!important}.secondary:hover{background:#e2e8f0!important}.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;margin-top:.75rem}.records{width:100%;border-collapse:collapse;font-size:.875rem}.records th{background:#f8fafc;color:#475569;font-weight:600;text-transform:uppercase;font-size:.75rem;letter-spacing:.05em;padding:.75rem 1rem;border-bottom:1px solid #e2e8f0}.records td{padding:.85rem 1rem;border-bottom:1px solid #f1f5f9;color:#1e293b;vertical-align:middle}.records tr:last-child td{border-bottom:none}.records tr:hover{background:#f8fafc}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}';
@@ -42,7 +43,7 @@ class GenericFrontendGenerator {
         || (view.platform === 'web' && (view.route === '/usuarios' || view.id === 'usuarios'))
       )));
     const views = allViews.filter((view) => view.platform === 'web');
-    const explicitMobile = screens.some((screen) => /mobile|m[oó]vil|android|ios/i.test(String(screen?.plataforma || '')));
+    const explicitMobile = screens.some((screen) => platformOf(screen) === 'móvil');
     const mobileViews = allViews.filter((view) => view.platform === 'móvil' || (!explicitMobile && !view.platformDeclared));
     const selectedWeb = platforms.includes('web') || platforms.includes('tablet');
     const selectedMobile = platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item));
@@ -237,7 +238,7 @@ class GenericFrontendGenerator {
     const modulo = screen.flujo || screen.mockup?.flujo || screen.modulo || screen.mockup?.modulo || 'General';
     // La ruta del árbol de navegación ("Sistema / Flujo / Pantalla") agrupa el menú, pero no es una URL: se usa una corta.
     const simple = /^\/[a-z0-9_-]+(?:\/[a-z0-9_-]+)?$/i.test(route);
-    return { id, name: screen.nombre || screen.nombre_visible || screen.nombre_pantalla || id, route: simple ? route : `/${id}`, roles: screen.roles || [], requirements: rf, operations: rf.map(slug), modulo, platform: platformOf(screen), platformDeclared: Boolean(screen.plataforma) };
+    return { id, name: screen.nombre || screen.nombre_visible || screen.nombre_pantalla || id, route: simple ? route : `/${id}`, roles: screen.roles || [], requirements: rf, operations: rf.map(slug), modulo, platform: platformOf(screen), platformDeclared: PlatformPolicy.declared(screen) !== null || platformOf(screen) === 'móvil' };
   }
 
   _inferScreenRfs(screen, screens = [], requerimientos = []) {

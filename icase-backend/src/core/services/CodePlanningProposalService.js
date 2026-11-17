@@ -139,10 +139,14 @@ class CodePlanningProposalService {
     };
   }
 
-  _alcance_plataforma({ texto }) {
+  _alcance_plataforma({ texto, diseno }) {
     const plataformas = [];
     if (/\bweb\b|react(?!\s+native)\b|navegador/i.test(texto)) plataformas.push('web');
     if (/react native|\bandroid\b|\bios\b|m[oó]vil/i.test(texto)) plataformas.push('móvil');
+    // Las pantallas del árbol de navegación también cuentan: una pantalla móvil exige la aplicación móvil.
+    const PlatformPolicy = require('./PlatformPolicy');
+    const arbol = Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
+    for (const app of ['web', 'móvil']) if (PlatformPolicy.count(arbol)[app] > 0 && !plataformas.includes(app)) plataformas.push(app);
     const opciones = plataformas.length ? plataformas : ['web'];
     return { valor: { plataformas: opciones, detectadas: opciones },
       advertencias: plataformas.length ? [] : ['Se propone web porque el análisis no especifica plataforma.'] };

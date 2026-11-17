@@ -5,7 +5,7 @@ const MockupBindingValidator = require('./MockupBindingValidator');
 
 const slug = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pantalla';
-const isMobile = (screen) => /mobile|m[oó]vil|android|ios/i.test(String(screen?.plataforma || screen?.flujo || ''));
+const PlatformPolicy = require('../../core/services/PlatformPolicy');
 
 /**
  * Vista previa de lo que se va a generar, calculada con las mismas entradas que los generadores pero sin generar nada:
@@ -28,7 +28,7 @@ class GenerationPreviewService {
       const id = screen.pantalla_id || slug(screen.slug || screen.nombre);
       const mockup = mockups.get(id) || mockups.get(screen.slug);
       const rfs = (Array.isArray(mockup?.rf_trazabilidad) ? mockup.rf_trazabilidad : screen.rf_trazabilidad) || [];
-      const base = { id, nombre: screen.nombre || screen.nombre_visible || id, ruta: screen.ruta || `/${id}`, plataforma: isMobile(screen) ? 'móvil' : 'web', modulo: screen.flujo || screen.modulo || 'General', rf: rfs };
+      const base = { id, nombre: screen.nombre || screen.nombre_visible || id, ruta: screen.ruta || `/${id}`, plataforma: PlatformPolicy.of(screen), modulo: screen.flujo || screen.modulo || 'General', rf: rfs };
       const fromSpec = specScreens.get(id);
       const components = (fromSpec?.componentes || []).filter((component) => actions.has(component.operacion));
       if (components.length) {
@@ -54,6 +54,14 @@ class GenerationPreviewService {
 
     const stack = decisiones.stack_tecnologico || {};
     const plataformas = stack.plataformas || decisiones.alcance_plataforma?.plataformas || ['web'];
+    // Cada pantalla pertenece a una sola aplicación; si esa aplicación no está en el alcance, no se genera.
+    const sinAlcance = new Set(PlatformPolicy.missing(manifest, plataformas));
+    for (const screen of pantallas) screen.generada = !sinAlcance.has(screen.plataforma);
+    const aplicaciones = Object.fromEntries([PlatformPolicy.WEB, PlatformPolicy.MOBILE].map((app) => {
+      const own = pantallas.filter((screen) => screen.plataforma === app);
+      return [app, { pantallas: own.length, generadas: own.filter((screen) => screen.generada).length, en_alcance: !sinAlcance.has(app) }];
+    }));
+    const avisosPlataforma = [...sinAlcance].map((app) => `${aplicaciones[app].pantallas} pantalla(s) ${app === 'móvil' ? 'móviles' : 'web'} no se generarán: la plataforma ${app} no está en el alcance.`);
     const contenedores = [
       { id: 'backend', tecnologia: stack.backend || 'Node.js + Express', descripcion: `API con ${contract.operations.length} operaciones de datos y ${operaciones.length} de negocio.` },
       { id: 'base_datos', tecnologia: stack.base_datos || 'MongoDB', descripcion: `${contract.entities.length} entidades del dominio.` },
@@ -67,9 +75,10 @@ class GenerationPreviewService {
       resumen: {
         requisitos: rf.length, pantallas: pantallas.length, operaciones_negocio: operaciones.length, entidades: contract.entities.length,
         pantallas_por_origen: { especificacion: por('especificacion'), mockup: por('mockup'), crud: por('crud') },
+        pantallas_sin_generar: pantallas.filter((screen) => !screen.generada).length,
         rf_sin_cubrir: rfSinCubrir.length, controles_sin_operacion: pantallas.reduce((total, screen) => total + screen.controles_sin_operacion.length, 0)
       },
-      contenedores, pantallas, operaciones, rf_sin_cubrir: rfSinCubrir, advertencias: contract.warnings
+      aplicaciones, contenedores, pantallas, operaciones, rf_sin_cubrir: rfSinCubrir, advertencias: [...avisosPlataforma, ...contract.warnings]
     };
   }
 }

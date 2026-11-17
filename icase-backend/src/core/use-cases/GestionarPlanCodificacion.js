@@ -53,7 +53,7 @@ class GestionarPlanCodificacion {
       this.requerimientoRepository.listarPorProyecto(proyectoId),
       this.diagramaRepository.listarPorProyecto(proyectoId)
     ]);
-    const diseno = ['estructura_carpetas', 'especificacion_aplicacion'].includes(etapa) ? await this.disenoRepository?.obtenerPorProyecto(proyectoId) : null;
+    const diseno = ['estructura_carpetas', 'especificacion_aplicacion', 'alcance_plataforma'].includes(etapa) ? await this.disenoRepository?.obtenerPorProyecto(proyectoId) : null;
     return this.proposalService.generar({ etapa, proyecto, requerimientos, diagramas, diseno, plan, inicial });
   }
 
