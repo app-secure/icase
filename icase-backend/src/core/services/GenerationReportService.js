@@ -82,7 +82,8 @@ class GenerationReportService {
 
     const mapped = new Set((contrato.operations || []).map((item) => item.entity).filter(Boolean));
     const count = (level) => items.filter((item) => item.nivel === level).length;
-    const fuenteCobertura = { requisitos, contrato, declaracion, stack };
+    const modulosActivos = (modulos?.opcionales || []).filter((item) => item.activo).map((item) => item.id);
+    const fuenteCobertura = { requisitos, contrato, declaracion, stack, modulosActivos };
     return {
       version: 2,
       cobertura_funcional: new GenerationCoverageService().evaluar(fuenteCobertura),

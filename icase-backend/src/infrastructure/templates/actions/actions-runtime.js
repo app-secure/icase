@@ -78,7 +78,10 @@ async function run(store, def, ctx = {}) {
     }
     case 'crear': {
       const values = pick(body, def.inputs || []);
-      if (!Object.keys(values).length) throw new ActionError(400, `Envía al menos uno de: ${(def.inputs || []).join(', ')}.`);
+      if (!Object.keys(values).length && (def.inputs || []).length) throw new ActionError(400, `Envía al menos uno de: ${(def.inputs || []).join(', ')}.`);
+      // Lo que completa el servidor no se toma de la petición: quien crea es la sesión y la marca de tiempo es la del registro.
+      for (const input of def.sessionInputs || []) values[input.campo] = await sessionValue(store, ctx.user, input);
+      for (const input of def.autoInputs || []) values[input.campo] = input.valor === 'hoy' ? new Date().toISOString().slice(0, 10) : new Date().toISOString();
       return flat(await store.create(def.capability, values, ctx.scope || null));
     }
     case 'actualizar': {

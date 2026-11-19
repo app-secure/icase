@@ -16,8 +16,8 @@ const DEPENDENCIES = {
 
 class GenerationCapabilityService {
   catalogo() {
-    return CAPABILITIES.map(({ id, etiqueta, alternativa }) => ({
-      id, version: 1, etiqueta, estado: 'no_soportado', alternativa,
+    return CAPABILITIES.map(({ id, etiqueta, alternativa, modulo }) => ({
+      id, version: 1, etiqueta, estado: 'no_soportado', alternativa, modulo: modulo || null,
       dependencias: DEPENDENCIES[id] || [],
       stacks_implementados: [],
       configuracion: { type: 'object', additionalProperties: false },

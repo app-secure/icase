@@ -161,6 +161,8 @@ class ApplicationContractBuilder {
       filters: op.filtros || [],
       fields: this._fieldMeta(op, entities),
       inputs: op.entradas || [],
+      ...(op.sesionEntradas?.length ? { sessionInputs: op.sesionEntradas } : {}),
+      ...(op.autoEntradas?.length ? { autoInputs: op.autoEntradas } : {}),
       output: op.salida || [],
       ...(op.transicion ? { transition: op.transicion } : {}),
       description: op.descripcion || ''

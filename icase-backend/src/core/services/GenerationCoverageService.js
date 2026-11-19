@@ -37,7 +37,12 @@ class GenerationCoverageService {
     return { modo_entrega: mode, aceptar_pendientes: value.aceptar_pendientes === true, requisitos };
   }
 
-  evaluar({ requisitos = [], contrato = {}, declaracion = {}, stack = {} }) {
+  /**
+   * `modulosActivos`: ids de los módulos opcionales que se generan. Una capacidad que un requisito menciona y que un módulo
+   * activo cubre ya no es un pendiente (el módulo declara sus límites). Sin declaración explícita del requisito, el alcance se
+   * deriva solo: gestión de datos (CRUD) más lo que el texto menciona; no hace falta confirmar requisito por requisito.
+   */
+  evaluar({ requisitos = [], contrato = {}, declaracion = {}, stack = {}, modulosActivos = [] }) {
     const value = this.validar(declaracion);
     const rf = requisitos.filter((item) => item.tipo === 'RF' && item.aprobado !== false);
     const operations = new Map((contrato.operations || []).map((item) => [item.id, item]));
@@ -47,24 +52,31 @@ class GenerationCoverageService {
     const operationIds = (contrato.operations || []).map((item) => item.id);
     if (new Set(operationIds).size !== operationIds.length) blockers.push('El contrato tiene identificadores RF repetidos en operaciones.');
     for (const item of value.requisitos) if (!knownRequirements.has(item.requisito)) blockers.push(`La declaración cita un RF inexistente: ${item.requisito}.`);
+    const active = new Set(modulosActivos);
+    const moduleOf = new Map(this.capabilities.catalogo().map((item) => [item.id, item.modulo]));
     const items = rf.map((requirement) => {
       const id = requirement.identificador;
       const operation = operations.get(id);
       const declaration = value.requisitos.find((item) => item.requisito === id);
       const suggestions = this.capabilities.sugerir(requirement);
-      const confirmed = declaration?.confirmado && declaration.huella_requisito === this.huellaRequisito(requirement);
+      // Una declaración explícita y vigente manda; sin ella (o si el RF cambió) el alcance se deriva de lo detectado.
+      const explicit = Boolean(declaration?.confirmado && declaration.huella_requisito === this.huellaRequisito(requirement));
+      // En entrega parcial no se pide confirmar requisito por requisito (el informe ya lista lo pendiente); la completa sí.
+      const confirmed = explicit || value.modo_entrega !== 'completa';
       const reasons = [];
       if (!confirmed) reasons.push('Falta confirmar el alcance de la versión actual del RF.');
       const omitted = suggestions.filter((item) => !(declaration?.capacidades || []).includes(item.id));
-      if (confirmed && omitted.length && declaration.justificacion.length < 10) reasons.push('Justifica las sugerencias descartadas con al menos 10 caracteres.');
-      const capabilities = confirmed ? declaration.capacidades : suggestions.map((item) => item.id);
+      if (explicit && omitted.length && declaration.justificacion.length < 10) reasons.push('Justifica las sugerencias descartadas con al menos 10 caracteres.');
+      const requested = explicit ? declaration.capacidades : suggestions.map((item) => item.id);
+      const coveredByModule = requested.filter((id) => moduleOf.get(id) && active.has(moduleOf.get(id)));
+      const capabilities = requested.filter((id) => !coveredByModule.includes(id));
       if (!operation || !entities.has(operation.entity)) reasons.push('No hay operación asociada por identificador a una entidad tipada.');
       else if (!(operation.methods || []).includes('GET') || (operation.methods || []).some((method) => !['GET', 'POST', 'PATCH', 'DELETE'].includes(method))) reasons.push('La operación no declara GET y métodos válidos.');
       if (declaration?.tipo === 'personalizado') reasons.push('El comportamiento personalizado necesita implementación y pruebas específicas.');
       if (capabilities.length) reasons.push(`Capacidades sin implementación: ${capabilities.join(', ')}.`);
       blockers.push(...reasons.map((reason) => `${id}: ${reason}`));
       return { requisito: id, operacion: operation?.key || null, entidad: operation?.entity || null,
-        tipo: declaration?.tipo || null, confirmado: Boolean(confirmed), capacidades: capabilities,
+        tipo: declaration?.tipo || 'crud', confirmado: confirmed, capacidades: capabilities, cubiertas_por_modulo: coveredByModule,
         sugerencias: suggestions, huella_requisito: this.huellaRequisito(requirement),
         estado: reasons.length ? 'pendiente' : 'alcance_base_cubierto', motivos: reasons };
     });

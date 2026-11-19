@@ -2,6 +2,7 @@ const { CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
 const AccessControlService = require('./AccessControlService');
 const ModuleService = require('./ModuleService');
 const NestRuntimePolicy = require('./NestRuntimePolicy');
+const { humanize } = require('./FieldLabel');
 const { contextOf } = require('./RequirementAnalysisContext');
 
 const CODE_DECISION_PHASES = Object.values(CODE_PHASE_DEFINITIONS)
@@ -70,8 +71,15 @@ class CodePlanningProposalService {
     })) }, advertencias: [] };
   }
 
-  _control_acceso({ requisitosAprobados }) {
-    return new AccessControlService().proponer({ requerimientos: requisitosAprobados });
+  _control_acceso({ requisitosAprobados, diseno }) {
+    // Los verbos de los mockups aprobados son lo que cada requisito realmente hace: de ahí salen los permisos por defecto.
+    const verbosPorRf = {};
+    for (const link of (diseno?.mockups || []).flatMap((item) => item.enlaces || [])) {
+      if (link.estado !== 'valido' || !link.rf || !link.verbo) continue;
+      const key = String(link.rf).toUpperCase();
+      verbosPorRf[key] = [...new Set([...(verbosPorRf[key] || []), link.verbo])];
+    }
+    return new AccessControlService().proponer({ requerimientos: requisitosAprobados, verbosPorRf });
   }
 
   async _reglas_negocio({ requisitosAprobados, diagramasAprobados, plan, analisis, inicial }) {
@@ -85,9 +93,10 @@ class CodePlanningProposalService {
       const rf = contrato.operations.filter(op => op.entity === entidad.key).map(op => op.id);
       if (!rf.length) continue;
       for (const campo of entidad.attributes.filter(attr => attr.name !== 'id' && !attr.nullable && !attr.referencia)) {
+        const etiqueta = humanize(campo.name);
         dominio.push({ id: 'DOM-' + entidad.key + '-' + campo.name, tipo: 'requerido', entidad: entidad.name,
-          campo: campo.name, rf, origen: 'inferido', estado_decision: 'pendiente',
-          mensaje: campo.name + ' es obligatorio.', justificacion: 'Atributo sin marca opcional en el dominio aprobado.' });
+          entidad_etiqueta: humanize(entidad.name), campo: campo.name, campo_etiqueta: etiqueta, rf, origen: 'inferido', estado_decision: 'pendiente',
+          mensaje: etiqueta + ' es obligatorio.', justificacion: 'En el diagrama de clases este dato no es opcional, por eso el sistema lo pide siempre.' });
       }
     }
     // Reglas de sentido común (no negativos, fin >= inicio): solo las que el motor de reglas valida como correctas.

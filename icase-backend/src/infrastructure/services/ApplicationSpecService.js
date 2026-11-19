@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const DomainModelExtractor = require('./DomainModelExtractor');
 const ApplicationContractBuilder = require('./ApplicationContractBuilder');
+const { systemManaged } = require('./MockupFieldPolicy');
 
 const PROMPT = path.join(__dirname, '..', 'prompts', 'analista_especificacion_aplicacion.md');
 const TIPOS = ['consulta', 'crear', 'actualizar', 'eliminar', 'transicion'];
@@ -10,6 +11,10 @@ const ORIGENES = ['sesion', 'parametro', 'constante'];
 const VALORES_SESION = ['usuario.id', 'usuario.email', 'usuario.rol'];
 const COMPONENTES = ['tabla', 'tarjetas', 'formulario', 'detalle', 'kpi'];
 const MAX_OPERACIONES = 120;
+// Motivos (de MockupFieldPolicy) por los que un dato no se pide en un formulario de alta.
+const NO_SE_PIDE = new Set(['empieza en su estado inicial', 'se calcula', 'lo genera el sistema', 'lo registra el sistema', 'solo lectura']);
+const REGISTRO_SISTEMA = 'lo registra el sistema';
+const VALIDAR = /\b(?:valid\w*|verific\w*|comprob\w*)\b/;
 
 const strip = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 // Conserva las mayúsculas internas (listarMesas) y normaliza separadores y tildes.
@@ -110,8 +115,9 @@ class ApplicationSpecService {
     candidatas.forEach((candidata, index) => {
       const { operacion, error } = this._operacion(candidata, { entidades, rfIds, nombres });
       if (error) { advertencias.push(`Se descartó la operación #${index + 1} (${candidata?.nombre || 'sin nombre'}): ${error}`); return; }
-      nombres.add(operacion.nombre);
-      operaciones.push({ ...operacion, origen: 'ia' });
+      const corregida = this._corregir(operacion, { entidad: entidades.get(operacion.entidad), requisito: rf.find((item) => String(item.identificador).toUpperCase() === operacion.rf), advertencias });
+      nombres.add(corregida.nombre);
+      operaciones.push({ ...corregida, origen: 'ia' });
     });
 
     // Los RF que la IA no cubrió reciben una operación derivada del verbo y de la entidad asociada.
@@ -205,14 +211,70 @@ class ApplicationSpecService {
       if (!valores.includes(destino) || origen.some((valor) => !valores.includes(valor))) return { error: `la transición usa estados fuera de ${valores.join('|')}.` };
       transicion = { campo, de: origen, a: destino };
     }
-    return {
-      operacion: {
-        nombre, rf, tipo, entidad: entidad.name, entidadClave: entidad.key,
-        actores: list(candidata.actores).map(text).filter(Boolean),
-        filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
-        descripcion: text(candidata.descripcion).slice(0, 300), estado_decision: 'pendiente'
-      }
+    const operacion = {
+      nombre, rf, tipo, entidad: entidad.name, entidadClave: entidad.key,
+      actores: list(candidata.actores).map(text).filter(Boolean),
+      filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
+      descripcion: text(candidata.descripcion).slice(0, 300), estado_decision: 'pendiente',
+      ...(list(candidata.sesionEntradas).length ? { sesionEntradas: list(candidata.sesionEntradas).filter((item) => existe(item?.campo) && item.valor === 'usuario.id').map((item) => ({ campo: item.campo, valor: item.valor })) } : {}),
+      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor })) } : {})
     };
+    return { operacion: this._completarDelSistema(operacion, entidad) };
+  }
+
+  /**
+   * Lo que no debe preguntarse a la persona al crear un registro: quién lo crea (la cuenta de la sesión, cuando el campo
+   * apunta a la entidad de cuentas) y la marca de tiempo del propio registro. El servidor los completa y no se pueden
+   * falsificar desde la petición. Idempotente: se puede aplicar a una operación ya guardada.
+   */
+  _completarDelSistema(operacion, entidad) {
+    if (operacion.tipo !== 'crear') return operacion;
+    const propiedades = entidad.schema.properties;
+    const sesion = list(operacion.sesionEntradas).slice();
+    const auto = list(operacion.autoEntradas).slice();
+    for (const campo of operacion.entradas) {
+      const objetivo = String(propiedades[campo]?.['x-references'] || '');
+      if (/^usuarios?$/i.test(objetivo) && entidad.key !== 'usuario' && !sesion.some((item) => item.campo === campo)) sesion.push({ campo, valor: 'usuario.id' });
+      else if (systemManaged(campo, propiedades[campo]) === REGISTRO_SISTEMA && ['string'].includes(propiedades[campo]?.type) && !auto.some((item) => item.campo === campo)) {
+        auto.push({ campo, valor: propiedades[campo]?.format === 'date' ? 'hoy' : 'ahora' });
+      }
+    }
+    const completados = new Set([...sesion, ...auto].map((item) => item.campo));
+    return {
+      ...operacion,
+      entradas: operacion.entradas.filter((campo) => !completados.has(campo)),
+      ...(sesion.length ? { sesionEntradas: sesion } : {}), ...(auto.length ? { autoEntradas: auto } : {})
+    };
+  }
+
+  /** ¿Se muestra este dato en el formulario de la operación? Lo que completa el sistema o se calcula no se pregunta. */
+  _seMuestra(operacion, campo, entidad) {
+    if (operacion.tipo !== 'crear') return true;
+    if ([...list(operacion.sesionEntradas), ...list(operacion.autoEntradas)].some((item) => item.campo === campo)) return false;
+    // La contraseña de una cuenta sí la escribe la persona: «hash» aquí es el nombre técnico del dato, no algo generado.
+    if (entidad.key === 'usuario' && /^password/i.test(campo)) return true;
+    return !NO_SE_PIDE.has(systemManaged(campo, entidad.schema.properties[campo]));
+  }
+
+  /**
+   * Una validación («validar el QR») no modifica el dato que identifica al registro: lo busca. Si la IA la propuso como
+   * actualización de un código generado, se convierte en una consulta por ese campo.
+   */
+  _corregir(operacion, { entidad, requisito, advertencias }) {
+    const propiedades = entidad.schema.properties;
+    const soloGenerados = operacion.entradas.length > 0 && operacion.entradas.every((campo) => systemManaged(campo, propiedades[campo]) === 'lo genera el sistema');
+    if (operacion.tipo === 'actualizar' && soloGenerados && VALIDAR.test(strip(`${requisito?.nombre || ''} ${operacion.nombre}`))) {
+      const campo = operacion.entradas[0];
+      advertencias.push(`${operacion.rf}: «${operacion.nombre}» modificaba «${campo}», que identifica al registro; se convirtió en una consulta por ese campo. Revísala.`);
+      return {
+        ...operacion, tipo: 'consulta', entradas: [], filtros: [{ campo, operador: '==', origen: 'parametro', valor: campo }],
+        salida: Object.keys(propiedades).filter((nombre) => nombre !== 'id' && !propiedades[nombre].readOnly)
+      };
+    }
+    if (operacion.tipo === 'consulta' && operacion.salida.length === 1 && Object.keys(propiedades).filter((nombre) => nombre !== 'id').length > 1) {
+      advertencias.push(`${operacion.rf}: «${operacion.nombre}» devuelve un solo campo («${operacion.salida[0]}»). Si la pantalla necesita datos de otras entidades (platos, mesa), todavía no se incluyen: amplía la salida o se verá casi vacía.`);
+    }
+    return operacion;
   }
 
   /** Operación mínima y honesta para un RF sin propuesta: el verbo fija el tipo y la entidad sale del asociador existente. */
@@ -228,12 +290,12 @@ class ApplicationSpecService {
     base = camel(base.replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
     let nombre = base;
     for (let n = 2; nombres.has(nombre); n += 1) nombre = `${base}${n}`;
-    return {
+    return this._completarDelSistema({
       nombre, rf: String(requisito.identificador).toUpperCase(), tipo, entidad: entidad.name, entidadClave: entidad.key,
       actores: list(requisito.actores).map(text).filter(Boolean), filtros: [],
       entradas: ['crear', 'actualizar'].includes(tipo) ? campos : [], salida: tipo === 'consulta' ? campos : [],
       descripcion: text(requisito.nombre), estado_decision: 'pendiente', origen: 'derivado'
-    };
+    }, entidad);
   }
 
   _esAcceso(requisito) {
@@ -251,14 +313,20 @@ class ApplicationSpecService {
         const operacion = porNombre.get(text(componente?.operacion));
         if (!COMPONENTES.includes(text(componente?.tipo)) || !operacion) { advertencias.push(`Pantalla ${id}: se descartó un componente (${componente?.tipo}/${componente?.operacion}) con tipo u operación inválidos.`); continue; }
         const props = entidades.get(operacion.entidad).schema.properties;
-        const campos = list(componente.campos).map(text).filter((campo) => Object.prototype.hasOwnProperty.call(props, campo));
+        const entidadOp = entidades.get(operacion.entidad);
+        const campos = list(componente.campos).map(text).filter((campo) => Object.prototype.hasOwnProperty.call(props, campo) && this._seMuestra(operacion, campo, entidadOp));
+        let tipoComponente = text(componente.tipo);
+        if (tipoComponente === 'formulario' && operacion.tipo === 'consulta') {
+          tipoComponente = 'tarjetas';
+          advertencias.push(`Pantalla ${id}: «${operacion.nombre}» solo consulta; se muestra como tarjetas con su filtro en lugar de un formulario de alta.`);
+        }
         const acciones = [];
         for (const accion of list(componente.acciones)) {
           const destino = porNombre.get(text(accion?.operacion));
           if (!destino || !text(accion?.etiqueta)) { advertencias.push(`Pantalla ${id}: se descartó el botón «${accion?.etiqueta || ''}» porque no ejecuta una operación definida.`); continue; }
           acciones.push({ etiqueta: text(accion.etiqueta), operacion: destino.nombre });
         }
-        componentes.push({ tipo: text(componente.tipo), operacion: operacion.nombre, campos, acciones });
+        componentes.push({ tipo: tipoComponente, operacion: operacion.nombre, campos, acciones });
       }
       if (componentes.length) vistas.push({ id, componentes });
     }

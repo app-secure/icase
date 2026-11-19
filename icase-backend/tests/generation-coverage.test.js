@@ -30,10 +30,25 @@ describe('contrato y compuerta de cobertura funcional', () => {
     expect(registry.find((item) => item.id === 'pagos').dependencias).toContain('integraciones');
   });
 
-  test('una entidad y ausencia de palabras clave no certifican el alcance', () => {
-    const result = evaluate();
+  test('una entidad y ausencia de palabras clave no certifican el alcance: la entrega completa exige confirmarlo', () => {
+    const result = evaluate({ modo_entrega: 'completa' });
     expect(result.exportable).toBe(false);
     expect(result.requisitos[0].estado).toBe('pendiente');
+  });
+
+  test('en entrega parcial un RF sin funciones especiales se cubre como gestión de datos sin confirmarlo uno a uno', () => {
+    const result = evaluate({ modo_entrega: 'parcial', aceptar_pendientes: true });
+    expect(result.requisitos[0]).toMatchObject({ estado: 'alcance_base_cubierto', tipo: 'crud', capacidades: [] });
+    expect(result.exportable).toBe(true);
+    expect(result.semantica).toContain('No certificada');
+  });
+
+  test('un módulo activo cubre la capacidad que el requisito menciona; sin el módulo queda pendiente', () => {
+    const conQr = { ...requirement, descripcion: 'El mesero escanea el código QR del cliente' };
+    const sinModulo = evaluate({ modo_entrega: 'parcial', aceptar_pendientes: true }, [conQr]);
+    expect(sinModulo.requisitos[0]).toMatchObject({ estado: 'pendiente', capacidades: ['dispositivos'] });
+    const conModulo = service.evaluar({ requisitos: [conQr], contrato: contract, declaracion: { modo_entrega: 'parcial', aceptar_pendientes: true }, modulosActivos: ['camara_qr'] });
+    expect(conModulo.requisitos[0]).toMatchObject({ estado: 'alcance_base_cubierto', capacidades: [], cubiertas_por_modulo: ['dispositivos'] });
   });
 
   test('solo habilita alcance completo base tras declaración explícita del RF actual', () => {
@@ -70,8 +85,9 @@ describe('contrato y compuerta de cobertura funcional', () => {
   });
 
   test('una entrega parcial exige reconocer los pendientes', () => {
-    expect(evaluate({ modo_entrega: 'parcial' }).exportable).toBe(false);
-    expect(evaluate({ modo_entrega: 'parcial', aceptar_pendientes: true })).toMatchObject({ exportable: true, estado: 'pendiente' });
+    const conReportes = { ...requirement, descripcion: 'Genera reportes de libros' };
+    expect(evaluate({ modo_entrega: 'parcial' }, [conReportes]).exportable).toBe(false);
+    expect(evaluate({ modo_entrega: 'parcial', aceptar_pendientes: true }, [conReportes])).toMatchObject({ exportable: true, estado: 'pendiente' });
   });
 
   test.each([

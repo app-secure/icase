@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { ZoomIn, ZoomOut, RotateCcw, AlertCircle, RefreshCw, Maximize2, X, MoveHorizontal, Scan } from "lucide-react";
 import { getPlantUMLSvgUrl } from "../utils/plantumlEncoder";
 import { diagramPng, downloadDiagram } from "../utils/diagramImage";
+import { hasNotes, stripNotes } from "../utils/plantumlNotes";
 
 /**
  * Extrae las dimensiones intrínsecas del SVG a partir de viewBox o width/height
@@ -27,7 +28,11 @@ function extractSvgDimensions(svgString) {
   return null;
 }
 
-export default function PlantUMLViewer({ code, title }) {
+export default function PlantUMLViewer({ code: fullCode, title }) {
+  // Las notas aclaran el modelo pero cargan el diagrama: se ocultan hasta que la persona las pida.
+  const [showNotes, setShowNotes] = useState(false);
+  const notesPresent = hasNotes(fullCode);
+  const code = showNotes ? fullCode : stripNotes(fullCode);
   const [svgUrl, setSvgUrl] = useState("");
   const [svgContent, setSvgContent] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -263,6 +268,9 @@ export default function PlantUMLViewer({ code, title }) {
           </div>
 
           <div className="flex items-center gap-1.5 flex-wrap">
+            {notesPresent && <button type="button" onClick={() => setShowNotes((value) => !value)} aria-pressed={showNotes}
+              className={`rounded px-2 py-1 border ${showNotes ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 hover:bg-slate-200'}`}
+              title="Las notas son aclaraciones del modelo; se ocultan para ver el diagrama más limpio">{showNotes ? 'Ocultar notas' : 'Mostrar notas'}</button>}
             <button type="button" disabled={imageBusy || isLoading || !!renderError || !svgContent}
               onClick={() => handleImage(false)} className="rounded px-2 py-1 hover:bg-slate-200 disabled:opacity-40"
               title="Descargar el diagrama completo como imagen PNG">Descargar PNG</button>

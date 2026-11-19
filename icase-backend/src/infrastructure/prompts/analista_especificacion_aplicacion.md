@@ -51,3 +51,11 @@ Responde solo con JSON válido, sin texto adicional:
   "pantallas": [ { "id": "slug-de-la-pantalla", "componentes": [ { "tipo": "tabla", "operacion": "...", "campos": [], "acciones": [] } ] } ]
 }
 ```
+
+
+## Criterios de calidad de las operaciones
+
+- Validar, verificar o comprobar un dato («validar una reserva con su código QR») es una `consulta` con un filtro `parametro` por ese campo, o una `transicion` del estado. Nunca una `actualizar` del campo que identifica al registro (el código QR, el token, el correo).
+- Una `consulta` devuelve en `salida` todos los atributos que la pantalla necesita mostrar, no uno solo. Si la persona necesita ver datos de otra entidad relacionada, di en la descripción qué entidad es.
+- Una operación `crear` no pide lo que completa el sistema: quién la registra (`usuario_id` de la sesión), el estado inicial, los totales calculados, ni la fecha de registro. Pide solo lo que la persona decide.
+- Si el requisito dice «registrar o actualizar», define las dos operaciones (`crear` y `actualizar`), cada una con su pantalla o botón.

@@ -4,7 +4,7 @@ import {
   Loader2, LockKeyhole, Puzzle, RotateCcw, Save, Scale, Settings2, ShieldCheck, WandSparkles, X
 } from 'lucide-react';
 import {
-  fetchCodePlanApi, fetchGeneratedArtifactsApi, generateBackendArtifactApi,
+  controlLocalRunApi, fetchCodePlanApi, fetchGeneratedArtifactsApi, generateBackendArtifactApi,
   downloadCodeArtifactApi, downloadDeliveryArtifactApi, generateDeliveryArtifactApi, generateFrontendArtifactApi,
   generateInfrastructureArtifactApi, generatePipelineArtifactApi, generateTestArtifactApi, proposeCodePhaseApi,
   reviewBackendArtifactApi, reviewCodePhaseApi, reviewFrontendArtifactApi,
@@ -19,6 +19,7 @@ import GenerationPreviewPanel from './GenerationPreviewPanel';
 import LocalRunPanel from './LocalRunPanel';
 import FolderExplorer from './FolderExplorer';
 import CodeSummary from './CodeSummary';
+import GeneratedSummary from './GeneratedSummary';
 import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
@@ -61,6 +62,9 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
   const [pipelineArtifact, setPipelineArtifact] = useState(null);
   const [deliveryArtifact, setDeliveryArtifact] = useState(null);
   const [busy, setBusy] = useState(Boolean(projectId));
+  // Al aprobar la entrega, levantar el proyecto en Docker sin un paso más (se puede desactivar).
+  const [autoRun, setAutoRun] = useState(() => { try { return localStorage.getItem('icase:ejecutar-al-aprobar') !== 'no'; } catch { return true; } });
+  const changeAutoRun = (value) => { setAutoRun(value); try { localStorage.setItem('icase:ejecutar-al-aprobar', value ? 'si' : 'no'); } catch { /* sin almacenamiento */ } };
 
   useEffect(() => {
     if (!projectId) return undefined;
@@ -341,7 +345,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
       setBusy(true);
       const artifact = await reviewDeliveryArtifactApi(projectId, deliveryArtifact.id, decision, notes, { modo_permisivo: decision === 'aprobar' && permissive });
       setDeliveryArtifact(artifact); setPlan(await fetchCodePlanApi(projectId));
-      addToast({ type: 'success', message: decision === 'aprobar' ? 'Entrega aprobada y proyecto finalizado. Ya puedes descargar el ZIP.' : 'Paquete rechazado para corrección.' });
+      addToast({ type: 'success', message: decision === 'aprobar' ? `Entrega aprobada y proyecto finalizado. Ya puedes descargar el ZIP.${autoRun ? ' Iniciando el proyecto en Docker…' : ''}` : 'Paquete rechazado para corrección.' });
+      if (decision === 'aprobar' && autoRun) controlLocalRunApi(projectId, 'iniciar').catch((error) => addToast({ type: 'error', message: `No se pudo iniciar el proyecto: ${error.message}` }));
     } catch (error) { addToast({ type: 'error', message: error.message }); }
     finally { setBusy(false); }
   };
@@ -684,6 +689,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                   </div>}
                 </div>
 
+                <GeneratedSummary artifacts={{ backend: backendArtifact, frontend: frontendArtifact, tests: testArtifact, infrastructure: infrastructureArtifact, pipeline: pipelineArtifact, delivery: deliveryArtifact }} />
+
                 <FunctionalGatePanel projectId={projectId} refreshKey={`${backendArtifact?.id}-${frontendArtifact?.id}-${testArtifact?.id}`} onError={(message) => addToast({ type: 'error', message })} />
 
                 <div className="border-t border-slate-200 pt-6">
@@ -696,7 +703,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                     <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(deliveryArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
                     <ArtifactVerification key={deliveryArtifact.id} projectId={projectId} artifact={deliveryArtifact} onArtifactChange={setDeliveryArtifact} />
                     <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                      {deliveryArtifact.estado === 'en_revision' && <>{mockupFormWaiver(deliveryArtifact.verificacion) && <label className="mr-auto flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup.</label>}<button disabled={busy} onClick={() => reviewDelivery('rechazar')} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewDelivery('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar entrega</button></>}
+                      {deliveryArtifact.estado === 'en_revision' && <><label className="mr-auto flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={autoRun} onChange={(event) => changeAutoRun(event.target.checked)} />Ejecutar el proyecto en Docker al aprobar</label>{mockupFormWaiver(deliveryArtifact.verificacion) && <label className="mr-auto flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup.</label>}<button disabled={busy} onClick={() => reviewDelivery('rechazar')} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewDelivery('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar entrega</button></>}
                       {deliveryArtifact.aprobado && <button disabled={busy} onClick={downloadDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-xs font-semibold text-white"><Download size={14} />Descargar ZIP</button>}
                     </div>
                   </div>}
@@ -929,62 +936,140 @@ const RULE_DECISIONS = [
 function describeRule(rule) {
   const limits = (min, max, unit) => (min !== undefined && max !== undefined ? `entre ${min} y ${max}${unit}` : min !== undefined ? `al menos ${min}${unit}` : `como máximo ${max}${unit}`);
   switch (rule.tipo) {
-    case 'requerido': return `«${rule.campo}» es obligatorio`;
-    case 'unico': return `${(rule.campos || [rule.campo]).map((item) => `«${item}»`).join(' + ')} no se repite entre registros`;
-    case 'rango': return `«${rule.campo}» ${limits(rule.min, rule.max, '')}`;
-    case 'longitud': return `«${rule.campo}» ${limits(rule.min, rule.max, ' caracteres')}`;
-    case 'formato': return `«${rule.campo}» debe ser un ${rule.formato === 'email' ? 'correo electrónico' : 'URL'} válido`;
-    case 'comparacion': return `«${rule.campo}» ${rule.operador} ${rule.con_campo !== undefined ? `«${rule.con_campo}»` : JSON.stringify(rule.con_valor)}`;
-    case 'maquina_estados': return `«${rule.campo}» empieza en ${rule.inicial}. Transiciones: ${(rule.transiciones || []).map((item) => `${item.de} → ${item.a}`).join(', ')}`;
-    case 'inmutable': return `«${rule.campo}» no puede cambiar una vez creado`;
-    case 'valor_por_defecto': return `«${rule.campo}» vale ${JSON.stringify(rule.valor)} si no se envía`;
-    case 'calculo': return `«${rule.campo}» se calcula con ${JSON.stringify(rule.expresion)} (${rule.decimales} decimales). Solo se ejecuta tras confirmar la regla.`;
+    case 'requerido': return `${ruleField(rule)} es obligatorio`;
+    case 'unico': return `${(rule.campos || [rule.campo]).map((item) => `«${humanizeField(item)}»`).join(' + ')} no se repite entre registros`;
+    case 'rango': return `«${ruleField(rule)}» ${limits(rule.min, rule.max, '')}`;
+    case 'longitud': return `«${ruleField(rule)}» ${limits(rule.min, rule.max, ' caracteres')}`;
+    case 'formato': return `«${ruleField(rule)}» debe ser un ${rule.formato === 'email' ? 'correo electrónico' : 'URL'} válido`;
+    case 'comparacion': return `«${ruleField(rule)}» ${rule.operador} ${rule.con_campo !== undefined ? `«${rule.con_campo}»` : JSON.stringify(rule.con_valor)}`;
+    case 'maquina_estados': return `«${ruleField(rule)}» empieza en ${rule.inicial}. Transiciones: ${(rule.transiciones || []).map((item) => `${item.de} → ${item.a}`).join(', ')}`;
+    case 'inmutable': return `«${ruleField(rule)}» no puede cambiar una vez creado`;
+    case 'valor_por_defecto': return `«${ruleField(rule)}» vale ${JSON.stringify(rule.valor)} si no se envía`;
+    case 'calculo': return `«${ruleField(rule)}» se calcula con ${JSON.stringify(rule.expresion)} (${rule.decimales} decimales). Solo se ejecuta tras confirmar la regla.`;
     default: return rule.tipo;
   }
 }
 
-function RulesEditor({ value, onChange, disabled }) {
+const RULE_TYPE_LABELS = {
+  requerido: 'Obligatorio', unico: 'No se repite', rango: 'Rango permitido', longitud: 'Longitud', formato: 'Formato válido',
+  comparacion: 'Comparación', maquina_estados: 'Estados', inmutable: 'No se modifica', valor_por_defecto: 'Valor por defecto', calculo: 'Cálculo'
+};
+
+/** Nombre legible de un campo cuando la propuesta no lo trae: «passwordHash» → «Contraseña», «cliente_id» → «Cliente». */
+function humanizeField(name) {
+  const raw = String(name || '').trim();
+  const key = raw.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  if (['passwordhash', 'password', 'contrasena'].includes(key)) return 'Contraseña';
+  if (['correo', 'email'].includes(key)) return 'Correo electrónico';
+  const words = raw.replace(/(?:_|\b)id$/i, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().toLowerCase().replace(/\bfecha hora\b/, 'fecha y hora');
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : raw;
+}
+const ruleField = (rule) => rule.campo_etiqueta || humanizeField(rule.campo);
+const ruleEntity = (rule) => rule.entidad_etiqueta || humanizeField(rule.entidad) || 'General';
+
+function DecisionButtons({ rule, onDecide, disabled, compact = false }) {
+  return <div className="flex shrink-0 gap-1" role="group" aria-label={`Decisión sobre la regla de ${ruleField(rule)}`}>
+    {RULE_DECISIONS.map(({ value: decision, label, style, icon: Icon }) => <button key={decision} type="button" disabled={disabled}
+      aria-pressed={rule.estado_decision === decision} aria-label={label} title={label}
+      onClick={() => onDecide(decision)}
+      className={`flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-semibold disabled:opacity-50 ${rule.estado_decision === decision ? style : 'border-slate-200 bg-white text-slate-400 hover:text-slate-600'}`}>
+      {Icon && <Icon size={12} />}{(!compact || !Icon) && label}
+    </button>)}
+  </div>;
+}
+
+function RuleOrigin({ rule }) {
+  const explicit = rule.origen === 'explicito';
+  return <span className={`rounded px-1.5 py-0.5 text-[11px] ${explicit ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+    {explicit ? 'Pedida en un requisito' : 'Sugerida por el sistema'}
+  </span>;
+}
+
+function RuleDetails({ rule, disabled, onChange }) {
+  return <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-3">
+    <label className="block"><span className="mb-1 block text-[11px] font-semibold text-slate-600">Mensaje que verá el usuario cuando no se cumpla</span>
+      <input disabled={disabled} value={rule.mensaje || ''} maxLength={240} onChange={(event) => onChange({ mensaje: event.target.value })} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-50" />
+    </label>
+    {rule.evidencia && <blockquote className="border-l-2 border-slate-300 pl-3 text-xs italic text-slate-600">«{rule.evidencia}»{rule.evidencia_literal ? '' : ' (no consta literalmente en el requisito)'}</blockquote>}
+    {rule.justificacion && <p className="text-xs text-slate-500">Por qué se propone: {rule.justificacion}</p>}
+    {(rule.rf || []).length > 0 && <p className="text-xs text-slate-500">Requisitos relacionados: {(rule.rf || []).join(', ')}</p>}
+  </div>;
+}
+
+export function RulesEditor({ value, onChange, disabled }) {
   const rules = Array.isArray(value.reglas) ? value.reglas : [];
+  const [filter, setFilter] = useState('todas');
   const count = (decision) => rules.filter((item) => item.estado_decision === decision).length;
-  const patch = (id, changes) => onChange({ ...value, reglas: rules.map((item) => (item.id === id ? { ...item, ...changes } : item)) });
+  const patchMany = (ids, changes) => onChange({ ...value, reglas: rules.map((item) => (ids.includes(item.id) ? { ...item, ...changes } : item)) });
   if (!rules.length) {
     return <div className="rounded-lg border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
       No hay reglas propuestas. Usa «Generar propuesta desde el proyecto» o aprueba la etapa vacía si el sistema no necesita reglas específicas.
     </div>;
   }
+  const visible = rules.filter((item) => filter === 'todas' || item.estado_decision === filter);
+  const groups = [];
+  for (const rule of visible) {
+    const name = ruleEntity(rule);
+    let group = groups.find((item) => item.name === name);
+    if (!group) groups.push(group = { name, rules: [] });
+    group.rules.push(rule);
+  }
+  const pendingIds = rules.filter((item) => item.estado_decision === 'pendiente').map((item) => item.id);
+  const FILTERS = [['todas', `Todas (${rules.length})`], ['pendiente', `Pendientes (${count('pendiente')})`], ['confirmado', `Confirmadas (${count('confirmado')})`], ['rechazado', `Rechazadas (${count('rechazado')})`]];
+
   return <div className="space-y-3">
-    {value.notas && <p className="text-xs text-slate-500">{value.notas}</p>}
-    <div className="flex flex-wrap gap-2 text-xs" aria-live="polite">
-      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">{count('confirmado')} confirmadas</span>
-      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">{count('pendiente')} pendientes</span>
-      <span className="rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-red-700">{count('rechazado')} rechazadas</span>
-    </div>
-    {rules.map((rule) => <article key={rule.id} className={`rounded-xl border p-4 ${rule.estado_decision === 'rechazado' ? 'border-red-100 bg-red-50/40' : 'border-slate-200 bg-white'}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span className="font-mono font-semibold text-slate-700">{rule.id}</span>
-            <span className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-700">{rule.tipo.replace('_', ' ')}</span>
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600">{rule.entidad}</span>
-            <span className={`rounded px-1.5 py-0.5 ${rule.origen === 'explicito' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{rule.origen === 'explicito' ? 'explícita en el RF' : 'inferida'}</span>
-            {(rule.rf || []).map((id) => <span key={id} className="rounded border border-slate-200 px-1.5 py-0.5 text-slate-500">{id}</span>)}
-          </div>
-          <p className="mt-2 text-sm font-medium text-slate-900">{describeRule(rule)}</p>
-          <label className="mt-2 block"><span className="mb-1 block text-[11px] font-semibold text-slate-600">Mensaje que verá el usuario</span>
-            <input disabled={disabled} value={rule.mensaje || ''} maxLength={240} onChange={(event) => patch(rule.id, { mensaje: event.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50" />
-          </label>
-          {rule.evidencia && <blockquote className="mt-2 border-l-2 border-slate-300 pl-3 text-xs italic text-slate-600">«{rule.evidencia}»{rule.evidencia_literal ? '' : ' (no consta literalmente en el RF)'}</blockquote>}
-          {rule.justificacion && <p className="mt-1 text-xs text-slate-500">Por qué se propone: {rule.justificacion}</p>}
-        </div>
-        <div className="flex gap-1" role="group" aria-label={`Decisión sobre ${rule.id}`}>
-          {RULE_DECISIONS.map(({ value: decision, label, style, icon: Icon }) => <button key={decision} type="button" disabled={disabled} aria-pressed={rule.estado_decision === decision}
-            onClick={() => patch(rule.id, { estado_decision: decision })}
-            className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold disabled:opacity-50 ${rule.estado_decision === decision ? style : 'border-slate-200 bg-white text-slate-400 hover:text-slate-600'}`}>
-            {Icon && <Icon size={12} />}{label}
-          </button>)}
-        </div>
+    <p className="text-xs text-slate-500">Cada regla es una condición que el sistema comprobará al guardar datos. Confirma las que correspondan al negocio y rechaza las que no. {value.notas ? '' : ''}</p>
+    <div className="flex flex-wrap items-center justify-between gap-2" aria-live="polite">
+      <div className="flex flex-wrap gap-1.5 text-xs">
+        {FILTERS.map(([key, label]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}
+          className={`rounded-full border px-2.5 py-1 ${filter === key ? 'border-violet-300 bg-violet-50 font-semibold text-violet-700' : 'border-slate-200 bg-white text-slate-600 hover:text-slate-900'}`}>{label}</button>)}
       </div>
-    </article>)}
+      <button type="button" disabled={disabled || !pendingIds.length} onClick={() => patchMany(pendingIds, { estado_decision: 'confirmado' })}
+        className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 disabled:opacity-40">
+        Confirmar las {pendingIds.length} pendientes
+      </button>
+    </div>
+    {!groups.length && <p className="rounded-lg border border-dashed border-slate-300 p-4 text-center text-sm text-slate-500">No hay reglas en este filtro.</p>}
+    {groups.map((group) => {
+      const required = group.rules.filter((item) => item.tipo === 'requerido');
+      const others = group.rules.filter((item) => item.tipo !== 'requerido');
+      const pending = group.rules.filter((item) => item.estado_decision === 'pendiente').map((item) => item.id);
+      return <details key={`${filter}-${group.name}`} open={filter !== 'todas' || pending.length > 0} className="rounded-xl border border-slate-200 bg-white">
+        <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <span className="text-sm font-semibold text-slate-900">{group.name} <span className="ml-1 text-xs font-normal text-slate-500">{group.rules.length} {group.rules.length === 1 ? 'regla' : 'reglas'}{pending.length ? ` · ${pending.length} por decidir` : ''}</span></span>
+          {pending.length > 0 && <button type="button" disabled={disabled} onClick={(event) => { event.preventDefault(); patchMany(pending, { estado_decision: 'confirmado' }); }}
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 disabled:opacity-40">Confirmar las de {group.name}</button>}
+        </summary>
+        <div className="space-y-3 border-t border-slate-100 px-4 py-3">
+          {required.length > 0 && <div>
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Datos que siempre se piden</p>
+            <ul className="divide-y divide-slate-100">
+              {required.map((rule) => <li key={rule.id} className={`py-2 ${rule.estado_decision === 'rechazado' ? 'opacity-60' : ''}`} title={rule.id}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2"><span className="text-sm text-slate-800">{ruleField(rule)} es obligatorio</span><RuleOrigin rule={rule} /></div>
+                  <DecisionButtons rule={rule} disabled={disabled} compact onDecide={(decision) => patchMany([rule.id], { estado_decision: decision })} />
+                </div>
+                <details className="mt-1"><summary className="cursor-pointer text-[11px] text-slate-500">Ver detalle y editar el mensaje</summary>
+                  <RuleDetails rule={rule} disabled={disabled} onChange={(changes) => patchMany([rule.id], changes)} /></details>
+              </li>)}
+            </ul>
+          </div>}
+          {others.map((rule) => <article key={rule.id} title={rule.id} className={`rounded-xl border p-3 ${rule.estado_decision === 'rechazado' ? 'border-red-100 bg-red-50/40' : 'border-slate-200 bg-white'}`}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-700">{RULE_TYPE_LABELS[rule.tipo] || rule.tipo}</span>
+                  <RuleOrigin rule={rule} />
+                </div>
+                <p className="mt-1.5 text-sm font-medium text-slate-900">{describeRule(rule)}</p>
+              </div>
+              <DecisionButtons rule={rule} disabled={disabled} onDecide={(decision) => patchMany([rule.id], { estado_decision: decision })} />
+            </div>
+            <RuleDetails rule={rule} disabled={disabled} onChange={(changes) => patchMany([rule.id], changes)} />
+          </article>)}
+        </div>
+      </details>;
+    })}
   </div>;
 }
 
@@ -995,7 +1080,16 @@ const ACCESS_METHODS = [
   { method: 'DELETE', label: 'Eliminar' }
 ];
 
-function AccessEditor({ value, onChange, disabled }) {
+const ACCESS_VERB_LABEL = { GET: 'consulta', POST: 'registra', PATCH: 'modifica', DELETE: 'elimina' };
+/** «Solo consulta», «Consulta y registra»…: qué hace la operación según los mockups aprobados. */
+function describeAccessMethods(methods) {
+  const verbs = methods.map((method) => ACCESS_VERB_LABEL[method]).filter(Boolean);
+  if (verbs.length === 1) return 'Solo consulta';
+  const text = verbs.join(', ').replace(/, ([^,]*)$/, ' y $1');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+export function AccessEditor({ value, onChange, disabled }) {
   const auth = value.autenticacion || { metodo: 'jwt', expiracion: '8h' };
   const roles = Array.isArray(value.roles) ? value.roles : [];
   const permisos = Array.isArray(value.permisos) ? value.permisos : [];
@@ -1062,16 +1156,20 @@ function AccessEditor({ value, onChange, disabled }) {
         <h3 className="mb-2 text-sm font-semibold text-slate-800">Qué puede hacer cada rol</h3>
         {!active.length ? <p className="text-xs text-slate-500">No hay roles incluidos.</p> : <div className="overflow-x-auto rounded-lg border border-slate-200">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600"><tr><th scope="col" className="p-2">Operación</th>{active.map((role) => <th scope="col" key={role.id} className="p-2">{role.nombre}</th>)}</tr></thead>
-            <tbody>{operaciones.map((operation) => <tr key={operation.id} className="border-t border-slate-100 align-top">
+            <thead className="bg-slate-50 text-slate-600"><tr><th scope="col" className="p-2">Operación</th>{active.map((role) => <th scope="col" key={role.id} className="p-2">{role.nombre}</th>)}<th scope="col" className="p-2 text-slate-500">Administrador</th></tr></thead>
+            <tbody>{operaciones.map((operation) => operation.tipo === 'acceso' ? <tr key={operation.id} className="border-t border-slate-100 bg-slate-50/60">
               <td className="p-2"><span className="font-mono font-semibold">{operation.id}</span><br />{operation.nombre}</td>
+              <td className="p-2 text-slate-500" colSpan={active.length + 1}>Inicio de sesión: lo resuelve la aplicación para todos los roles. No tiene permisos que configurar.</td>
+            </tr> : <tr key={operation.id} className="border-t border-slate-100 align-top">
+              <td className="p-2"><span className="font-mono font-semibold">{operation.id}</span><br />{operation.nombre}{Array.isArray(operation.metodos) && operation.metodos.length > 0 && <span className="mt-0.5 block text-[11px] text-slate-500">{describeAccessMethods(operation.metodos)}</span>}</td>
               {active.map((role) => <td key={role.id} className="p-2"><div className="flex flex-wrap gap-1" role="group" aria-label={`${operation.id} para ${role.nombre}`}>
-                {ACCESS_METHODS.map(({ method, label }) => <button key={method} type="button" disabled={disabled} aria-pressed={has(operation.id, role.id, method)} onClick={() => toggle(operation.id, role.id, method)}
+                {ACCESS_METHODS.filter(({ method }) => !Array.isArray(operation.metodos) || !operation.metodos.length || operation.metodos.includes(method)).map(({ method, label }) => <button key={method} type="button" disabled={disabled} aria-pressed={has(operation.id, role.id, method)} onClick={() => toggle(operation.id, role.id, method)}
                   className={`rounded border px-1.5 py-0.5 ${has(operation.id, role.id, method) ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400 hover:text-slate-600'}`}>{label}</button>)}
                 {permisos.some((item) => item.operacion === operation.id && item.rol === role.id) && <label className="mt-1 flex items-center gap-1 text-[11px] text-slate-600">
                   <input type="checkbox" disabled={disabled} checked={ownOnly(operation.id, role.id)} onChange={() => toggleOwn(operation.id, role.id)} />Solo registros propios
                 </label>}
               </div></td>)}
+              <td className="p-2 text-[11px] text-slate-500">Todo, siempre</td>
             </tr>)}</tbody>
           </table>
         </div>}
@@ -1080,7 +1178,7 @@ function AccessEditor({ value, onChange, disabled }) {
   </div>;
 }
 
-function ModulesEditor({ value, onChange, disabled, modules }) {
+export function ModulesEditor({ value, onChange, disabled, modules }) {
   const [processDraft,setProcessDraft]=useState(()=>JSON.stringify(value.procesos||[],null,2));
   const [processError,setProcessError]=useState('');
   useEffect(()=>{setProcessDraft(JSON.stringify(value.procesos||[],null,2));setProcessError('');},[value.procesos]);
@@ -1093,15 +1191,18 @@ function ModulesEditor({ value, onChange, disabled, modules }) {
     return mode === 'personalizado' && chosen ? chosen.activo : recommended;
   };
   const toggle = (id, active) => onChange({ ...value, modo: 'personalizado', modulos: optional.map((item) => ({ id: item.id, activo: item.id === id ? active : stateOf(item.id) })) });
+  const requests = moduleRequests(modules);
   return <div className="space-y-5">
-    <CoverageEditor value={value.cobertura || {}} onChange={(cobertura) => onChange({ ...value, cobertura })} disabled={disabled} modules={modules} />
+    <p className="text-xs text-slate-600">Elige qué funciones extra se agregan al sistema. Si omites este paso se usan las sugeridas por el análisis.</p>
+    <ModuleNeeds modules={modules} isActive={stateOf} onActivate={(id) => toggle(id, true)} disabled={disabled} />
     <section>
-      <h3 className="mb-2 text-xs font-semibold text-slate-700">Módulos opcionales</h3>
+      <h3 className="mb-2 text-xs font-semibold text-slate-700">Funciones extra que puedes incluir</h3>
       {optional.length === 0 ? <p className="text-xs text-slate-500">No hay módulos opcionales disponibles.</p> : <ul className="space-y-2">{optional.map((item) => <li key={item.id} className="rounded-lg border border-slate-200 p-3">
         <label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={disabled} checked={stateOf(item.id)} onChange={(event) => toggle(item.id, event.target.checked)} className="mt-1" />
           <span><span className="font-medium text-slate-800">{item.etiqueta}</span>
             <span className="block text-xs text-slate-600">{item.descripcion}</span>
-            {item.sinEfecto && <span className="block text-xs text-slate-500">{item.sinEfecto}</span>}</span></label>
+            {item.sinEfecto && <span className="block text-xs text-slate-500">{item.sinEfecto}</span>}
+            {(requests.get(item.id) || []).length > 0 && <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[11px] ${stateOf(item.id) ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-300 bg-amber-50 text-amber-800'}`}>Lo piden: {requests.get(item.id).join(', ')}</span>}</span></label>
       </li>)}</ul>}
       {mode==='personalizado'&&stateOf('procesos_negocio')&&<div className="mt-4 rounded border p-3">
         <h4 className="font-semibold">Definiciones de procesos (experimental)</h4>
@@ -1112,6 +1213,7 @@ function ModulesEditor({ value, onChange, disabled, modules }) {
         <p className="text-xs text-slate-500">Aplicar no aprueba la etapa: revisa las definiciones y aprueba Módulos explícitamente. Los cambios sin aplicar no se guardan.</p>
       </div>}
     </section>
+    <DeliveryScope value={value.cobertura || {}} onChange={(cobertura) => onChange({ ...value, cobertura })} disabled={disabled} />
     <section>
       <h3 className="mb-2 text-xs font-semibold text-slate-700">Incluido según otras etapas</h3>
       <ul className="space-y-1">{included.map((item) => <li key={item.id} className="flex items-start gap-2 text-xs">
@@ -1122,53 +1224,77 @@ function ModulesEditor({ value, onChange, disabled, modules }) {
   </div>;
 }
 
-function CoverageEditor({ value, onChange, disabled, modules }) {
+/** Qué requisitos piden algo que un módulo opcional cubre: de ahí salen las etiquetas «Lo piden…» y el resumen de arriba. */
+function moduleRequests(modules) {
+  const catalog = new Map((modules?.capacidades || []).map((item) => [item.id, item]));
+  const byModule = new Map();
+  for (const rf of modules?.requisitos || []) {
+    for (const suggestion of rf.sugerencias || []) {
+      const moduleId = catalog.get(suggestion.id)?.modulo;
+      if (!moduleId) continue;
+      byModule.set(moduleId, [...new Set([...(byModule.get(moduleId) || []), rf.identificador])]);
+    }
+  }
+  return byModule;
+}
+
+/**
+ * Lo que los requisitos piden más allá de gestionar datos, y qué módulo lo cubre. Una sola lista: la persona decide por
+ * módulo (abajo), no requisito por requisito. Lo que ningún módulo cubre solo se informa; no se activa nada al marcarlo.
+ */
+function ModuleNeeds({ modules, isActive, onActivate, disabled }) {
   const requirements = modules?.requisitos || [];
-  const catalog = modules?.capacidades || [];
-  const declaration = (rf) => (value.requisitos || []).find((item) => item.requisito === rf.identificador) || {
-    requisito: rf.identificador, tipo: rf.sugerencias?.length ? 'personalizado' : 'crud',
-    capacidades: (rf.sugerencias || []).map((item) => item.id), confirmado: false, justificacion: ''
-  };
-  const update = (rf, changes) => {
-    const current = declaration(rf);
-    const next = { ...current, confirmado: false, ...changes, huella_requisito: rf.huella_requisito };
-    onChange({ ...value, requisitos: [...(value.requisitos || []).filter((item) => item.requisito !== rf.identificador), next] });
-  };
-  return <section className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/30 p-3">
-    <h3 className="text-sm font-semibold text-slate-800">Alcance de la entrega</h3>
-    <p className="text-xs text-slate-600">El arranque y las pruebas técnicas no certifican todo el negocio. Declara qué necesita cada RF. Las capacidades pendientes no se activan al seleccionarlas.</p>
-    <label className="block text-xs font-medium">Modalidad
-      <select disabled={disabled} className="mt-1 block w-full rounded border p-2" value={value.modo_entrega || 'parcial'} onChange={(event) => onChange({ ...value, modo_entrega: event.target.value })}>
+  const catalog = new Map((modules?.capacidades || []).map((item) => [item.id, item]));
+  const optional = new Map((modules?.opcionales || []).map((item) => [item.id, item]));
+  const special = requirements.filter((rf) => rf.sugerencias?.length);
+  const plain = requirements.filter((rf) => !rf.sugerencias?.length);
+  if (!requirements.length) return <p className="text-xs text-slate-500">Reabre el plan para cargar los requisitos aprobados.</p>;
+  return <section className="space-y-3 rounded-xl border border-violet-200 bg-violet-50/30 p-4" aria-label="Qué piden tus requisitos">
+    <div>
+      <h3 className="text-sm font-semibold text-slate-800">Qué piden tus requisitos</h3>
+      <p className="mt-1 text-xs text-slate-600">Todos los requisitos se generan como gestión de datos (crear, consultar, editar y eliminar) con tus reglas y permisos. Aquí solo aparece lo que un requisito menciona y va más allá de eso.</p>
+    </div>
+    {special.length > 0 ? <ul className="space-y-2">
+      {special.map((rf) => <li key={rf.identificador} className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
+        <p className="font-semibold text-slate-800">{rf.identificador} · {rf.nombre}</p>
+        <ul className="mt-1.5 space-y-1.5">
+          {rf.sugerencias.map((suggestion) => {
+            const moduleId = catalog.get(suggestion.id)?.modulo;
+            const module = moduleId ? optional.get(moduleId) : null;
+            return <li key={suggestion.id} className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-slate-600"><span className="font-medium text-slate-800">{suggestion.etiqueta}</span> — {suggestion.evidencia}</span>
+              {module && isActive(moduleId) && <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">Lo cubre «{module.etiqueta}»</span>}
+              {module && !isActive(moduleId) && <button type="button" disabled={disabled} onClick={() => onActivate(moduleId)} className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800 disabled:opacity-50">Activar «{module.etiqueta}»</button>}
+              {!module && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600" title={suggestion.alternativa}>El generador aún no lo hace: quedará como pendiente en el informe</span>}
+            </li>;
+          })}
+        </ul>
+      </li>)}
+    </ul> : <p className="text-xs text-slate-600">Ningún requisito pide funciones especiales.</p>}
+    {plain.length > 0 && <details className="text-xs text-slate-600">
+      <summary className="cursor-pointer font-medium">{plain.length} {plain.length === 1 ? 'requisito es' : 'requisitos son'} gestión de datos estándar: no necesitan decisión</summary>
+      <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{plain.map((rf) => <li key={rf.identificador}>{rf.identificador} · {rf.nombre}</li>)}</ul>
+    </details>}
+  </section>;
+}
+
+/** Opciones avanzadas de la entrega: casi nunca hace falta tocarlas. */
+function DeliveryScope({ value, onChange, disabled }) {
+  const mode = value.modo_entrega || 'parcial';
+  return <details className="rounded-xl border border-slate-200 p-3 text-xs">
+    <summary className="cursor-pointer text-sm font-semibold text-slate-800">Opciones avanzadas de la entrega</summary>
+    <p className="mt-2 text-slate-600">El arranque y las pruebas técnicas no certifican todo el negocio. Por defecto la entrega es parcial: lo que ningún módulo cubre aparece como pendiente en el informe.</p>
+    <label className="mt-2 block font-medium">Modalidad
+      <select disabled={disabled} className="mt-1 block w-full rounded border p-2" value={mode} onChange={(event) => onChange({ ...value, modo_entrega: event.target.value })}>
         <option value="parcial">Parcial: incluir pendientes en el informe</option>
-        <option value="completa">Completa: resolver la cobertura del generador</option>
+        <option value="completa">Completa: exige confirmar cada requisito y no admite pendientes</option>
       </select>
     </label>
-    {(value.modo_entrega || 'parcial') === 'parcial' && <label className="flex gap-2 text-xs">
+    {mode === 'parcial' && <label className="mt-2 flex gap-2">
       <input disabled={disabled} type="checkbox" checked={value.aceptar_pendientes !== false} onChange={(event) => onChange({ ...value, aceptar_pendientes: event.target.checked })} />
-      Reconozco que la entrega puede tener funciones pendientes; revisaré su informe antes de aprobarla.
+      Reviso el informe de pendientes antes de aprobar la entrega.
     </label>}
-    {requirements.map((rf) => {
-      const item = declaration(rf);
-      return <details key={rf.identificador} className="rounded border bg-white p-2">
-        <summary className="cursor-pointer text-xs font-medium">{rf.identificador} · {rf.nombre} — {item.confirmado && item.huella_requisito === rf.huella_requisito ? 'confirmado' : 'por revisar'}</summary>
-        <label className="mt-2 block text-xs">Comportamiento
-          <select disabled={disabled} className="mt-1 w-full rounded border p-2" value={item.tipo} onChange={(event) => update(rf, { tipo: event.target.value })}>
-            <option value="crud">Gestión CRUD con las reglas declaradas</option><option value="personalizado">Proceso específico que requiere implementación adicional</option>
-          </select>
-        </label>
-        <p className="mt-2 text-xs text-slate-500">Sugerencias del texto: {(rf.sugerencias || []).map((capability) => capability.etiqueta).join(', ') || 'ninguna; esto no demuestra cobertura'}</p>
-        <div className="mt-2 grid gap-1 sm:grid-cols-2">{catalog.map((capability) => <label key={capability.id} className="flex gap-2 text-xs">
-          <input disabled={disabled} type="checkbox" checked={item.capacidades.includes(capability.id)} onChange={(event) => update(rf, { capacidades: event.target.checked ? [...item.capacidades, capability.id] : item.capacidades.filter((id) => id !== capability.id) })} />
-          {capability.etiqueta} (pendiente)
-        </label>)}</div>
-        <label className="mt-2 block text-xs">Justificación si descartas alguna sugerencia
-          <textarea disabled={disabled} className="mt-1 w-full rounded border p-2" value={item.justificacion || ''} onChange={(event) => update(rf, { justificacion: event.target.value })} />
-        </label>
-        <label className="mt-2 flex gap-2 text-xs"><input disabled={disabled} type="checkbox" checked={item.confirmado && item.huella_requisito === rf.huella_requisito} onChange={(event) => update(rf, { confirmado: event.target.checked })} />Confirmo esta declaración para la versión actual del RF.</label>
-      </details>;
-    })}
-    {!requirements.length && <p className="text-xs text-slate-500">Reabre el plan para cargar los RF aprobados.</p>}
-  </section>;
+  </details>;
 }
 
 function PhaseForm({ phase, value, onChange, disabled, modules, projectId, version }) {
