@@ -35,7 +35,7 @@ class MockupIaService {
     }
   }
 
-  async generarMockups({ contextoProyecto, pantallas = [], insumoAdicional = '', modoEdicion = false }) {
+  async generarMockups({ contextoProyecto, pantallas = [], insumoAdicional = '', modoEdicion = false, complejidad = null }) {
     const promptBase = modoEdicion
       ? 'Edita el HTML existente aplicando la petición del usuario y su diagnóstico. Conserva el diseño, navegación, campos y acciones que no requieren corrección. Devuelve SOLO JSON {"mockups":[{"nombre_pantalla":"slug exacto","preview_code":"documento HTML5 completo corregido"}]}. No reemplaces contenido por resúmenes ni puntos suspensivos.\nCONTEXTO:\n{{CONTEXTO_PROYECTO}}'
       : this.leerPrompt(process.env.MOCKUP_PROMPT_FILE || 'disenador_mockups_compacto.md');
@@ -60,7 +60,7 @@ class MockupIaService {
           tokensProveedor = this._estimarTokens(promptProveedor);
         }
       }
-      const intento = await this._intentarProveedor(proveedor, promptProveedor, tokensProveedor, { modoEdicion });
+      const intento = await this._intentarProveedor(proveedor, promptProveedor, tokensProveedor, { modoEdicion, complejidad });
       advertencias.push(...intento.advertencias);
       if (intento.texto) {
         resultado = intento.texto;
@@ -79,7 +79,7 @@ class MockupIaService {
       }
       if (reabiertos) {
         for (const proveedor of this._ordenProveedores()) {
-          const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados, { modoEdicion });
+          const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados, { modoEdicion, complejidad });
           advertencias.push(...intento.advertencias);
           if (intento.texto) {
             resultado = intento.texto;
@@ -181,9 +181,11 @@ class MockupIaService {
     return { tipo: 'transitorio', reintentable: true };
   }
 
-  async _intentarProveedor(proveedor, prompt, tokensEstimados, { modoEdicion = false } = {}) {
+  async _intentarProveedor(proveedor, prompt, tokensEstimados, { modoEdicion = false, complejidad = null } = {}) {
     const advertencias = [];
-    const modelos = this.models[proveedor] || [];
+    // Una edición (chat) es delicada: siempre el modelo de las pantallas densas. Sin reparto configurado, la lista general.
+    const porComplejidad = proveedor === 'bedrock' ? AiModelConfig.mockups.bedrockPorComplejidad(modoEdicion ? 'densa' : complejidad) : null;
+    const modelos = porComplejidad || this.models[proveedor] || [];
     if (modelos.length === 0) return { texto: null, modelo: null, advertencias: [`${proveedor}: sin modelos configurados`] };
     const tieneCredencial = proveedor === 'gemini'
       ? Boolean(this.geminiApiKey)

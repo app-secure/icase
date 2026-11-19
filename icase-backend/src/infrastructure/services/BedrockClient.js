@@ -34,6 +34,11 @@ class BedrockClient {
   async converse({ modelId, prompt, system = '', maxTokens = 8000, temperature = 0.3, timeout = 90000, extra = null }) {
     if (!this.apiKey) throw Object.assign(new Error('BEDROCK_API_KEY no configurada'), { response: { status: 401 } });
     if (!modelId) throw new Error('Falta el identificador del modelo de Bedrock (BEDROCK_*_MODELS).');
+    // Kimi K3.x no admite `temperature` y razona por defecto al máximo (lento y caro): se omite y se fija un nivel bajo (BEDROCK_KIMI_REASONING).
+    if (/moonshotai\.kimi-k3/i.test(modelId)) {
+      temperature = null;
+      extra = extra || { reasoning_config: process.env.BEDROCK_KIMI_REASONING || 'low' };
+    }
     const body = {
       messages: [{ role: 'user', content: [{ text: prompt }] }],
       inferenceConfig: { maxTokens, ...(temperature === null ? {} : { temperature }) },

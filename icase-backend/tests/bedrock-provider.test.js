@@ -17,6 +17,16 @@ describe('BedrockClient (API Converse)', () => {
     expect(resultado).toMatchObject({ text: '{"ok":true}', stopReason: 'end_turn', truncated: false });
   });
 
+  test('Kimi K3.x se llama sin temperature y con razonamiento bajo por defecto; los demás modelos no cambian', async () => {
+    const post = jest.fn(async () => respuesta('{}'));
+    await cliente(post).converse({ modelId: 'us.moonshotai.kimi-k3.1', prompt: 'p', temperature: 0.3 });
+    expect(post.mock.calls[0][1]).toMatchObject({ inferenceConfig: { maxTokens: 8000 }, additionalModelRequestFields: { reasoning_config: 'low' } });
+    expect(post.mock.calls[0][1].inferenceConfig).not.toHaveProperty('temperature');
+    await cliente(post).converse({ modelId: 'us.anthropic.claude-sonnet-4-6', prompt: 'p', temperature: 0.3 });
+    expect(post.mock.calls[1][1].inferenceConfig.temperature).toBe(0.3);
+    expect(post.mock.calls[1][1]).not.toHaveProperty('additionalModelRequestFields');
+  });
+
   test('codifica el identificador del modelo en la URL y solo lee el texto de la respuesta', async () => {
     const post = jest.fn(async () => ({ data: { output: { message: { content: [{ reasoningContent: { reasoningText: { text: 'pienso…' } } }, { text: 'respuesta' }] } }, stopReason: 'end_turn' } }));
     const resultado = await cliente(post).converse({ modelId: 'arn:aws:bedrock:us-east-2:123:inference-profile/x', prompt: 'p' });

@@ -49,6 +49,12 @@ module.exports = {
     groq: () => listaEnv('GROQ_MOCKUP_MODELS', 'openai/gpt-oss-120b'),
     openrouter: () => openrouterModels('OPENROUTER_MOCKUP_MODELS'),
     bedrock: () => listaEnv('BEDROCK_MOCKUP_MODELS', process.env.BEDROCK_MODELS || ''),
+    // Reparto por dificultad: BEDROCK_MOCKUP_MODELS_SIMPLE / BEDROCK_MOCKUP_MODELS_DENSE. Sin ellos se usa la lista general (null = no hay reparto).
+    bedrockPorComplejidad: (complejidad) => {
+      if (!['simple', 'densa'].includes(complejidad)) return null;
+      const lista = listaEnv(complejidad === 'densa' ? 'BEDROCK_MOCKUP_MODELS_DENSE' : 'BEDROCK_MOCKUP_MODELS_SIMPLE', '');
+      return lista.length ? lista : null;
+    },
     // Los mockups pueden tener su propio orden (MOCKUP_PROVIDER_ORDER); sin él se usa el general.
     providerOrder: () => providerOrder('MOCKUP_PROVIDER_ORDER')
   }
