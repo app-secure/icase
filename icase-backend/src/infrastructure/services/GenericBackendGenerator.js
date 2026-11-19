@@ -357,6 +357,7 @@ const associations=require('./data/associations');
  @Get('api/contract') contract(){return ${JSON.stringify(contract)};}
  @Get('api/openapi.json') openapi(){return require('./docs/openapi.js');}
  @Get('api/docs') docs(@Res() res:any){res.type('html').send(require('./docs/swagger-ui').html());}
+ @Get('api/docs/init.js') docsScript(@Res() res:any){res.type('application/javascript').send(require('./docs/swagger-ui').script());}
  @Get('api/associations/:relation') links(@Param('relation') relation:string,@Query() query:any,@Req() req:any){return associations(this.store,'list',relation,query,linkScopes(req.user,relation));}
  @Post('api/associations/:relation') @HttpCode(200) link(@Param('relation') relation:string,@Body() body:any,@Req() req:any){return associations(this.store,'link',relation,body,linkScopes(req.user,relation));}
  @Delete('api/associations/:relation') unlink(@Param('relation') relation:string,@Body() body:any,@Req() req:any){return associations(this.store,'unlink',relation,body,linkScopes(req.user,relation));}
@@ -469,6 +470,7 @@ app.get('/health',async(_req,res,next)=>{try{await store.ping();res.json({status
 app.get('/api/contract',(_req,res)=>res.json(${JSON.stringify(contract)}));
 app.get('/api/openapi.json',(_req,res)=>res.json(require('./docs/openapi')));
 app.get('/api/docs',(_req,res)=>res.type('html').send(require('./docs/swagger-ui').html()));
+app.get('/api/docs/init.js',(_req,res)=>res.type('application/javascript').send(require('./docs/swagger-ui').script()));
 app.use('/api/docs/static',(req,res,next)=>{try{express.static(require('./docs/swagger-ui').absoluteAssetPath(),{index:false})(req,res,next);}catch(e){next(e);}});
 app.get('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'list',req.params.relation,req.query,linkScopes(req,req.params.relation)))}catch(e){next(e)}});
 app.post('/api/associations/:relation',async(req,res,next)=>{try{res.json(await associations(store,'link',req.params.relation,req.body,linkScopes(req,req.params.relation)))}catch(e){next(e)}});

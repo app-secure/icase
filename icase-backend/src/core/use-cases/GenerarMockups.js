@@ -8,6 +8,8 @@ const MockupLayoutLinter = require('../../infrastructure/services/MockupLayoutLi
 const Compatibility = require('../services/RequirementScreenCompatibility');
 const PlatformPolicy = require('../services/PlatformPolicy');
 const MockupChatCorrectionService = require('../../infrastructure/services/MockupChatCorrectionService');
+const MockupContentRepair = require('../../infrastructure/services/MockupContentRepair');
+const MockupContentLint = require('../../infrastructure/services/MockupContentLint');
 const MockupFormRepairService = require('../../infrastructure/services/MockupFormRepairService');
 
 class GenerarMockups {
@@ -276,10 +278,12 @@ class GenerarMockups {
           const htmlInicial = this.validator.aplicarSistemaDiseno(this.validator.sanitizar(primerResultado?.preview_code).html, sistemaDiseno);
           const validacionInicial = this.validator.validar(htmlInicial);
           const nombreIncorrecto = primerResultado && primerResultado.nombre_pantalla !== lote[0];
-          if (!soloReparar && !esAjusteChat && (!primerResultado || !validacionInicial.valido || nombreIncorrecto)) {
+          // Un script (que se elimina) o una pantalla de carga/casi vacía no sirve como maqueta: se pide de nuevo con el motivo exacto.
+          const defectosContenido = primerResultado && !esAjusteChat && !soloReparar ? new MockupContentLint().revisar(htmlInicial, primerResultado.ajustes_sanitizacion) : [];
+          if (!soloReparar && !esAjusteChat && (!primerResultado || !validacionInicial.valido || nombreIncorrecto || defectosContenido.length)) {
             const motivos = nombreIncorrecto
               ? `nombre_pantalla debe ser exactamente "${lote[0]}"`
-              : (validacionInicial.errores.join('; ') || 'la IA no devolvió la pantalla solicitada');
+              : ([...validacionInicial.errores, ...defectosContenido].join('; ') || 'la IA no devolvió la pantalla solicitada');
             advertencias.push(`${lote[0]}: primer intento inválido (${motivos}); se realizó una reparación aislada`);
             resultadoIa = await this.mockupIaService.generarMockups({
               contextoProyecto: contextoLote,
@@ -448,6 +452,8 @@ DESCRIPCIÓN DEL NEGOCIO: ${this._limitarTexto(proyecto.descripcion || 'Sin desc
 
 REGLAS, RESTRICCIONES, EXCLUSIONES Y PREGUNTAS DEL PROYECTO (respeta sus estados; una pregunta no es una obligación):
 ${JSON.stringify(require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos))}
+
+MONEDA DEL PROYECTO: ${require('../../infrastructure/services/MockupContentRepair').currencyOf({ proyecto, requerimientos }) || 'no indicada (escribe los importes solo con el número, sin símbolo)'}
 
 SISTEMA VISUAL OBLIGATORIO (idéntico en todas las pantallas):
 - Color primario: ${diseno.colores.primario}; primario oscuro: ${diseno.colores.primario_oscuro}
@@ -777,7 +783,9 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
   _normalizarMockup(mockup, { sistemaDiseno, requerimientos, contratoEnlaces, manifiestoPorSlug }) {
     const sanitizado = this.validator.sanitizar(mockup.preview_code);
     const accionesReparadas = this.actionRepair.reparar(this.validator.aplicarSistemaDiseno(sanitizado.html, sistemaDiseno), { rfs: mockup.rf_trazabilidad, requerimientos });
-    const htmlConSistemaDiseno = accionesReparadas.html;
+    // Reparación determinista (sin IA): filas «Cargando…», clases sin definir, moneda y controles solo visuales.
+    const contenidoReparado = new MockupContentRepair().reparar(accionesReparadas.html, { moneda: MockupContentRepair.currencyOf({ requerimientos }), contrato: contratoEnlaces, requerimientos });
+    const htmlConSistemaDiseno = contenidoReparado.html;
     const validacion = this.validator.validar(htmlConSistemaDiseno);
     const enlazado = this.bindingService.evaluar({ html: htmlConSistemaDiseno, requerimientos, contrato: contratoEnlaces });
     const pantalla = manifiestoPorSlug.get(mockup.nombre_pantalla);
@@ -799,7 +807,7 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     const erroresValidacion = [...validacion.errores, ...erroresTrazabilidad];
     // Los elementos que el sanitizador ya eliminó son ajustes informativos,
     // no problemas que sigan presentes en el mockup final.
-    const ajustesSanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...sanitizado.advertencias, ...accionesReparadas.reparadas.map((cambio) => `Acción conectada: ${cambio}`)])];
+    const ajustesSanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...sanitizado.advertencias, ...accionesReparadas.reparadas.map((cambio) => `Acción conectada: ${cambio}`), ...contenidoReparado.cambios.map((cambio) => `Reparación automática: ${cambio}`)])];
     // Un botón que ejecuta un requisito de otro actor o de otra plataforma no pertenece a esta pantalla.
     const controlesAjenos = (enlazado.enlaces || []).filter((enlace) => enlace.estado === 'valido').map((enlace) => {
       const requisito = (requerimientos || []).find((item) => String(item.identificador).toUpperCase() === String(enlace.rf).toUpperCase());

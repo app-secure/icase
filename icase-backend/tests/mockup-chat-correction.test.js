@@ -98,13 +98,13 @@ describe('correcciones del mockup desde el chat', () => {
   });
 
   test('permite corregir una advertencia y continuar después con las demás', async () => {
-    const previous = { ...anterior, preview_code: html('', '<button>Cancelar</button>') };
-    const { run } = setup([[candidato(html(controles, '<button>Cancelar</button>'))]], previous);
+    const previous = { ...anterior, preview_code: html('', '<button>Aceptar</button>') };
+    const { run } = setup([[candidato(html(controles, '<button>Aceptar</button>'))]], previous);
     const result = await run();
     expect(result.totalProcesados).toBe(1);
-    expect(result.ajustes[0].advertencias_pendientes).toContain('sin enlace: Cancelar');
-    const next = setup([[candidato(html(controles, '<button data-accion="ui">Cancelar</button>'))]], result.mockups[0]);
-    const second = await next.run('corrige esto: sin enlace: Cancelar');
+    expect(result.ajustes[0].advertencias_pendientes).toContain('sin enlace: Aceptar');
+    const next = setup([[candidato(html(controles, '<button data-accion="ui">Aceptar</button>'))]], result.mockups[0]);
+    const second = await next.run('corrige esto: sin enlace: Aceptar');
     expect(second.totalProcesados).toBe(1);
     expect(second.mockups[0].enlaces[0].campos_faltantes).toEqual([]);
     expect(second.ajustes[0].advertencias_pendientes).toEqual([]);

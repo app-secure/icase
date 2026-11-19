@@ -171,7 +171,21 @@ describe('documento OpenAPI generado', () => {
 
   test('expone Swagger UI en /api/docs y ejemplos en POST', async () => {
     const booted = await arrancar();
-    expect((await fetch(`${booted.base}/api/docs`)).status).toBe(401);
+    // La página es pública (un navegador no envía Authorization): incluye su propio inicio de sesión; el documento sigue protegido.
+    const publica = await fetch(`${booted.base}/api/docs`);
+    expect(publica.status).toBe(200);
+    const pagina = await publica.text();
+    expect(pagina).toContain('id="login"'); // formulario de inicio de sesión de la propia página
+    expect((await fetch(`${booted.base}/api/openapi.json`)).status).toBe(401);
+    // El código de la página es un archivo propio (la CSP no admite scripts en línea) y también es público.
+    expect(pagina).not.toMatch(/<script>/);
+    const init = await fetch(`${booted.base}/api/docs/init.js`);
+    expect(init.status).toBe(200);
+    expect(init.headers.get('content-type')).toMatch(/javascript/);
+    const codigo = await init.text();
+    expect(codigo).toContain('SwaggerUIBundle');
+    expect(codigo).toContain('/api/auth/login');
+    expect(codigo).toContain('icase_docs_token');
     const login = await fetch(`${booted.base}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: ENV.ADMIN_EMAIL, password: ENV.ADMIN_PASSWORD })
@@ -179,7 +193,7 @@ describe('documento OpenAPI generado', () => {
     const { token } = await login.json();
     const docs = await fetch(`${booted.base}/api/docs`, { headers: { Authorization: `Bearer ${token}` } });
     expect(docs.status).toBe(200);
-    expect(await docs.text()).toMatch(/SwaggerUIBundle/);
+    expect(await docs.text()).toMatch(/swagger-ui-bundle.js/);
     const post = booted.openapi.paths['/api/operations/rf-01'].post;
     expect(post.requestBody.content['application/json'].example).toEqual(expect.objectContaining({ email: expect.any(String) }));
     expect(post.responses['201'].content['application/json'].example).toEqual(expect.objectContaining({ id: '1', capability: 'rf-01' }));

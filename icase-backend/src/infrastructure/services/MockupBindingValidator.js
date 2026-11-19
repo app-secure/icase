@@ -83,7 +83,7 @@ class MockupBindingValidator {
    * Marca como «solo interfaz» (data-accion="ui") los botones sin enlace, sin IA ni tocar nada más del HTML.
    * Con `controles` solo se marcan los que tienen esa etiqueta. Devuelve el HTML nuevo y las etiquetas marcadas.
    */
-  marcarSinEnlace(html, { controles = null } = {}) {
+  marcarSinEnlace(html, { controles = null, soloGrupos = false } = {}) {
     if (!html || typeof html !== 'string') return { html, marcados: [] };
     const document = parse(html, { sourceCodeLocationInfo: true });
     const root = descendants(document, (node) => node.tagName === 'main')[0]
@@ -91,6 +91,12 @@ class MockupBindingValidator {
     const wanted = controles ? new Set(controles.map((item) => String(item).replace(/\s+/g, ' ').trim().toLowerCase())) : null;
     const nodes = descendants(root, (item) => isButton(item) && !attr(item, 'data-accion').trim())
       .filter((node) => node.sourceCodeLocation?.startTag && (!wanted || wanted.has(label(node).toLowerCase())));
+    // Un grupo de botones hermanos sin operación (pestañas de estado, selector «Mesa / Silla») solo cambia la vista.
+    const inGroup = (node) => {
+      const siblings = (node.parentNode?.childNodes || []).filter((child) => child.tagName);
+      return siblings.length >= 2 && siblings.every((child) => isButton(child) && ['', 'ui'].includes(attr(child, 'data-accion').trim().toLowerCase()));
+    };
+    if (soloGrupos) nodes.splice(0, nodes.length, ...nodes.filter(inGroup));
     let result = html;
     for (const node of nodes.sort((a, b) => b.sourceCodeLocation.startTag.startOffset - a.sourceCodeLocation.startTag.startOffset)) {
       const at = node.sourceCodeLocation.startTag.startOffset + 1 + node.tagName.length;

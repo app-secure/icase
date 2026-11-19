@@ -179,6 +179,7 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
 
   function isPublic(method, path) {
     return (method === 'GET' && path === '/health')
+      || (method === 'GET' && (path === '/api/docs' || path === '/api/docs/init.js')) // la página no trae datos; pide el inicio de sesión y carga el documento (protegido) con el token
       || (method === 'GET' && path.startsWith('/api/docs/static/'))
       || (method === 'POST' && (path === '/api/auth/login' || path === '/api/auth/register'));
   }

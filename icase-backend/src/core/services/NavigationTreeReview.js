@@ -34,9 +34,17 @@ function platformOf(node) {
   return null;
 }
 
+// Un mensaje de resultado no es un destino de navegación: es la respuesta de la pantalla que ejecuta la acción.
+const RESULT_NODE = /^(?:confirmacion|resultado|exito|exitosa?|operacion exitosa)\b/;
+
 function review(codigo) {
   const nodes = parse(codigo);
   const warnings = [];
+  const results = nodes.filter((node) => node.children === 0 && node.level >= 3 && RESULT_NODE.test(strip(node.name)));
+  if (results.length) {
+    const sample = results.slice(0, 4).map((node) => label(node.name)).join(', ');
+    warnings.push(`${results.length} nodo(s) describen un mensaje de resultado, no una pantalla: ${sample}${results.length > 4 ? '…' : ''}. El resultado de una acción se muestra dentro de la pantalla que la ejecuta; quita esos nodos para no generar mockups sin función propia.`);
+  }
   const roots = nodes.filter((node) => node.level === 2);
   const marked = nodes.some((node) => PlatformPolicy.marked(node.name));
   const metrics = { aplicaciones: 0, pantallas_sin_aplicacion: 0 };

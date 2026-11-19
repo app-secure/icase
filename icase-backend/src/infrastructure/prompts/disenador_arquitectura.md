@@ -97,7 +97,18 @@ NODOS PROHIBIDOS (NO deben aparecer):
 - Entidades o conceptos de datos: "FormulaMezcla", "MetricaConsolidada", "Auditoría del sistema".
 - Componentes técnicos: microservicios, gateways, bases de datos, APIs.
 - Fases, entregables o paquetes de trabajo, y cualquier término de descomposición de trabajo.
+- Mensajes y estados de resultado como pantallas: «Confirmación de…», «Resultado de…», «Éxito de…», «Pedido registrado». Son la respuesta de la pantalla que ejecuta la acción (un aviso o un panel dentro de ella), no destinos de navegación: no les crees nodo.
+- Resúmenes o partes de una pantalla ya listada («Resumen de movimientos de caja» junto a «Cierre de caja»): una pantalla por tarea, no una por bloque de contenido.
 - Áreas organizacionales ("Finanzas", "Logística") salvo que correspondan a un módulo real y navegable de la aplicación.
+
+NOMBRES DE PANTALLA (OBLIGATORIO): cada nodo nombra la pantalla como la vería la persona en el menú: un sustantivo o una frase nominal, nunca un verbo en infinitivo ni imperativo.
+- Correcto: «Mesas asignadas», «Registro de cobros», «Cierre de caja», «Precios del menú», «Detalle de comanda», «Formulario de edición de precios».
+- Incorrecto: «Consultar Mesas Asignadas», «Registrar Cobro de Consumo», «Modificar Precios del Menú», «Cerrar Sesión de Caja».
+
+LISTADOS (OBLIGATORIO): las pantallas con la tabla de registros son las más usadas y no pueden faltar. Para cada módulo, y por cada entidad principal que su actor gestiona (platos, mesas, usuarios, cobros, reservas, recompensas...), incluye:
+- una pantalla de LISTADO con el nombre de lo que lista («Mesas», «Cobros», «Usuarios», «Recompensas»), donde la persona busca, filtra y elige un registro;
+- el DETALLE y los FORMULARIOS de alta o edición como pantallas hermanas («Detalle de cobro», «Formulario de cobro»), que se abren desde el listado.
+Un módulo que solo tenga formularios es un árbol incompleto. Ejemplo para Caja: «Cobros» (listado), «Formulario de cobro», «Cierres de caja» (listado), «Formulario de cierre de caja».
 
 REGLA DE ORO: si un nodo no se puede alcanzar navegando (no corresponde a una pantalla, vista o ruta del sistema), NO debe aparecer en el árbol.
 - CONSISTENCIA CON CASOS DE USO: cada caso de uso que requiera interacción humana debe corresponder a una pantalla o ruta reconocible. Los procesos internos sin interfaz no se convierten en pantallas; documenta su omisión en la descripción.

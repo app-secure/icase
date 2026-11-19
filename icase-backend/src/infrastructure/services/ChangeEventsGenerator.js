@@ -24,9 +24,10 @@ import { AppModule } from './app.module';
 import { StoreExceptionFilter } from './store-exception.filter';
 import { RecordStore } from './record.store';
 import { AuthService } from './auth.service';
+const express = require('express');
 const configureHttpSecurity = require('./security/http-security');
 const { connectChangeEvents: attachChangeEvents } = require('./events/change-events');
-async function bootstrap(){const app=await NestFactory.create(AppModule);configureHttpSecurity(app.getHttpAdapter().getInstance());app.useGlobalFilters(new StoreExceptionFilter());await app.init();await attachChangeEvents(app.getHttpServer(),{store:app.get(RecordStore),auth:app.get(AuthService).core,${config}});await app.listen(Number(process.env.PORT||3000));}
+async function bootstrap(){const app=await NestFactory.create(AppModule);configureHttpSecurity(app.getHttpAdapter().getInstance());app.getHttpAdapter().getInstance().use('/api/docs/static',(req:any,res:any,next:any)=>{try{express.static(require('./docs/swagger-ui').absoluteAssetPath(),{index:false})(req,res,next);}catch(e){next(e);}});app.useGlobalFilters(new StoreExceptionFilter());await app.init();await attachChangeEvents(app.getHttpServer(),{store:app.get(RecordStore),auth:app.get(AuthService).core,${config}});await app.listen(Number(process.env.PORT||3000));}
 bootstrap();\n`;
     } else {
       files.find(file => file.ruta === 'backend/src/main.js').contenido = `require('dotenv').config();

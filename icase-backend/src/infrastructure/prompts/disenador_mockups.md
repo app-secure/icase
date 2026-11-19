@@ -101,7 +101,10 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
 5. **HTML AUTOCONTENIDO Y LISTO PARA IFRAME**:
    - Código HTML5 completo (`<!DOCTYPE html><html>...</html>`) sin librerías externas pesadas más allá de Tailwind CDN.
    - Iconos como SVG inline estilizados (`w-4 h-4`, `stroke-current`).
-   - Cero JavaScript malicioso o bloqueante; permitir scripts básicos de maquetación (como abrir/cerrar modal o tabs sencillos si se requiere).
+   - Maqueta ESTÁTICA: sin `<script>` (salvo el de Tailwind CDN). Cualquier script se elimina al guardar y deja la pantalla vacía.
+   - Las tablas y listas llevan siempre 3 a 5 filas de ejemplo ESCRITAS en el HTML, con datos coherentes con el negocio (platos, mesas, clientes, importes). PROHIBIDO dejar filas «Cargando…», «Sin datos» o cuerpos de tabla vacíos para que un script los llene.
+   - Todo estilo se escribe con clases de Tailwind o con un `<style>` propio. No uses clases inventadas sin definirlas (`btn-primary`, `table-container`...).
+   - Los importes usan la moneda indicada en el contexto («MONEDA DEL PROYECTO»); si no se indica, escribe solo el número (45.50), sin símbolo.
 
 6. **ESTRUCTURA DE SALIDA (JSON ESTRICTO)**:
    Genera un mockup COMPLETO por cada pantalla del listado, respetando su orden y sin omitir ninguna. NUNCA trunques el JSON.

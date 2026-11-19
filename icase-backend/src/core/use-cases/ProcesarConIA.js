@@ -208,7 +208,7 @@ class ProcesarConIA {
         const approved = await this.initialAnalysis.requireApproved(proyectoId, proyecto.usuario_id);
         if (proyecto.auditoria_requisitos?.referencia_analisis_inicial?.id !== approved.id) throw new Error('Los requisitos deben revisarse contra el análisis inicial vigente antes de generar diagramas.');
       }
-      const estadosPermitidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
+      const estadosPermitidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (!estadosPermitidos.has(proyecto.estado_fase)) {
         throw new Error('Los requisitos deben estar aprobados antes de generar los diagramas.');
       }

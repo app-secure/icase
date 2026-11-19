@@ -124,3 +124,18 @@ describe('instrucciones para generar el árbol', () => {
     expect(prompt).not.toContain('Las pantallas compartidas de acceso se declaran una sola vez');
   });
 });
+
+describe('nodos de resultado en el árbol de navegación', () => {
+  const { review } = require('../src/core/services/NavigationTreeReview');
+  const tree = (...leaves) => `@startwbs\n* Sistema\n** Aplicación Web Interna\n*** Módulo de Caja\n${leaves.map((leaf) => `**** ${leaf}`).join('\n')}\n@endwbs`;
+
+  test('avisa de los nodos «Confirmación…» y «Resultado…» y los cuenta', () => {
+    const result = review(tree('Registro de Cobros', 'Confirmación de Cobro Registrado', 'Resultado de Validación', 'Cierre de Caja'));
+    expect(result.advertencias.some((warning) => /2 nodo\(s\) describen un mensaje de resultado/.test(warning) && warning.includes('«Confirmación de Cobro Registrado»'))).toBe(true);
+  });
+
+  test('un árbol sin esos nodos no recibe ese aviso', () => {
+    const result = review(tree('Registro de Cobros', 'Cierre de Caja'));
+    expect(result.advertencias.some((warning) => /mensaje de resultado/.test(warning))).toBe(false);
+  });
+});

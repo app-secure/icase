@@ -55,7 +55,7 @@ class AprobarFase {
       if (!isValidDiagramType(tipo)) {
         throw new Error(`Tipo de diagrama inválido: ${tipoDiagrama || 'no especificado'}.`);
       }
-      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
+      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (!estadosValidos.has(proyecto.estado_fase)) {
         throw new Error('Los requisitos deben estar aprobados antes de aprobar un diagrama.');
       }
@@ -172,7 +172,7 @@ class AprobarFase {
         nuevoEstado
       };
     } else if (fase === 'diagramas' || fase === 'diseno') {
-      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
+      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (proyecto.estado_fase && !estadosValidos.has(proyecto.estado_fase)) {
         throw new Error('La fase de análisis debe estar aprobada antes de aprobar los diagramas.');
       }
