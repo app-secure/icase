@@ -149,7 +149,7 @@ class ApplicationSpecService {
     const porNombre = new Map(operaciones.map((operacion) => [operacion.nombre, operacion]));
     const vistas = this._pantallas(propuesta?.pantallas, { porNombre, entidades, pantallas, advertencias });
     for (const triple of gestion) this._reorganizarGestion(vistas, triple, advertencias);
-    this._cablearEdicion(operaciones, vistas, pantallas, advertencias);
+    operaciones.push(...this._cablearEdicion(operaciones, vistas, pantallas, advertencias));
     operaciones.forEach((operacion, index) => { operacion.id = `OP-${String(index + 1).padStart(2, '0')}`; });
     const sinPantalla = operaciones.filter((operacion) => !vistas.some((vista) => vista.componentes.some((c) => c.operacion === operacion.nombre || c.acciones.some((a) => a.operacion === operacion.nombre))));
     if (vistas.length && sinPantalla.length) advertencias.push(`Operaciones sin ninguna pantalla que las use: ${sinPantalla.map((operacion) => operacion.nombre).join(', ')}.`);
@@ -179,7 +179,10 @@ class ApplicationSpecService {
     const vigentes = new Map(operaciones.filter((op) => op.estado_decision !== 'rechazado').map((op) => [op.nombre, op]));
     const vistas = this._pantallas(guardada?.pantallas, { porNombre: vigentes, entidades, pantallas, advertencias: avisos });
     // Sin el árbol de pantallas (al generar) no se conocen los roles: no se cablea nada nuevo, solo se normaliza.
-    if (cablear) this._cablearEdicion(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, pantallas, avisos);
+    if (cablear) {
+      const añadidas = this._cablearEdicion(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, pantallas, avisos);
+      for (const operacion of añadidas) operaciones.push({ ...operacion, id: `OP-${String(operaciones.length + 1).padStart(2, '0')}` });
+    }
     return { operaciones, pantallas: vistas, errores, avisos };
   }
 
@@ -233,9 +236,9 @@ class ApplicationSpecService {
       filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
       descripcion: text(candidata.descripcion).slice(0, 300), estado_decision: 'pendiente',
       ...(list(candidata.sesionEntradas).length ? { sesionEntradas: list(candidata.sesionEntradas).filter((item) => existe(item?.campo) && item.valor === 'usuario.id').map((item) => ({ campo: item.campo, valor: item.valor })) } : {}),
-      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado', 'cero'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}) })) } : {})
+      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado', 'cero', 'lineas'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}) })) } : {})
     };
-    return { operacion: this._completarDelSistema(operacion, entidad) };
+    return { operacion: this._completarDelSistema(operacion, entidad, entidades) };
   }
 
   /**
@@ -268,6 +271,7 @@ class ApplicationSpecService {
    * como estaba (la revisión ya avisa de que no tiene pantalla).
    */
   _cablearEdicion(operaciones, vistas, pantallas, advertencias) {
+    const añadidas = [];
     const operacionDe = new Map(operaciones.map((op) => [op.nombre, op]));
     const pantallaPorId = new Map(list(pantallas).map((screen) => [this._screenId(screen), screen]));
     // Un «Editar» que quedó en una pantalla cuyo rol no puede ejecutarlo (cableado antes de conocer los roles) se retira.
@@ -287,8 +291,45 @@ class ApplicationSpecService {
     const usadas = new Set(vistas.flatMap((vista) => vista.componentes.flatMap((c) => [c.operacion, ...c.acciones.map((a) => a.operacion)])));
     const porNombre = new Map(operaciones.map((op) => [op.nombre, op]));
     const pantallaDe = new Map(list(pantallas).map((screen) => [this._screenId(screen), screen]));
+    const rfsDe = (screen) => (screen?.rf_trazabilidad || screen?.mockup?.rf_trazabilidad || []).map((id) => String(id).toUpperCase());
+    const nombresUsados = new Set(operaciones.map((op) => op.nombre));
     for (const edicion of operaciones.filter((op) => op.tipo === 'actualizar' && !usadas.has(op.nombre))) {
       const actores = (edicion.actores || []).map(Compatibility.canonicalRole);
+      // La pantalla del mismo requisito y de un rol que puede ejecutarla manda: si su lista es de otro actor (el menú del cliente en la
+      // pantalla de la cocina), recibiría 403 al abrirla; esa pantalla gana una lista propia de la entidad, con «Editar» por fila.
+      const propia = vistas.find((vista) => {
+        const pantalla = pantallaDe.get(vista.id);
+        const roles = Compatibility.rolesOf(pantalla);
+        return rfsDe(pantalla).includes(String(edicion.rf).toUpperCase()) && roles.length && (!actores.length || roles.some((rol) => actores.includes(rol)));
+      });
+      if (propia) {
+        const roles = Compatibility.rolesOf(pantallaDe.get(propia.id));
+        const ejecutable = (op) => op?.tipo === 'consulta' && op.entidad === edicion.entidad && (op.actores || []).map(Compatibility.canonicalRole).some((rol) => roles.includes(rol));
+        let componente = propia.componentes.find((c) => ['tabla', 'tarjetas'].includes(c.tipo) && ejecutable(porNombre.get(c.operacion)));
+        if (!componente) {
+          const base = `listar${edicion.entidad}Gestion`;
+          let nombre = base;
+          for (let n = 2; nombresUsados.has(nombre); n += 1) nombre = `${base}${n}`;
+          nombresUsados.add(nombre);
+          const lista = {
+            rf: edicion.rf, entidad: edicion.entidad, entidadClave: edicion.entidadClave, actores: edicion.actores, nombre, tipo: 'consulta',
+            filtros: [], entradas: [], salida: edicion.entradas.filter((campo) => !SENSIBLE.test(campo)), estado_decision: 'confirmado', origen: 'derivado',
+            descripcion: `Lista los registros de ${edicion.entidad} para quien los gestiona en esta pantalla.`
+          };
+          añadidas.push(lista);
+          porNombre.set(nombre, lista);
+          operacionDe.set(nombre, lista);
+          const ajena = propia.componentes.findIndex((c) => ['tabla', 'tarjetas'].includes(c.tipo) && porNombre.get(c.operacion)?.entidad === edicion.entidad);
+          componente = { tipo: 'tabla', operacion: nombre, campos: lista.salida, acciones: [] };
+          if (ajena >= 0) {
+            advertencias.push(`Pantalla ${propia.id}: su lista (${propia.componentes[ajena].operacion}) es de otro actor y daría «sin permiso»; ahora usa «${nombre}».`);
+            propia.componentes[ajena] = componente;
+          } else propia.componentes.push(componente);
+        }
+        componente.acciones.push({ etiqueta: 'Editar', operacion: edicion.nombre });
+        advertencias.push(`Pantalla ${propia.id}: se añadió «Editar» (${edicion.nombre}) a la lista de ${edicion.entidad}.`);
+        continue;
+      }
       const candidatos = vistas.flatMap((vista) => vista.componentes
         .filter((c) => ['tabla', 'tarjetas'].includes(c.tipo))
         .map((componente) => ({ vista, componente, lista: porNombre.get(componente.operacion) }))
@@ -305,6 +346,7 @@ class ApplicationSpecService {
       elegido.componente.acciones.push({ etiqueta: 'Editar', operacion: edicion.nombre });
       advertencias.push(`Pantalla ${elegido.vista.id}: se añadió «Editar» (${edicion.nombre}) a la lista de ${edicion.entidad}, porque ninguna pantalla la usaba.`);
     }
+    return añadidas;
   }
 
   /** La pantalla de un requisito de gestión pasa de un formulario de alta a una lista con «Nuevo» y «Editar» por fila. */
@@ -325,8 +367,37 @@ class ApplicationSpecService {
    * apunta a la entidad de cuentas) y la marca de tiempo del propio registro. El servidor los completa y no se pueden
    * falsificar desde la petición. Idempotente: se puede aplicar a una operación ya guardada.
    */
-  _completarDelSistema(operacion, entidad) {
+  /**
+   * Un pedido «contiene» líneas (composición del dominio): el alta del pedido recibe también sus líneas (plato y cantidad), el
+   * precio de cada una sale del plato y el total es la suma. Devuelve la descripción, o null si la entidad no tiene líneas.
+   */
+  _lineasDe(operacion, entidad, entidades) {
+    if (operacion.tipo !== 'crear' || !entidades) return null;
+    const numero = (def) => ['number', 'integer'].includes(def?.type);
+    for (const hijo of entidades.values()) {
+      const union = list(hijo.references).find((ref) => ref.entity === entidad.name && ref.relation === 'composicion');
+      if (!union) continue;
+      const props = hijo.schema.properties;
+      const referencia = Object.entries(props).find(([campo, def]) => campo !== union.field && def?.['x-references'] && def['x-references'] !== entidad.name);
+      const cantidad = Object.keys(props).find((campo) => /^(cantidad|unidades|qty)$/i.test(campo) && numero(props[campo]));
+      const destino = referencia && entidades.get(referencia[1]['x-references']);
+      if (!referencia || !cantidad || !destino) continue;
+      const precioHijo = Object.keys(props).find((campo) => /precio|importe|monto/i.test(campo) && numero(props[campo]));
+      const precioOrigen = Object.keys(destino.schema.properties).find((campo) => /^precio/i.test(campo) && numero(destino.schema.properties[campo]));
+      const total = Object.keys(entidad.schema.properties).find((campo) => /^total$/i.test(campo) && numero(entidad.schema.properties[campo]));
+      return {
+        entidad: hijo.name, entidadClave: hijo.key, fk: union.field, referencia: referencia[0], destino: destino.name, destinoClave: destino.key, cantidad,
+        ...(precioHijo && precioOrigen ? { precio: { campo: precioHijo, desde: precioOrigen } } : {}), ...(total ? { total } : {}),
+        // Solo se pueden pedir los disponibles.
+        ...(destino.schema.properties.disponible?.type === 'boolean' ? { filtros: [{ campo: 'disponible', operador: '==', origen: 'constante', valor: true }] } : {})
+      };
+    }
+    return null;
+  }
+
+  _completarDelSistema(operacion, entidad, entidades = null) {
     if (operacion.tipo !== 'crear') return operacion;
+    const lineas = entidades ? this._lineasDe(operacion, entidad, entidades) : (operacion.lineas || null);
     const propiedades = entidad.schema.properties;
     const sesion = list(operacion.sesionEntradas).slice();
     const auto = list(operacion.autoEntradas).slice();
@@ -343,8 +414,8 @@ class ApplicationSpecService {
         // Códigos que genera el sistema (el QR de una reserva): el servidor los crea; la persona no los inventa.
         auto.push({ campo, valor: 'generado' });
       } else if (/^(sub)?total(es)?$/.test(compacto(campo)) && ['number', 'integer'].includes(propiedades[campo]?.type)) {
-        // Un total o subtotal no lo escribe la persona: nace en 0 y lo calcula el sistema (hoy no hay líneas que lo sumen, y la regla «obligatorio» lo exige).
-        auto.push({ campo, valor: 'cero' });
+        // Un total no lo escribe la persona: con líneas es su suma; sin ellas nace en 0 (la regla «obligatorio» lo exige).
+        auto.push({ campo, valor: lineas?.total === campo ? 'lineas' : 'cero' });
       }
     }
     // Lo que el servidor debe aportar aunque la propuesta no lo liste (la IA suele omitir el estado y el código del QR): sin eso la
@@ -355,6 +426,7 @@ class ApplicationSpecService {
       if (razon === 'empieza en su estado inicial' && definicion?.enum?.length) auto.push({ campo, valor: 'inicial', opciones: definicion.enum });
       else if (razon === 'lo genera el sistema' && definicion?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) auto.push({ campo, valor: 'generado' });
       else if (MARCA_DE_REGISTRO.test(compacto(campo)) && definicion?.type === 'string') auto.push({ campo, valor: definicion?.format === 'date' ? 'hoy' : 'ahora' });
+      else if (lineas?.total === campo) auto.push({ campo, valor: 'lineas' });
     }
     const completados = new Set([...sesion, ...auto].map((item) => item.campo));
     // «Quién lo registra» solo se omite cuando se puede resolver (la cuenta de la sesión). Una referencia al propio actor
@@ -368,7 +440,8 @@ class ApplicationSpecService {
     return {
       ...operacion,
       entradas: [...operacion.entradas.filter((campo) => !completados.has(campo)), ...conservadas],
-      ...(sesion.length ? { sesionEntradas: sesion } : {}), ...(auto.length ? { autoEntradas: auto } : {})
+      ...(sesion.length ? { sesionEntradas: sesion } : {}), ...(auto.length ? { autoEntradas: auto } : {}),
+      ...(lineas ? { lineas } : {})
     };
   }
 

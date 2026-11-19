@@ -13,6 +13,37 @@ const formOf = (control) => {
 };
 const recordId = (control) => control.closest('[data-id]')?.getAttribute('data-id') || '';
 
+/**
+ * Filas de líneas de un formulario con alta compuesta (los platos de un pedido): cada `select` que no es un campo de la operación,
+ * con la cantidad (`input` numérico) de su misma fila. Sirve igual si el diseño trae una fila o varias.
+ */
+export function lineRows(form, mapped = []) {
+  if (!form) return [];
+  const known = new Set(mapped);
+  const selects = Array.from(form.querySelectorAll('select')).filter((select) => !known.has(select.getAttribute('name')) && !select.disabled);
+  const numbers = Array.from(form.querySelectorAll('input[type="number"]')).filter((input) => !known.has(input.getAttribute('name')));
+  return selects.map((select, index) => {
+    let row = select.parentElement;
+    while (row && row !== form) {
+      const inside = numbers.filter((input) => row.contains(input));
+      const others = selects.filter((other) => row.contains(other));
+      if (inside.length && others.length === 1) break;
+      if (others.length > 1) { row = null; break; }
+      row = row.parentElement;
+    }
+    const quantity = row && row !== form ? numbers.find((input) => row.contains(input)) : numbers[index];
+    return { select, quantity: quantity || null, row: row && row !== form ? row : null };
+  });
+}
+
+/** Líneas elegidas, listas para el cuerpo del alta: `[{ plato_id, cantidad }]`. */
+export function collectLines(form, named) {
+  if (!named || !named.lineas) return null;
+  return lineRows(form, named.inputs)
+    .filter((item) => item.select.value)
+    .map((item) => ({ [named.lineas.referencia]: item.select.value, [named.lineas.cantidad]: Number(item.quantity && item.quantity.value) || 1 }));
+}
+
 /** Campos del formulario asociado, incluidos los externos. Solo las consultas admiten filtros de pantalla. */
 export function collectFields(control, { requireForm = false } = {}) {
   const fields = {};
@@ -94,7 +125,8 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
   const read = (target) => (accounts ? accountFields(collectFields(target, { requireForm: true })) : collectFields(target, { requireForm: true }));
   const ask = confirmar || ((message) => (typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true));
   try {
-    if (['crear', 'editar'].includes(verb) && (!control || !formOf(control))) {
+    const porBoton = verb === 'editar' && named && named.booleanos && named.booleanos.length === 1; // «Marcar agotado»: el texto del botón es la orden
+    if (['crear', 'editar'].includes(verb) && !porBoton && (!control || !formOf(control))) {
       return onResult({ estado: 'aviso', mensaje: 'Esta acción necesita un formulario asociado antes de guardar.' });
     }
     if (verb === 'consultar') {
@@ -107,7 +139,10 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
       return onResult({ estado: 'ok', mensaje: `${registros.length} ${registros.length === 1 ? 'registro' : 'registros'}`, registros, operacion: operation });
     }
     if (verb === 'crear') {
-      await api(named ? named.path : base, { method: named ? named.method : method, body: JSON.stringify(only(control ? read(control) : {})) });
+      const body = only(control ? read(control) : {});
+      // Alta compuesta: las líneas del formulario viajan en el mismo cuerpo; el servidor las guarda y suma el total.
+      if (named && named.lineas) body.lineas = collectLines(formOf(control), named) || [];
+      await api(named ? named.path : base, { method: named ? named.method : method, body: JSON.stringify(body) });
       return onResult({ estado: 'ok', mensaje: 'Registro creado' });
     }
     const chosen = selected && selected.operation === operation && selected.id ? selected : null;
@@ -115,7 +150,14 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
     if (!id) return onResult({ estado: 'aviso', mensaje: 'Selecciona primero un registro: usa Consultar y luego Seleccionar en la tabla.' });
     const target = named ? named.path.replace(':id', encodeURIComponent(id)) : `${base}/${encodeURIComponent(id)}`;
     if (verb === 'editar') {
-      await api(target, { method: named ? named.method : method, body: JSON.stringify(only(read(control))) });
+      let body = formOf(control) ? only(read(control)) : {};
+      // Un botón sin formulario («Marcar agotado», «Marcar disponible») fija el campo sí/no de la operación según lo que dice.
+      if (named && !Object.keys(body).length && named.booleanos && named.booleanos.length === 1) {
+        const label = String((control && control.textContent) || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+        if (/agotad|inactiv|desactiv|deshabilit|cerrar|no disponible/.test(label)) body = { [named.booleanos[0]]: false };
+        else if (/disponible|activ|habilit|reabrir/.test(label)) body = { [named.booleanos[0]]: true };
+      }
+      await api(target, { method: named ? named.method : method, body: JSON.stringify(body) });
       return onResult({ estado: 'ok', mensaje: 'Registro actualizado' });
     }
     if (!ask(`¿Eliminar el registro ${(chosen && chosen.etiqueta) || id}?`)) return undefined;

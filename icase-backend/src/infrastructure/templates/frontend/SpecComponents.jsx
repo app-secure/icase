@@ -19,7 +19,7 @@ const queryParams = (action) => (action.filters || []).filter((filter) => filter
 
 function usePermission() {
   const { can } = useSession();
-  return (action) => can(action.capability, METHOD_FOR_PERMISSION[action.type]);
+  return (action) => can(action.permiso || action.capability, METHOD_FOR_PERMISSION[action.type]);
 }
 
 function useRows(action, query) {
@@ -51,11 +51,46 @@ function FieldInput({ name, meta = {}, value, onChange }) {
   return <input {...common} type="text" />;
 }
 
+const LABEL_KEYS = ['nombre', 'name', 'titulo', 'numero', 'codigo', 'descripcion'];
+const rowLabel = (row) => { for (const key of LABEL_KEYS) if (row[key] !== undefined && row[key] !== null && String(row[key]).trim()) return String(row[key]); return `#${row.id}`; };
+const money = (value) => (Number.isFinite(value) ? value.toFixed(2) : '0.00');
+
+/** Líneas de un alta compuesta (los platos de un pedido): elige el registro y la cantidad; el servidor pone el precio y suma el total. */
+function LinesEditor({ action, lines, setLines }) {
+  const { api } = useSession();
+  const [options, setOptions] = useState([]);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let alive = true;
+    api(action.path).then((data) => { if (alive) setOptions(Array.isArray(data) ? data : []); }).catch((failure) => { if (alive) setError(failure.message); });
+    return () => { alive = false; };
+  }, [api, action.path]);
+  const spec = action.lineas;
+  const priceOf = (ref) => Number(options.find((row) => String(row.id) === String(ref))?.[spec.precio]);
+  const total = lines.reduce((sum, line) => sum + (line.ref ? (Number.isFinite(priceOf(line.ref)) ? priceOf(line.ref) : 0) * (Number(line.qty) || 0) : 0), 0);
+  const change = (index, patch) => setLines((old) => old.map((line, position) => (position === index ? { ...line, ...patch } : line)));
+  return <fieldset className="lines" aria-label="Líneas">
+    <legend>{humanize(spec.destino)}s del pedido</legend>
+    {error && <p role="alert" className="error">{error}</p>}
+    {lines.map((line, index) => <div className="line-row" key={index}>
+      <select className="input" aria-label={`${humanize(spec.destino)} ${index + 1}`} value={line.ref} onChange={(event) => change(index, { ref: event.target.value })}>
+        <option value="">Selecciona…</option>
+        {options.map((row) => <option key={row.id} value={row.id}>{rowLabel(row)}{spec.precio && row[spec.precio] !== undefined ? ` — ${money(Number(row[spec.precio]))}` : ''}</option>)}
+      </select>
+      <input className="input" type="number" min="1" step="1" aria-label={`Cantidad ${index + 1}`} value={line.qty} onChange={(event) => change(index, { qty: event.target.value })} />
+      <button type="button" className="button secondary" disabled={lines.length === 1} onClick={() => setLines((old) => old.filter((_, position) => position !== index))}>Quitar</button>
+    </div>)}
+    <button type="button" className="button secondary" onClick={() => setLines((old) => [...old, { ref: '', qty: 1 }])}>Añadir otra línea</button>
+    {spec.precio && <p className="lines-total">Total estimado: <strong>{money(total)}</strong></p>}
+  </fieldset>;
+}
+
 /** Formulario de una operación de crear o actualizar: pide exactamente sus campos de entrada. */
 export function ActionForm({ action, fields, id, initial, onDone, title }) {
   const { api } = useSession();
   const names = fields?.length ? fields : action.inputs;
   const [values, setValues] = useState(initial || {});
+  const [lines, setLines] = useState([{ ref: '', qty: 1 }]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const set = (name, value) => setValues((old) => ({ ...old, [name]: value }));
@@ -65,9 +100,10 @@ export function ActionForm({ action, fields, id, initial, onDone, title }) {
       const type = action.fields?.[name]?.type;
       return [name, type === 'integer' || type === 'number' ? Number(values[name]) : values[name]];
     }));
+    if (action.lineas) body.lineas = lines.filter((line) => line.ref).map((line) => ({ [action.lineas.referencia]: line.ref, [action.lineas.cantidad]: Number(line.qty) }));
     try {
       await api(pathOf(action, id), { method: action.method, body: JSON.stringify(body) });
-      setMessage('Guardado'); setError(''); if (!id) setValues({});
+      setMessage('Guardado'); setError(''); if (!id) { setValues({}); setLines([{ ref: '', qty: 1 }]); }
       onDone?.();
     } catch (failure) { setError(failure.message); setMessage(''); }
   };
@@ -76,6 +112,7 @@ export function ActionForm({ action, fields, id, initial, onDone, title }) {
       <label htmlFor={`campo-${name}`}>{humanize(name)}</label>
       <FieldInput name={name} meta={action.fields?.[name]} value={values[name]} onChange={set} />
     </div>)}
+    {action.lineas && <LinesEditor action={action} lines={lines} setLines={setLines} />}
     <div className="form-row"><button type="submit" className="button">{title || humanize(action.name)}</button></div>
     {message && <p role="status">{message}</p>}
     {error && <p role="alert" className="error">{error}</p>}

@@ -37,6 +37,7 @@ class GenericBackendGenerator {
     this._ensureAssociationOperations(contract, rules);
     const policy = new AccessControlService().politica(access, contract.operations);
     this._syncSupportPermissions(contract, policy);
+    this._limitScopes(contract, policy);
     contract.auth = policy;
     const resolved = StackCatalog.resolve(stack);
     const ownership = require('../templates/auth/ownership');
@@ -387,11 +388,14 @@ ${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/opera
     if (!this._hasActions(contract)) return [];
     const definitions = contract.operations.flatMap((operation) => (operation.actions || []).map((action) => ({
       name: action.name, type: action.type, method: action.method, byId: action.byId, capability: action.capability, entity: action.entity,
+      ...(action.permission && action.permission !== action.capability ? { permiso: action.permission } : {}),
       filters: action.filters, inputs: action.inputs, output: action.output, ...(action.transition ? { transition: action.transition } : {}),
       // Campos que apuntan a otro registro: la consulta devuelve también su nombre legible (`<campo>__etiqueta`).
       ...(action.type === 'consulta' && Object.values(action.fields || {}).some((meta) => meta?.referencia) ? { refs: Object.fromEntries(Object.entries(action.fields).filter(([, meta]) => meta?.referencia).map(([campo, meta]) => [campo, meta.referencia])) } : {}),
       // Lo que completa el servidor al crear (la cuenta de la sesión, la fecha, el estado inicial, un código generado).
-      ...(action.sessionInputs?.length ? { sessionInputs: action.sessionInputs } : {}), ...(action.autoInputs?.length ? { autoInputs: action.autoInputs } : {})
+      ...(action.sessionInputs?.length ? { sessionInputs: action.sessionInputs } : {}), ...(action.autoInputs?.length ? { autoInputs: action.autoInputs } : {}),
+      // Alta compuesta (pedido + líneas): el cuerpo trae `lineas` y el servidor guarda cada una y calcula el total.
+      ...(action.type === 'crear' && action.lineas?.capability ? { lineas: action.lineas } : {})
     })));
     const source = fs.readFileSync(path.join(__dirname, '..', 'templates', 'actions', 'actions-runtime.js'), 'utf8');
     return [{ ruta: 'backend/src/actions/actions.js', lenguaje: 'javascript', contenido: renderTemplate(source, { DEFINITIONS: JSON.stringify(definitions, null, 2) }) }];
@@ -524,6 +528,25 @@ ${this._hasActions(contract) ? this._expressActionRoutes() : ''}app.use((error,_
       });
       if (contract.model && Array.isArray(contract.model.unmapped)) {
         contract.model.unmapped = contract.model.unmapped.filter((name) => name !== entity.name);
+      }
+    }
+  }
+
+  /**
+   * «Solo lo propio» tiene sentido cuando el dato es de alguien (una reserva, un pedido, un paquete del cliente). Un dato compartido (el
+   * menú, el catálogo) no es de nadie: con ese alcance nadie vería nada, y dejar que el cliente lo modifique sería peor. Se consulta
+   * completo y no se modifica.
+   */
+  _limitScopes(contract, policy) {
+    if (!policy?.habilitada || !policy.operaciones) return;
+    const owned = (entity) => !entity || ['cliente', 'usuario'].includes(entity.key) || (entity.references || []).some((reference) => /^(cliente|usuario)$/i.test(String(reference.entity)));
+    for (const operation of contract.operations || []) {
+      const entry = policy.operaciones[operation.key];
+      if (!entry) continue;
+      const entity = (contract.entities || []).find((item) => item.key === operation.entity);
+      if (owned(entity)) continue;
+      for (const [role, rule] of Object.entries(entry)) {
+        if (rule?.alcance === 'propios') entry[role] = { ...rule, alcance: 'todos', metodos: (rule.metodos || []).filter((method) => method === 'GET') };
       }
     }
   }

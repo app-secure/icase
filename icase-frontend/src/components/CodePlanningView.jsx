@@ -1310,7 +1310,14 @@ function PhaseForm({ phase, value, onChange, disabled, modules, projectId, versi
   </div>;
   if (phase === 'alcance_plataforma') return <fieldset className="space-y-2"><legend>Interfaces</legend>
     {(value.detectadas || ['web', 'móvil']).map(p => <label key={p} className="mr-4"><input type="checkbox" checked={(value.plataformas || []).includes(p)} disabled={disabled || (value.plataformas?.length === 1 && value.plataformas.includes(p))}
-      onChange={e => onChange({ ...value, plataformas: e.target.checked ? [...(value.plataformas || []), p] : value.plataformas.filter(item => item !== p) })} /> {p}</label>)}
+      onChange={e => {
+        const plataformas = e.target.checked ? [...(value.plataformas || []), p] : value.plataformas.filter(item => item !== p);
+        // Al quitar la móvil, sus pantallas (el flujo del cliente) pasan a la web adaptadas, salvo que se desmarque.
+        onChange({ ...value, plataformas, ...(p === 'móvil' ? { moviles_en_web: !e.target.checked } : {}) });
+      }} /> {p}</label>)}
+    {(value.detectadas || []).includes('móvil') && !(value.plataformas || []).includes('móvil') && <label className="mt-2 block text-sm text-slate-700">
+      <input type="checkbox" disabled={disabled} checked={value.moviles_en_web === true} onChange={e => onChange({ ...value, moviles_en_web: e.target.checked })} /> Mostrar en la web, adaptadas, las pantallas pensadas para móvil (por ejemplo, el flujo del cliente). Sin esto no se generan.
+    </label>}
   </fieldset>;
   const choice = (key, label) => {
     const current = String(value[key] || '');

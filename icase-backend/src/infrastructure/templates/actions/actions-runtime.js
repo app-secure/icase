@@ -50,7 +50,11 @@ async function withLabels(store, def, rows) {
 
 /** Operación que atiende un método y una ruta (con o sin identificador); null si no existe. */
 function find(slug, method, hasId) {
-  return definitions.find((item) => slugOf(item.name) === slug && item.method === method && Boolean(item.byId) === Boolean(hasId)) || null;
+  const direct = definitions.find((item) => slugOf(item.name) === slug && item.method === method && Boolean(item.byId) === Boolean(hasId));
+  if (direct) return direct;
+  // GET de un alta con líneas: las opciones que se pueden elegir en ellas (los platos disponibles), con el permiso de quien la crea.
+  const base = method === 'GET' && !hasId ? definitions.find((item) => slugOf(item.name) === slug && item.lineas && !item.byId) : null;
+  return base ? { name: base.name, type: 'consulta', method: 'GET', byId: false, capability: base.capability, fuente: base.lineas.destinoCapability, entity: base.lineas.destinoClave, filters: base.lineas.filtros || [], inputs: [], output: [] } : null;
 }
 
 /** Valor de un filtro que depende de la sesión; null si la persona no tiene un registro asociado en la entidad referida. */
@@ -100,9 +104,31 @@ async function resolveFilters(store, def, ctx) {
 function autoValue(input) {
   if (input.valor === 'hoy') return new Date().toISOString().slice(0, 10);
   if (input.valor === 'inicial') return (input.opciones || [])[0] ?? null;
-  if (input.valor === 'cero') return 0;
+  if (input.valor === 'cero' || input.valor === 'lineas') return 0;
   if (input.valor === 'generado') return crypto.randomBytes(5).toString('hex').toUpperCase();
   return new Date().toISOString();
+}
+
+/** Valida las líneas del cuerpo (plato y cantidad), toma el precio del plato y calcula el subtotal de cada una. */
+async function prepareLines(store, def, body) {
+  const spec = def.lineas;
+  const received = Array.isArray(body.lineas) ? body.lineas : [];
+  if (!received.length) throw new ActionError(400, 'Agrega al menos una línea.');
+  if (received.length > 100) throw new ActionError(400, 'Demasiadas líneas.');
+  const prepared = [];
+  for (const [index, line] of received.entries()) {
+    const quantity = Number(line?.[spec.cantidad]);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) throw new ActionError(400, `Línea ${index + 1}: la cantidad debe ser un entero entre 1 y 1000.`);
+    const reference = line?.[spec.referencia];
+    if (reference === undefined || reference === null || reference === '') throw new ActionError(400, `Línea ${index + 1}: elige ${spec.destino}.`);
+    const record = await store.getRecord(spec.destinoCapability, reference, null);
+    if (!record) throw new ActionError(400, `Línea ${index + 1}: ${spec.destino} inexistente.`);
+    if (record.data?.disponible === false) throw new ActionError(409, `Línea ${index + 1}: ${labelOf(record.data) || spec.destino} no está disponible.`);
+    const price = spec.precio ? Number(record.data?.[spec.precio.desde]) : 0;
+    const values = { [spec.referencia]: reference, [spec.cantidad]: quantity, ...(spec.precio ? { [spec.precio.campo]: Number.isFinite(price) ? price : 0 } : {}) };
+    prepared.push({ values, subtotal: (Number.isFinite(price) ? price : 0) * quantity });
+  }
+  return prepared;
 }
 
 async function run(store, def, ctx = {}) {
@@ -112,7 +138,7 @@ async function run(store, def, ctx = {}) {
       const filters = await resolveFilters(store, def, ctx);
       if (filters.some((filter) => filter.empty)) return [];
       const equality = Object.fromEntries(filters.filter((filter) => filter.operador === '==').map((filter) => [filter.campo, filter.value]));
-      const rows = await store.list(def.capability, equality, ctx.scope || null);
+      const rows = await store.list(def.fuente || def.capability, equality, def.fuente ? null : ctx.scope || null);
       const list = (Array.isArray(rows) ? rows : rows?.data || []).map(flat);
       const rest = filters.filter((filter) => filter.operador !== '==');
       const kept = rest.length ? list.filter((row) => rest.every((filter) => row[filter.campo] !== undefined && compare(row[filter.campo], filter.operador, filter.value))) : list;
@@ -124,7 +150,17 @@ async function run(store, def, ctx = {}) {
       // Lo que completa el servidor no se toma de la petición: quien crea es la sesión y la marca de tiempo es la del registro.
       for (const input of def.sessionInputs || []) values[input.campo] = await sessionValue(store, ctx.user, input);
       for (const input of def.autoInputs || []) values[input.campo] = autoValue(input);
-      return flat(await store.create(def.capability, values, ctx.scope || null));
+      const lines = def.lineas ? await prepareLines(store, def, body) : [];
+      if (def.lineas?.total && lines.length) values[def.lineas.total] = Math.round(lines.reduce((sum, line) => sum + line.subtotal, 0) * 100) / 100;
+      const created = await store.create(def.capability, values, ctx.scope || null);
+      try {
+        for (const line of lines) await store.create(def.lineas.capability, { ...line.values, [def.lineas.fk]: created.id }, ctx.scope || null);
+      } catch (error) {
+        // Sin todas sus líneas el pedido no queda a medias.
+        try { await store.remove(def.capability, created.id, ctx.scope || null); } catch { /* se informa el fallo original */ }
+        throw error;
+      }
+      return { ...flat(created), ...(lines.length ? { lineas: lines.length } : {}) };
     }
     case 'actualizar': {
       const values = pick(body, def.inputs || []);

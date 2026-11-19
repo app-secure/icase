@@ -21,3 +21,8 @@
 .spec-page .kpi strong{font-size:1.8rem}
 .spec-page .empty{color:#64748b;margin:0}
 .spec-page .error{color:#b91c1c;margin:0}
+
+.lines{border:1px solid #e2e8f0;border-radius:8px;padding:.75rem;margin:.5rem 0;display:grid;gap:.5rem}
+.lines legend{font-weight:600;padding:0 .25rem}
+.line-row{display:grid;grid-template-columns:1fr 6rem auto;gap:.5rem;align-items:center}
+.lines-total{margin:.25rem 0 0;text-align:right}

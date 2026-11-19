@@ -116,7 +116,8 @@ class GestionarPlanCodificacion {
     if (etapa === 'alcance_plataforma') {
       if (!Array.isArray(propuesta.plataformas) || !propuesta.plataformas.length || propuesta.plataformas.some(p => !['web', 'móvil'].includes(p))) throw new Error('Selecciona plataformas válidas.');
       const detectadas = propuesta.detectadas?.filter?.(p => ['web', 'móvil'].includes(p));
-      propuesta = { plataformas: [...new Set(propuesta.plataformas)], ...(detectadas?.length ? { detectadas: [...new Set(detectadas)] } : {}) };
+      // `moviles_en_web`: sin aplicación móvil, las pantallas pensadas para móvil se sirven también en la web (adaptadas), en lugar de perderse.
+      propuesta = { plataformas: [...new Set(propuesta.plataformas)], ...(detectadas?.length ? { detectadas: [...new Set(detectadas)] } : {}), ...(typeof propuesta.moviles_en_web === 'boolean' ? { moviles_en_web: propuesta.moviles_en_web } : {}) };
     }
     if (etapa === 'stack_tecnologico') {
       const stack = StackCatalog.resolve(propuesta);

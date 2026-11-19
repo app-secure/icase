@@ -24,8 +24,9 @@ function describeOperation(op) {
   switch (op.tipo) {
     case 'consulta': return `Devuelve ${op.entidad}${where}${op.salida?.length ? ` (campos: ${op.salida.join(', ')})` : ' (todos los campos)'}.`;
     case 'crear': {
-      const system = [...(op.sesionEntradas || []).map((item) => `${item.campo} (la cuenta de la sesión)`), ...(op.autoEntradas || []).map((item) => `${item.campo} (${{ inicial: 'el estado inicial', generado: 'un código que genera el sistema', cero: 'empieza en 0; lo calcula el sistema' }[item.valor] || 'la fecha del registro'})`)];
-      return `Registra un ${op.entidad} con ${(op.entradas || []).join(', ') || 'sus campos'}.${system.length ? ` El sistema completa: ${system.join(', ')}.` : ''}`;
+      const system = [...(op.sesionEntradas || []).map((item) => `${item.campo} (la cuenta de la sesión)`), ...(op.autoEntradas || []).map((item) => `${item.campo} (${{ inicial: 'el estado inicial', generado: 'un código que genera el sistema', cero: 'empieza en 0; lo calcula el sistema', lineas: 'la suma de sus líneas' }[item.valor] || 'la fecha del registro'})`)];
+      const lines = op.lineas ? ` Incluye sus líneas (${op.lineas.entidad}: ${op.lineas.destino.toLowerCase()} y cantidad); el precio sale de cada ${op.lineas.destino.toLowerCase()}.` : '';
+      return `Registra un ${op.entidad} con ${(op.entradas || []).join(', ') || 'sus campos'}.${lines}${system.length ? ` El sistema completa: ${system.join(', ')}.` : ''}`;
     }
     case 'actualizar': return `Modifica ${(op.entradas || []).join(', ') || 'campos'} de un ${op.entidad}${where}.`;
     case 'eliminar': return `Elimina un ${op.entidad}${where}.`;

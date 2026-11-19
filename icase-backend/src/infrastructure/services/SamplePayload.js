@@ -601,7 +601,7 @@ async function exerciseAction(api, operations, action) {
       const created = await createValidRecord(api, operations, target, cleanups, 0);
       const rows = expectStatus(await api(action.path, 'GET'), 200, 'consultar').data;
       if (!Array.isArray(rows)) fail('la consulta debe devolver una lista');
-      const allowed = new Set(['id', ...(action.output || [])]);
+      const allowed = new Set(['id', ...(action.output || []), ...(action.output || []).map((name) => name + '__etiqueta')]); // la etiqueta legible de una referencia acompaña a su campo
       for (const row of rows) {
         if (row.id === undefined) fail('cada fila debe traer su id');
         if ((action.output || []).length) for (const key of Object.keys(row)) if (!allowed.has(key)) fail('devolvió el campo no declarado «' + key + '»');
@@ -617,9 +617,25 @@ async function exerciseAction(api, operations, action) {
       if ((action.autoInputs || []).some((item) => ['ahora', 'hoy'].includes(item.valor))) {
         for (const [name, value] of Object.entries(body)) if (typeof value === 'string' && /^2030-/.test(value)) body[name] = value.replace(/^2030/, '2020');
       }
+      // Un alta con líneas (pedido + platos): sin ellas el servidor responde 400; se elige un registro real y se retiran las líneas al limpiar.
+      if (action.lineas) {
+        const destino = operations.find((item) => item.key === action.lineas.destinoCapability);
+        if (!destino) fail('no tiene operación para ' + action.lineas.destino);
+        const choice = await createValidRecord(api, operations, destino, cleanups, 1);
+        body.lineas = [{ [action.lineas.referencia]: choice.id, [action.lineas.cantidad]: 2 }];
+      }
       const response = expectStatus(await api(action.path, 'POST', body), 201, 'crear');
       if (!response.data.id) fail('la creación no devolvió id');
-      cleanups.unshift(() => api(itemPath(response.data.id), 'DELETE'));
+      if (action.lineas && !(response.data.lineas >= 1)) fail('el alta con líneas no confirmó haberlas guardado');
+      cleanups.unshift(async () => {
+        if (action.lineas) {
+          const child = operations.find((item) => item.key === action.lineas.capability);
+          const listed = child ? await api(child.collectionPath + '?limit=200', 'GET') : null;
+          const rows = Array.isArray(listed?.data) ? listed.data : (listed?.data?.data || []);
+          for (const row of rows) if (String((row.data || row)[action.lineas.fk]) === String(response.data.id)) await api(child.itemPath.replace(':id', row.id), 'DELETE');
+        }
+        return api(itemPath(response.data.id), 'DELETE');
+      });
     } else if (action.type === 'actualizar') {
       const seed = await createValidRecord(api, operations, target, cleanups, 0);
       const body = await bodyFor(seed);

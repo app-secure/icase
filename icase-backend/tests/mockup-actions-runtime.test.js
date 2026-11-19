@@ -215,3 +215,21 @@ describe('mockup-actions: operaciones de la especificación', () => {
     expect(api).not.toHaveBeenCalled();
   });
 });
+
+describe('mockup-actions: botones que fijan un campo sí/no', () => {
+  const acciones = { 'rf-07.editar': { name: 'actualizarPlato', method: 'PATCH', path: '/api/actions/actualizar-plato/:id', byId: true, inputs: ['nombre', 'disponible'], booleanos: ['disponible'] } };
+  const run = async (label) => {
+    const document = page(`<table><tbody><tr data-id="5"><td><button id="b" type="button">${label}</button></td></tr></tbody></table>`);
+    const api = jest.fn().mockResolvedValue({});
+    await runtime.runAction({ event: { preventDefault: jest.fn(), currentTarget: document.getElementById('b') }, operation: 'rf-07', verb: 'editar', api, can: () => true, acciones, onResult: () => {} });
+    return api;
+  };
+
+  test('«Marcar agotado» pone el plato como no disponible', async () => {
+    expect(await run('Marcar Agotado')).toHaveBeenCalledWith('/api/actions/actualizar-plato/5', { method: 'PATCH', body: JSON.stringify({ disponible: false }) });
+  });
+
+  test('«Marcar disponible» lo vuelve a poner disponible', async () => {
+    expect(await run('Marcar Disponible')).toHaveBeenCalledWith('/api/actions/actualizar-plato/5', { method: 'PATCH', body: JSON.stringify({ disponible: true }) });
+  });
+});

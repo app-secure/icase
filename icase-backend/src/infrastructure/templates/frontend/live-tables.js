@@ -1,18 +1,24 @@
 // Las tablas del mockup traen filas de ejemplo: aquí se sustituyen por los registros reales de la consulta de la pantalla.
 // Se conserva el diseño (clases, insignias, botones y campos de cada fila) y solo cambia el contenido.
+import { lineRows } from './mockupActions';
 const plain = (value) => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const LABELS = ['nombre', 'numero', 'titulo', 'codigo', 'descripcion'];
 const YES = /^(si|sí|disponible|activo|activa|habilitado|abierto|abierta|true)$/;
 const NO = /^(no|agotado|agotada|inactivo|inactiva|deshabilitado|cerrado|cerrada|false)$/;
 
 /** Campo de la consulta que corresponde al encabezado de una columna; null si no hay uno claro. */
-export function matchField(header, fields, entity) {
+export function matchField(header, fields, entity, types = {}) {
   const key = plain(header);
   if (!key) return null;
   const compact = key.replace(/ /g, '');
   const candidates = fields.map((name) => ({ name, key: plain(name.replace(/_id$/, '')).replace(/ /g, '') }));
   const exact = candidates.find((item) => item.key === compact);
   if (exact) return exact.name;
+  // «Estado» de algo que solo tiene un campo sí/no (disponible, activo): es ese campo.
+  if (/^(estado|situacion)$/.test(compact)) {
+    const flag = fields.find((name) => types[name] === 'boolean' || /^(disponible|activ[oa]|habilitad[oa])$/.test(plain(name).replace(/ /g, '')));
+    if (flag) return flag;
+  }
   const partial = candidates.find((item) => item.key.length >= 4 && (compact.includes(item.key) || (compact.length >= 4 && item.key.includes(compact))));
   if (partial) return partial.name;
   // «Disponibilidad» ↔ «disponible», «Precio actual» ↔ «precio»: comparten la raíz de la palabra.
@@ -99,6 +105,64 @@ function wireRow(tr, onAction) {
   });
 }
 
+const labelOf = (row) => { for (const key of ['nombre', 'name', 'titulo', 'numero', 'codigo', 'descripcion']) if (row[key] !== undefined && row[key] !== null && String(row[key]).trim()) return String(row[key]); return `#${row.id}`; };
+
+/**
+ * Las líneas de un pedido del diseño (un select de plato y una cantidad por fila): el select se llena con los platos reales, «Añadir» y
+ * «Quitar» copian y retiran filas. El envío las recoge con `collectLines`.
+ */
+export async function bindLines({ root, specMap, api }) {
+  for (const form of root.querySelectorAll('form')) {
+    if (form.__lines) continue;
+    const declared = (form.getAttribute('data-accion') || form.querySelector('[data-accion]:not([data-accion="ui"])')?.getAttribute('data-accion') || '').toLowerCase();
+    const named = specMap && specMap[declared];
+    if (!named || !named.lineas) continue;
+    const rows = lineRows(form, named.inputs);
+    if (!rows.length) continue;
+    let options;
+    try { options = await api(named.path); } catch { continue; }
+    if (!Array.isArray(options)) continue;
+    form.__lines = true;
+    const fill = (select) => {
+      const keep = select.value;
+      select.replaceChildren();
+      const first = select.ownerDocument.createElement('option');
+      first.value = '';
+      first.textContent = 'Selecciona…';
+      select.append(first);
+      for (const row of options) {
+        const option = select.ownerDocument.createElement('option');
+        option.value = String(row.id);
+        const price = row.precio !== undefined ? ` — ${Number(row.precio).toFixed(2)}` : '';
+        option.textContent = `${labelOf(row)}${price}`;
+        select.append(option);
+      }
+      select.value = keep;
+    };
+    rows.forEach((item) => fill(item.select));
+    const template = rows[0].row;
+    form.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button || !form.contains(button)) return;
+      const label = plain(button.textContent);
+      const current = lineRows(form, named.inputs);
+      if (/^(\+ )?(anadir|agregar|otro|nuevo)/.test(label) || /anadir otr|agregar otr/.test(label)) {
+        if (!template) return;
+        event.preventDefault();
+        const copy = template.cloneNode(true);
+        const select = copy.querySelector('select');
+        if (select) { fill(select); select.value = ''; }
+        const quantity = copy.querySelector('input[type="number"]');
+        if (quantity) quantity.value = '1';
+        (current[current.length - 1]?.row || template).after(copy);
+      } else if (/^(eliminar|quitar|remover|x)$/.test(label)) {
+        const mine = current.find((item) => item.row && item.row.contains(button));
+        if (mine && current.length > 1) { event.preventDefault(); mine.row.remove(); }
+      }
+    });
+  }
+}
+
 /** Sustituye las filas de cada tabla del mockup por los registros de la consulta de su bloque (la n-ésima tabla ↔ el n-ésimo listado). */
 export async function bindLiveTables({ root, blocks, actions, api, can, onAction, onShowOperations }) {
   const lists = blocks.filter((block) => ['tabla', 'tarjetas'].includes(block.tipo) && actions[block.operacion]?.type === 'consulta' && actions[block.operacion].capability);
@@ -106,7 +170,7 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
   let bound = 0;
   for (let index = 0; index < Math.min(lists.length, tables.length); index += 1) {
     const action = actions[lists[index].operacion];
-    if (can && !can(action.capability, 'GET')) continue;
+    if (can && !can(action.permiso || action.capability, 'GET')) continue;
     const table = tables[index];
     const body = table.tBodies[0];
     let rows;
@@ -120,11 +184,12 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
     bound += 1;
     const samples = table.__samples;
     const fields = [...new Set([...(lists[index].campos || []), ...(action.output || []), ...Object.keys(rows[0] || {}).filter((key) => key !== 'id' && !key.endsWith('__etiqueta'))])];
+    const types = Object.fromEntries(Object.entries(action.fields || {}).map(([name, meta]) => [name, meta?.type]));
     const headers = Array.from(table.tHead?.rows[0]?.cells || []).map((cell) => cell.textContent);
     const mapping = headers.map((header, position) => {
       const sampleCell = samples[0].cells[position];
       if (sampleCell?.querySelector('form, button, a, input, select')) return null; // columna de acciones
-      return matchField(header, fields, action.entity);
+      return matchField(header, fields, action.entity, types);
     });
     body.replaceChildren();
     if (!rows.length) {
@@ -154,7 +219,95 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
       body.append(tr);
     }
   }
+  // Las listas que quedaron sin tabla se enlazan con las rejillas de tarjetas, en el orden del documento.
+  const leftover = lists.slice(tables.length);
+  const grids = leftover.length ? findRepeaters(root) : [];
+  for (let index = 0; index < Math.min(leftover.length, grids.length); index += 1) {
+    const action = actions[leftover[index].operacion];
+    if (can && !can(action.permiso || action.capability, 'GET')) continue;
+    let rows;
+    try { const data = await api(action.path); rows = Array.isArray(data) ? data : []; } catch { continue; }
+    if (!grids[index].isConnected) return;
+    const fields = [...new Set([...(leftover[index].campos || []), ...(action.output || [])])].filter((name) => name !== 'id');
+    fillCards(grids[index], rows, fields.length ? fields : Object.keys(rows[0] || {}).filter((key) => key !== 'id' && !key.endsWith('__etiqueta')), onAction);
+    bound += 1;
+  }
   notifySamples(root, lists.length - bound, onShowOperations);
+}
+
+const ACTION_CONTROL = '[data-accion]:not([data-accion="ui"])';
+const humanize = (name) => String(name).replace(/_id$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
+
+/**
+ * Rejillas de tarjetas del diseño: un contenedor con varios hijos iguales (misma etiqueta y clases) que no son una tabla, un menú ni un
+ * formulario, y cuyas tarjetas traen botones de acción o bastante texto (así no se confunden con los indicadores de un resumen).
+ */
+export function findRepeaters(root) {
+  const found = [];
+  for (const container of root.querySelectorAll('div, ul, section, ol')) {
+    if (container.closest('table, form, nav, header, select, [data-icase-sample-notice]')) continue;
+    const children = Array.from(container.children);
+    if (children.length < 2) continue;
+    const signature = (child) => `${child.tagName}|${child.getAttribute('class') || ''}`;
+    if (!children.every((child) => signature(child) === signature(children[0]))) continue;
+    const rich = children.every((child) => child.querySelector(ACTION_CONTROL) || child.querySelectorAll('*').length >= 6);
+    if (!rich) continue;
+    if (found.some((other) => other.contains(container) || container.contains(other))) continue;
+    found.push(container);
+  }
+  return found;
+}
+
+/** Valor de un campo para una tarjeta: nombre legible de la referencia, sí/no, fecha corta. */
+function cardValue(row, name) {
+  const value = display(row, name);
+  return value === '' ? '—' : value;
+}
+
+/**
+ * Sustituye las tarjetas de ejemplo por los registros reales conservando el aspecto de la tarjeta (sus clases) y sus botones: el contenido
+ * es el título del registro y sus campos como «Etiqueta: valor». Los textos de ejemplo no se reutilizan: no se sabe a qué campo corresponden.
+ */
+function fillCards(container, rows, fields, onAction) {
+  const document = container.ownerDocument;
+  if (!container.__samples) container.__samples = Array.from(container.children).map((child) => child.cloneNode(true));
+  const template = container.__samples[0];
+  container.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('p');
+    empty.textContent = 'No hay registros para mostrar.';
+    empty.style.cssText = 'grid-column:1/-1;padding:12px;color:#64748b';
+    container.append(empty);
+    return;
+  }
+  const title = LABELS.find((label) => fields.includes(label)) || fields[0];
+  const body = fields.filter((name) => name !== title);
+  const footer = Array.from(template.children).find((child) => child.matches(ACTION_CONTROL) || child.querySelector(ACTION_CONTROL)) || null;
+  for (const row of rows) {
+    const card = template.cloneNode(false);
+    card.setAttribute('data-id', String(row.id));
+    const head = document.createElement('div');
+    head.style.cssText = 'font-weight:700;font-size:1.05rem;margin-bottom:6px';
+    head.textContent = title ? cardValue(row, title) : `#${row.id}`;
+    card.append(head);
+    if (body.length) {
+      const list = document.createElement('dl');
+      list.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:.85rem;margin:0 0 8px';
+      for (const name of body) {
+        const term = document.createElement('dt');
+        term.style.color = '#64748b';
+        term.textContent = humanize(name);
+        const detail = document.createElement('dd');
+        detail.style.margin = '0';
+        detail.textContent = cardValue(row, name);
+        list.append(term, detail);
+      }
+      card.append(list);
+    }
+    if (footer) card.append(footer.cloneNode(true));
+    wireRow(card, onAction);
+    container.append(card);
+  }
 }
 
 /** Si alguna lista del diseño no se pudo llenar con registros reales, se avisa: lo que se ve en ella es de ejemplo. */

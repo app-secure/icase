@@ -65,6 +65,21 @@ class ApplicationContractBuilder {
         ...(specOps.length ? { actions: specOps.map((op) => this._action(op, entities)) } : {})
       };
     });
+    // Las líneas de un pedido se guardan en su propia entidad: si ningún requisito la gestiona, se le crea un almacén de soporte
+    // (sin permisos para nadie salvo el administrador; las escribe el servidor al crear el pedido).
+    for (const operation of [...operations]) {
+      for (const action of operation.actions || []) {
+        const hijo = action.lineas && entities.find((entity) => entity.key === action.lineas.entidadClave);
+        if (!hijo || operations.some((item) => item.entity === hijo.key)) continue;
+        let key = `op-${slug(hijo.name)}`;
+        for (let n = 2; operations.some((item) => item.key === key); n += 1) key = `op-${slug(hijo.name)}-${n}`;
+        operations.push({
+          id: `OP-${slug(hijo.name).toUpperCase()}`, key, name: `Líneas de ${action.lineas.entidad}`, description: `Almacén de soporte de ${hijo.name}`, actors: [],
+          collectionPath: `/api/operations/${key}`, itemPath: `/api/operations/${key}/:id`, methods: [...ALL_METHODS], entity: hijo.key, relatedEntities: [],
+          rules: rules.filter((rule) => rule.entidad === hijo.name), schema: hijo.schema, support: true
+        });
+      }
+    }
     const used = new Set(operations.map((operation) => operation.entity).filter(Boolean));
     // Las relaciones del modelo aprobado se conservan tal cual: si un extremo no tiene RF propio,
     // el generador del backend le crea una operación de soporte en lugar de cambiar el significado de la relación.
@@ -156,6 +171,8 @@ class ApplicationContractBuilder {
       method: { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', eliminar: 'DELETE', transicion: 'POST' }[op.tipo],
       path: `/api/actions/${kebab}${byId ? '/:id' : ''}`,
       byId,
+      // El permiso es el del requisito de la operación: la lista de recompensas del cliente (RF-18) se guarda en el almacén de RF-19, que es del administrador.
+      permission: slug(op.rf),
       entity: op.entidadClave || entities.find((item) => item.name === op.entidad)?.key || null,
       actors: op.actores || [],
       filters: op.filtros || [],
@@ -163,6 +180,7 @@ class ApplicationContractBuilder {
       inputs: op.entradas || [],
       ...(op.sesionEntradas?.length ? { sessionInputs: op.sesionEntradas } : {}),
       ...(op.autoEntradas?.length ? { autoInputs: op.autoEntradas } : {}),
+      ...(op.lineas ? { lineas: op.lineas } : {}),
       output: op.salida || [],
       ...(op.transicion ? { transition: op.transicion } : {}),
       description: op.descripcion || ''
@@ -195,7 +213,15 @@ class ApplicationContractBuilder {
       const reference = target ? operationOf.get(target.key) : null;
       return [name, reference ? { ...meta, referencia: reference } : meta];
     }));
-    return { ...action, capability, filters, fields };
+    // Líneas del alta: el almacén donde se guardan y el del dato del que sale el precio.
+    let lineas;
+    if (action.lineas) {
+      const hijo = operationOf.get(action.lineas.entidadClave);
+      const destino = operationOf.get(action.lineas.destinoClave);
+      if (hijo && destino) lineas = { ...action.lineas, capability: hijo, destinoCapability: destino };
+      else warnings.push(`«${action.name}»: no se pudo guardar las líneas (${action.lineas.entidad}); se crea sin ellas.`);
+    }
+    return { ...action, capability, filters, fields, lineas };
   }
 
   /** GET más los métodos de los verbos válidos declarados, en orden canónico; sin verbos, CRUD completo. */

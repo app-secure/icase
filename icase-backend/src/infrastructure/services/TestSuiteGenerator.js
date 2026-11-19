@@ -42,8 +42,8 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...(functional && this._specScreensE2eTest({ screens: this._allFrontendScreens(frontend), contract, auth }) ? [{ ruta: 'tests/e2e/spec-screens.spec.js', lenguaje: 'javascript', contenido: this._specScreensE2eTest({ screens: this._allFrontendScreens(frontend), contract, auth }) }] : []),
       ...(designedUi ? [{ ruta: 'tests/e2e/designed-ui.spec.js', lenguaje: 'javascript', contenido: designedUi }] : []),
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
-      ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._frontendScreens(frontend)))}] : []),
-      ...(contract.eventos_cambios?.experimental ? [{ ruta: 'tests/e2e/change-events.spec.js', lenguaje: 'javascript', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/frontend/change-events.e2e.template'), 'utf8').replace('__SCREENS__', JSON.stringify(this._frontendScreens(frontend))).replace('__SAMPLES__', () => samplePayload.runtimeSource()) }] : []),
+      ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._adminScreens(frontend)))}] : []),
+      ...(contract.eventos_cambios?.experimental ? [{ ruta: 'tests/e2e/change-events.spec.js', lenguaje: 'javascript', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/frontend/change-events.e2e.template'), 'utf8').replace('__SCREENS__', JSON.stringify(this._adminScreens(frontend))).replace('__SAMPLES__', () => samplePayload.runtimeSource()) }] : []),
       { ruta: 'tests/playwright.config.js', lenguaje: 'javascript', contenido: "import { defineConfig } from '@playwright/test';\n// Tiempos holgados: la verificación corre en contenedores que comparten CPU con la compilación y otras ejecuciones.\nexport default defineConfig({ testDir: './e2e', workers: 1, timeout: 120000, expect: { timeout: 15000 }, retries: 1, use: { baseURL: process.env.BASE_WEB_URL || 'http://localhost:5173', actionTimeout: 30000, navigationTimeout: 60000, trace: 'retain-on-failure' } });\n" },
       { ruta: 'tests/README.md', lenguaje: 'markdown', contenido: this._readme(backend.version, frontend.version) }
     ];
@@ -98,6 +98,14 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     return this._allFrontendScreens(frontend).filter((screen) => screen.origen !== 'especificacion');
   }
 
+  /**
+   * Pantallas que el administrador puede abrir y con registros suyos: las pruebas de módulos (adjuntos, reportes, cambios en vivo) crean
+   * los registros con la sesión del administrador, y una pantalla de otro rol («propios») no los mostraría.
+   */
+  _adminScreens(frontend) {
+    return this._frontendScreens(frontend).filter((screen) => !(screen.roles || []).length || (screen.roles || []).includes('administrador'));
+  }
+
   _allFrontendScreens(frontend) {
     const manifest = frontend.archivos?.find((file) => file.ruta === 'frontend/icase.manifest.json');
     try { return JSON.parse(manifest?.contenido || '{}').pantallas || []; }
@@ -122,7 +130,9 @@ for (const item of cases) {
   test(item.name + ': la pantalla de la especificación muestra los datos reales' + (item.action ? ' de ' + item.action : ''), async ({ page }) => {
     let rows = null;
     if (item.path) {
-      const response = await fetch(apiBase + item.path, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+      // Con la sesión de quien abre la pantalla (su rol): una consulta de «mis mesas» no devuelve lo mismo al administrador.
+      const session = typeof tokenFor === 'function' ? await tokenFor(rolesByRoute[item.route]) : token;
+      const response = await fetch(apiBase + item.path, { headers: session ? { Authorization: 'Bearer ' + session } : {} });
       expect(response.status, 'la operación ' + item.action + ' debe responder 200').toBe(200);
       rows = await response.json();
       expect(Array.isArray(rows)).toBe(true);
@@ -171,7 +181,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript((value) => window.localStorage.setItem('icase_token', value), token);
   const open = page.goto.bind(page);
   page.goto = async (url, options) => {
-    const route = String(url).replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
+    const route = new URL(String(url), 'http://localhost').pathname;
     const value = await tokenFor(rolesByRoute[route]);
     await page.addInitScript((session) => window.localStorage.setItem('icase_token', session), value);
     return open(url, options);

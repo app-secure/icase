@@ -4,11 +4,13 @@ const { JSDOM } = require('jsdom');
 const { transformSync } = require('esbuild');
 
 const source = fs.readFileSync(path.join(__dirname, '../src/infrastructure/templates/frontend/live-tables.js'), 'utf8');
-const live = (() => {
+const load = (code, requireFn = () => ({})) => {
   const module = { exports: {} };
-  new Function('module', 'exports', transformSync(source, { format: 'cjs' }).code)(module, module.exports);
+  new Function('module', 'exports', 'require', transformSync(code, { format: 'cjs' }).code)(module, module.exports, requireFn);
   return module.exports;
-})();
+};
+const actionsRuntime = load(fs.readFileSync(path.join(__dirname, '../src/infrastructure/templates/frontend/mockup-actions.js'), 'utf8'));
+const live = load(source, () => actionsRuntime);
 
 const html = `<main><table><thead><tr><th>Plato</th><th>Precio actual</th><th>Disponibilidad</th><th>Acciones</th></tr></thead><tbody>
   <tr><td>Lomo Saltado</td><td>35.00</td><td><span><i class="dot-ok"></i> Disponible</span></td><td><form data-accion="RF-12.editar"><input name="precio" value="35"><button type="submit">Guardar</button></form></td></tr>
@@ -27,6 +29,8 @@ describe('tablas del mockup con datos reales', () => {
     expect(live.matchField('Disponibilidad', fields, 'plato')).toBe('disponible');
     expect(live.matchField('Mesa', fields, 'plato')).toBe('mesa_id');
     expect(live.matchField('Observaciones', fields, 'plato')).toBeNull();
+    expect(live.matchField('Estado', ['nombre', 'precio', 'disponible'], 'plato', { disponible: 'boolean' })).toBe('disponible');
+    expect(live.matchField('Estado', ['nombre', 'estado'], 'mesa')).toBe('estado');
   });
 
   test('sustituye las filas de ejemplo por los registros, conservando la insignia de estado y los campos de la fila', async () => {
