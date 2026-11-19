@@ -113,6 +113,9 @@ async function runAnalysis(model, cases) {
   const ModelosIaService = require('../src/infrastructure/services/ModelosIaService');
   const plainText = (value) => String(value).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   const fixtures = require('../tests/fixtures/requirements-evaluation.json').filter((item) => !cases.length || cases.includes(item.id));
+  // --input <archivo>: analiza ese texto (sin objetivos de referencia) y muestra lo que se extrae.
+  if (arg('input')) { fixtures.length = 0; fixtures.push({ id: path.basename(arg('input')), input: fs.readFileSync(path.resolve(arg('input')), 'utf8'), objectives: [] }); }
+  else
   // Caso real: el insumo del proyecto de restaurante; el «objetivo» de cada RF aprobado se da por cubierto si el análisis nombra la mayoría de sus palabras clave.
   if (!cases.length || cases.includes('restaurante-real')) {
     const project = await new (repo('MongoProyectoRepository'))().obtenerPorId(projectId);
