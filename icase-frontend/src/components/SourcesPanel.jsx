@@ -291,7 +291,7 @@ export default function SourcesPanel({
       />
 
       <div className="w-full max-w-[1200px]">
-        <header className="initial-analysis__header"><div className="initial-analysis__icon"><Files size={24} /></div><div><p className="text-xs font-bold tracking-wide text-violet-700">FASE 1 · FUENTES</p><h1 className="text-2xl font-bold">Reunir la información del proyecto</h1><p className="initial-analysis__intro">Sube documentos, notas o audios y revisa su contenido. Esta información será la base del análisis inicial.</p></div></header>
+        <header className="initial-analysis__header"><div className="initial-analysis__icon"><Files size={24} /></div><div><h1 className="text-2xl font-bold">Reunir la información del proyecto</h1><p className="initial-analysis__intro">Sube documentos, notas o audios y revisa su contenido. Esta información será la base del análisis inicial.</p></div></header>
         <div className={isProcessed && onContinueToProject ? "mb-3 flex justify-end" : "hidden"}>
           {isProcessed && onContinueToProject && (
             <button

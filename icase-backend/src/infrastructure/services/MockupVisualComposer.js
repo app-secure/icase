@@ -204,6 +204,33 @@ function ensureTitle(root, screen) {
   root.childNodes = [heading, ...(root.childNodes || [])];
 }
 
+/**
+ * En una pantalla móvil de segundo nivel el marco ya trae el botón «volver» en la cabecera. Si el modelo dibujó además el suyo
+ * («‹», «←», «Volver», un icono de flecha), se quita el primero que aparece para no tener dos.
+ */
+function dropOwnBack(root) {
+  const LABEL = /^(?:[<‹«←]|volver|atras|regresar|back)(?:\s.{0,20})?$/;
+  const ARROW = /M15 19l-7-7 7-7|M15 18l-6-6 6-6|M10 19l-7-7m0 0l7-7|M19 12H5m0 0l7 7m-7-7l7-7/;
+  let removed = false;
+  eachNode(root, () => {});
+  const visit = (node, parent) => {
+    if (removed) return;
+    if (parent && ['button', 'a'].includes(node.tagName)) {
+      const text = plain(textOf(node));
+      const label = plain(`${attrOf(node, 'aria-label')} ${attrOf(node, 'title')}`);
+      const paths = [];
+      eachNode(node, (inner) => { if (inner.tagName === 'path') paths.push(attrOf(inner, 'd')); });
+      if (LABEL.test(text) || /volver|atras|regresar|\bback\b/.test(label) || (!text && paths.some((d) => ARROW.test(d)))) {
+        parent.childNodes = parent.childNodes.filter((child) => child !== node);
+        removed = true;
+        return;
+      }
+    }
+    for (const child of [...(node.childNodes || [])]) visit(child, node);
+  };
+  visit(root, null);
+}
+
 // Pantallas de segundo nivel: se llega a ellas desde otra y no son un destino de la barra inferior.
 const SECONDARY = /\b(?:detalle|formulario|confirmacion|confirmar|editar|edicion|nuevo|nueva|crear|registro de)\b/;
 const isPrimary = (item) => !SECONDARY.test(plain(item.nombre));
@@ -312,6 +339,7 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   cleanTitle(content);
   const kind = kindOf(screen);
   if (kind !== 'auth') ensureTitle(content, screen);
+  if (kind === 'mobile' && !isPrimary(screen)) dropOwnBack(content);
   if (kind === 'auth') { scrubAccess(content, { brand: identity.nombre_aplicacion || name, screen }); uiOnlyActions(content); }
   const fragment = serialize(content);
   const styles = [];

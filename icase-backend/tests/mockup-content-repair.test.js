@@ -116,3 +116,25 @@ describe('alineación del contenido en la estructura común y en la app', () => 
     expect(css).toContain('.mockup-content>[class*="max-w-"]:not([class*="mx-auto"])');
   });
 });
+
+describe('botón «volver» duplicado en pantallas móviles de segundo nivel', () => {
+  const MockupVisualComposer = require('../src/infrastructure/services/MockupVisualComposer');
+  const screens = [{ nombre: 'Menú', slug: 'menu', plataforma: 'mobile', flujo: 'Menú', modulo: 'Menú' }, { nombre: 'Detalle de Plato', slug: 'detalle-de-plato', plataforma: 'mobile', flujo: 'Menú', modulo: 'Menú' }];
+  const compose = (main, screen) => MockupVisualComposer.compose(`<html><head></head><body><main>${main}</main></body></html>`, { screen, manifest: screens, identity: {}, name: 'App' });
+
+  test('se quita el «volver» del modelo y queda el del marco; en una pantalla principal no se toca', () => {
+    const detalle = compose('<div><button type="button" aria-label="Volver">←</button><h1>Detalle de Plato</h1></div><button>Agregar al pedido</button>', screens[1]);
+    expect(detalle.match(/class="icase-back"/g)).toHaveLength(1);
+    expect(detalle).not.toContain('>←<');
+    expect(detalle).toContain('Agregar al pedido');
+    const menu = compose('<button aria-label="Volver">←</button><h1>Menú</h1>', screens[0]);
+    expect(menu).toContain('>←<');
+  });
+
+  test('un icono de flecha sin texto también se reconoce, y «Volver al menú» largo no', () => {
+    const icono = compose('<button><svg><path d="M15 19l-7-7 7-7"/></svg></button><h1>Detalle</h1>', screens[1]);
+    expect(icono).not.toContain('M15 19l-7-7 7-7');
+    const largo = compose('<h1>Detalle</h1><button>Volver al menú principal de la aplicación</button>', screens[1]);
+    expect(largo).toContain('Volver al menú principal');
+  });
+});

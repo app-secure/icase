@@ -1,3 +1,4 @@
+import StepSidebar from './StepSidebar';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Code2, Download, FolderTree, Layers3,
@@ -48,6 +49,7 @@ const STATUS_STYLE = {
 };
 
 export default function CodePlanningView({ projectId, projectName, onBackToDiagrams, onOpenDocument }) {
+  const [stepsCollapsed, setStepsCollapsed] = useState(false);
   const [plan, setPlan] = useState(null);
   const [selected, setSelected] = useState('alcance_plataforma');
   const [drafts, setDrafts] = useState(DEFAULTS);
@@ -357,91 +359,28 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
     finally { setBusy(false); }
   };
 
+  const decisionItems = (plan?.etapas || []).filter((item) => EDITABLE_PHASES.includes(item.etapa));
+  const generationGate = {
+    etapa: 'generacion_entrega',
+    titulo: 'Generación y entrega',
+    estado: deliveryArtifact?.aprobado ? 'aprobada' : plan?.etapas?.some(e => e.etapa === 'generacion_backend' && e.habilitada) ? 'en_revision' : 'bloqueada'
+  };
+  // La revisión previa no depende de ninguna aprobación: permite ver qué se generará mientras se toman las decisiones.
+  const previewItem = { etapa: 'revision_previa', titulo: 'Revisión previa', estado: 'pendiente' };
+  const codingSteps = [...decisionItems, previewItem, generationGate].map((item) => ({
+    key: item.etapa,
+    label: item.titulo,
+    state: item.estado === 'aprobada' ? 'done' : item.estado === 'bloqueada' && !item.propuesta ? 'blocked' : item.estado === 'desactualizada' ? 'stale' : 'pending',
+    title: item.etapa === 'generacion_entrega' && item.estado === 'bloqueada'
+      ? 'Aprueba las decisiones anteriores para habilitar la generación y entrega'
+      : `${item.titulo} (${String(item.estado || '').replace('_', ' ')})`
+  }));
+
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-white">
-      {/* SIDEBAR IZQUIERDO DELGADO TIPO ROADMAP: Decisiones de codificación */}
-      <aside className="w-64 shrink-0 border-r border-slate-100 bg-white flex flex-col overflow-y-auto select-none">
-        <div className="px-5 pt-6 pb-3">
-          <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Decisiones de codificación
-          </h2>
-        </div>
-
-        <nav className="flex-1 flex flex-col pb-4">
-          {(() => {
-            const decisionItems = (plan?.etapas || []).filter((item) => EDITABLE_PHASES.includes(item.etapa));
-            const generationGate = {
-              etapa: 'generacion_entrega',
-              titulo: 'Generación y entrega',
-              estado: deliveryArtifact?.aprobado
-                ? 'aprobada'
-                : plan?.etapas?.some(e => e.etapa === 'generacion_backend' && e.habilitada)
-                  ? 'en_revision'
-                  : 'bloqueada'
-            };
-            // La revisión previa no depende de ninguna aprobación: permite ver qué se generará mientras se toman las decisiones.
-            const previewItem = { etapa: 'revision_previa', titulo: 'Revisión previa', estado: 'pendiente' };
-            const roadmapItems = [...decisionItems, previewItem, generationGate];
-
-            return roadmapItems.map((item, idx) => {
-              const isSelected = selected === item.etapa;
-              const isApproved = item.estado === 'aprobada';
-              const isBlocked = item.estado === 'bloqueada' && !item.propuesta;
-              const nextItem = roadmapItems[idx + 1];
-              const isNextApproved = nextItem?.estado === 'aprobada';
-              const showConnector = idx < roadmapItems.length - 1;
-
-              return (
-                <React.Fragment key={item.etapa}>
-                  <button
-                    disabled={isBlocked}
-                    onClick={() => { if (!isBlocked) { setSelected(item.etapa); setSuggestionMeta(null); } }}
-                    className={`group w-full flex items-center gap-3 px-5 py-2.5 text-left text-[13px] transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#F8F4FF] text-[#6D28D9] font-bold'
-                        : isApproved
-                        ? 'text-slate-800 font-semibold hover:bg-slate-50/80'
-                        : isBlocked
-                        ? 'text-slate-400 cursor-not-allowed opacity-65'
-                        : 'text-slate-500 font-medium hover:bg-slate-50/80'
-                    }`}
-                    title={
-                      item.etapa === 'generacion_entrega' && isBlocked
-                        ? 'Aprueba las decisiones anteriores para habilitar la generación y entrega'
-                        : `${item.titulo} (${item.estado?.replace('_', ' ')})`
-                    }
-                  >
-                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
-                      isApproved
-                        ? 'bg-emerald-500 text-white'
-                        : isSelected
-                        ? 'border border-violet-500 bg-violet-100 text-violet-700'
-                        : 'border border-slate-300 bg-white text-slate-500'
-                    }`}>
-                      {isApproved ? <Check size={12} strokeWidth={3} /> : idx + 1}
-                    </span>
-                    <span className="truncate">{item.titulo}</span>
-                    {isBlocked && <LockKeyhole size={12} className="ml-auto shrink-0 text-slate-400" />}
-                  </button>
-
-                  {showConnector && (
-                    <div className="flex items-center px-5 pointer-events-none" aria-hidden="true">
-                      <div className="w-5 flex justify-center">
-                        <span
-                          className={`block w-[2px] h-2.5 rounded-full ${
-                            isApproved && isNextApproved ? 'bg-emerald-500' : 'bg-slate-200'
-                          }`}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </React.Fragment>
-              );
-            });
-          })()}
-
-        </nav>
-      </aside>
+      <StepSidebar title="Codificación" ariaLabel="Pasos de la codificación" steps={codingSteps} currentKey={selected}
+        collapsed={stepsCollapsed} onToggleCollapsed={() => setStepsCollapsed((value) => !value)}
+        onSelect={(key) => { setSelected(key); setSuggestionMeta(null); }} />
 
       {/* SECCIÓN DERECHA: Misma altura y estructura de cabecera que la Fase 2 */}
       <div className="w-full flex-1 overflow-y-auto min-h-0 pt-6 pb-10 px-6 md:px-12 flex flex-col bg-white">
@@ -449,23 +388,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
           Vuelve a revisar o generar: {plan.etapas.filter(item => item.estado === 'desactualizada').map(item => item.titulo).join(', ')}.
         </p>}
         <div className="max-w-6xl mx-auto w-full flex-1 flex flex-col min-h-0">
-          {/* Cabecera superior unificada de Fase 3 (idéntica en altura a Fase 2) */}
           <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
-            <div>
-              <span className="text-[11px] font-semibold text-[#7C3AED] uppercase tracking-wider block">
-                Fase 3: Planificación de la Codificación
-              </span>
-              <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
-                Decisiones técnicas de {projectName || 'proyecto'}
-              </h2>
-            </div>
-
-            <button
-              onClick={onBackToDiagrams}
-              className="text-xs text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
-            >
-              ← Volver a Diagramas y Mockups
-            </button>
+            <h2 className="text-xl font-normal text-slate-900 tracking-tight">Decisiones técnicas de {projectName || 'proyecto'}</h2>
           </div>
 
           {/* Barra compacta de acción y progreso (en el mismo nivel donde Fase 2 ubica sus tabs) */}

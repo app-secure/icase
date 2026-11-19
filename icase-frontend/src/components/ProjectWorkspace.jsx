@@ -1,13 +1,13 @@
 import React, { useState } from "react";
-import { ArrowLeft, Files, FileText, Pencil, PanelLeft } from "lucide-react";
+import { ArrowLeft, Files, FileText, Pencil } from "lucide-react";
 import { RequirementsReferencePanel } from "./ApprovedRequirementsSidebar";
-import PhaseNav from "./PhaseNav";
+import PhaseBar from "./PhaseBar";
+import StepSidebar from "./StepSidebar";
 import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
 import SourcesDrawer from "./SourcesDrawer";
 import RequirementsView from "./RequirementsView";
 import InitialAnalysisView from './InitialAnalysisView';
-import AnalysisFlowProgress from './AnalysisFlowProgress';
 import RequirementJobStatus from './RequirementJobStatus';
 import DiagramsView from "./DiagramsView";
 import DocumentViewer from "./DocumentViewer";
@@ -413,7 +413,7 @@ export default function ProjectWorkspace({
   const [isRequirementsSidebarOpen, setIsRequirementsSidebarOpen] = useState(false);
   const [isManagingSources, setIsManagingSources] = useState(false);
   const [analysisSourcesOpen, setAnalysisSourcesOpen] = useState(false);
-  const [progressHidden, setProgressHidden] = useState(false);
+  const [stepsCollapsed, setStepsCollapsed] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [isReviewingRequirements, setIsReviewingRequirements] = useState(false);
@@ -1397,14 +1397,13 @@ export default function ProjectWorkspace({
       {/* CONTENIDO PRINCIPAL A PANTALLA COMPLETA (100% ANCHO) */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {(project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <>
-      {!analysisSourcesOpen && <button type="button" onClick={() => setAnalysisSourcesOpen(true)} aria-label="Mostrar insumos del proyecto" aria-haspopup="dialog" aria-controls="project-sources-drawer" title="Insumos del proyecto" className="fixed left-3 top-3 z-30 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-[#262235] text-violet-200 shadow-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-400"><PanelLeft size={18} /></button>}
       <SourcesDrawer open={analysisSourcesOpen} onClose={() => setAnalysisSourcesOpen(false)}><SourcesPanel compact sources={project.sources || []} onAddSource={async source => { await handleAddSource(source); await loadInitial(); }} readOnly={project.isAnalysisApproved} isProcessing={['encolado', 'procesando'].includes(requirementJob?.estado)} /></SourcesDrawer>
       </>}
       {project.isAnalysisApproved && project.currentPhase > 1 && !showInitial && !isManagingSources && !isReviewingRequirements && (
         <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
       )}
       <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
-        {projectBackendId && project.isProcessed && !isProcessing && <PhaseNav
+        {projectBackendId && project.isProcessed && !isProcessing && <PhaseBar
           project={project}
           disabled={isProcessing}
           sourcesAvailable={project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements}
@@ -1423,19 +1422,22 @@ export default function ProjectWorkspace({
             if (project.currentPhase !== phase) onUpdateProject({ ...project, currentPhase: phase });
           }} />}
         <RequirementJobStatus key={requirementJob?.id} job={requirementJob} onResume={resumeRequirements} onCancel={async () => { const next = await cancelRequirementJobApi(requirementJob.id); setRequirementJob(next); }} />
-        {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <AnalysisFlowProgress
-          onBack={onBackToDashboard}
-          collapsed={progressHidden} onReveal={() => setProgressHidden(false)} onCollapse={() => setProgressHidden(true)}
-          current={showInitial ? 'analysis' : isManagingSources || !project.isProcessed ? 'sources' : project.currentPhase > 1 && !isReviewingRequirements ? null : 'requirements'}
-          completed={{ sources: Boolean(project.sources?.length), analysis: Boolean(initialState?.aprobado), requirements: Boolean(project.isAnalysisApproved) }}
-          requirementsAvailable={Boolean(project.isProcessed)}
-          laterPhase={!showInitial && !isManagingSources && !isReviewingRequirements && project.currentPhase > 1 ? ({ 2: 'Diseño', 3: 'Codificación', 4: 'Documento' }[project.currentPhase]) : null}
-          onNavigate={key => {
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+        {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <StepSidebar
+          title="Análisis del proyecto" ariaLabel="Pasos del análisis" collapsed={stepsCollapsed} onToggleCollapsed={() => setStepsCollapsed(value => !value)}
+          currentKey={showInitial ? 'analysis' : isManagingSources || !project.isProcessed ? 'sources' : project.currentPhase > 1 && !isReviewingRequirements ? null : 'requirements'}
+          steps={[
+            { key: 'sources', label: 'Fuentes', state: project.sources?.length ? 'done' : 'pending', title: 'Fuentes: información del proyecto' },
+            { key: 'analysis', label: 'Análisis inicial', state: initialState?.aprobado ? 'done' : 'pending', title: 'Análisis inicial: comprender y aprobar' },
+            { key: 'requirements', label: 'Requisitos', state: !project.isProcessed ? 'blocked' : project.isAnalysisApproved ? 'done' : 'pending', title: project.isProcessed ? 'Requisitos: definir y validar RF / RNF' : 'Disponible después de generar los requisitos' }
+          ]}
+          onSelect={key => {
             if (key === 'analysis') { if (showInitial) return; loadInitial().then(() => { setShowInitial(true); setIsManagingSources(false); }).catch(error => setAlertModal({ title: 'Análisis inicial', message: error.message })); return; }
             if (!canLeaveInitial()) return;
             setShowInitial(false); setIsManagingSources(key === 'sources');
             if (key === 'requirements') { if (project.isAnalysisApproved) setIsReviewingRequirements(true); else onUpdateProject({ ...project, currentPhase: 1 }); }
           }} />}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {isProcessing ? (
           /* Barra Dinámica Minimalista con Porcentaje */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
@@ -1659,6 +1661,8 @@ export default function ProjectWorkspace({
             onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 3 })}
           />
         )}
+        </div>
+        </div>
       </main>
       </div>
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

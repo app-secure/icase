@@ -1,3 +1,4 @@
+import StepSidebar from "./StepSidebar";
 import React, { useState } from "react";
 import {
   GitBranch,
@@ -68,6 +69,9 @@ export default function DiagramsView({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const regenerationLock = React.useRef(false);
 
+  const [stepsCollapsed, setStepsCollapsed] = useState(Boolean(isDiagramsApproved));
+  const [showQuality, setShowQuality] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const options = [
     { key: "useCase", type: "casos_de_uso", label: "Casos de Uso", icon: GitBranch },
     { key: "classDiagram", type: "clases_dominio", label: "Clases de Dominio", icon: Box },
@@ -485,73 +489,32 @@ export default function DiagramsView({
     }
   };
 
+  const stateOfOption = (opt) => {
+    const flowItem = opt.type ? diagramFlow?.items?.find((item) => item.tipo === opt.type) : null;
+    const optionState = opt.key === "mockups"
+      ? (isDiagramsApproved ? "disponible" : "bloqueado")
+      : flowItem?.estado || diagrams?.[opt.key]?.status || (diagrams?.[opt.key] ? "pendiente_revision" : (opt.key === "useCase" ? "disponible" : "bloqueado"));
+    const blocked = optionState === "bloqueado" || (opt.key === "mockups" && !isDiagramsApproved);
+    return { flowItem, blocked, state: blocked ? "blocked" : optionState === "aprobado" ? "done" : optionState === "desactualizado" ? "stale" : "pending" };
+  };
+  const designSteps = options.map((opt) => {
+    const { flowItem, blocked, state } = stateOfOption(opt);
+    return { key: opt.key, label: opt.label, state, title: blocked ? `${opt.label}: bloqueado hasta aprobar ${flowItem?.unmet_dependencies?.join(", ") || "los diagramas anteriores"}` : opt.label };
+  });
+  const isMockupWorkspace = selectedKey === "mockups";
+
   return (
-    <div className="w-full h-full flex flex-col min-h-0 bg-white">
-      {/* Contenedor scrolleable que abarca todo el ancho hasta el extremo derecho */}
-      <div className={`w-full flex-1 overflow-y-auto min-h-0 pt-6 pb-10 flex flex-col ${selectedKey === "mockups" ? "px-4" : "px-6 md:px-12"}`}>
-        <div className={`${selectedKey === "mockups" ? "max-w-none" : "max-w-6xl"} mx-auto w-full flex-1 flex flex-col min-h-0`}>
-          {/* Cabecera superior unificada de Fase 2 */}
-          <div className="pb-3 mb-3 border-b border-slate-100 flex items-center justify-between shrink-0">
-            <div>
-              <span className="text-[11px] font-semibold text-[#7C3AED] uppercase tracking-wider block">
-                Fase 2: Modelado del Software & Wireframes
-              </span>
-              <h2 className="text-xl font-normal text-slate-900 tracking-tight mt-0.5">
-                {selectedKey === "mockups"
-                  ? "Wireframes y Mockups de Interfaz del Sistema"
-                  : "Diagramas UML & Arquitectura en Código Puro"}
-              </h2>
-            </div>
-
-            <button
-              onClick={onBackToAnalysis}
-              className="text-xs text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
-            >
-              ← Volver a Requerimientos
-            </button>
-          </div>
-
-          {/* Fila Superior: Tabs de navegación (Casos de Uso, Arquitectura, Clases, Árbol de Navegación, Mockups) */}
-          <div className="flex flex-wrap items-center gap-2 mb-3 shrink-0">
-            {options.map((opt) => {
-              const Icon = opt.icon;
-              const isSelected = selectedKey === opt.key;
-              const flowItem = opt.type ? diagramFlow?.items?.find((item) => item.tipo === opt.type) : null;
-              const optionState = opt.key === "mockups"
-                ? (isDiagramsApproved ? "disponible" : "bloqueado")
-                : flowItem?.estado || diagrams?.[opt.key]?.status || (diagrams?.[opt.key] ? "pendiente_revision" : (opt.key === "useCase" ? "disponible" : "bloqueado"));
-              const isBlocked = optionState === "bloqueado" || (opt.key === "mockups" && !isDiagramsApproved);
-              return (
-                <button
-                  key={opt.key}
-                  disabled={isBlocked}
-                  title={isBlocked ? `Bloqueado hasta aprobar: ${flowItem?.unmet_dependencies?.join(", ") || "los diagramas anteriores"}` : undefined}
-                  onClick={() => {
-                    if (isBlocked) return;
-                    setSelectedKey(opt.key);
-                    setShowVersionHistory(false);
-                  }}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer ${
-                    isSelected
-                      ? "bg-slate-900 text-white shadow-xs"
-                      : isBlocked
-                        ? "bg-slate-50 text-slate-300 cursor-not-allowed"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  {isBlocked ? <LockKeyhole size={13} /> : <Icon size={14} />}
-                  <span>{opt.label}</span>
-                  {optionState === "aprobado" && <Check size={12} className="text-emerald-500" />}
-                  {optionState === "desactualizado" && <RefreshCw size={12} className="text-amber-500" />}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Fila: Selector Vista Gráfica / Código (izquierda) y Control de Calidad (derecha) */}
-          {selectedKey !== "mockups" && (
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-2 shrink-0">
-              <div className="flex flex-wrap items-center gap-2">
+    <div className="flex h-full w-full min-h-0 bg-white">
+      <StepSidebar title="Modelamiento" ariaLabel="Pasos del modelamiento" steps={designSteps} currentKey={selectedKey}
+        collapsed={stepsCollapsed} onToggleCollapsed={() => setStepsCollapsed((value) => !value)}
+        onSelect={(key) => { setSelectedKey(key); setShowVersionHistory(false); setStepsCollapsed(key === "mockups"); }} />
+    <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-white">
+      {/* Contenedor de la vista: los mockups ocupan todo el espacio y gestionan su propio desplazamiento */}
+      <div className={`w-full flex-1 min-h-0 flex flex-col ${isMockupWorkspace ? "overflow-hidden" : "overflow-y-auto pt-4 pb-6 px-6 md:px-10"}`}>
+        <div className={`${isMockupWorkspace ? "max-w-none" : "max-w-6xl"} mx-auto w-full flex-1 flex flex-col min-h-0`}>
+          {/* Una sola fila de herramientas: vista, versión, procedencia y control de calidad. El detalle se abre en una ventana flotante. */}
+          {!isMockupWorkspace && (
+            <div className="relative mb-2 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5">
               <div className="flex items-center bg-slate-100 p-0.5 rounded-full shrink-0">
                 <button
                   type="button"
@@ -577,37 +540,8 @@ export default function DiagramsView({
                 </button>
               </div>
               {currentDiagram && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-medium text-slate-700">Versión {currentDiagram.version || currentFlowItem?.diagrama?.version || 1}</span>}
-              </div>
-
-              {qualityStatus && (
-                <span
-                  className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-medium border shrink-0 ${
-                    qualityInvalid
-                      ? "border-red-200 bg-red-50 text-red-700"
-                      : qualityStatus === "advertencia"
-                        ? "border-amber-200 bg-amber-50 text-amber-800"
-                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  }`}
-                  title={
-                    validationErrors.length || validationWarnings.length
-                      ? [...validationErrors, ...validationWarnings].join("\n")
-                      : `Control de calidad: ${qualityStatus}`
-                  }
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${
-                    qualityInvalid ? "bg-red-500" : qualityStatus === "advertencia" ? "bg-amber-500" : "bg-emerald-500"
-                  }`} />
-                  Control de calidad: {qualityStatus}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Procedencia y validación (sin descripción para aprovechar el espacio) */}
-          {selectedKey !== "mockups" && (
-            <div className="text-xs text-slate-600 mb-3 shrink-0">
               {currentDiagram && (
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-slate-500">
                   {(currentFlowItem?.diagrama?.restaurada_desde_version || currentDiagram.restoredFromVersion) && (
                     <span className="rounded-full bg-sky-50 px-2 py-0.5 text-sky-700">
                       Restaurada desde v{currentFlowItem?.diagrama?.restaurada_desde_version || currentDiagram.restoredFromVersion}
@@ -625,8 +559,24 @@ export default function DiagramsView({
                   )}
                 </div>
               )}
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                {qualityStatus && (() => {
+                  const count = validationErrors.length + validationWarnings.length + (currentState === "desactualizado" ? staleReasons.length : 0) + (currentState === "rechazado" && latestRejectedReview?.observaciones ? 1 : 0);
+                  return (
+                    <button type="button" onClick={() => setShowQuality((value) => !value)} aria-expanded={showQuality} title="Control de calidad, trazabilidad y observaciones"
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-0.5 text-[11px] font-medium ${
+                        qualityInvalid ? "border-red-200 bg-red-50 text-red-700" : qualityStatus === "advertencia" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${qualityInvalid ? "bg-red-500" : qualityStatus === "advertencia" ? "bg-amber-500" : "bg-emerald-500"}`} />
+                      Control de calidad: {qualityStatus}{count > 0 ? ` (${count})` : ""}
+                    </button>
+                  );
+                })()}
+              </div>
+              {showQuality && qualityStatus && (
+                <div className="absolute right-0 top-full z-30 mt-1 max-h-[60vh] w-[min(640px,100%)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 text-[11px] text-slate-700 shadow-xl">
+                  <div className="mb-1 flex items-center justify-between"><p className="text-xs font-semibold text-slate-900">Control de calidad y trazabilidad</p><button type="button" onClick={() => setShowQuality(false)} aria-label="Cerrar" className="cursor-pointer text-base leading-none text-slate-400">×</button></div>
               {currentState === "desactualizado" && staleReasons.length > 0 && (
-                <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                   <div>
                     <p className="font-semibold">Debe regenerarse antes de aprobarse</p>
@@ -634,17 +584,15 @@ export default function DiagramsView({
                   </div>
                 </div>
               )}
-              {currentDiagram && (qualityInvalid || qualityStatus === "advertencia") && (validationErrors.length > 0 || validationWarnings.length > 0) && (
-                <details open key={selectedKey} className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${
-                  qualityInvalid ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"
-                }`}>
-                  <summary className="cursor-pointer select-none font-semibold">Advertencias y validación ({validationErrors.length + validationWarnings.length})</summary>
-                  {validationErrors.map((message) => <p key={message}>• {message}</p>)}
-                  {validationWarnings.map((message) => <p key={message} className="whitespace-pre-line">• {String(message).replace(/\\n/g, '\n')}</p>)}
-                </details>
-              )}
+                  {currentDiagram && (validationErrors.length > 0 || validationWarnings.length > 0) && (
+                    <div className={`mb-2 rounded-lg border px-3 py-2 ${qualityInvalid ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                      <p className="font-semibold">Advertencias y validación ({validationErrors.length + validationWarnings.length})</p>
+                      {validationErrors.map((message) => <p key={message}>• {message}</p>)}
+                      {validationWarnings.map((message) => <p key={message} className="whitespace-pre-line">• {String(message).replace(/\\n/g, '\n')}</p>)}
+                    </div>
+                  )}
               {Array.isArray(currentDiagram?.trazabilidad_rnf) && currentDiagram.trazabilidad_rnf.length > 0 && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Trazabilidad RNF:</span>
                   {currentDiagram.trazabilidad_rnf.map((trace, index) => (
                     <span key={`${trace?.rnf_id || trace}-${index}`} className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
@@ -654,16 +602,18 @@ export default function DiagramsView({
                 </div>
               )}
               {currentState === "rechazado" && latestRejectedReview?.observaciones && (
-                <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[11px] text-violet-800">
+                <div className="mb-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[11px] text-violet-800">
                   <p className="font-semibold">Cambios solicitados para la versión {latestRejectedReview.version}</p>
                   <p>{latestRejectedReview.observaciones}</p>
+                </div>
+              )}
                 </div>
               )}
             </div>
           )}
 
           {/* Main Canvas Area */}
-          <div className="flex-1 flex flex-col min-h-[460px] relative mb-2">
+          <div className={`flex-1 flex flex-col relative ${isMockupWorkspace ? "min-h-0" : "min-h-[460px] pb-20"}`}>
             {selectedKey === "mockups" ? (
               <MockupsView
                 mockups={mockups}
@@ -746,17 +696,53 @@ export default function DiagramsView({
                 />
               </div>
             )}
-              <div className="h-6 shrink-0 bg-white" aria-hidden="true" />
 
           </div>
         </div>
       </div>
 
-      {/* CHAT INTELIGENTE UNIFICADO: Detecta automáticamente el diagrama o mockup activo */}
-      <div className={`w-full shrink-0 border-t border-slate-200 bg-white z-10 py-3.5 ${selectedKey === "mockups" ? "px-4" : "px-6 md:px-12"}`}>
-        <div className={`${selectedKey === "mockups" ? "max-w-none" : "max-w-6xl"} mx-auto w-full flex flex-col gap-2`}>
-          {showReviewPanel && selectedKey !== "mockups" && (
-            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+      {/* Barra flotante de acciones: el chat de ajustes con IA, rechazar, regenerar y aprobar. No ocupa espacio del lienzo. */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex flex-col items-center gap-2 px-3">
+        {(chatOpen || isFixing) && (
+          <div className="pointer-events-auto w-[min(680px,100%)]">
+            <form
+              onSubmit={handleSendCorrection}
+              className="flex w-full items-center bg-white shadow-xl hover:bg-slate-100/60 focus-within:bg-white border border-slate-300 focus-within:border-blue-500 rounded-full px-3 py-2 transition-all shadow-2xs"
+            >
+              <BrainGearsIcon size={16} className="text-blue-600 mr-2 shrink-0" />
+
+              {/* Badge Contextual que indica el artefacto exacto que se está refinando */}
+              <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100/80 text-blue-700 border border-blue-200/80 shrink-0 mr-2 max-w-[160px] truncate">
+                {contextInfo.badge}
+              </span>
+
+              <input
+                type="text"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                autoFocus
+                disabled={isFixing || (selectedKey !== "mockups" && !currentDiagram)}
+                placeholder={contextInfo.placeholder}
+                className="flex-1 bg-transparent text-xs text-slate-800 placeholder:text-slate-400 outline-none min-w-0"
+              />
+
+              <button
+                type="submit"
+                disabled={(isFixing || (selectedKey !== "mockups" && isGeneratingDiagram)) || !prompt.trim() || (selectedKey !== "mockups" && !currentDiagram)}
+                className="p-1 text-blue-600 hover:text-blue-700 disabled:text-slate-300 transition-colors cursor-pointer shrink-0 ml-1"
+                title={`Aplicar ajuste con IA a ${contextInfo.badge}`}
+              >
+                {isFixing || (selectedKey !== "mockups" && isGeneratingDiagram) ? (
+                  <div className="w-3.5 h-3.5 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                ) : (
+                  <Send size={14} />
+                )}
+              </button>
+            </form>
+          </div>
+        )}
+        {showReviewPanel && selectedKey !== "mockups" && (
+            <div className="pointer-events-auto w-[min(680px,100%)] rounded-xl border border-violet-200 bg-violet-50 p-3 shadow-xl">
               <label className="mb-1 block text-xs font-semibold text-violet-900">Observaciones para la siguiente versión</label>
               <p className="mb-2 text-xs text-violet-800">Registra el rechazo sin modificar el diagrama. Después usa «Regenerar diagrama» para aplicar las observaciones. Para un ajuste directo, utiliza el chat con IA.</p>
               <textarea
@@ -780,85 +766,56 @@ export default function DiagramsView({
             </div>
           )}
 
-          <div className="flex items-center gap-3">
-            {/* Input de Ajustes IA Inteligente y Contextual */}
-            <form
-              onSubmit={handleSendCorrection}
-              className="flex-1 flex items-center bg-slate-50 hover:bg-slate-100/60 focus-within:bg-white border border-slate-300 focus-within:border-blue-500 rounded-full px-3 py-1.5 transition-all shadow-2xs"
-            >
-              <BrainGearsIcon size={16} className="text-blue-600 mr-2 shrink-0" />
+        <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur">
+          <button type="button" onClick={() => setChatOpen((open) => !open)} aria-expanded={chatOpen} disabled={selectedKey !== "mockups" && !currentDiagram}
+            title={`Pedir un ajuste con IA a ${contextInfo.badge}`}
+            className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${chatOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+            <BrainGearsIcon size={15} className="text-blue-600" />Ajustar con IA
+          </button>
 
-              {/* Badge Contextual que indica el artefacto exacto que se está refinando */}
-              <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100/80 text-blue-700 border border-blue-200/80 shrink-0 mr-2 max-w-[160px] truncate">
-                {contextInfo.badge}
-              </span>
 
-              <input
-                type="text"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                disabled={isFixing || (selectedKey !== "mockups" && !currentDiagram)}
-                placeholder={contextInfo.placeholder}
-                className="flex-1 bg-transparent text-xs text-slate-800 placeholder:text-slate-400 outline-none min-w-0"
-              />
-
-              <button
-                type="submit"
-                disabled={(isFixing || (selectedKey !== "mockups" && isGeneratingDiagram)) || !prompt.trim() || (selectedKey !== "mockups" && !currentDiagram)}
-                className="p-1 text-blue-600 hover:text-blue-700 disabled:text-slate-300 transition-colors cursor-pointer shrink-0 ml-1"
-                title={`Aplicar ajuste con IA a ${contextInfo.badge}`}
-              >
-                {isFixing || (selectedKey !== "mockups" && isGeneratingDiagram) ? (
-                  <div className="w-3.5 h-3.5 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                ) : (
-                  <Send size={14} />
-                )}
-              </button>
-            </form>
-
-            {selectedKey !== "mockups" && currentDiagram && !["aprobado", "desactualizado", "rechazado"].includes(currentState) && (
-              <button
-                type="button"
-                onClick={() => setShowReviewPanel((visible) => !visible)}
-                aria-expanded={showReviewPanel}
-                title="Registrar un rechazo para la siguiente generación, sin modificar el diagrama ahora"
-                className="rounded-full border border-violet-200 px-4 py-2.5 text-xs font-semibold text-violet-700 hover:bg-violet-50"
-              >
-                Rechazar con observaciones
-              </button>
-            )}
-
-            {selectedKey !== "mockups" && currentDiagram && (
-              <button type="button"
-                disabled={!onGenerateDiagram || isGeneratingDiagram || isRegenerating || isFixing || isSavingCode || isReviewing || restoringVersion !== null || currentState === "bloqueado"}
-                onClick={() => handleRegenerate(currentOption)}
-                className="flex shrink-0 items-center gap-1.5 rounded-full border border-violet-200 px-4 py-2.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed">
-                <RefreshCw size={14} /> Regenerar diagrama
-              </button>
-            )}
-
-            {/* Botón de Aprobación Escalonada: Modelado -> Mockups -> Documento */}
+          {selectedKey !== "mockups" && currentDiagram && !["aprobado", "desactualizado", "rechazado"].includes(currentState) && (
             <button
               type="button"
-              onClick={handleApproveCurrentStage}
-              disabled={isGeneratingDiagram || currentState === "bloqueado" || (selectedKey !== "mockups" && currentState === "aprobado") || (selectedKey === "mockups" && mockupTraceability?.valido === false)}
-              title={selectedKey === "mockups" && mockupTraceability?.valido === false
-                ? `No se puede aprobar: ${(mockupTraceability.errores || []).join(' ') || 'Revisa los errores de trazabilidad.'}`
-                : undefined}
-              className="px-5 py-2.5 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed shrink-0"
+              onClick={() => setShowReviewPanel((visible) => !visible)}
+              aria-expanded={showReviewPanel}
+              title="Registrar un rechazo para la siguiente generación, sin modificar el diagrama ahora"
+              className="rounded-full border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50"
             >
-              {isGeneratingDiagram ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-              <span>{selectedKey === "mockups"
-                ? "Aprobar mockups y pasar a codificación"
-                : currentState === "aprobado"
-                  ? "Diagrama aprobado"
-                  : currentDiagram && !["desactualizado", "rechazado"].includes(currentState) && !qualityInvalid
-                    ? `Aprobar ${currentOption?.label}`
-                    : isGeneratingDiagram
-                      ? "Generando diagrama..."
-                      : `${qualityInvalid || currentState === "rechazado" ? "Regenerar" : "Generar"} ${currentOption?.label}`}</span>
+              Rechazar con observaciones
             </button>
-          </div>
+          )}
+
+          {selectedKey !== "mockups" && currentDiagram && (
+            <button type="button"
+              disabled={!onGenerateDiagram || isGeneratingDiagram || isRegenerating || isFixing || isSavingCode || isReviewing || restoringVersion !== null || currentState === "bloqueado"}
+              onClick={() => handleRegenerate(currentOption)}
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed">
+              <RefreshCw size={14} /> Regenerar diagrama
+            </button>
+          )}
+
+          {/* Botón de Aprobación Escalonada: Modelado -> Mockups -> Documento */}
+          <button
+            type="button"
+            onClick={handleApproveCurrentStage}
+            disabled={isGeneratingDiagram || currentState === "bloqueado" || (selectedKey !== "mockups" && currentState === "aprobado") || (selectedKey === "mockups" && mockupTraceability?.valido === false)}
+            title={selectedKey === "mockups" && mockupTraceability?.valido === false
+              ? `No se puede aprobar: ${(mockupTraceability.errores || []).join(' ') || 'Revisa los errores de trazabilidad.'}`
+              : undefined}
+            className="px-4 py-2 bg-[#7C3AED] hover:bg-[#6D28D9] disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed shrink-0"
+          >
+            {isGeneratingDiagram ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+            <span>{selectedKey === "mockups"
+              ? "Aprobar mockups y pasar a codificación"
+              : currentState === "aprobado"
+                ? "Diagrama aprobado"
+                : currentDiagram && !["desactualizado", "rechazado"].includes(currentState) && !qualityInvalid
+                  ? `Aprobar ${currentOption?.label}`
+                  : isGeneratingDiagram
+                    ? "Generando diagrama..."
+                    : `${qualityInvalid || currentState === "rechazado" ? "Regenerar" : "Generar"} ${currentOption?.label}`}</span>
+          </button>
         </div>
       </div>
       <RegenerateDiagramDialog target={regenerateTarget} busy={isRegenerating}
@@ -899,6 +856,7 @@ export default function DiagramsView({
 
       {/* Toast container flotante en la esquina superior derecha */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+    </div>
     </div>
   );
 }
