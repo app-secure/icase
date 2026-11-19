@@ -11,6 +11,7 @@ function buildCodificacionRoutes(controller, access) {
   router.param('trabajoId', access.trabajo);
   router.get('/:id/codificacion', (req, res) => controller.obtenerPlan(req, res));
   router.post('/:id/codificacion/un-clic', (req, res) => controller.ejecutarModoUnClic(req, res));
+  router.get('/:id/codificacion/vista-previa', (req, res) => controller.vistaPrevia(req, res));
   router.post('/:id/codificacion/etapas/:etapa/sugerencia', (req, res) => controller.sugerirEtapa(req, res));
   router.put('/:id/codificacion/etapas/:etapa', (req, res) => controller.proponerEtapa(req, res));
   router.post('/:id/codificacion/etapas/:etapa/revision', (req, res) => controller.revisarEtapa(req, res));
@@ -25,9 +26,15 @@ function buildCodificacionRoutes(controller, access) {
   router.post('/:id/codificacion/infraestructura/:artefactoId/revision', (req, res) => controller.revisarInfraestructura(req, res));
   router.post('/:id/codificacion/ci-cd/generar', (req, res) => controller.generarPipeline(req, res));
   router.post('/:id/codificacion/ci-cd/:artefactoId/revision', (req, res) => controller.revisarPipeline(req, res));
+  router.get('/:id/codificacion/puerta-funcional', (req, res) => controller.puertaFuncional(req, res));
+  router.post('/:id/codificacion/puerta-funcional/aceptar', (req, res) => controller.aceptarPuertaFuncional(req, res));
+  router.get('/:id/codificacion/ejecucion', (req, res) => controller.estadoEjecucion(req, res));
+  router.post('/:id/codificacion/ejecucion/iniciar', (req, res) => controller.iniciarEjecucion(req, res));
+  router.post('/:id/codificacion/ejecucion/detener', (req, res) => controller.detenerEjecucion(req, res));
   router.post('/:id/codificacion/paquete/generar', (req, res) => controller.generarPaquete(req, res));
   router.post('/:id/codificacion/paquete/:artefactoId/revision', (req, res) => controller.revisarPaquete(req, res));
   router.get('/:id/codificacion/paquete/:artefactoId/descargar', (req, res) => controller.descargarPaquete(req, res));
+  router.get('/:id/artefactos/:artefactoId/descargar', (req, res) => controller.descargarArtefacto(req, res));
   router.get('/:id/artefactos', (req, res) => controller.listarArtefactos(req, res));
   router.post('/:id/artefactos/:artefactoId/verificar', (req, res) => controller.verificarArtefacto(req, res));
   router.post('/:id/artefactos/:artefactoId/verificar-async', (req, res) => controller.iniciarVerificacionAsync(req, res));

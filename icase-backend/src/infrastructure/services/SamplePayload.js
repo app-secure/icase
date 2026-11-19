@@ -82,7 +82,8 @@ function samplePayload(schema, rules, salt) {
     if (adjusted !== undefined) payload[rule.campo] = adjusted;
   }
 
-  const typed = Object.entries(payload).map(([name, value]) => ({ name, type: properties[name].type, format: properties[name].format || null, value }));
+  // Los campos de secretos se guardan como hash y no se devuelven: no se comparan con lo enviado.
+  const typed = Object.entries(payload).filter(([name]) => !properties[name]['x-sensitive']).map(([name, value]) => ({ name, type: properties[name].type, format: properties[name].format || null, value }));
   const defaults = rules.filter((rule) => rule.tipo === 'valor_por_defecto').map((rule) => ({ campo: rule.campo, valor: rule.valor }));
 
   const cases = [];
@@ -90,7 +91,10 @@ function samplePayload(schema, rules, salt) {
   for (const rule of rules) {
     const field = rule.campo;
     const base = { regla: rule.id, tipo: rule.tipo };
-    if (rule.tipo === 'requerido' && (payload[field] !== undefined || parents.some((parent) => parent.campo === field))) cases.push({ ...base, accion: 'crear', omitir: [field], esperado: 422 });
+    if (rule.tipo === 'requerido' && !defaulted.has(field) && !ruleFor('maquina_estados', field) && !ruleFor('calculo', field)
+      && (payload[field] !== undefined || parents.some((parent) => parent.campo === field))) {
+      cases.push({ ...base, accion: 'crear', omitir: [field], esperado: 422 });
+    }
     if (rule.tipo === 'rango' && payload[field] !== undefined) cases.push({ ...base, accion: 'crear', cuerpo: { [field]: rule.max !== undefined ? rule.max + 1 : rule.min - 1 }, esperado: 422 });
     if (rule.tipo === 'longitud' && payload[field] !== undefined) {
       if (rule.max !== undefined) cases.push({ ...base, accion: 'crear', cuerpo: { [field]: 'x'.repeat(rule.max + 1) }, esperado: 422 });
@@ -131,14 +135,15 @@ async function createValidRecord(api, operations, target, cleanups, depth) {
   const body = { ...sample.payload };
   for (const parent of sample.parents) {
     const parentOperation = operations.find((item) => item.schema && item.schema.title === parent.entidad);
-    if (!parentOperation) fail('no existe una operación para la entidad referenciada ' + parent.entidad);
-    body[parent.campo] = (await createValidRecord(api, operations, parentOperation, cleanups, depth + 1)).id;
+    body[parent.campo] = parentOperation
+      ? (await createValidRecord(api, operations, parentOperation, cleanups, depth + 1)).id
+      : '1';
   }
   const response = await api(target.collectionPath, 'POST', { ...body, verification: 'isolated' });
   if (response.status !== 201) fail('crear respondió ' + response.status + ' (se esperaba 201): ' + JSON.stringify(response.data));
   const id = response.data.id || response.data._id;
   if (!id) fail('la creación no devolvió identificador');
-  cleanups.unshift(() => api(target.collectionPath + '/' + id, 'DELETE'));
+  if (!target.methods || target.methods.includes('DELETE')) cleanups.unshift(() => api(target.collectionPath + '/' + id, 'DELETE'));
   return { sample, body, response, id };
 }
 
@@ -154,10 +159,25 @@ async function exerciseOperation(api, operations, operation) {
   };
   const same = (expected, actual, format) => (format === 'date-time' ? Date.parse(expected) === Date.parse(actual) : JSON.stringify(expected) === JSON.stringify(actual));
   const cleanups = [];
+  // Solo se ejercen los métodos que la operación declara; sin `methods` se ejerce el ciclo completo.
+  const declared = (method) => !operation.methods || operation.methods.includes(method);
 
   try {
+    if (!declared('POST')) {
+      const listing = expectStatus(await api(operation.collectionPath), 200, 'listar');
+      if (!Array.isArray(listing.data) && !Array.isArray((listing.data || {}).data)) fail('el listado no devolvió una colección');
+      const limited = await api(operation.collectionPath + '?page=1&limit=1');
+      if (limited.status === 200) {
+        const limitedRecords = Array.isArray(limited.data) ? limited.data : (limited.data.data || []);
+        if (limitedRecords.length > 1) fail('la paginación con limit=1 devolvió más de un registro');
+      }
+      return;
+    }
     const main = await createValidRecord(api, operations, operation, cleanups, 0);
     const stored = main.response.data.data;
+    for (const name of Object.keys(operation.schema.properties || {}).filter((key) => operation.schema.properties[key]['x-sensitive'])) {
+      if (stored[name] !== undefined) fail('el campo ' + name + ' es un secreto y no debe devolverse');
+    }
     for (const field of main.sample.typed) {
       if (!same(field.value, stored[field.name], field.format)) fail('el campo ' + field.name + ' no conservó su tipo (' + JSON.stringify(stored[field.name]) + ')');
     }
@@ -174,7 +194,8 @@ async function exerciseOperation(api, operations, operation) {
       const pagedRecords = Array.isArray(paged.data) ? paged.data : (paged.data.data || []);
       if (pagedRecords.length > 1) fail('la paginación con limit=1 devolvió más de un registro');
     }
-    const textField = main.sample.typed.find((field) => ['string', 'date'].includes(field.type) && field.value);
+    const textField = main.sample.typed.find((field) => field.type === 'string' && !['date-time', 'date', 'time'].includes(field.format) && field.value)
+      || main.sample.typed.find((field) => ['string', 'date'].includes(field.type) && field.value);
     if (textField) {
       const term = String(textField.value).slice(0, 4);
       if (term) {
@@ -186,14 +207,17 @@ async function exerciseOperation(api, operations, operation) {
       }
     }
 
-    const updated = expectStatus(await api(operation.collectionPath + '/' + main.id, 'PATCH', { verification: 'updated' }), 200, 'modificar');
-    if (updated.data.data.verification !== 'updated') fail('la modificación no se aplicó');
-    if (Object.keys(stored).some((key) => updated.data.data[key] === undefined)) fail('la modificación parcial perdió datos');
+    if (declared('PATCH')) {
+      const updated = expectStatus(await api(operation.collectionPath + '/' + main.id, 'PATCH', { verification: 'updated' }), 200, 'modificar');
+      if (updated.data.data.verification !== 'updated') fail('la modificación no se aplicó');
+      if (Object.keys(stored).some((key) => updated.data.data[key] === undefined)) fail('la modificación parcial perdió datos');
+    }
 
     const wrong = main.sample.typed.find((field) => ['integer', 'number', 'boolean'].includes(field.type));
     if (wrong) expectStatus(await api(operation.collectionPath, 'POST', { ...main.body, [wrong.name]: 'valor-que-no-corresponde' }), 400, 'rechazar un tipo incorrecto');
 
     for (const item of main.sample.cases) {
+      if (item.accion === 'modificar' && !declared('PATCH')) continue;
       const label = item.regla + ' (' + item.tipo + ')';
       let response;
       if (item.accion === 'modificar') {
@@ -202,14 +226,16 @@ async function exerciseOperation(api, operations, operation) {
         const body = item.accion === 'duplicar' ? { ...main.body } : { ...main.body, ...(item.cuerpo || {}) };
         for (const field of item.omitir || []) delete body[field];
         response = await api(operation.collectionPath, 'POST', body);
-        if (response.status === 201) cleanups.unshift(() => api(operation.collectionPath + '/' + (response.data.id || response.data._id), 'DELETE'));
+        if (response.status === 201 && declared('DELETE')) cleanups.unshift(() => api(operation.collectionPath + '/' + (response.data.id || response.data._id), 'DELETE'));
       }
       if (response.status !== item.esperado) fail('regla ' + label + ' respondió ' + response.status + ' (se esperaba ' + item.esperado + '): ' + JSON.stringify(response.data));
       if (item.esperado === 422 && !(response.data.details || []).some((detail) => detail.regla === item.regla)) fail('regla ' + label + ' fue rechazada por otra causa: ' + JSON.stringify(response.data));
     }
 
-    expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 200, 'eliminar');
-    expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 404, 'eliminar dos veces');
+    if (declared('DELETE')) {
+      expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 200, 'eliminar');
+      expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 404, 'eliminar dos veces');
+    }
   } finally {
     for (const cleanup of cleanups) { try { await cleanup(); } catch (error) { /* limpieza de mejor esfuerzo */ } }
   }
@@ -252,6 +278,16 @@ async function setupAccess(base, config) {
   };
 }
 
+function permissionMethods(entry) {
+  if (!entry) return [];
+  return Array.isArray(entry) ? entry : (Array.isArray(entry.metodos) ? entry.metodos : []);
+}
+
+function permissionScope(entry) {
+  if (!entry || Array.isArray(entry)) return 'todos';
+  return entry.alcance === 'propios' ? 'propios' : 'todos';
+}
+
 /** Comprueba la matriz de permisos de una operación para cada rol, además del acceso sin sesión. */
 async function exerciseAccess(access, operations, operation, matrix) {
   const fail = (message) => { throw new Error(operation.id + ' (acceso): ' + message); };
@@ -269,7 +305,7 @@ async function exerciseAccess(access, operations, operation, matrix) {
     status(await access.invalid(path), 401, 'listar con un token alterado');
     const record = await createValidRecord(access.admin, operations, operation, cleanups, 0);
     for (const [role, session] of Object.entries(access.roles)) {
-      const allowed = matrix[role] || [];
+      const allowed = permissionMethods(matrix[role]);
       const label = 'rol ' + role;
       const check = (response, method, text) => (allowed.includes(method) ? permitted(response, label + ' ' + text) : status(response, 403, label + ' ' + text + ' sin permiso'));
       check(await session.api(path), 'GET', 'listar');
@@ -364,12 +400,17 @@ async function exerciseOpenApi(api, operations, auth) {
   for (const operation of operations) {
     const collection = doc.paths[operation.collectionPath];
     const item = doc.paths[operation.collectionPath + '/{id}'];
-    if (!collection || !collection.get || !collection.post) fail('falta documentar listar y crear en ' + operation.collectionPath);
-    if (!item || !item.patch || !item.delete) fail('falta documentar modificar y eliminar en ' + operation.collectionPath + '/{id}');
-    const required = ((((collection.post.requestBody || {}).content || {})['application/json'] || {}).schema || {}).$ref;
+    // Se exige documentar exactamente los métodos que la operación declara (sin `methods`, el CRUD completo).
+    const declared = (method) => !operation.methods || operation.methods.includes(method);
+    if (!collection || !collection.get) fail('falta documentar listar en ' + operation.collectionPath);
+    if (declared('POST') !== Boolean(collection.post)) fail(declared('POST') ? 'falta documentar crear en ' + operation.collectionPath : 'se documenta crear en ' + operation.collectionPath + ' pero la operación no lo declara');
+    if (declared('PATCH') !== Boolean(item && item.patch)) fail(declared('PATCH') ? 'falta documentar modificar en ' + operation.collectionPath + '/{id}' : 'se documenta modificar en ' + operation.collectionPath + '/{id} pero la operación no lo declara');
+    if (declared('DELETE') !== Boolean(item && item.delete)) fail(declared('DELETE') ? 'falta documentar eliminar en ' + operation.collectionPath + '/{id}' : 'se documenta eliminar en ' + operation.collectionPath + '/{id} pero la operación no lo declara');
+    const required = collection.post ? ((((collection.post.requestBody || {}).content || {})['application/json'] || {}).schema || {}).$ref : undefined;
     const schema = required ? doc.components.schemas[required.split('/').pop()] : null;
+    const defaulted = new Set((operation.rules || []).filter((rule) => ['valor_por_defecto', 'maquina_estados'].includes(rule.tipo)).map((rule) => rule.campo));
     for (const rule of operation.rules || []) {
-      if (rule.tipo === 'requerido' && schema && !(schema.required || []).includes(rule.campo)) fail(operation.id + ': la regla ' + rule.id + ' no figura como campo obligatorio');
+      if (rule.tipo === 'requerido' && schema && !defaulted.has(rule.campo) && !(schema.required || []).includes(rule.campo)) fail(operation.id + ': la regla ' + rule.id + ' no figura como campo obligatorio');
       if (rule.tipo === 'rango' && schema && schema.properties[rule.campo].maximum !== rule.max) fail(operation.id + ': la regla ' + rule.id + ' no figura como máximo');
     }
   }
@@ -378,14 +419,265 @@ async function exerciseOpenApi(api, operations, auth) {
   if (secured !== Boolean(doc.paths['/api/auth/login'])) fail('la ruta de inicio de sesión debe documentarse solo con autenticación');
 }
 
+async function exerciseAssociation(api, operations, association, access, auth) {
+  const fail = (message) => { throw new Error('N:M ' + association.table + ': ' + message); };
+  const expectStatus = (response, expected, label) => {
+    if (response.status !== expected) fail(label + ' respondió ' + response.status + ' (se esperaba ' + expected + ')');
+    return response.data;
+  };
+  if (!association.endpoints_generated) fail('no hay API generada');
+  const endpoints = (association.operations || []).map((keys) => operations.find((operation) => keys.includes(operation.key)));
+  if (endpoints.length !== 2 || endpoints.some((endpoint) => !endpoint)) fail('faltan operaciones para crear ambos extremos');
+  const cleanups = [];
+  const path = '/api/associations/' + encodeURIComponent(association.table);
+  try {
+    const source = await createValidRecord(api, operations, endpoints[0], cleanups, 0);
+    const targets = [await createValidRecord(api, operations, endpoints[1], cleanups, 0), await createValidRecord(api, operations, endpoints[1], cleanups, 0)];
+    const pair = (target) => ({ source_id: String(source.id), target_id: String(target.id) });
+    const listPath = path + '?source_id=' + encodeURIComponent(source.id);
+    const absent = await createValidRecord(api, operations, endpoints[1], cleanups, 0);
+    expectStatus(await api(endpoints[1].collectionPath + '/' + absent.id, 'DELETE'), 200, 'preparar extremo inexistente');
+    expectStatus(await api(path, 'POST', pair(absent)), 404, 'rechazar extremo inexistente');
+    expectStatus(await api(path, 'POST', { source_id: String(source.id), target_id: 'no-es-un-id' }), 400, 'rechazar ID inválido');
+    for (const target of targets) {
+      cleanups.unshift(() => api(path, 'DELETE', pair(target)));
+      expectStatus(await api(path, 'POST', pair(target)), 200, 'asociar');
+      expectStatus(await api(path, 'POST', pair(target)), 200, 'repetir asociación idempotente');
+    }
+    const first = expectStatus(await api(listPath + '&limit=1'), 200, 'primera página');
+    if (!Array.isArray(first.data) || first.data.length !== 1 || first.has_more !== true) fail('primera página o has_more incorrectos');
+    const second = expectStatus(await api(listPath + '&limit=1&after_target_id=' + encodeURIComponent(first.data[0].target_id)), 200, 'segunda página');
+    if (!Array.isArray(second.data) || second.data.length !== 1 || second.has_more !== false) fail('segunda página o cursor incorrectos');
+    const rows = [...first.data, ...second.data];
+    if (new Set(rows.map((row) => String(row.target_id))).size !== 2 || targets.some((target) => !rows.some((row) => String(row.target_id) === String(target.id))) || rows.some((row) => String(row.source_id) !== String(source.id))) fail('vínculos duplicados, omitidos o asociados a otro origen');
+    expectStatus(await api(endpoints[0].collectionPath + '/' + source.id, 'DELETE'), 409, 'proteger origen vinculado');
+    expectStatus(await api(endpoints[1].collectionPath + '/' + targets[0].id, 'DELETE'), 409, 'proteger destino vinculado');
+    if (access) {
+      expectStatus(await access.anonymous(listPath), 401, 'consulta anónima');
+      expectStatus(await access.invalid(path, 'POST', pair(targets[0])), 401, 'token inválido');
+      for (const [role, session] of Object.entries(access.roles)) {
+        const permitted = (verbs) => association.operations.every((keys) => keys.some((key) => verbs.every((verb) => permissionMethods(auth.operaciones?.[key]?.[role]).includes(verb))));
+        expectStatus(await session.api(listPath), permitted(['GET']) ? 200 : 403, 'lectura del rol ' + role);
+        const write = permitted(['GET', 'PATCH']);
+        // Usar un vínculo ya existente para no alterar el caso de otros roles.
+        expectStatus(await session.api(path, 'POST', pair(targets[0])), write ? 200 : 403, 'asociación del rol ' + role);
+        expectStatus(await session.api(path, 'DELETE', pair(targets[0])), write ? 200 : 403, 'desasociación del rol ' + role);
+        if (write) expectStatus(await session.api(path, 'POST', pair(targets[0])), 200, 'restaurar vínculo del rol ' + role);
+      }
+    }
+    for (const target of targets) {
+      expectStatus(await api(path, 'DELETE', pair(target)), 200, 'desasociar');
+      expectStatus(await api(path, 'DELETE', pair(target)), 200, 'repetir desasociación idempotente');
+      const records = expectStatus(await api(endpoints[1].collectionPath), 200, 'conservar destino');
+      const data = Array.isArray(records) ? records : records.data;
+      if (!data?.some((record) => String(record.id || record._id) === String(target.id))) fail('desasociar borró el destino');
+    }
+    const empty = expectStatus(await api(listPath), 200, 'lista vacía');
+    if (!Array.isArray(empty.data) || empty.data.length || empty.has_more !== false) fail('desasociación no persistida');
+    expectStatus(await api(endpoints[0].collectionPath + '/' + source.id, 'DELETE'), 200, 'eliminar origen después de desasociar');
+    return { table: association.table, estado: 'correcta' };
+  } finally {
+    for (const cleanup of cleanups) { try { await cleanup(); } catch { /* Solo datos creados por esta prueba, mejor esfuerzo. */ } }
+  }
+}
+
+/** Dos usuarios del mismo rol con alcance «propios»: aislamiento, 404 cruzado y propietario no falsificable. */
+async function exerciseOwnership(access, operations, operation, matrix, config = {}) {
+  const fail = (message) => { throw new Error(operation.id + ' (propiedad): ' + message); };
+  const status = (response, expected, label) => {
+    if (response.status !== expected) fail(label + ' respondió ' + response.status + ' (se esperaba ' + expected + '): ' + JSON.stringify(response.data));
+    return response;
+  };
+  const limited = Object.entries(matrix || {}).find(([, entry]) => permissionScope(entry) === 'propios' && permissionMethods(entry).includes('POST') && permissionMethods(entry).includes('GET'));
+  if (!limited) return;
+  const role = limited[0];
+  const first = access.roles[role];
+  if (!first) fail('falta el usuario del rol ' + role);
+  const base = config.base;
+  const email = 'own-peer-' + access.salt + '-' + operation.key + '@example.test';
+  const password = 'Passw0rd-' + access.salt;
+  const createdUser = status(await access.admin('/api/users', 'POST', { email, password, nombre: 'Par', rol: role }), 201, 'crear segundo usuario');
+  const session = status(await access.anonymous('/api/auth/login', 'POST', { email, password }), 200, 'sesión del segundo usuario');
+  const second = { api: makeApi(base, session.data.token), userId: createdUser.data.id };
+  const cleanups = [() => access.admin('/api/users/' + second.userId, 'DELETE')];
+  try {
+    const mine = await createValidRecord(first.api, operations, operation, cleanups, 0);
+    const theirs = await createValidRecord(second.api, operations, operation, cleanups, 1);
+    const listed = status(await first.api(operation.collectionPath), 200, 'listar propios');
+    const rows = Array.isArray(listed.data) ? listed.data : listed.data.data;
+    if (!rows.some((row) => String(row.id) === String(mine.id))) fail('el listado omitió el registro propio');
+    if (rows.some((row) => String(row.id) === String(theirs.id))) fail('el listado expuso un registro ajeno');
+    // Un registro ajeno no existe para quien solo ve lo suyo (404). Si el rol ni siquiera puede usar ese método, la política lo
+    // rechaza antes (403): el permiso se comprueba primero, y ese es el comportamiento correcto, no un fallo de aislamiento.
+    const allowed = permissionMethods(limited[1]);
+    status(await first.api(operation.collectionPath + '/' + theirs.id, 'PATCH', { verification: 'ajeno' }), allowed.includes('PATCH') ? 404 : 403, 'modificar ajeno');
+    status(await first.api(operation.collectionPath + '/' + theirs.id, 'DELETE'), allowed.includes('DELETE') ? 404 : 403, 'borrar ajeno');
+    const forged = await first.api(operation.collectionPath, 'POST', { ...(await createValidRecord(first.api, operations, operation, cleanups, 2)).body, owner_id: second.userId, __owner: second.userId });
+    if (forged.status === 201) {
+      cleanups.unshift(() => first.api(operation.collectionPath + '/' + forged.data.id, 'DELETE'));
+      const seen = status(await second.api(operation.collectionPath), 200, 'listar tras falsificar propietario');
+      const data = Array.isArray(seen.data) ? seen.data : seen.data.data;
+      if (data.some((row) => String(row.id) === String(forged.data.id))) fail('el cliente pudo asignar un propietario ajeno');
+      if (JSON.stringify(forged.data).includes(String(second.userId)) && /owner/.test(JSON.stringify(forged.data))) fail('la API expuso el propietario');
+    }
+    const filtered = await first.api(operation.collectionPath + '?owner_id=' + second.userId + '&__owner=' + second.userId);
+    if (filtered.status === 200) {
+      const data = Array.isArray(filtered.data) ? filtered.data : filtered.data.data;
+      if (data.some((row) => String(row.id) === String(theirs.id))) fail('el filtro de consulta reveló registros ajenos');
+    }
+    for (const candidate of operations) {
+      // Sin la entidad de la operación no se sabe qué campos la referencian: comparar «nada» con «nada» daba falsos candidatos (`id`).
+      if (!operation.entity) break;
+      const keyOf = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const reference = Object.entries(candidate.schema?.properties || {}).find(([, schema]) => schema && schema['x-references'] && keyOf(schema['x-references']) === String(operation.entity));
+      if (!reference) continue;
+      const candidateEntry = (config.auth?.operaciones || {})[candidate.key]?.[role];
+      if (permissionScope(candidateEntry) !== 'propios') continue;
+      // Una operación reducida pierde POST en la política: el rol recibiría 403 al crear.
+      if (!permissionMethods(candidateEntry).includes('POST') || (candidate.methods && !candidate.methods.includes('POST'))) continue;
+      const payload = await createValidRecord(first.api, operations, candidate, cleanups, 0);
+      const conflict = await first.api(candidate.collectionPath, 'POST', { ...payload.body, [reference[0]]: theirs.id });
+      if (conflict.status !== 409) fail('referencia cruzada en ' + candidate.id + '.' + reference[0] + ' (rol ' + role + ') respondió ' + conflict.status + ': ' + JSON.stringify(conflict.data).slice(0, 300));
+    }
+    for (const association of config.associations || []) {
+      const ends = association.operations || [];
+      const sourceKeys = Array.isArray(ends[0]) ? ends[0] : [];
+      const targetKeys = Array.isArray(ends[1]) ? ends[1] : [];
+      // Solo cuando la operación actual es el extremo source: source_id = registro propio.
+      if (!sourceKeys.includes(operation.key)) continue;
+      const targetOp = operations.find((item) => targetKeys.includes(item.key));
+      if (!targetOp) continue;
+      const targetEntry = (config.auth?.operaciones || {})[targetOp.key]?.[role];
+      if (permissionScope(targetEntry) !== 'propios') continue;
+      if (!permissionMethods(targetEntry).includes('POST') || (targetOp.methods && !targetOp.methods.includes('POST'))) continue;
+      const myTarget = await createValidRecord(first.api, operations, targetOp, cleanups, 0);
+      const theirTarget = await createValidRecord(second.api, operations, targetOp, cleanups, 0);
+      // Extremo ajeno: 404 (mismo contrato CRUD), nunca 403 de “N:M prohibido”.
+      const foreign = await first.api('/api/associations/' + encodeURIComponent(association.table), 'POST', { source_id: String(mine.id), target_id: String(theirTarget.id) });
+      if (foreign.status !== 404) fail('N:M con extremo ajeno respondió ' + foreign.status);
+      const linked = status(await first.api('/api/associations/' + encodeURIComponent(association.table), 'POST', { source_id: String(mine.id), target_id: String(myTarget.id) }), 200, 'vincular extremos propios');
+      if (!linked.data?.associated) fail('N:M no asoció extremos propios');
+      // Sin filtro de targets, el listado incluiría el vínculo ajeno si alguien lo hubiera creado; comprobamos que el 404 se mantuvo.
+      const listed = status(await first.api('/api/associations/' + encodeURIComponent(association.table) + '?source_id=' + encodeURIComponent(String(mine.id))), 200, 'listar vínculos propios');
+      const linkRows = Array.isArray(listed.data?.data) ? listed.data.data : [];
+      if (!linkRows.some((row) => String(row.target_id) === String(myTarget.id))) fail('N:M omitió el vínculo propio');
+      if (linkRows.some((row) => String(row.target_id) === String(theirTarget.id))) fail('N:M listó un extremo ajeno');
+    }
+  } finally {
+    for (const cleanup of cleanups) { try { await cleanup(); } catch { /* mejor esfuerzo */ } }
+  }
+}
+
+/**
+ * Ejerce una operación de negocio de la especificación sobre el backend en marcha: consulta, creación, actualización,
+ * baja o cambio de estado. Crea sus propios datos y los limpia; cualquier discrepancia lanza un Error.
+ */
+async function exerciseAction(api, operations, action) {
+  const fail = (message) => { throw new Error(action.name + ': ' + message); };
+  const expectStatus = (response, status, label) => {
+    if (response.status !== status) fail(label + ' respondió ' + response.status + ' (se esperaba ' + status + '): ' + JSON.stringify(response.data));
+    return response;
+  };
+  const target = operations.find((item) => item.key === action.capability);
+  if (!target) fail('no tiene operación de almacén (' + action.capability + ')');
+  const pick = (source, names) => Object.fromEntries((names || []).filter((name) => source[name] !== undefined).map((name) => [name, source[name]]));
+  const cleanups = [];
+  // Una entrada que es una relación opcional (la persona asignada a una mesa) no viene en el registro de ejemplo: se crea el
+  // registro relacionado y se usa su id, como lo haría quien elige uno en la lista.
+  const bodyFor = async (seed) => {
+    const body = pick(seed.body, action.inputs);
+    for (const name of action.inputs || []) {
+      if (body[name] !== undefined) continue;
+      const reference = target.schema?.properties?.[name]?.['x-references'];
+      const parent = reference ? operations.find((item) => item.schema && item.schema.title === reference) : null;
+      if (parent) body[name] = (await createValidRecord(api, operations, parent, cleanups, 1)).id;
+    }
+    return body;
+  };
+  const itemPath = (id) => target.itemPath.replace(':id', id);
+  const route = (id) => action.path.replace(':id', id);
+  try {
+    if (action.type === 'consulta') {
+      const created = await createValidRecord(api, operations, target, cleanups, 0);
+      const rows = expectStatus(await api(action.path, 'GET'), 200, 'consultar').data;
+      if (!Array.isArray(rows)) fail('la consulta debe devolver una lista');
+      const allowed = new Set(['id', ...(action.output || []), ...(action.output || []).map((name) => name + '__etiqueta')]); // la etiqueta legible de una referencia acompaña a su campo
+      for (const row of rows) {
+        if (row.id === undefined) fail('cada fila debe traer su id');
+        if ((action.output || []).length) for (const key of Object.keys(row)) if (!allowed.has(key)) fail('devolvió el campo no declarado «' + key + '»');
+      }
+      // Sin filtros, el registro recién creado debe aparecer: comprueba que la consulta lee datos reales.
+      if (!(action.filters || []).length && !rows.some((row) => String(row.id) === String(created.id))) fail('el registro creado no aparece en la consulta');
+    } else if (action.type === 'crear') {
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      await api(itemPath(seed.id), 'DELETE');
+      const body = await bodyFor(seed);
+      // Si el servidor pone la fecha del registro («ahora»), las demás fechas del ejemplo deben ser anteriores: un cierre no es
+      // anterior a su apertura. Los datos de ejemplo usan 2030, que en un alta real sería una apertura en el futuro.
+      if ((action.autoInputs || []).some((item) => ['ahora', 'hoy'].includes(item.valor))) {
+        for (const [name, value] of Object.entries(body)) if (typeof value === 'string' && /^2030-/.test(value)) body[name] = value.replace(/^2030/, '2020');
+      }
+      // Un alta con líneas (pedido + platos): sin ellas el servidor responde 400; se elige un registro real y se retiran las líneas al limpiar.
+      if (action.lineas) {
+        const destino = operations.find((item) => item.key === action.lineas.destinoCapability);
+        if (!destino) fail('no tiene operación para ' + action.lineas.destino);
+        const choice = await createValidRecord(api, operations, destino, cleanups, 1);
+        body.lineas = [{ [action.lineas.referencia]: choice.id, [action.lineas.cantidad]: 2 }];
+      }
+      const response = expectStatus(await api(action.path, 'POST', body), 201, 'crear');
+      if (!response.data.id) fail('la creación no devolvió id');
+      if (action.lineas && !(response.data.lineas >= 1)) fail('el alta con líneas no confirmó haberlas guardado');
+      cleanups.unshift(async () => {
+        if (action.lineas) {
+          const child = operations.find((item) => item.key === action.lineas.capability);
+          const listed = child ? await api(child.collectionPath + '?limit=200', 'GET') : null;
+          const rows = Array.isArray(listed?.data) ? listed.data : (listed?.data?.data || []);
+          for (const row of rows) if (String((row.data || row)[action.lineas.fk]) === String(response.data.id)) await api(child.itemPath.replace(':id', row.id), 'DELETE');
+        }
+        return api(itemPath(response.data.id), 'DELETE');
+      });
+    } else if (action.type === 'actualizar') {
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      const body = await bodyFor(seed);
+      const response = expectStatus(await api(route(seed.id), 'PATCH', body), 200, 'actualizar');
+      if (String(response.data.id) !== String(seed.id)) fail('devolvió otro registro');
+      expectStatus(await api(route('no-existe-0'), 'PATCH', body), 404, 'actualizar un registro inexistente');
+    } else if (action.type === 'eliminar') {
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      expectStatus(await api(route(seed.id), 'DELETE'), 200, 'eliminar');
+      expectStatus(await api(itemPath(seed.id), 'GET'), 404, 'leer el registro eliminado');
+    } else if (action.type === 'transicion') {
+      const { campo, de = [], a } = action.transition;
+      const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      // La transición sobre el registro relacionado (marcar lista una comanda) se invoca con el id del registro de origen.
+      let routeId = seed.id;
+      if (action.sobre) {
+        const source = operations.find((item) => item.entity === action.sobre.entidadClave);
+        if (!source) fail('no tiene operación para ' + action.sobre.entidad);
+        routeId = (await createValidRecord(api, operations, source, cleanups, 0)).id;
+        expectStatus(await api(itemPath(seed.id), 'PATCH', { [action.sobre.via]: routeId }), 200, 'vincular el registro relacionado');
+      }
+      if (de.length) expectStatus(await api(itemPath(seed.id), 'PATCH', { [campo]: de[0] }), 200, 'preparar el estado de origen');
+      const response = expectStatus(await api(route(routeId), 'POST', {}), 200, 'cambiar de estado');
+      if (response.data[campo] !== a) fail('el estado quedó en ' + response.data[campo] + ' (se esperaba ' + a + ')');
+      if (de.length && !de.includes(a)) expectStatus(await api(route(routeId), 'POST', {}), 409, 'repetir una transición no permitida');
+    } else fail('tipo de operación desconocido: ' + action.type);
+  } finally {
+    for (const cleanup of cleanups) await Promise.resolve(cleanup()).catch(() => {});
+  }
+}
+
 function runtimeSource() {
-  return [salted, samplePayload, createValidRecord, exerciseOperation, makeApi, setupAccess, exerciseAccess, exerciseAuth, exerciseOpenApi].map((fn) => fn.toString()).join('\n\n');
+  return [salted, samplePayload, createValidRecord, exerciseOperation, exerciseAction, makeApi, setupAccess, permissionMethods, permissionScope, exerciseAccess, exerciseOwnership, exerciseAuth, exerciseOpenApi, exerciseAssociation].map((fn) => fn.toString()).join('\n\n');
 }
 
 samplePayload.exerciseOperation = exerciseOperation;
 samplePayload.exerciseAccess = exerciseAccess;
+samplePayload.exerciseAction = exerciseAction;
+samplePayload.exerciseOwnership = exerciseOwnership;
 samplePayload.exerciseAuth = exerciseAuth;
 samplePayload.exerciseOpenApi = exerciseOpenApi;
+samplePayload.exerciseAssociation = exerciseAssociation;
 samplePayload.setupAccess = setupAccess;
 samplePayload.makeApi = makeApi;
 samplePayload.runtimeSource = runtimeSource;

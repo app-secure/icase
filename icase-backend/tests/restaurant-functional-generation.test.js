@@ -33,7 +33,7 @@ describe('generación funcional genérica', () => {
     const backend = await new BackendScaffoldGenerator().generar({ proyecto: { nombre: 'Restaurante' },
       insumos: { decisiones: { stack_tecnologico: { backend: 'NestJS', base_datos: 'PostgreSQL' } }, requerimientos: rf }, versionesOrigen: {} });
     const screens = ['Inicio de sesión', 'Vista de menú y disponibilidad', 'Formulario de reserva de mesa o silla', 'Formulario de toma de comanda', 'Módulo de procesamiento de cobros']
-      .map((nombre, index) => ({ pantalla_id: String(index), nombre, slug: `screen-${index}`, ruta: `/screen-${index}`, rf_trazabilidad: [rf[index].identificador] }));
+      .map((nombre, index) => ({ pantalla_id: String(index), nombre, slug: `screen-${index}`, ruta: `/screen-${index}`, plataforma: index === 1 ? 'móvil' : 'web', rf_trazabilidad: [rf[index].identificador] }));
     const frontend = await new FrontendScaffoldGenerator().generar({ proyecto: { nombre: 'Restaurante' },
       insumos: { decisiones: { stack_tecnologico: { frontend: 'React + Vite' } }, diseno: { manifiesto_navegacion: screens, mockups: [] } }, versionesOrigen: {} });
     expect(frontend.generado_por).toBe('generador_frontend_generico_v2');

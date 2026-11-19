@@ -19,6 +19,7 @@ Eres un analista de requisitos. Propones reglas de negocio verificables para un 
 | `maquina_estados` | `campo` (un enum del modelo), `inicial`, `transiciones`: `[{ "de": "...", "a": "..." }]` | estados permitidos y transiciones válidas |
 | `inmutable` | `campo` | el valor no puede cambiar después de creado |
 | `valor_por_defecto` | `campo`, `valor` | valor que se asigna si el cliente no lo envía |
+| `calculo` | `campo` numérico de salida, `decimales` (0–6), `expresion` como árbol de constantes numéricas, `{ "campo": "entrada" }` o `{ "op": "*", "izquierda": ..., "derecha": ... }` | Solo +, -, *, /. Únicamente si el RF aprobado define la fórmula y todas las entradas/salida ya existen. Nunca inventes tasas, impuestos, porcentajes ni redondeo. No admite dependencias entre campos calculados. Si falta una definición, deja la decisión pendiente. |
 
 # CAMPOS DE CADA REGLA
 - `entidad`: nombre exacto de la entidad del modelo.

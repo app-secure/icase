@@ -22,7 +22,9 @@ const PlanCodificacionSchema = new mongoose.Schema({
     plataformas: { type: [String], default: ['web'] }
   },
   etapas: { type: [EtapaCodificacionSchema], default: [] },
-  modo_un_clic: { type: mongoose.Schema.Types.Mixed, default: null }
+  modo_un_clic: { type: mongoose.Schema.Types.Mixed, default: null },
+  // Hallazgos de la puerta de calidad funcional que la persona aceptó de forma explícita antes de empaquetar.
+  puerta_funcional: { type: mongoose.Schema.Types.Mixed, default: null }
 }, {
   timestamps: true,
   toJSON: {

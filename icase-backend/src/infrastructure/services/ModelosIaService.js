@@ -1,11 +1,16 @@
-const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
-const ClasesDisenoSynthesizer = require('./ClasesDisenoSynthesizer');
 const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const AiModelConfig = require('./AiModelConfig');
+const BedrockClient = require('./BedrockClient');
 const RequirementSemanticsService = require('./RequirementSemanticsService');
+const RequirementCoverageService = require('./RequirementCoverageService');
+const { unwrapEvidence, inspectEvidence } = require('./SourceEvidence');
+const AiRequestBudget = require('./AiRequestBudget');
+const AiRetryPolicy = require('./AiRetryPolicy');
+const RequirementExecution = require('./RequirementExecutionContext');
+const RequirementApprovalService = require('../../core/services/RequirementApprovalService');
 const { normalizeDiagramType, DIAGRAM_DEFINITIONS } = require('../../core/constants/DiagramTypes');
 
 function normalizarCodigoPlantUML(value) {
@@ -19,10 +24,16 @@ function normalizarCodigoPlantUML(value) {
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&amp;/gi, '&')
     .replace(/\\([<>])/g, '$1')
+    .replace(/\\"/g, '"')
     .replace(/\\\r?\n/g, '\n');
 
   if (/^\s*@start(?:uml|wbs|mindmap)\\n/i.test(codigo)) {
     codigo = codigo.replace(/\\n/g, '\n').replace(/\\t/g, '  ');
+  }
+  // Alias de dispositivo inventado por modelos: conserva argumentos, alias y contenido.
+  // No sobrescribe una macro personalizada que sí esté definida por el documento.
+  if (/!include\s+<C4\/C4_Deployment>/i.test(codigo) && !/!\s*(?:define|definelong|procedure|function)\s+\$?kiosk_or_tablet\b/i.test(codigo)) {
+    codigo = codigo.replace(/^(\s*)kiosk_or_tablet\s*\(/gim, '$1Deployment_Node(');
   }
 
   return codigo.split(/\r?\n/).reduce((lineas, linea) => {
@@ -45,18 +56,28 @@ function textoComparable(value) {
 }
 
 function numerosDe(value) {
-  return String(value || '').match(/\d+(?:[.,]\d+)?/g)?.map((numero) => numero.replace(',', '.')) || [];
+  const words = { un: '1', uno: '1', una: '1', dos: '2', tres: '3', cuatro: '4', cinco: '5', seis: '6', siete: '7', ocho: '8', nueve: '9', diez: '10' };
+  const text = String(value || '').replace(/\b(un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/gi, word => words[word.toLowerCase()]);
+  return text.match(/\d+(?:[.,]\d+)?/g)?.map((numero) => numero.replace(',', '.')) || [];
 }
 
-function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
-  const insumoComparable = textoComparable(insumo);
+function normalizarTrazabilidadRequerimientos(requerimientos, insumo, approvedAnalysis = null) {
   const semantics = new RequirementSemanticsService();
 
   return (requerimientos || []).map((requisito) => {
-    const evidencia = String(requisito.evidencia || requisito.evidencia_fuente || '').trim();
+    if (requisito && requisito._locked) {
+      const { _locked, ...conserved } = requisito;
+      return conserved;
+    }
+    if (approvedAnalysis) requisito = require('./ApprovedRequirementGrounding').ground(requisito, approvedAnalysis, insumo);
+    const evidenceReport = inspectEvidence(requisito, insumo);
+    const multi = (Array.isArray(requisito.evidencias) && requisito.evidencias.length > 0) ||
+      (requisito.evidencia && typeof requisito.evidencia === 'object') ||
+      /(?:\.{3}|…|\s+\/\s+)/u.test(String(requisito.evidencia || ''));
+    const evidencia = evidenceReport.valid[0]?.texto || unwrapEvidence(requisito.evidencia || requisito.evidencia_fuente || '');
     const evidenciaComparable = textoComparable(evidencia);
-    const evidenciaValida = evidenciaComparable.length >= 8 && insumoComparable.includes(evidenciaComparable);
-    const numerosEvidencia = new Set(evidenciaValida ? numerosDe(evidencia) : []);
+    const evidenciaValida = evidenceReport.valido && (multi || evidenciaComparable.length >= 8);
+    const numerosEvidencia = new Set(evidenciaValida ? numerosDe(multi ? evidenceReport.valid.map(item => item.texto).join(' ') : evidencia) : []);
     const tipo = String(requisito.tipo || 'RF').toUpperCase();
     let metricaMedible = String(requisito.metrica_medible || '').trim();
     const numerosNoSustentados = numerosDe(metricaMedible).filter((numero) => !numerosEvidencia.has(numero));
@@ -65,8 +86,8 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
     const origen = evidenciaValida && !metricaNoSustentada && origenSolicitado !== 'inferido'
       ? 'explicito'
       : 'inferido';
-    const requiereConfirmacion = Boolean(requisito.requiere_confirmacion) || origen === 'inferido' ||
-      (tipo === 'RNF' && !metricaMedible);
+    const requiereConfirmacion = Boolean(requisito.requiere_confirmacion) || (origen === 'inferido' && !approvedAnalysis) ||
+      (tipo === 'RNF' && (!metricaMedible || /por confirmar con el usuario/i.test(metricaMedible)));
 
     if (tipo === 'RNF' && (!metricaMedible || metricaNoSustentada)) {
       metricaMedible = 'Por confirmar con el usuario';
@@ -78,7 +99,8 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
       metrica_medible: metricaMedible,
       origen,
       evidencia: evidenciaValida ? evidencia : '',
-      fuentes_origen: Array.isArray(requisito.fuentes_origen)
+      evidencias: multi ? evidenceReport.valid : [],
+      fuentes_origen: multi ? [...new Set(evidenceReport.valid.map(item => item.fuente).filter(item => item !== 'insumo_directo'))] : Array.isArray(requisito.fuentes_origen)
         ? requisito.fuentes_origen.map(String).filter(Boolean)
         : [],
       requiere_confirmacion: requiereConfirmacion
@@ -87,23 +109,30 @@ function normalizarTrazabilidadRequerimientos(requerimientos, insumo) {
 }
 
 class ModelosIaService {
-  constructor() {
+  constructor({ requirementsRouter = null, env = process.env } = {}) {
+    this.requirementsEnabled = env.REQUIREMENTS_RESILIENT_ENABLED === 'true';
+    this.requirementsEnv = env;
+    this.requirementsRouter = requirementsRouter;
+    this.requestBudget = new AiRequestBudget();
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
     this.deepseekApiKey = process.env.DEEPSEEK_API_KEY || '';
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
     this.openaiApiKey = process.env.OPENAI_API_KEY || '';
+    this.bedrock = new BedrockClient({ transport: { post: (...args) => this.requestBudget.post(...args) } });
     this.provider = (process.env.AI_PROVIDER || 'groq').toLowerCase();
     this.promptsDir = path.join(__dirname, '../prompts');
     this.models = {
       gemini: AiModelConfig.analysis.gemini(),
       groq: AiModelConfig.analysis.groq(),
       openrouter: AiModelConfig.analysis.openrouter(),
-      openai: AiModelConfig.analysis.openai()
+      openai: AiModelConfig.analysis.openai(),
+      bedrock: AiModelConfig.analysis.bedrock()
     };
     this.providerOrder = AiModelConfig.analysis.providerOrder();
     this.modelosDeshabilitados = new Set();
     this.circuitos = new Map();
+    this.erroresModelo = new Map();
     this.circuitCooldownMs = Number(process.env.AI_CIRCUIT_COOLDOWN_MS || 300000);
   }
 
@@ -126,12 +155,12 @@ class ModelosIaService {
     };
     const directivas = (objetivo === 'requisitos'
       ? [
-        this.leerPrompt('analista_ieee830.md'),
+        this.leerPrompt('analista_iso29148.md'),
         this.leerPrompt('auditor_requisitos.md')
       ]
       : [
-        this.leerPrompt('analista_ieee830.md'),
-        this.leerPrompt('disenador_arquitectura.md'),
+        ...(objetivo === 'diagramas' ? [] : [this.leerPrompt('analista_iso29148.md')]),
+        tipoDiagrama ? require('./DiagramPromptContext').diagramDirectives(this.leerPrompt('disenador_arquitectura.md'), tipoDiagrama) : this.leerPrompt('disenador_arquitectura.md'),
         tipoDiagrama && promptsEspecializados[tipoDiagrama]
           ? this.leerPrompt(promptsEspecializados[tipoDiagrama])
           : '',
@@ -161,7 +190,7 @@ class ModelosIaService {
   async verificarSaldoDeepSeek() {
     if (!this.deepseekApiKey) return { tieneSaldo: false, disponible: false, razon: 'No hay API Key configurada para DeepSeek' };
     try {
-      const res = await axios.get('https://api.deepseek.com/user/balance', {
+      const res = await this.requestBudget.get('https://api.deepseek.com/user/balance', {
         headers: { Authorization: `Bearer ${this.deepseekApiKey}` },
         timeout: 5000
       });
@@ -180,7 +209,16 @@ class ModelosIaService {
     }
   }
 
-  async obtenerModelosDisponibles() {
+  async obtenerModelosDisponibles({ objetivo = null } = {}) {
+    if (this.requirementsEnabled && objetivo === 'requisitos') {
+      if (!this.requirementsRouter) {
+        const Router = require('./RequirementProviderRouter');
+        const StateRepository = require('../../interface-adapters/repositories/MongoAiProviderStateRepository');
+        this.requirementsRouter = new Router({ stateRepository: new StateRepository(), budget: this.requestBudget, env: this.requirementsEnv });
+      }
+      return { provider_defecto: 'auto', requisitos_resilientes: true,
+        proveedores: [{ id: 'auto', nombre: 'Automático gratuito + local', disponible: true }, ...await this.requirementsRouter.status()] };
+    }
     let deepseekDisponible = Boolean(this.deepseekApiKey);
     let deepseekDesc = 'Modelo especializado en razonamiento y arquitectura de software';
 
@@ -248,6 +286,7 @@ class ModelosIaService {
 
   async procesar(payload) {
     const insumo = payload.insumo_bruto || payload.nombre_proyecto || '';
+    const pistasFuentes = Array.isArray(payload.pistas_fuentes) ? payload.pistas_fuentes : [];
     const insumoAdicional = payload.insumo_adicional || '';
     const reqsActuales = payload.contexto_proyecto?.requerimientos_actuales || [];
     const reqsAprobados = payload.contexto_proyecto?.requerimientos_aprobados || [];
@@ -276,11 +315,21 @@ class ModelosIaService {
             `  Precondición: ${r.precondiciones || r.precondicion || 'No especificada'}`,
             `  Poscondición: ${r.poscondiciones || r.poscondicion || 'No especificada'}`,
             `  Métrica: ${r.metrica_medible || 'No especificada'}`,
-            `  Origen: ${r.origen || 'No especificado'}`
+            `  Origen: ${r.origen || 'No especificado'}`,
+            `  Criterios de aceptación: ${JSON.stringify(r.criterios_aceptacion || [])}`
           ].join('\n');
         }).join('\n');
     }
 
+    const analysis = payload.contexto_proyecto?.analisis_requisitos;
+    if (analysis && (objetivo === 'diagramas' || esRefinamientoExplicito)) {
+      contextoActualTexto += `\n\nDECISIONES Y REGLAS DEL ANÁLISIS DEL MISMO PROYECTO (no son funciones adicionales; respeta estados y preguntas pendientes):\n${JSON.stringify(objetivo === 'diagramas' && tipoDiagrama ? require('./DiagramPromptContext').selectAnalysis(analysis, tipoDiagrama) : {
+        restricciones_tecnicas: analysis.restricciones_tecnicas || [],
+        reglas_negocio: analysis.reglas_negocio || [],
+        decisiones: analysis.decisiones || [],
+        preguntas_pendientes: analysis.preguntas_pendientes || []
+      })}`;
+    }
     if (tipoDiagrama) {
       const dependencies = DIAGRAM_DEFINITIONS[tipoDiagrama]?.dependencies || [];
       const approvedDiagrams = payload.contexto_proyecto?.diagramas_aprobados || [];
@@ -290,25 +339,52 @@ class ModelosIaService {
           .sort((a, b) => Number(b.version || 1) - Number(a.version || 1));
         const diagram = candidates[0];
         if (!diagram) return '';
-        const code = String(diagram.codigo_plantuml || diagram.codigo_mermaid || '').slice(0, 6000);
-        return `[ARTEFACTO APROBADO: ${dependencyType} v${diagram.version || 1}]\n${diagram.descripcion || ''}\n${code}`;
+        const code = String(diagram.codigo_plantuml || diagram.codigo_mermaid || '');
+        const requiredEntities = tipoDiagrama === 'clases_diseno' && dependencyType === 'clases_dominio'
+          ? `\nLISTA DE CONTROL DE ENTIDADES DE ORIGEN (conservar o documentar realización; no confundir con DTO): ${new (require('./DomainModelExtractor'))().extract(code).entities.map(entity => entity.name).join(', ')}\n`
+          : '';
+        return `[ARTEFACTO APROBADO: ${dependencyType} v${diagram.version || 1}]\n${diagram.descripcion || ''}\n${code}${requiredEntities}`;
       }).filter(Boolean);
       if (dependencyBlocks.length) {
         contextoActualTexto += `\n\nDIAGRAMAS APROBADOS QUE DEBEN RESPETARSE:\n${dependencyBlocks.join('\n\n')}`;
       }
       const feedback = String(payload.contexto_proyecto?.retroalimentacion_diagrama || '').trim();
-      if (feedback) {
+      if (feedback && !String(insumoAdicional || '').includes(feedback)) {
         contextoActualTexto += `\n\nOBSERVACIONES DE LA REVISIÓN MANUAL QUE DEBES CORREGIR:\n${feedback}`;
       }
     }
 
+    if (objetivo === 'diagramas' && tipoDiagrama === 'casos_de_uso') {
+      const limits = require('../../core/constants/UseCaseDiagramPolicy').useCaseLimits(reqsContexto);
+      contextoActualTexto += `\nCASOS DE USO: alcance de ${limits.rf} RF, límite de ${limits.min} a ${limits.max} casos. No elimines funciones para cumplir una cuota menor. En vistas extensas usa paquetes por capacidades dentro del límite del sistema, con actores fuera. Nombra cada caso con verbo en infinitivo y objeto. Conserva casos, alias, asociaciones y trazabilidad RF visible; la agrupación no reduce cobertura ni cambia el significado de las operaciones.`;
+    }
+    if (objetivo === 'diagramas' && tipoDiagrama === 'clases_diseno') {
+      contextoActualTexto += new (require('./DesignGenerationPolicy'))().checklist(reqsContexto);
+    }
     console.log(`[ModelosIaService] Procesando ${insumo.length} caracteres de insumo (Proveedor solicitado: ${requestedProvider})...`);
 
-    const promptCompleto = this.construirPrompt({ insumo, contextoActualTexto, insumoAdicional, objetivo, tipoDiagrama });
+    const insumoPrompt = objetivo === 'diagramas' && tipoDiagrama && reqsAprobados.length && analysis && Object.values(analysis).some(items => Array.isArray(items) && items.length)
+      ? 'El alcance vigente está en los requisitos y el análisis clasificado aprobados del contexto. No reinterpretes los insumos originales para añadir obligaciones. Las decisiones pendientes no son requisitos confirmados.'
+      : insumo;
+    const promptCompleto = this.construirPrompt({
+      insumo: objetivo === 'requisitos' ? 'El contenido verificable se proporciona en cada etapa del análisis.' : insumoPrompt,
+      contextoActualTexto, insumoAdicional, objetivo, tipoDiagrama
+    });
+    const evidenceInput = objetivo === 'requisitos' && insumoAdicional.trim()
+      ? `${insumo}\n\n[Insumo adicional]\n${insumoAdicional}` : [insumo, insumoAdicional].filter(Boolean).join('\n\n');
 
+    let preferredProvider = null;
+    RequirementExecution.setInput(evidenceInput);
+    if (this.requirementsEnabled && !this.requirementsRouter) {
+      const Router = require('./RequirementProviderRouter');
+      const StateRepository = require('../../interface-adapters/repositories/MongoAiProviderStateRepository');
+      this.requirementsRouter = new Router({ stateRepository: new StateRepository(), budget: this.requestBudget, env: this.requirementsEnv });
+    }
+    const solicitar = async (promptCompleto, { etapa = 'generacion', promptGroq = null } = {}) => RequirementExecution.request(etapa, promptCompleto, () => this.requestBudget.logical(etapa, async () => {
+    if (this.requirementsEnabled && objetivo === 'requisitos') return this.requirementsRouter.generate(promptCompleto, { provider: requestedProvider, specificModel, promptGroq, stage: etapa });
     let respuestaData = null;
     if (requestedProvider === 'groq') {
-      respuestaData = await this.generarConGroq(promptCompleto, specificModel, { allowFallback: false });
+      respuestaData = await this.generarConGroq(promptGroq || promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider === 'gemini') {
       respuestaData = await this.generarConGemini(promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider.includes('deep')) {
@@ -323,15 +399,53 @@ class ModelosIaService {
       respuestaData = await this.generarConOpenRouter(promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider === 'openai') {
       respuestaData = await this.generarConOpenAI(promptCompleto, specificModel, { allowFallback: false });
+    } else if (requestedProvider === 'bedrock') {
+      respuestaData = await this.generarConBedrock(promptCompleto, specificModel, { allowFallback: false });
     } else {
-      const orden = promptCompleto.length > 22000
-        ? ['gemini', ...this.providerOrder.filter(p => p !== 'gemini')]
-        : this.providerOrder;
+      const orden = this.providerOrder;
       for (const proveedor of orden) {
-        respuestaData = await this._ejecutarProveedor(proveedor, promptCompleto, specificModel);
-        if (respuestaData) break;
+        if (this.requestBudget.exhausted()) break;
+        respuestaData = await this._ejecutarProveedor(proveedor, proveedor === 'groq' ? (promptGroq || promptCompleto) : promptCompleto, null);
+        if (respuestaData) { preferredProvider = proveedor; break; }
       }
     }
+
+    return respuestaData;
+    }));
+    const auditoriaPrevia = payload.contexto_proyecto?.auditoria_requisitos || null;
+    const usarRefinamientoAcotado = objetivo === 'requisitos' && !payload.approvedInitialAnalysis && !payload.initialAnalysisOnly && esRefinamientoExplicito && reqsActuales.length > 0;
+    let respuestaData = objetivo === 'requisitos'
+      ? await this.requestBudget.run(() => payload.initialAnalysisTask
+        ? require('../../core/services/InitialAnalysisTasks')({ task: payload.initialAnalysisTask, previous: payload.initialAnalysisPrevious, answer: payload.answerText, questionId: payload.questionId, input: evidenceInput, request: solicitar })
+        : payload.initialAnalysisOnly
+        ? new RequirementCoverageService().extractAnalysis({ input: evidenceInput, prompt: promptCompleto, request: solicitar, semanticReview: true, sourceHints: pistasFuentes,
+          analysisInstruction: payload.initialAnalysisInstruction, analysisPrevious: payload.initialAnalysisPrevious })
+        : payload.approvedInitialAnalysis
+        ? new RequirementCoverageService().draftFromAnalysis({ input: evidenceInput, prompt: promptCompleto, request: solicitar, semanticReview: true }, payload.approvedInitialAnalysis)
+        : usarRefinamientoAcotado
+        ? new RequirementCoverageService().refine({
+          input: insumo,
+          instruction: insumoAdicional,
+          existingRequirements: reqsActuales,
+          existingAudit: auditoriaPrevia,
+          prompt: promptCompleto,
+          request: solicitar
+        })
+        : new RequirementCoverageService().generate({
+          semanticReview: true,
+          maxObjectivesPerBatch: this.requirementsEnabled && (requestedProvider === 'ollama' || (requestedProvider === 'auto' && !this.requirementsEnv.AI_FREE_TIER_PROVIDERS?.trim())) && this.requirementsEnv.OLLAMA_ENABLED === 'true'
+            ? Math.max(1, Math.min(3, Number(this.requirementsEnv.OLLAMA_REQUIREMENTS_BATCH_OBJECTIVES) || 2)) : null,
+          groqInputBudget: this.groqApiKey && (requestedProvider === 'auto' || requestedProvider === 'groq') ? Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000) : null,
+          input: evidenceInput,
+          sourceHints: pistasFuentes,
+          prompt: promptCompleto,
+          request: solicitar
+        }), payload.initialAnalysisTask === 'analisis_respuesta' ? { ...this.requirementsEnv,
+          AI_REQUIREMENTS_TIMEOUT_MS: Math.min(Number(this.requirementsEnv.AI_REQUIREMENTS_TIMEOUT_MS) || 180000, 60000),
+          AI_REQUIREMENTS_REQUEST_TIMEOUT_MS: Math.min(Number(this.requirementsEnv.AI_REQUIREMENTS_REQUEST_TIMEOUT_MS) || 35000, 20000),
+          AI_REQUIREMENTS_MAX_ATTEMPTS: Math.min(Number(this.requirementsEnv.AI_REQUIREMENTS_MAX_ATTEMPTS) || 8, 4)
+        } : this.requirementsEnv, { allowLocal: this.requirementsEnabled && ['auto', 'ollama'].includes(requestedProvider) && this.requirementsEnv.OLLAMA_ENABLED === 'true' })
+      : await solicitar(promptCompleto);
 
     if (!respuestaData) {
       if (objetivo === 'requisitos') {
@@ -344,11 +458,23 @@ class ModelosIaService {
       };
     }
 
+    if (payload.initialAnalysisOnly || payload.initialAnalysisTask) return respuestaData;
+    if (payload.approvedInitialAnalysis) respuestaData.auditoria_requisitos = { ...respuestaData.auditoria_requisitos, referencia_analisis_inicial: payload.approvedInitialAnalysis.referencia };
+    if (objetivo === 'requisitos' && RequirementExecution.current()) {
+      const ctx = RequirementExecution.current();
+      ctx.draft = respuestaData;
+      const reviewState = respuestaData.auditoria_requisitos?.revision_semantica?.estado;
+      ctx.pending = Boolean(ctx.pending) || reviewState === 'pendiente_redaccion' || reviewState === 'no_completada' ||
+        !payload.approvedInitialAnalysis && reviewState === 'parcial';
+      if (reviewState === 'completada') await RequirementExecution.confirm('revision_semantica');
+    }
+
     return this.normalizarResultado(respuestaData, objetivo, tipoDiagrama, {
       nombreProyecto: payload.nombre_proyecto,
       requerimientos: reqsContexto,
       diagramasAprobados: payload.contexto_proyecto?.diagramas_aprobados || [],
-      insumo: [insumo, insumoAdicional].filter(Boolean).join('\n\n')
+      insumo: evidenceInput,
+      approvedAnalysis: payload.approvedInitialAnalysis || null
     });
   }
 
@@ -358,12 +484,12 @@ class ModelosIaService {
    */
   async generarJson(prompt, { provider = null, specificModel = null } = {}) {
     const solicitado = String(provider || '').toLowerCase();
-    const orden = solicitado
+    const orden = solicitado && solicitado !== 'auto'
       ? [solicitado === 'deepseek' || solicitado.includes('deep') ? 'deepseek' : solicitado]
-      : (prompt.length > 22000 ? ['gemini', ...this.providerOrder.filter((item) => item !== 'gemini')] : this.providerOrder);
+      : this.providerOrder;
     for (const proveedor of orden) {
       try {
-        const respuesta = await this._ejecutarProveedor(proveedor, prompt, specificModel);
+        const respuesta = await this._ejecutarProveedor(proveedor, prompt, solicitado && solicitado !== 'auto' ? specificModel : null);
         if (respuesta) return respuesta;
       } catch (error) {
         console.warn(`[ModelosIaService] ${proveedor} no pudo completar la solicitud estructurada: ${error.message}`);
@@ -373,6 +499,9 @@ class ModelosIaService {
   }
 
   async _ejecutarProveedor(proveedor, prompt, specificModel) {
+    const key = { gemini: 'geminiApiKey', groq: 'groqApiKey', deepseek: 'deepseekApiKey', openai: 'openaiApiKey', openrouter: 'openrouterApiKey' }[proveedor];
+    if ((key && !this[key]) || (proveedor === 'bedrock' && !this.bedrock.configured)) this.requestBudget.reportProviderFailure(proveedor, 'sin_credencial');
+    if (proveedor === 'bedrock') return this.generarConBedrock(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'gemini') return this.generarConGemini(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'groq') return this.generarConGroq(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'deepseek') return this.generarConDeepSeek(prompt, specificModel, { allowFallback: true });
@@ -395,6 +524,7 @@ class ModelosIaService {
     const tokensEntrada = Math.ceil(prompt.length / 4);
     const presupuestoEntrada = Number(process.env.GROQ_ANALYSIS_INPUT_BUDGET || 3000);
     if (tokensEntrada > presupuestoEntrada) {
+      this.requestBudget.reportProviderFailure('groq', 'limite_entrada_proveedor', { tokens_estimados: tokensEntrada, limite_tokens: presupuestoEntrada });
       const mensaje = `Prompt estimado en ${tokensEntrada} tokens; supera el presupuesto Groq de ${presupuestoEntrada}.`;
       if (!options.allowFallback) throw new Error(mensaje);
       console.warn(`[ModelosIaService] ${mensaje} Proveedor omitido.`);
@@ -405,7 +535,7 @@ class ModelosIaService {
       if (!this._modeloDisponible(`groq:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con Groq Cloud (${modelName})...`);
-        const res = await axios.post(
+        const res = await this.requestBudget.post(
           'https://api.groq.com/openai/v1/chat/completions',
           {
             model: modelName,
@@ -433,14 +563,23 @@ class ModelosIaService {
         );
 
         const rawText = res.data?.choices?.[0]?.message?.content;
+        if (res.data?.choices?.[0]?.finish_reason === 'length') throw new Error('Respuesta JSON truncada por límite de salida; el lote no se considera generado.');
         if (rawText) {
+          const parsed = this.limpiarYParsearJson(rawText);
           console.log(`[ModelosIaService] Generación exitosa con Groq Cloud (${modelName})`);
-          return this.limpiarYParsearJson(rawText);
+          return parsed;
         }
       } catch (err) {
         const errorMsg = err.response?.data?.error?.message || err.message;
         console.warn(`[ModelosIaService] Groq Cloud (${modelName}) falló:`, errorMsg);
         this._registrarErrorModelo(`groq:${modelName}`, err);
+        const retryHeader = Number.parseFloat(err.response?.headers?.['retry-after']);
+        const retryText = /try again in\s+([\d.]+)\s*s/i.exec(errorMsg);
+        const retrySeconds = Number.isFinite(retryHeader) ? retryHeader : Number.parseFloat(retryText?.[1]);
+        if (err.response?.status === 429 && options.retryRateLimit !== false && await this.requestBudget.waitForRetry(Math.ceil(retrySeconds * 1000) + 250)) {
+          this.circuitos.delete(`groq:${modelName}`);
+          return this.generarConGroq(prompt, modelName, { ...options, retryRateLimit: false });
+        }
         if (!options.allowFallback && modelName === modelosGroq[modelosGroq.length - 1]) {
           throw new Error(`El proveedor Groq Cloud no pudo completar la solicitud: ${errorMsg}`);
         }
@@ -466,13 +605,14 @@ class ModelosIaService {
 
     for (const modelName of modelos) {
       if (!this._modeloDisponible(`gemini:${modelName}`)) continue;
-      const maxIntentos = Number(process.env.AI_TRANSIENT_RETRIES || 1);
+      const maxIntentos = AiRetryPolicy.attempts();
       for (let intento = 1; intento <= maxIntentos; intento++) {
+        if (this.requestBudget.exhausted()) break;
         try {
           console.log(`[ModelosIaService] Procesando con Google Gemini (${modelName}) [Intento ${intento}]...`);
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.geminiApiKey}`;
 
-          const res = await axios.post(
+          const res = await this.requestBudget.post(
             url,
             {
               contents: [{ parts: [{ text: prompt }] }],
@@ -485,10 +625,18 @@ class ModelosIaService {
             { timeout: 60000 }
           );
 
-          const rawText = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          const candidate = res.data?.candidates?.[0];
+          if (candidate?.finishReason === 'MAX_TOKENS') {
+            throw new Error('La salida JSON de Gemini se truncó por límite de tokens (MAX_TOKENS).');
+          }
+          const rawText = candidate?.content?.parts?.filter((part) => !part.thought && typeof part.text === 'string')
+            .map((part) => part.text).join('');
           if (rawText) {
+            const parsed = this.limpiarYParsearJson(rawText);
+            this.circuitos.delete(`gemini:${modelName}`);
+            this.erroresModelo.delete(`gemini:${modelName}`);
             console.log(`[ModelosIaService] Generación exitosa con Google Gemini (${modelName})`);
-            return this.limpiarYParsearJson(rawText);
+            return parsed;
           }
         } catch (err) {
           const msg = err.response?.data?.error?.message || err.message;
@@ -497,11 +645,10 @@ class ModelosIaService {
             break;
           }
 
-          if (intento < maxIntentos && /demand|high demand|429|503|timeout/i.test(msg)) {
-            await new Promise(r => setTimeout(r, 1200));
-          } else if (/quota|exceeded|not found|no longer available/i.test(msg)) {
-            break;
-          }
+          const delay = AiRetryPolicy.retryDelay(err, intento);
+          if (intento >= maxIntentos || delay === null) break;
+          console.log(`[ModelosIaService] Gemini (${modelName}): espera progresiva de ${delay} ms antes del siguiente intento.`);
+          if (!await this.requestBudget.waitForRetry(delay, { allowOutsideBudget: true })) break;
         }
       }
     }
@@ -520,7 +667,7 @@ class ModelosIaService {
     if (this.deepseekApiKey) {
       try {
         console.log(`[ModelosIaService] Procesando con DeepSeek API directa (${modelName})...`);
-        const res = await axios.post(
+        const res = await this.requestBudget.post(
           'https://api.deepseek.com/v1/chat/completions',
           {
             model: modelName,
@@ -581,7 +728,7 @@ class ModelosIaService {
       if (!this._modeloDisponible(`openrouter:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con OpenRouter Cloud (${modelName})...`);
-        const res = await axios.post(
+        const res = await this.requestBudget.post(
           'https://openrouter.ai/api/v1/chat/completions',
           {
             model: modelName,
@@ -594,7 +741,7 @@ class ModelosIaService {
             ],
             temperature: 0.2,
             max_tokens: 8000,
-            response_format: { type: 'json_object' }
+            ...await require('./OpenRouterPolicy').parameters(modelName)
           },
           {
             headers: {
@@ -638,7 +785,7 @@ class ModelosIaService {
       if (!this._modeloDisponible(`openai:${modelName}`)) continue;
       try {
         console.log(`[ModelosIaService] Procesando con OpenAI (${modelName})...`);
-        const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+        const response = await this.requestBudget.post('https://api.openai.com/v1/chat/completions', {
           model: modelName,
           messages: [
             { role: 'system', content: 'Responde exclusivamente con un objeto JSON válido según la plantilla solicitada.' },
@@ -664,16 +811,51 @@ class ModelosIaService {
     return null;
   }
 
+  async generarConBedrock(prompt, specificModel = null, options = { allowFallback: true }) {
+    if (!this.bedrock.configured) {
+      if (!options.allowFallback) throw new Error('BEDROCK_API_KEY no está configurada en el servidor backend.');
+      return null;
+    }
+    const modelos = AiModelConfig.modelosConPreferencia(specificModel, this.models.bedrock);
+    if (!modelos.length) {
+      if (!options.allowFallback) throw new Error('Define BEDROCK_MODELS (o BEDROCK_ANALYSIS_MODELS) con el identificador del modelo de tu consola de Bedrock.');
+      return null;
+    }
+    for (const modelName of modelos) {
+      if (!this._modeloDisponible(`bedrock:${modelName}`)) continue;
+      try {
+        console.log(`[ModelosIaService] Procesando con Amazon Bedrock (${modelName})...`);
+        const respuesta = await this.bedrock.converse({
+          modelId: modelName, prompt, temperature: 0.2,
+          maxTokens: Number(process.env.BEDROCK_ANALYSIS_MAX_OUTPUT_TOKENS || 16000),
+          system: 'Eres un orquestador experto en ingeniería de software y arquitectura. Responde exclusivamente con un objeto JSON válido según la plantilla solicitada, sin texto adicional ni bloques de código.',
+          timeout: Number(process.env.BEDROCK_TIMEOUT_MS || 180000)
+        });
+        if (respuesta.truncated) throw Object.assign(new Error('Respuesta de Bedrock truncada por el límite de salida.'), { code: 'INVALID_AI_JSON' });
+        if (respuesta.text) return this.limpiarYParsearJson(respuesta.text);
+      } catch (error) {
+        const mensaje = BedrockClient.messageOf(error);
+        console.warn(`[ModelosIaService] Bedrock (${modelName}) falló:`, mensaje);
+        this._registrarErrorModelo(`bedrock:${modelName}`, error);
+        if (!options.allowFallback && modelName === modelos.at(-1)) throw new Error(`El proveedor Bedrock no pudo completar la solicitud: ${mensaje}`);
+      }
+    }
+    if (!options.allowFallback) throw new Error('El proveedor Bedrock no devolvió una respuesta válida.');
+    return null;
+  }
+
   _esModeloNoDisponible(error) {
     const status = error.response?.status;
-    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
-    return status === 404 || /no longer available|does not exist|not found|unavailable for free/.test(mensaje);
+    const mensaje = String(BedrockClient.messageOf(error)).toLowerCase();
+    return status === 404 || /no longer available|does not exist|not found|unavailable for free|model identifier is invalid|on-demand throughput isn.t supported/.test(mensaje);
   }
 
   _clasificarError(error) {
     if (this._esModeloNoDisponible(error)) return 'modelo_no_disponible';
     const status = error.response?.status;
-    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    const mensaje = String(BedrockClient.messageOf(error)).toLowerCase();
+    if (status === 402 || /insufficient balance|saldo insuficiente/.test(mensaje)) return 'sin_saldo';
+    if (/high demand|experiencing high|overloaded/.test(mensaje) || status === 503) return 'saturacion';
     if (status === 401 || status === 403) return 'autenticacion';
     if (status === 429 || /quota|rate limit|high demand|resource exhausted|insufficient balance/.test(mensaje)) return 'cuota';
     if (/request too large|context|tokens per minute|tpm/.test(mensaje)) return 'limite_contexto';
@@ -682,19 +864,22 @@ class ModelosIaService {
 
   _registrarErrorModelo(clave, error) {
     const tipo = this._clasificarError(error);
+    this.erroresModelo.set(clave, tipo);
+    this.requestBudget.reportProviderFailure(clave.split(':')[0], tipo);
     if (tipo === 'modelo_no_disponible' || tipo === 'autenticacion') {
       this.modelosDeshabilitados.add(clave);
-    } else if (tipo === 'cuota') {
-      this.circuitos.set(clave, Date.now() + this.circuitCooldownMs);
+    } else if (['cuota', 'sin_saldo', 'saturacion'].includes(tipo)) {
+      this.circuitos.set(clave, Date.now() + (tipo === 'saturacion' ? Math.min(this.circuitCooldownMs, 15000) : this.circuitCooldownMs));
     }
     return tipo;
   }
 
   _modeloDisponible(clave) {
-    if (this.modelosDeshabilitados.has(clave)) return false;
+    if (this.requestBudget.exhausted()) return false;
+    if (this.modelosDeshabilitados.has(clave)) { this.requestBudget.reportProviderFailure(clave.split(':')[0], this.erroresModelo.get(clave) || 'modelo_no_disponible'); return false; }
     const hasta = this.circuitos.get(clave);
     if (!hasta) return true;
-    if (hasta > Date.now()) return false;
+    if (hasta > Date.now()) { this.requestBudget.reportProviderFailure(clave.split(':')[0], this.erroresModelo.get(clave) || 'cuota', { reintentar_en_ms: hasta - Date.now() }); return false; }
     this.circuitos.delete(clave);
     return true;
   }
@@ -723,12 +908,21 @@ class ModelosIaService {
   normalizarResultado(data, objetivo = 'completo', tipoDiagrama = null, contexto = {}) {
     const rawProjectName = (data?.nombre_proyecto || '').replace(/["“”]/g, "'");
     const safeProjectName = this.limpiarNombreProyecto(rawProjectName) || 'Gestión y Control Operativo';
-    const requerimientos = objetivo === 'diagramas'
+    let requerimientos = objetivo === 'diagramas'
       ? []
       : normalizarTrazabilidadRequerimientos(
         Array.isArray(data?.requerimientos) ? data.requerimientos : [],
-        contexto.insumo || ''
+        contexto.insumo || '', contexto.approvedAnalysis || null
       );
+    let audit = data?.auditoria_requisitos || null;
+    if (contexto.approvedAnalysis && objetivo === 'requisitos') {
+      // Coverage is measured against the actual immutable approval, never a
+      // smaller inventory returned/rewritten by a provider or intermediary.
+      const inventory = structuredClone(contexto.approvedAnalysis.inventario || []);
+      audit = { ...audit, version: Math.max(2, Number(audit?.version) || 0), inventario: inventory,
+        ...require('../../core/constants/RequirementAnalysisContract').analysisSections(inventory),
+        actores: structuredClone(contexto.approvedAnalysis.actores || audit?.actores || []) };
+    }
 
     let palabrasClave = Array.isArray(data?.palabras_clave)
       ? data.palabras_clave.filter(k => typeof k === 'string' && k.trim())
@@ -746,7 +940,11 @@ class ModelosIaService {
     let diagramas = [];
     if (objetivo !== 'requisitos') {
       if (tipoDiagrama) {
-        const recibidos = Array.isArray(data?.diagramas) ? data.diagramas : [];
+        // Admitir un objeto singular sin inventar contenido ni sintetizar CRUD.
+        const recibidos = Array.isArray(data?.diagramas) ? data.diagramas
+          : data?.diagramas && typeof data.diagramas === 'object' ? [data.diagramas]
+          : data?.diagrama && typeof data.diagrama === 'object' ? [data.diagrama]
+          : typeof data?.codigo_plantuml === 'string' || typeof data?.codigo_puml === 'string' ? [data] : [];
         const matchesTarget = (diagram) => {
           const raw = String(diagram?.tipo || '').toLowerCase();
           const normalized = normalizeDiagramType(raw);
@@ -784,35 +982,9 @@ class ModelosIaService {
           const validacion = validator.validar(codigo, tipoDiagrama);
 
           if (!validacion.valido) {
-            console.warn(`[ModelosIaService] Corrigiendo clases_diseno incompleto: ${validacion.error}`);
-            const aprobados = Array.isArray(contexto.diagramasAprobados) ? contexto.diagramasAprobados : [];
-            const obtenerAprobado = (tipo) => aprobados
-              .filter((diagrama) => normalizeDiagramType(diagrama.tipo) === tipo)
-              .sort((a, b) => Number(b.version || 1) - Number(a.version || 1))[0];
-            const dominio = obtenerAprobado('clases_dominio');
-            const arquitectura = obtenerAprobado('arquitectura_software');
-            const codigoDominio = String(dominio?.codigo_plantuml || '');
-            const entidades = [...codigoDominio.matchAll(/^\s*(?:abstract\s+)?class\s+(?:"[^"]+"\s+as\s+)?([A-Za-z_][\w]*)/gim)]
-              .map((match) => match[1])
-              .filter((nombre) => !/(?:Controller|Service|UseCase|Repository|DTO)$/i.test(nombre))
-              .slice(0, 10)
-              .map((nombre) => ({ nombre }));
-            const codigoArquitectura = String(arquitectura?.codigo_plantuml || '');
-            const database = /postgres/i.test(codigoArquitectura)
-              ? 'PostgreSQL'
-              : (/sql/i.test(codigoArquitectura) ? 'SQL' : 'MongoDB');
-            const versionesOrigen = Object.fromEntries(['casos_de_uso', 'clases_dominio', 'arquitectura_software'].map((tipo) => [
-              tipo,
-              Number(obtenerAprobado(tipo)?.version || 1)
-            ]));
-
-            diagramas = [ClasesDisenoSynthesizer.sintetizar({
-              casosDeUsoAprobados: (contexto.requerimientos || []).filter((req) => String(req.tipo || '').toUpperCase() === 'RF'),
-              clasesDominio: entidades,
-              arquitecturaSoftware: codigoArquitectura,
-              tecnologiasSeleccionadas: { database },
-              versionesOrigen
-            })];
+            // Conservar la respuesta para la reparación acotada de ProcesarConIA.
+            // Nunca sustituirla por CRUD inventado ni asociar RF por posición.
+            console.warn(`[ModelosIaService] clases_diseno requiere reparación controlada: ${validacion.error}`);
           }
         }
       } else {
@@ -836,6 +1008,9 @@ class ModelosIaService {
       objetivos: data?.objetivos || { general: '', especificos: [] },
       alcance_sistema: data?.alcance_sistema || '',
       palabras_clave: palabrasClave,
+      auditoria_requisitos: audit ? { ...audit,
+        control_aprobacion: new RequirementApprovalService().evaluate(requerimientos, audit)
+      } : null,
       requerimientos,
       diagramas
     };

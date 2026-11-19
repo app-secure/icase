@@ -21,12 +21,12 @@ const service = new AccessControlService();
 describe('AccessControlService.proponer', () => {
   const { valor, advertencias } = service.proponer({ requerimientos: requirements });
 
-  test('un rol por actor humano, con acceso completo a los RF donde participa', () => {
+  test('un rol por actor humano, con solo lo que cada RF hace y el cliente limitado a lo suyo', () => {
     expect(valor.roles.map((item) => [item.id, item.incluir])).toEqual([['cliente', true], ['mesero', true], ['sistema-de-pagos', false]]);
     expect(valor.permisos).toEqual([
-      { operacion: 'RF-01', rol: 'cliente', metodos: ['GET', 'POST', 'PATCH', 'DELETE'] },
-      { operacion: 'RF-02', rol: 'mesero', metodos: ['GET', 'POST', 'PATCH', 'DELETE'] },
-      { operacion: 'RF-02', rol: 'cliente', metodos: ['GET', 'POST', 'PATCH', 'DELETE'] }
+      { operacion: 'RF-01', rol: 'cliente', metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'propios' },
+      { operacion: 'RF-02', rol: 'mesero', metodos: ['GET', 'POST'], alcance: 'todos' },
+      { operacion: 'RF-02', rol: 'cliente', metodos: ['GET', 'POST'], alcance: 'propios' }
     ]);
     expect(valor.operaciones.map((item) => item.id)).toEqual(['RF-01', 'RF-02', 'RF-03']);
   });
@@ -107,9 +107,22 @@ describe('AccessControlService.validar', () => {
     expect(politica.habilitada).toBe(true);
     expect(politica.roles).toEqual({ cliente: { nombre: 'Cliente', autoregistro: true }, mesero: { nombre: 'Mesero', autoregistro: false } });
     expect(politica.operaciones['rf-03']).toEqual({});
-    expect(politica.operaciones['rf-02'].mesero).toEqual(['GET', 'POST', 'PATCH', 'DELETE']);
+    expect(politica.operaciones['rf-02'].mesero).toEqual({ metodos: ['GET', 'POST'], alcance: 'todos' });
     expect(service.politica({ autenticacion: { metodo: 'ninguna' } }, [])).toEqual({ habilitada: false });
     expect(service.politica(null, [])).toEqual({ habilitada: false });
+  });
+
+  test('acepta alcance propios, fusiona al más amplio y lo publica en la política', () => {
+    const propuesta = base();
+    propuesta.permisos.push({ operacion: 'RF-01', rol: 'cliente', metodos: ['GET'], alcance: 'todos' });
+    propuesta.permisos = propuesta.permisos.filter((item) => !(item.operacion === 'RF-02' && item.rol === 'cliente'));
+    propuesta.permisos.push({ operacion: 'RF-02', rol: 'cliente', metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'propios' });
+    const { propuesta: normalizada, errores } = validar(propuesta);
+    expect(errores).toEqual([]);
+    expect(normalizada.permisos.find((item) => item.operacion === 'RF-01' && item.rol === 'cliente').alcance).toBe('todos');
+    expect(normalizada.permisos.find((item) => item.operacion === 'RF-02' && item.rol === 'cliente').alcance).toBe('propios');
+    const politica = service.politica(normalizada, [{ id: 'RF-01', key: 'rf-01' }, { id: 'RF-02', key: 'rf-02' }, { id: 'RF-03', key: 'rf-03' }]);
+    expect(politica.operaciones['rf-02'].cliente).toEqual({ metodos: ['GET', 'POST', 'PATCH', 'DELETE'], alcance: 'propios' });
   });
 });
 
@@ -332,5 +345,51 @@ Cliente "1" --> "0..*" Reserva
 
   test('si la política aprobada deja de ser coherente con los RF, la generación falla', async () => {
     await expect(arrancar({ control: { ...acceso(), permisos: [{ operacion: 'RF-77', rol: 'mesero', metodos: ['GET'] }] } })).rejects.toThrow('ya no es coherente');
+  });
+});
+
+describe('permisos por defecto según lo que hace cada requisito', () => {
+  const req = (id, nombre, actores, descripcion = '') => ({ identificador: id, nombre, descripcion, actores, aprobado: true, tipo: 'RF' });
+  const reqs = [
+    req('RF-01', 'Visualización del menú digital', ['Cliente']),
+    req('RF-02', 'Reserva de mesa o silla', ['Cliente']),
+    req('RF-06', 'Visualización de comandas en KDS', ['Cocinero']),
+    req('RF-07', 'Actualización de disponibilidad de platos', ['Cocinero']),
+    req('RF-10', 'Autenticación de usuarios', ['Cliente', 'Mesero']),
+    req('RF-14', 'Gestión de usuarios', ['Administrador'])
+  ];
+
+  test('un requisito que solo consulta da solo lectura; lo demás se deduce de su redacción', () => {
+    const { valor } = service.proponer({ requerimientos: reqs });
+    const metodos = (operacion, rol) => valor.permisos.find((item) => item.operacion === operacion && item.rol === rol)?.metodos;
+    expect(metodos('RF-01', 'cliente')).toEqual(['GET']);
+    expect(metodos('RF-06', 'cocinero')).toEqual(['GET']);
+    expect(metodos('RF-02', 'cliente')).toEqual(['GET', 'POST']);
+    expect(metodos('RF-07', 'cocinero')).toEqual(['GET', 'PATCH']);
+  });
+
+  test('los verbos de los mockups aprobados mandan sobre la redacción', () => {
+    const { valor } = service.proponer({ requerimientos: reqs, verbosPorRf: { 'RF-01': ['consultar'], 'RF-02': ['consultar', 'crear', 'eliminar'] } });
+    expect(valor.permisos.find((item) => item.operacion === 'RF-02').metodos).toEqual(['GET', 'POST', 'DELETE']);
+    expect(valor.operaciones.find((item) => item.id === 'RF-02').metodos).toEqual(['GET', 'POST', 'DELETE']);
+  });
+
+  test('la autenticación no recibe permisos por rol y el cliente solo ve lo suyo al escribir', () => {
+    const { valor } = service.proponer({ requerimientos: reqs });
+    expect(valor.permisos.some((item) => item.operacion === 'RF-10')).toBe(false);
+    expect(valor.operaciones.find((item) => item.id === 'RF-10')).toEqual({ id: 'RF-10', nombre: 'Autenticación de usuarios', tipo: 'acceso', metodos: [] });
+    expect(valor.permisos.find((item) => item.operacion === 'RF-02').alcance).toBe('propios');
+    expect(valor.permisos.find((item) => item.operacion === 'RF-01').alcance).toBe('todos');
+  });
+
+  test('al validar se conservan los métodos de cada operación, no se culpa al acceso y se avisa de lo que no se generará', () => {
+    const { valor } = service.proponer({ requerimientos: reqs });
+    const conExtra = { ...valor, permisos: valor.permisos.map((item) => (item.operacion === 'RF-01' ? { ...item, metodos: ['GET', 'DELETE'] } : item)) };
+    const resultado = service.validar(conExtra, { requerimientos: reqs });
+    expect(resultado.errores).toEqual([]);
+    expect(resultado.propuesta.operaciones.find((item) => item.id === 'RF-01').metodos).toEqual(['GET']);
+    expect(resultado.propuesta.operaciones.find((item) => item.id === 'RF-10').tipo).toBe('acceso');
+    expect(resultado.advertencias.join(' ')).toContain('RF-01: DELETE para «cliente» no se generará');
+    expect(resultado.advertencias.join(' ')).not.toContain('RF-10');
   });
 });

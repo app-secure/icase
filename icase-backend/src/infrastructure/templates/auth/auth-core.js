@@ -5,6 +5,7 @@ const { promisify } = require('node:util');
 const jwt = require('jsonwebtoken');
 const { HttpError } = require('../data/store-support');
 const policy = require('./policy');
+const { methodsOf } = require('./ownership');
 
 const scrypt = promisify(crypto.scrypt);
 const METHODS = ['GET', 'POST', 'PATCH', 'DELETE'];
@@ -68,7 +69,7 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
     const isAdmin = user.rol === ADMIN;
     const operaciones = {};
     for (const [key, byRole] of Object.entries(policy.operaciones || {})) {
-      const methods = isAdmin ? METHODS : byRole[user.rol] || [];
+      const methods = isAdmin ? METHODS : methodsOf(byRole[user.rol]);
       if (methods.length) operaciones[key] = [...methods];
     }
     return { rol: user.rol, nombre_rol: isAdmin ? 'Administrador' : (roles()[user.rol] || {}).nombre || user.rol, administrador: isAdmin, operaciones };
@@ -105,11 +106,30 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
       return;
     }
     const credentials = validateCredentials({ email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD });
-    if (await store.findUserByEmail(credentials.email)) return;
-    try {
-      await store.createUser({ email: credentials.email, nombre: 'Administrador', rol: ADMIN, activo: true, password_hash: await hashPassword(credentials.password) });
-    } catch (error) {
-      if (!(error instanceof HttpError && error.status === 409)) throw error; // otra instancia lo creó primero
+    if (!(await store.findUserByEmail(credentials.email))) {
+      try {
+        await store.createUser({ email: credentials.email, nombre: 'Administrador', rol: ADMIN, activo: true, password_hash: await hashPassword(credentials.password) });
+      } catch (error) {
+        if (!(error instanceof HttpError && error.status === 409)) throw error; // otra instancia lo creó primero
+      }
+    }
+    await seedDemoUsers();
+    if (typeof store.syncProfiles === 'function') await store.syncProfiles();
+  }
+
+  /** Una cuenta de ejemplo por rol (<rol>@ejemplo.test) para probar la aplicación; nunca en producción. */
+  async function seedDemoUsers() {
+    // Fuera de producción se crean por defecto; en producción solo si SEED_DEMO_USERS=true (por ejemplo, una demostración en Docker).
+    if (env.SEED_DEMO_USERS === 'false' || (env.NODE_ENV === 'production' && env.SEED_DEMO_USERS !== 'true')) return;
+    const password = env.DEMO_PASSWORD || 'Demo-2026-icase';
+    for (const [id, role] of Object.entries(roles())) {
+      const email = id + '@ejemplo.test';
+      if (await store.findUserByEmail(email)) continue;
+      try {
+        await store.createUser({ email, nombre: role.nombre || id, rol: id, activo: true, password_hash: await hashPassword(password) });
+      } catch (error) {
+        if (!(error instanceof HttpError && error.status === 409)) throw error;
+      }
     }
   }
 
@@ -158,15 +178,43 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
   }
 
   function isPublic(method, path) {
-    return (method === 'GET' && path === '/health') || (method === 'POST' && (path === '/api/auth/login' || path === '/api/auth/register'));
+    return (method === 'GET' && path === '/health')
+      || (method === 'GET' && (path === '/api/docs' || path === '/api/docs/init.js')) // la página no trae datos; pide el inicio de sesión y carga el documento (protegido) con el token
+      || (method === 'GET' && path.startsWith('/api/docs/static/'))
+      || (method === 'POST' && (path === '/api/auth/login' || path === '/api/auth/register'));
   }
 
   function authorize(user, method, path) {
+    try { path = decodeURIComponent(path); } catch { throw new HttpError(400, 'Ruta inválida.'); }
+    const association = /^\/api\/associations\/([^/]+)(?:\/|$)/.exec(path);
+    if (association) {
+      const model = require('../data/model');
+      const relation = (model.associations || []).find((item) => item.table === association[1]);
+      if (!relation) throw new HttpError(404, 'Relación inexistente.');
+      if (user.rol === ADMIN) return;
+      const required = method === 'GET' ? ['GET'] : ['GET', 'PATCH'];
+      const endpoints = model.tables[relation.table].columns.map((column) => column.references);
+      for (const table of endpoints) {
+        const permitted = Object.entries(model.operations).some(([key, name]) => name === table && required.every((verb) => methodsOf(policy.operaciones?.[key]?.[user.rol]).includes(verb)));
+        if (!permitted) throw new HttpError(403, 'Se requieren permisos sobre ambos extremos del vínculo.');
+      }
+      return;
+    }
+    const action = /^\/api\/actions\/([^/]+)(\/[^/]+)?\/?$/.exec(path);
+    if (action) {
+      // Una operación de negocio exige el permiso equivalente del CRUD de su requisito.
+      const def = require('../actions/actions').find(action[1], method, Boolean(action[2]));
+      if (!def) return; // inexistente: responde 404 la ruta
+      const needed = { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' }[def.type];
+      const byRole = policy.operaciones?.[def.permiso || def.capability] || {};
+      if (user.rol !== ADMIN && !methodsOf(byRole[user.rol]).includes(needed)) throw new HttpError(403, 'No tienes permiso para esta operación.');
+      return;
+    }
     const operation = /^\/api\/operations\/([^/]+)/.exec(path);
     if (operation) {
       const byRole = Object.prototype.hasOwnProperty.call(policy.operaciones || {}, operation[1]) ? policy.operaciones[operation[1]] : null;
       if (!byRole) return; // operación inexistente: responde 404 la ruta
-      if (user.rol !== ADMIN && !(byRole[user.rol] || []).includes(method)) throw new HttpError(403, 'No tienes permiso para esta operación.');
+      if (user.rol !== ADMIN && !methodsOf(byRole[user.rol]).includes(method)) throw new HttpError(403, 'No tienes permiso para esta operación.');
       return;
     }
     if (/^\/api\/users(?:\/|$)/.test(path) && user.rol !== ADMIN) throw new HttpError(403, 'Solo el administrador gestiona usuarios.');

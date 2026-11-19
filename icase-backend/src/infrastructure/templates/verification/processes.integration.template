@@ -1,0 +1,40 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
+import {io} from 'socket.io-client';
+const base=process.env.BASE_API_URL||'http://localhost:3000';
+test('Proceso PostgreSQL: rollback real, actor distinto, concurrencia e idempotencia',async()=>{
+ const call=async(path,token,body,method=body?'POST':'GET')=>{const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{})});return {status:response.status,data:await response.json()};};
+ const login=async(email,password)=>{const result=await call('/api/auth/login',null,{email,password});assert.equal(result.status,200);return result.data.token;};
+ const admin=await login(process.env.ADMIN_EMAIL||'admin@example.test',process.env.ADMIN_PASSWORD||'test-admin-password');
+ const email='process-'+randomUUID()+'@example.test',password='Process-Test-Only-123!';
+ const created=await call('/api/users',admin,{email,password,nombre:'Revisor de procesos',rol:'administrador',activo:true});assert.ok([200,201].includes(created.status),JSON.stringify(created.data));
+ const reviewer=await login(email,password),endpoint='/api/operations/rf-01';
+ const record=async(state)=>{const result=await call(endpoint,admin,{nombre:'Proceso '+randomUUID(),estado:state});assert.equal(result.status,201);return result.data.id;};
+ const first=await record('pendiente'),second=await record('cancelado');
+ const started=await call('/api/processes/revision/instances',admin,{records:{primero:String(first),segundo:String(second)}});assert.equal(started.status,201,JSON.stringify(started.data));
+ let path='/api/processes/instances/'+started.data.id;const action={action:'cerrar',version:0,key:'request-'+randomUUID()};
+ assert.equal((await call(path+'/actions',admin,action)).status,403);
+ assert.equal((await call(path+'/actions',reviewer,action)).status,409);
+ let rows=(await call(endpoint,admin)).data;assert.equal(rows.find(row=>String(row.id)===String(first)).data.estado,'pendiente');
+ assert.equal((await call(path,admin)).data.version,0);
+ assert.equal((await call(endpoint+'/'+second,admin,{estado:'pendiente'},'PATCH')).status,409);
+ assert.equal((await call(endpoint+'/'+first,admin,undefined,'DELETE')).status,409);
+ assert.equal((await call(endpoint+'/0'+first,admin,{estado:'pendiente'},'PATCH')).status,409);
+ const goodFirst=await record('pendiente'),goodSecond=await record('pendiente');
+ const good=await call('/api/processes/revision/instances',admin,{records:{primero:String(goodFirst),segundo:String(goodSecond)}});assert.equal(good.status,201);path='/api/processes/instances/'+good.data.id;
+ assert.equal((await call('/api/processes/revision/instances',admin,{records:{primero:String(goodFirst),segundo:String(goodSecond)}})).status,409);
+ assert.ok((await call('/api/processes/instances',admin)).data.data.some(item=>item.id===good.data.id));
+ assert.equal((await call('/api/processes/instances?page=-1',admin)).status,400);
+ const socket=io(base,{transports:['websocket'],auth:{token:admin},reconnection:false});
+ try{
+ await new Promise((resolve,reject)=>{socket.once('connect',resolve);socket.once('connect_error',reject);});
+ assert.equal((await socket.timeout(3000).emitWithAck('subscribe',['rf-01'])).ok,true);
+ const event=new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('No llegó aviso posterior al commit')),5000);socket.once('records:changed',value=>{clearTimeout(timeout);resolve(value);});});
+ const results=await Promise.all([call(path+'/actions',reviewer,action),call(path+'/actions',reviewer,action)]);
+ assert.ok(results.some(result=>result.status===200));assert.ok(results.every(result=>[200,409].includes(result.status)));
+ const replay=await call(path+'/actions',reviewer,action);assert.equal(replay.status,200);assert.equal(replay.data.replayed,true);
+ const view=(await call(path,admin)).data;assert.equal(view.state,'cerrado');assert.equal(view.history.length,1);assert.equal(view.version,1);assert.ok(!JSON.stringify(view).includes(action.key));
+ rows=(await call(endpoint,admin)).data;for(const id of [goodFirst,goodSecond])assert.equal(rows.find(row=>String(row.id)===String(id)).data.estado,'cerrado');
+ assert.equal((await event).method,'PATCH');
+ assert.equal((await call(endpoint+'/'+goodFirst,admin,{estado:'pendiente'},'PATCH')).status,409);
+ }finally{socket.close();}
+});

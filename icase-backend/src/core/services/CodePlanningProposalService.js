@@ -1,6 +1,9 @@
 const { CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
 const AccessControlService = require('./AccessControlService');
 const ModuleService = require('./ModuleService');
+const NestRuntimePolicy = require('./NestRuntimePolicy');
+const { humanize } = require('./FieldLabel');
+const { contextOf } = require('./RequirementAnalysisContext');
 
 const CODE_DECISION_PHASES = Object.values(CODE_PHASE_DEFINITIONS)
   .filter((item) => item.tipo === 'decision')
@@ -21,11 +24,12 @@ const clean = (value) => String(value || '').trim();
 const unique = (values) => [...new Set(values.map(clean).filter(Boolean))];
 
 class CodePlanningProposalService {
-  constructor({ ruleInferenceService = null } = {}) {
+  constructor({ ruleInferenceService = null, specService = null } = {}) {
     this.ruleInferenceService = ruleInferenceService;
+    this.specService = specService;
   }
 
-  generar({ etapa, proyecto, requerimientos = [], diagramas = [], plan }) {
+  generar({ etapa, proyecto, requerimientos = [], diagramas = [], diseno = {}, plan, inicial = false }) {
     if (!CODE_DECISION_PHASES.includes(etapa)) {
       throw new Error(`La etapa ${etapa} no admite propuestas de planificación.`);
     }
@@ -34,82 +38,152 @@ class CodePlanningProposalService {
     const diagramasAprobados = diagramas.filter((item) =>
       item.aprobado === true && item.estado === 'aprobado' && !item.desactualizado
     );
-    const texto = this._textoDe(requisitosAprobados, diagramasAprobados);
-    const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto };
+    const analysis = contextOf(proyecto?.auditoria_requisitos, { includeContext: true });
+    const analysisDecisions = [...analysis.restricciones_tecnicas, ...analysis.reglas_negocio, ...analysis.decisiones, ...analysis.contexto]
+      .filter((item) => item.estado === 'confirmado');
+    const texto = [this._textoDe(requisitosAprobados, diagramasAprobados), ...analysisDecisions.map((item) => `${item.necesidad}\n${item.evidencia || ''}`)].join('\n');
+    const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto, diseno, inicial, analisis: analysis };
     const propuesta = this[`_${etapa}`](contexto);
     const construir = (resultado) => ({
       etapa,
-      propuesta: resultado.valor,
-      evidencias: this._evidencias(requisitosAprobados, diagramasAprobados),
+      propuesta: Object.values(analysis).some(entries => entries.length) ? { ...resultado.valor, contexto_analisis: analysis } : resultado.valor,
+      contexto_analisis: analysis,
+      evidencias: [...this._evidencias(requisitosAprobados, diagramasAprobados), ...analysisDecisions.map((item) => ({ tipo: item.tipo, identificador: item.id, nombre: item.necesidad }))],
       advertencias: resultado.advertencias
     });
     // La etapa de reglas de negocio consulta a la IA, por lo que responde de forma asíncrona.
     return propuesta && typeof propuesta.then === 'function' ? propuesta.then(construir) : construir(propuesta);
   }
 
-  _modulos() {
-    return new ModuleService().proponer();
+  _modulos({ texto, plan }) {
+    const stack = this._propuestaAprobada(plan, 'stack_tecnologico');
+    const acceso = this._propuestaAprobada(plan, 'control_acceso');
+    const compatible = !/spring/i.test(stack.backend) && acceso.autenticacion?.metodo === 'jwt';
+    const sugeridos = {
+      eventos_cambios: compatible && stack.tiempo_real === 'Socket.IO',
+      camara_qr: compatible && /\bqr\b/i.test(texto),
+      reportes_calculos: compatible && /reportes?|estadísticas/i.test(texto),
+      pagos_prueba: compatible && /stripe/i.test(texto) && /sandbox|de prueba/i.test(texto)
+    };
+    const valor = new ModuleService().proponer().valor;
+    return { valor: { ...valor, modo: 'personalizado', modulos: valor.modulos.map(item => ({
+      id: item.id, activo: Boolean(sugeridos[item.id])
+    })) }, advertencias: [] };
   }
 
-  _control_acceso({ requisitosAprobados }) {
-    return new AccessControlService().proponer({ requerimientos: requisitosAprobados });
+  _control_acceso({ requisitosAprobados, diseno }) {
+    // Los verbos de los mockups aprobados son lo que cada requisito realmente hace: de ahí salen los permisos por defecto.
+    const verbosPorRf = {};
+    for (const link of (diseno?.mockups || []).flatMap((item) => item.enlaces || [])) {
+      if (link.estado !== 'valido' || !link.rf || !link.verbo) continue;
+      const key = String(link.rf).toUpperCase();
+      verbosPorRf[key] = [...new Set([...(verbosPorRf[key] || []), link.verbo])];
+    }
+    return new AccessControlService().proponer({ requerimientos: requisitosAprobados, verbosPorRf });
   }
 
-  async _reglas_negocio({ requisitosAprobados, diagramasAprobados, plan }) {
+  async _reglas_negocio({ requisitosAprobados, diagramasAprobados, plan, analisis, inicial }) {
     const anterior = plan?.etapas?.find((item) => item.etapa === 'reglas_negocio');
+    const confirmadas = analisis.reglas_negocio.filter(item => item.estado === 'confirmado');
+    const modelo = new (require('../../infrastructure/services/DomainModelExtractor'))().fromDiagrams(diagramasAprobados);
+    const Builder = require('../../infrastructure/services/ApplicationContractBuilder');
+    const contrato = new Builder().build({ proyecto: {}, requerimientos: requisitosAprobados, domainModel: modelo });
+    const dominio = [];
+    for (const entidad of modelo?.entities || []) {
+      const rf = contrato.operations.filter(op => op.entity === entidad.key).map(op => op.id);
+      if (!rf.length) continue;
+      for (const campo of entidad.attributes.filter(attr => attr.name !== 'id' && !attr.nullable && !attr.referencia)) {
+        const etiqueta = humanize(campo.name);
+        dominio.push({ id: 'DOM-' + entidad.key + '-' + campo.name, tipo: 'requerido', entidad: entidad.name,
+          entidad_etiqueta: humanize(entidad.name), campo: campo.name, campo_etiqueta: etiqueta, rf, origen: 'inferido', estado_decision: 'pendiente',
+          mensaje: etiqueta + ' es obligatorio.', justificacion: 'En el diagrama de clases este dato no es opcional, por eso el sistema lo pide siempre.' });
+      }
+    }
+    // Reglas de sentido común (no negativos, fin >= inicio): solo las que el motor de reglas valida como correctas.
+    const rfPorEntidad = Object.fromEntries((modelo?.entities || []).map((entidad) => [entidad.key, contrato.operations.filter((op) => op.entity === entidad.key).map((op) => op.id)]));
+    const sentidoComun = new (require('./SanityRuleService'))().derivar({ entidades: modelo?.entities || [], rfPorEntidad });
+    const validador = new (require('./BusinessRuleService'))();
+    const contextoReglas = { entidades: modelo?.entities || [], requerimientos: requisitosAprobados };
+    for (const regla of sentidoComun) {
+      if (!validador.validar([regla], contextoReglas).errores.length) dominio.push(regla);
+    }
+    if (inicial) return { valor: { reglas: dominio, confirmadas }, advertencias: [] };
     if (!this.ruleInferenceService) {
-      return { valor: { reglas: [], notas: 'Sin inferencia automática: redacta las reglas manualmente.' }, advertencias: ['El servicio de inferencia de reglas no está configurado.'] };
+      return { valor: { reglas: dominio, confirmadas, notas: 'Revisa las reglas derivadas del dominio.' }, advertencias: ['El servicio de inferencia de reglas no está configurado.'] };
     }
     const { reglas, advertencias } = await this.ruleInferenceService.inferir({
       requerimientos: requisitosAprobados,
       diagramas: diagramasAprobados,
+      analisis,
       retroalimentacion: anterior?.estado === 'rechazada' ? anterior.observaciones : ''
     });
-    const pendientes = reglas.filter((item) => item.estado_decision === 'pendiente').length;
+    const todas = [...dominio.filter(base => !reglas.some(r => r.entidad === base.entidad && r.tipo === base.tipo && r.campo === base.campo)), ...reglas];
+    const pendientes = todas.filter(item => item.estado_decision === 'pendiente').length;
     return {
       valor: {
-        reglas,
+        reglas: todas, confirmadas,
         notas: `Reglas propuestas desde los RF y el modelo de dominio aprobados. ${pendientes} requieren tu decisión (confirmar o rechazar) antes de aprobar la etapa.`
       },
       advertencias: [...advertencias, ...(reglas.length ? [] : ['No se propuso ninguna regla: puedes aprobar la etapa vacía o redactarlas manualmente.'])]
     };
   }
 
-  _alcance_plataforma({ requisitosAprobados, texto }) {
-    const rf = requisitosAprobados.filter((item) => item.tipo === 'RF');
-    const rnf = requisitosAprobados.filter((item) => item.tipo === 'RNF');
-    const plataformas = [];
-    if (/react native|android|ios|aplicaci[oó]n m[oó]vil|\bapp m[oó]vil\b/i.test(texto)) plataformas.push('móvil');
-    if (/\bweb\b|react|navegador|spa/i.test(texto)) plataformas.push('web');
-    if (/tablet/i.test(texto)) plataformas.push('tablet');
-    const plataformaInferida = plataformas.length === 0;
-    if (plataformaInferida) plataformas.push('web');
-
+  /** Operaciones de negocio por RF y componentes por pantalla; la IA propone y el servicio valida contra el dominio aprobado. */
+  async _especificacion_aplicacion({ requisitosAprobados, diagramasAprobados, plan, analisis, diseno }) {
+    const vacio = { operaciones: [], pantallas: [], version: 1 };
+    if (!this.specService) return { valor: vacio, advertencias: ['El servicio de especificación no está configurado.'] };
+    const anterior = plan?.etapas?.find((item) => item.etapa === 'especificacion_aplicacion');
+    const { especificacion, advertencias } = await this.specService.inferir({
+      requerimientos: requisitosAprobados,
+      diagramas: diagramasAprobados,
+      pantallas: Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [],
+      analisis,
+      retroalimentacion: anterior?.estado === 'rechazada' ? anterior.observaciones : ''
+    });
+    if (!especificacion) return { valor: vacio, advertencias };
+    const derivadas = especificacion.operaciones.filter((op) => op.origen === 'derivado').length;
     return {
-      valor: {
-        plataformas: unique(plataformas),
-        alcance: `Implementar ${rf.length} requisitos funcionales aprobados para ${unique(plataformas).join(', ')}.`,
-        exclusiones: 'No se incluirán capacidades que no consten en requisitos o artefactos aprobados.',
-        capacidades_principales: rf.map((item) => `${item.identificador}: ${item.nombre}`),
-        restricciones_no_funcionales: rnf.map((item) => `${item.identificador}: ${item.nombre}`)
-      },
-      advertencias: plataformaInferida ? ['No se identificó una plataforma explícita; se propone web para revisión.'] : []
+      valor: { ...especificacion, notas: `${especificacion.operaciones.length} operaciones (${derivadas} derivadas sin IA) y ${especificacion.pantallas.length} pantallas. Confirma o rechaza cada operación antes de aprobar.` },
+      advertencias
     };
   }
 
-  _stack_tecnologico({ texto }) {
+  _alcance_plataforma({ texto, diseno }) {
+    const plataformas = [];
+    if (/\bweb\b|react(?!\s+native)\b|navegador/i.test(texto)) plataformas.push('web');
+    if (/react native|\bandroid\b|\bios\b|m[oó]vil/i.test(texto)) plataformas.push('móvil');
+    // Las pantallas del árbol de navegación también cuentan: una pantalla móvil exige la aplicación móvil.
+    const PlatformPolicy = require('./PlatformPolicy');
+    const arbol = Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
+    for (const app of ['web', 'móvil']) if (PlatformPolicy.count(arbol)[app] > 0 && !plataformas.includes(app)) plataformas.push(app);
+    const opciones = plataformas.length ? plataformas : ['web'];
+    return { valor: { plataformas: opciones, detectadas: opciones },
+      advertencias: plataformas.length ? [] : ['Se propone web porque el análisis no especifica plataforma.'] };
+  }
+
+  _stack_tecnologico({ texto, analisis, plan }) {
+    const restricciones = analisis.restricciones_tecnicas.filter(item => item.estado === 'confirmado');
+    const confirmado = restricciones.map(item => item.necesidad).join(' ');
+    const plataformas = plan?.etapas?.find(item => item.etapa === 'alcance_plataforma')?.propuesta?.plataformas
+      || this._alcance_plataforma({ texto }).valor.plataformas;
+    texto = confirmado;
     const advertencias = [];
     const conSpring = /spring|\bjava\b/i.test(texto);
-    const backend = /nestjs/i.test(texto) ? 'Node.js + NestJS'
+    const backend = /nestjs/i.test(texto) ? NestRuntimePolicy.label
       : conSpring ? 'Java + Spring Boot'
         : 'Node.js + Express';
-    const frontend = /react native/i.test(texto) ? 'React + Vite para web; React Native para móvil' : 'React + Vite';
+    const frontend = 'React + Vite';
     let baseDatos = /postgres(?:ql)?/i.test(texto) ? 'PostgreSQL'
       : /mongodb|mongo\b/i.test(texto) ? 'MongoDB'
         : /mysql/i.test(texto) ? 'MySQL' : 'MongoDB';
     if (!/nestjs|express|spring|\bjava\b/i.test(texto)) advertencias.push('Backend no especificado: se propone Node.js + Express para revisión.');
     if (!/react/i.test(texto)) advertencias.push('Frontend no especificado: se propone React + Vite para revisión.');
+    if (/nestjs/i.test(texto)) {
+      try { NestRuntimePolicy.validate(texto); } catch (error) { advertencias.push(error.message); }
+    }
     if (!/postgres(?:ql)?|mongodb|mongo\b|mysql/i.test(texto)) advertencias.push('Base de datos no especificada: se propone MongoDB para revisión.');
+    if (/prisma/i.test(texto)) advertencias.push('Prisma está confirmado. El backend actual usa el controlador de la base de datos y genera SQL directamente.');
+    if (/redis/i.test(texto)) advertencias.push('El generador no implementa caché de consultas con Redis.');
     if (conSpring && baseDatos === 'MongoDB') {
       baseDatos = 'PostgreSQL';
       advertencias.push('Java + Spring Boot solo se genera con PostgreSQL o MySQL: se propone PostgreSQL en lugar de MongoDB.');
@@ -122,57 +196,34 @@ class CodePlanningProposalService {
     return {
       valor: {
         backend,
+        ...(/nestjs/i.test(backend) ? { version_backend: NestRuntimePolicy.version } : {}),
         frontend,
         base_datos: baseDatos,
-        gestor_paquetes: conSpring ? 'Maven' : /\bpnpm\b/i.test(texto) ? 'pnpm' : /\byarn\b/i.test(texto) ? 'yarn' : 'npm',
-        plataformas: unique([
-          /\bweb\b|react/i.test(texto) && 'web',
-          /react native|android|ios/i.test(texto) && 'móvil'
-        ]),
-        tiempo_real: /socket\.io/i.test(texto) ? 'Socket.IO' : /websocket/i.test(texto) ? 'WebSocket' : '',
-        estilos: /tailwind/i.test(texto) ? 'Tailwind CSS' : '',
+        gestor_paquetes: conSpring ? 'Maven' : 'npm',
+        plataformas,
+        origen: Object.fromEntries(Object.entries({
+          backend: /nestjs|express|spring/i, base_datos: /postgres|mongo|mysql/i, frontend: /react(?!\s+native)\b/i,
+          gestor_paquetes: /npm|maven/i, tiempo_real: /socket\.io/i, estilos: /tailwind/i
+        }).map(([campo, patron]) => [campo, patron.test(confirmado) ? 'Confirmado en el análisis' : 'Propuesta'])),
+        tiempo_real: /socket\.io/i.test(texto) ? 'Socket.IO' : '',
+        estilos: /tailwind/i.test(texto) ? 'Tailwind CSS' : 'Estilos del mockup',
+        ci_cd: 'GitHub Actions',
         observaciones_tecnicas: 'Versiones exactas y librerías complementarias deberán fijarse antes de generar dependencias.'
       },
       advertencias
     };
   }
 
-  _arquitectura_codigo({ requisitosAprobados, diagramasAprobados, texto }) {
-    const modulos = unique(requisitosAprobados
-      .filter((item) => item.tipo === 'RF')
-      .map((item) => item.nombre)
-      .slice(0, 12));
-    const tieneJwt = /\bjwt\b/i.test(texto);
-    const diagramaArquitectura = diagramasAprobados.some((item) =>
-      ['arquitectura_software', 'clases_diseno'].includes(item.tipo)
-    );
-    return {
-      valor: {
-        estilo: /clean architecture/i.test(texto) ? 'Clean Architecture por módulos' : 'Arquitectura modular por capas',
-        capas: 'Dominio, aplicación, adaptadores de interfaz e infraestructura',
-        comunicacion: /socket\.io|websocket/i.test(texto) ? 'API REST/JSON y eventos en tiempo real' : 'API REST con JSON',
-        autenticacion: tieneJwt ? 'JWT y control de acceso basado en roles' : 'Autenticación y autorización según requisitos aprobados',
-        modulos,
-        decisiones_adicionales: 'Las dependencias apuntan hacia el dominio; la infraestructura implementa los puertos definidos por la aplicación.'
-      },
-      advertencias: diagramaArquitectura ? [] : ['No se encontró una arquitectura de software o clases de diseño aprobada y vigente.']
-    };
-  }
-
-  _estructura_carpetas({ plan }) {
-    const arquitectura = this._propuestaAprobada(plan, 'arquitectura_codigo');
-    const stack = this._propuestaAprobada(plan, 'stack_tecnologico');
-    const usaNest = /nestjs/i.test(clean(stack.backend));
-    const backendTree = usaNest
-      ? 'backend/\n  src/{domain,application,infrastructure,interfaces,modules}\n  test/{unit,integration,e2e}'
-      : 'backend/\n  src/core/{entities,use-cases,services}\n  src/interface-adapters/{controllers,repositories}\n  src/infrastructure/{database,middlewares,services}\n  src/routes\n  tests/{unit,integration,e2e}';
-    return {
-      valor: {
-        arbol: `${backendTree}\nfrontend/\n  src/{components,pages,services,hooks,utils}\n  tests/{unit,integration,e2e}\nops/{docker,ci}`,
-        convenciones: `Organización por capacidad funcional dentro de ${clean(arquitectura.estilo) || 'la arquitectura aprobada'}; código fuente y pruebas separados; infraestructura reproducible en ops/.`
-      },
-      advertencias: []
-    };
+  async _estructura_carpetas({ proyecto, plan, requisitosAprobados, diagramasAprobados, diseno }) {
+    const Backend = require('../../infrastructure/services/BackendScaffoldGenerator');
+    const Frontend = require('../../infrastructure/services/FrontendScaffoldGenerator');
+    const decisiones = Object.fromEntries((plan?.etapas || []).filter(item => item.estado === 'aprobada').map(item => [item.etapa, item.propuesta]));
+    const insumos = { decisiones, requerimientos: requisitosAprobados, diseno: diseno || {},
+      diagramaDominio: diagramasAprobados.find(item => ['clases_dominio', 'clases'].includes(item.tipo)) };
+    const partes = await Promise.all([new Backend(), new Frontend()].map(generador =>
+      generador.generar({ proyecto, insumos, versionesOrigen: {} })));
+    const rutas = partes.flatMap(parte => parte.archivos.map(archivo => archivo.ruta)).sort();
+    return { valor: { arbol: rutas.join('\n') }, advertencias: [] };
   }
 
   _propuestaAprobada(plan, etapa) {
@@ -182,7 +233,7 @@ class CodePlanningProposalService {
 
   _textoDe(requisitos, diagramas) {
     return [
-      ...requisitos.flatMap((item) => [item.identificador, item.nombre, item.descripcion, item.metrica_medible, item.evidencia]),
+      ...requisitos.flatMap((item) => [item.identificador, item.nombre, item.descripcion, item.metrica_medible, item.evidencia, item.canal, ...(Array.isArray(item.canales) ? item.canales : [])]),
       ...diagramas.flatMap((item) => [item.tipo, item.titulo, item.descripcion, item.codigo_plantuml, item.codigo_mermaid])
     ].map(clean).filter(Boolean).join('\n');
   }

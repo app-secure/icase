@@ -19,6 +19,8 @@ const capitalizeFirst = (text) => {
 };
 
 export default function DocumentViewer({ project, onBackToDiagrams }) {
+  const [showAudit, setShowAudit] = React.useState(false);
+  const designClasses = project.diagrams?.designClassDiagram || project.diagrams?.designClasses;
   const [showPdfModal, setShowPdfModal] = useState(false);
   const finalAudit = project.finalAudit;
   const exportBlocked = Boolean(finalAudit && !finalAudit.exportable);
@@ -102,23 +104,21 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
       {/* Contenedor scrolleable que abarca todo el ancho hasta el extremo derecho */}
       <div className="w-full flex-1 overflow-y-auto min-h-0 px-6 md:px-12 pt-6 pb-12 flex flex-col">
         <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col min-h-0">
-          {/* Top Controls Bar */}
-          <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200 shrink-0">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onBackToDiagrams}
-                className="p-1.5 hover:bg-slate-100 rounded-full text-slate-600 transition-colors flex items-center gap-1 text-xs cursor-pointer"
-              >
-                <ChevronLeft size={16} />
-                <span>Volver a Modelado</span>
-              </button>
-              <span className="text-slate-300">|</span>
+          {/* Barra de herramientas compacta: el detalle de la auditoría se abre en una ventana flotante */}
+          <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5">
                 <CheckCircle2 size={13} />
                 Documento de Especificación del Sistema
               </span>
+              {finalAudit && (
+                <button type="button" onClick={() => setShowAudit((value) => !value)} aria-expanded={showAudit} title="Ver el detalle de la auditoría final"
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${exportBlocked ? "border-red-200 bg-red-50 text-red-700" : finalAudit.advertencias?.length ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                  {exportBlocked ? <ShieldAlert size={13} /> : finalAudit.advertencias?.length ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
+                  Auditoría final: {exportBlocked ? "requiere correcciones" : finalAudit.advertencias?.length ? "exportable con advertencias" : "válida"}
+                </button>
+              )}
             </div>
-
             {/* Botón Principal: Previsualizar documento en PDF */}
             <button
               type="button"
@@ -131,18 +131,15 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               <span>Previsualizar documento en PDF</span>
             </button>
           </div>
-
-          {finalAudit && (
-            <div className={`mb-5 rounded-xl border p-4 text-sm ${exportBlocked ? "border-red-200 bg-red-50" : finalAudit.advertencias?.length ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
-              <div className="flex items-center gap-2 font-semibold text-slate-900">
-                {exportBlocked ? <ShieldAlert size={17} className="text-red-600" /> : finalAudit.advertencias?.length ? <AlertTriangle size={17} className="text-amber-600" /> : <CheckCircle2 size={17} className="text-emerald-600" />}
-                Auditoría final: {exportBlocked ? "requiere correcciones" : finalAudit.advertencias?.length ? "exportable con advertencias" : "válida"}
-              </div>
+          {finalAudit && showAudit && (
+            <div className="fixed right-6 top-40 z-30 max-h-[60vh] w-[min(620px,calc(100vw-3rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-xl">
+              <div className="flex items-center justify-between"><p className="font-semibold text-slate-900">Auditoría final</p><button type="button" onClick={() => setShowAudit(false)} aria-label="Cerrar" className="cursor-pointer text-base leading-none text-slate-400">×</button></div>
               <p className="mt-1 text-xs text-slate-600">
                 {finalAudit.resumen?.diagramas_aprobados || 0}/{finalAudit.resumen?.diagramas_requeridos || 6} diagramas aprobados · {finalAudit.resumen?.mockups_generados || 0} mockups · cobertura RF/UI {finalAudit.resumen?.cobertura_rf_mockups ?? "—"}%
               </p>
               {finalAudit.errores_criticos?.map((item) => <p key={item} className="mt-2 text-xs text-red-700">• {item}</p>)}
               {finalAudit.advertencias?.map((item) => <p key={item} className="mt-2 text-xs text-amber-800">• {item}</p>)}
+
             </div>
           )}
 
@@ -427,14 +424,14 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
               8.3 Diagrama de Clases de Diseño
             </h3>
             <p className="text-sm text-slate-700 leading-relaxed">
-              {project.diagrams?.designClasses?.description || "Define la estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades de dominio y DTOs."}
+              {designClasses?.description || "Define la estructura de arquitectura en capas con controladores, casos de uso, repositorios, entidades de dominio y DTOs."}
             </p>
             <StaticDiagram
-              code={project.diagrams?.designClasses?.code}
-              plantumlCode={project.diagrams?.designClasses?.plantumlCode}
+              code={designClasses?.code}
+              plantumlCode={designClasses?.plantumlCode}
               caption="Figura 8.3: Diagrama de Clases de Diseño en Capas"
             />
-            {renderDiagramExplanation(project.diagrams?.designClasses, "Diagrama de Clases de Diseño")}
+            {renderDiagramExplanation(designClasses, "Diagrama de Clases de Diseño")}
           </div>
 
           {/* 8.4 Árbol de Navegación */}

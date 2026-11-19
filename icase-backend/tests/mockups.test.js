@@ -75,7 +75,7 @@ describe('Módulo de Mockups - Casos de Uso y Servicios', () => {
     });
 
     await expect(useCase.ejecutar({ proyectoId: 'proj-1' }))
-      .rejects.toThrow('Debes aprobar los cuatro diagramas');
+      .rejects.toThrow('Debes aprobar los seis diagramas');
     expect(mockupIaService.generarMockups).not.toHaveBeenCalled();
   });
 
@@ -524,5 +524,34 @@ describe('Módulo de Mockups - Casos de Uso y Servicios', () => {
     expect(aplicado).toContain('background:#c2410c');
     expect(aplicado).toContain('--icase-primary:#c2410c');
     expect(aplicado).toContain('id="icase-design-system"');
+  });
+
+  test('GenerarMockups retira mockups huérfanos existentes y descarta slugs fuera del lote', async () => {
+    const htmlOk = '<!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script></head><body><main><h1>Paquetes</h1></main></body></html>';
+    const codigo = '@startwbs\n* Sistema\n** Clientes\n*** Paquetes Adquiridos\n*** Inicio\n@endwbs';
+    const huerfano = { nombre_pantalla: 'pantalla-obsoleta', pantalla_id: 'pantalla-obsoleta', preview_code: htmlOk };
+    const inicio = { nombre_pantalla: 'inicio', pantalla_id: 'inicio', preview_code: htmlOk };
+    const guardarOActualizar = jest.fn().mockResolvedValue({});
+    const mockIaService = {
+      generarMockups: jest.fn()
+        .mockResolvedValueOnce({ mockups: [{ nombre_pantalla: 'slug-inventado', tipo: 'list', preview_code: htmlOk }], proveedorUsado: 'gemini', advertencias: [] })
+        .mockResolvedValueOnce({ mockups: [{ nombre_pantalla: 'slug-inventado', tipo: 'list', preview_code: htmlOk }], proveedorUsado: 'gemini', advertencias: [] })
+    };
+    const useCase = new GenerarMockups({
+      proyectoRepository: { obtenerPorId: jest.fn().mockResolvedValue({ id: 'p1', nombre: 'Sistema', estado_fase: 'diagramas_aprobados' }) },
+      requerimientoRepository: { listarPorProyecto: jest.fn().mockResolvedValue([]) },
+      diagramaRepository: { listarPorProyecto: jest.fn().mockResolvedValue([{ tipo: 'arbol_navegacion', codigo_plantuml: codigo }]) },
+      disenoRepository: { obtenerPorProyecto: jest.fn().mockResolvedValue({ mockups: [huerfano, inicio] }), guardarOActualizar },
+      mockupIaService: mockIaService
+    });
+
+    const resultado = await useCase.ejecutar({ proyectoId: 'p1', pantallas: ['paquetes-adquiridos'] });
+
+    expect(resultado.mockups.map(m => m.nombre_pantalla)).toEqual(['inicio']);
+    expect(resultado.advertencias.some(a => a.includes('pantalla-obsoleta'))).toBe(true);
+    expect(resultado.advertencias.some(a => a.includes('slug-inventado'))).toBe(true);
+    expect(guardarOActualizar).toHaveBeenCalledWith('p1', expect.objectContaining({
+      mockups: [expect.objectContaining({ nombre_pantalla: 'inicio' })]
+    }));
   });
 });

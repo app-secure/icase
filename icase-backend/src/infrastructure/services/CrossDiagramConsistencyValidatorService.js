@@ -4,7 +4,10 @@ const IGNORED = new Set([
   'aplicacion', 'componente', 'contenedor', 'del', 'el', 'la', 'las', 'los', 'modulo',
   'servicio', 'sistema', 'vista', 'web', 'usecase', 'controller', 'dto', 'repository',
   'crear', 'consultar', 'gestionar', 'procesar', 'registrar', 'validar', 'actualizar', 'ver',
-  'permitir', 'controlar', 'administrar'
+  'permitir', 'controlar', 'administrar',
+  // Palabras que no distinguen un elemento de otro: conectores y términos genéricos de interfaz o de acción.
+  'de', 'en', 'por', 'para', 'con', 'sin', 'al', 'un', 'una', 'que', 'se', 'mediante', 'desde', 'sobre',
+  'pantalla', 'formulario', 'visualizar', 'mostrar', 'revisar', 'solicitar', 'realizar', 'seleccionar', 'obtener'
 ]);
 
 const SYNONYMS = new Map([
@@ -34,13 +37,24 @@ function tokens(value) {
     .filter((token) => token.length >= 2 && !IGNORED.has(token)))];
 }
 
+/**
+ * Dos palabras se consideran la misma si son iguales o si una es el comienzo de la otra con poca diferencia
+ * («paquete» y «paquetes», «compra» y «comprar», «comanda» y «comandas»): así los plurales, las conjugaciones y los
+ * sustantivos derivados de un verbo no cuentan como elementos distintos.
+ */
+function sameWord(left, right) {
+  if (left === right) return true;
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+  return short.length >= 4 && long.startsWith(short) && long.length - short.length <= 3;
+}
+
 function matches(source, candidates) {
   const expected = tokens(source);
   if (!expected.length) return true;
   return candidates.some((candidate) => {
     const actual = tokens(candidate);
     if (!actual.length) return false;
-    const common = expected.filter((token) => actual.includes(token)).length;
+    const common = expected.filter((token) => actual.some((other) => sameWord(token, other))).length;
     return common / Math.min(expected.length, actual.length) >= 0.5;
   });
 }
@@ -62,7 +76,7 @@ function extractUseCases(code) {
   for (const match of String(code || '').matchAll(/^\s*usecase\s+(?:"([^"]+)"|[\w.]+\s+as\s+"([^"]+)")/gim)) {
     labels.push(match[1] || match[2]);
   }
-  return labels.filter(Boolean);
+  return labels.filter(Boolean).map(label => label.replace(/\\[nr]/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
 class CrossDiagramConsistencyValidatorService {
@@ -91,8 +105,17 @@ class CrossDiagramConsistencyValidatorService {
       ...String(codigo || '').matchAll(/"([^"]+)"/g),
       ...String(codigo || '').matchAll(/(?:Container|Component|System|Boundary)\s*\([^,]+,\s*([^,)]+)/gim)
     ].map((match) => match[1]).filter(Boolean);
+    // Las responsabilidades pueden estar en notas de contenedores existentes.
+    // No cuentan títulos, comentarios ni notas huérfanas para fingir cobertura.
+    const aliases = require('./ArchitectureTraceabilityService').aliasesFromCode(codigo);
+    for (const match of String(codigo || '').matchAll(/^\s*note\s+(?:right|left|top|bottom)\s+of\s+([\w.]+)(?:\s+as\s+\w+)?\s*\n([\s\S]*?)^\s*end\s*note\b/gim)) {
+      if (aliases.has(match[1].toLowerCase())) candidatos.push(match[2].replace(/\b(?:RF|RNF)-\d+\b/gi, ''));
+    }
+    for (const match of String(codigo || '').matchAll(/^\s*note\s+(?:right|left|top|bottom)\s+of\s+([\w.]+)\s*:\s*(.+)$/gim)) {
+      if (aliases.has(match[1].toLowerCase())) candidatos.push(match[2].replace(/\b(?:RF|RNF)-\d+\b/gi, ''));
+    }
     return this.resultadoCobertura({
-      elementos: extractUseCases(origen.codigo_plantuml),
+      elementos: extractUseCases(origen.codigo_plantuml).map(label => label.replace(/\bRF-\d+\b/gi, '')),
       candidatos,
       metrica: 'casos_uso_representados_arquitectura',
       etiqueta: 'los módulos funcionales de los casos de uso aprobados',
@@ -125,19 +148,21 @@ class CrossDiagramConsistencyValidatorService {
       candidatos: extractClasses(codigo),
       metrica: 'clases_dominio_realizadas',
       etiqueta: 'clases del dominio aprobado',
+      soloAdvertencias: true,
       umbralError: 0.6
     });
     const casosUso = latest(diagramas, DIAGRAM_TYPES.USE_CASES);
     if (!casosUso?.codigo_plantuml) return coberturaDominio;
     const candidatos = [
-      ...extractClasses(codigo),
-      ...[...String(codigo || '').matchAll(/package\s+"([^"]+)"/gim)].map((match) => match[1])
+      ...extractClasses(codigo).filter(name => /(?:UseCase|CasoUso|Service|Servicio|Controller|Controlador|Gateway|Handler)/i.test(name)),
+      ...this.operacionesDiseno(codigo)
     ];
     const coberturaFuncional = this.resultadoCobertura({
       elementos: extractUseCases(casosUso.codigo_plantuml),
       candidatos,
       metrica: 'casos_uso_realizados_diseno',
       etiqueta: 'los casos de uso aprobados',
+      soloAdvertencias: true,
       umbralError: 0.5
     });
     return {
@@ -165,19 +190,29 @@ class CrossDiagramConsistencyValidatorService {
     });
   }
 
-  resultadoCobertura({ elementos, candidatos, metrica, etiqueta, umbralError, soloErrorSinCobertura = false }) {
+  operacionesDiseno(codigo) {
+    const operations = [];
+    // Solo métodos de entrada/aplicación; una nota RF o método de entidad no realiza un flujo.
+    for (const match of String(codigo || '').matchAll(/class\s+(?:"([^"]+)"(?:\s+as\s+\w+)?|([\w.]+))\s*(?:<<([^>]+)>>)?\s*\{([^}]*)}/gi)) {
+      if (!/(?:Controller|Controlador|UseCase|CasoUso|Service|Servicio|Gateway|Handler|Adapter)/i.test(`${match[1] || match[2]} ${match[3] || ''}`)) continue;
+      for (const method of match[4].matchAll(/(?:^|\n)\s*[+\-#~]?\s*(\w+)\s*\(/g)) operations.push(method[1]);
+    }
+    return operations;
+  }
+
+  resultadoCobertura({ elementos, candidatos, metrica, etiqueta, umbralError, soloErrorSinCobertura = false, soloAdvertencias = false }) {
     const unique = [...new Set(elementos.filter(Boolean))];
     if (!unique.length) return { valido: true, errores: [], advertencias: [], metricas: { [metrica]: 0 } };
-    const cubiertos = unique.filter((elemento) => matches(elemento, candidatos));
+    const cubiertos = unique.filter((elemento) => matches(soloAdvertencias ? elemento.replace(/\b(?:RF|RNF)-\d+\b/gi, '') : elemento, candidatos));
     const omitidos = unique.filter((elemento) => !cubiertos.includes(elemento));
     const ratio = cubiertos.length / unique.length;
     const errores = [];
     const advertencias = [];
 
-    if ((soloErrorSinCobertura && cubiertos.length === 0 && unique.length >= 3) || (!soloErrorSinCobertura && ratio < umbralError)) {
+    if (!soloAdvertencias && ((soloErrorSinCobertura && cubiertos.length === 0 && unique.length >= 3) || (!soloErrorSinCobertura && ratio < umbralError))) {
       errores.push(`El diagrama no conserva suficiente consistencia con ${etiqueta}. Faltan: ${omitidos.join(', ')}.`);
     } else if (omitidos.length) {
-      advertencias.push(`Revisa elementos del artefacto origen que no se reconocen en este diagrama: ${omitidos.join(', ')}.`);
+      advertencias.push(`${soloAdvertencias ? 'Diseño por verificar: ' : ''}Revisa elementos del artefacto origen que no se reconocen en este diagrama: ${omitidos.join(', ')}. La comparación es léxica: no demuestra una omisión funcional. Comprueba las responsabilidades descritas en elementos o relaciones; una lista de RF no explica su realización.`);
     }
 
     return {

@@ -1,11 +1,12 @@
 const axios = require('axios');
+const BedrockClient = require('./BedrockClient');
 const fs = require('fs');
 const path = require('path');
 const AiModelConfig = require('./AiModelConfig');
 
 class MockupIaService {
   constructor() {
-    this.provider = process.env.MOCKUP_IA_PROVIDER || 'gemini';
+    this.provider = process.env.MOCKUP_IA_PROVIDER || 'auto';
     this.geminiApiKey = process.env.GEMINI_API_KEY || '';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
@@ -14,11 +15,15 @@ class MockupIaService {
     this.models = {
       gemini: AiModelConfig.mockups.gemini(),
       groq: AiModelConfig.mockups.groq(),
-      openrouter: AiModelConfig.mockups.openrouter()
+      openrouter: AiModelConfig.mockups.openrouter(),
+      bedrock: AiModelConfig.mockups.bedrock()
     };
+    this.bedrock = new BedrockClient();
     this.circuitos = new Map();
     this.failureThreshold = Number(process.env.MOCKUP_CIRCUIT_FAILURES || 2);
     this.cooldownMs = Number(process.env.MOCKUP_CIRCUIT_COOLDOWN_MS || 300000);
+    // Esperas (ms) entre reintentos del mismo modelo cuando responde «alta demanda».
+    this.esperasAltaDemanda = (process.env.MOCKUP_HIGH_DEMAND_WAITS_MS || '4000,10000,20000').split(',').map(Number).filter((value) => value > 0);
   }
 
   leerPrompt(archivo) {
@@ -30,8 +35,10 @@ class MockupIaService {
     }
   }
 
-  async generarMockups({ contextoProyecto, pantallas = [], insumoAdicional = '' }) {
-    const promptBase = this.leerPrompt(process.env.MOCKUP_PROMPT_FILE || 'disenador_mockups_compacto.md');
+  async generarMockups({ contextoProyecto, pantallas = [], insumoAdicional = '', modoEdicion = false, complejidad = null }) {
+    const promptBase = modoEdicion
+      ? 'Edita el HTML existente aplicando la petición del usuario y su diagnóstico. Conserva el diseño, navegación, campos y acciones que no requieren corrección. Devuelve SOLO JSON {"mockups":[{"nombre_pantalla":"slug exacto","preview_code":"documento HTML5 completo corregido"}]}. No reemplaces contenido por resúmenes ni puntos suspensivos.\nCONTEXTO:\n{{CONTEXTO_PROYECTO}}'
+      : this.leerPrompt(process.env.MOCKUP_PROMPT_FILE || 'disenador_mockups_compacto.md');
     const promptCompleto = this._construirPromptCompleto(promptBase, contextoProyecto, pantallas, insumoAdicional);
 
     let resultado = null;
@@ -42,12 +49,44 @@ class MockupIaService {
     advertencias.push(`Prompt estimado: ${tokensEstimados} tokens de entrada`);
 
     for (const proveedor of this._ordenProveedores()) {
-      const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados);
+      let promptProveedor = promptCompleto;
+      let tokensProveedor = tokensEstimados;
+      if (proveedor === 'groq') {
+        const presupuestoGroq = Number(process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000);
+        // Una edición necesita todo el HTML y el diagnóstico. Si no caben, probar
+        // otro proveedor; recortar el documento produce cambios incompletos.
+        if (tokensProveedor > presupuestoGroq && !modoEdicion) {
+          promptProveedor = this._construirPromptCompactoGroq(contextoProyecto, pantallas, insumoAdicional, presupuestoGroq);
+          tokensProveedor = this._estimarTokens(promptProveedor);
+        }
+      }
+      const intento = await this._intentarProveedor(proveedor, promptProveedor, tokensProveedor, { modoEdicion, complejidad });
       advertencias.push(...intento.advertencias);
       if (intento.texto) {
         resultado = intento.texto;
         proveedorUsado = `${proveedor}:${intento.modelo}`;
         break;
+      }
+    }
+
+    if (!resultado) {
+      let reabiertos = false;
+      for (const [clave, estado] of this.circuitos.entries()) {
+        if (!estado.permanente && estado.tipo !== 'cuota') {
+          this.circuitos.delete(clave);
+          reabiertos = true;
+        }
+      }
+      if (reabiertos) {
+        for (const proveedor of this._ordenProveedores()) {
+          const intento = await this._intentarProveedor(proveedor, promptCompleto, tokensEstimados, { modoEdicion, complejidad });
+          advertencias.push(...intento.advertencias);
+          if (intento.texto) {
+            resultado = intento.texto;
+            proveedorUsado = `${proveedor}:${intento.modelo}`;
+            break;
+          }
+        }
       }
     }
 
@@ -90,7 +129,7 @@ class MockupIaService {
 
   _ordenProveedores() {
     if (!this.provider || this.provider === 'auto') return this.providerOrder;
-    return [this.provider, ...this.providerOrder.filter(p => p !== this.provider)];
+    return [this.provider];
   }
 
   _estimarTokens(texto) {
@@ -114,6 +153,7 @@ class MockupIaService {
     this.circuitos.set(clave, {
       fallos,
       permanente,
+      tipo: clasificacion.tipo,
       abiertoHasta: debeAbrir
         ? Date.now() + (clasificacion.reintentarEnMs || this.cooldownMs)
         : 0
@@ -121,13 +161,18 @@ class MockupIaService {
   }
 
   _clasificarError(error) {
+    if (error.code === 'MOCKUP_OUTPUT_TRUNCATED') return { tipo: 'salida_truncada', reintentable: true };
     const status = error.response?.status;
-    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    const mensaje = String(BedrockClient.messageOf(error)).toLowerCase();
     if (status === 401 || status === 403) return { tipo: 'autenticacion', reintentable: false };
-    if (status === 404 || /no longer available|does not exist|not found|unavailable for free/.test(mensaje)) {
+    if (status === 404 || /no longer available|does not exist|not found|unavailable for free|model identifier is invalid|on-demand throughput isn.t supported/.test(mensaje)) {
       return { tipo: 'modelo_no_disponible', reintentable: false };
     }
-    if (status === 429 || /quota|rate limit|high demand|resource exhausted/.test(mensaje)) {
+    // Bedrock responde 429 «Too many requests» cuando varias pantallas piden a la vez: es momentáneo, se espera y se reintenta el mismo modelo.
+    if (status === 503 || /high demand|spikes in demand|temporarily unavailable|overloaded|too many requests|please wait before trying again|throttl/.test(mensaje)) {
+      return { tipo: 'alta_demanda', reintentable: true, reintentarEnMs: 3000 };
+    }
+    if (status === 429 || /quota|rate limit|resource exhausted/.test(mensaje)) {
       const minutos = mensaje.match(/retry in (\d+)m/);
       return { tipo: 'cuota', reintentable: true, reintentarEnMs: minutos ? Number(minutos[1]) * 60000 : this.cooldownMs };
     }
@@ -137,21 +182,27 @@ class MockupIaService {
     return { tipo: 'transitorio', reintentable: true };
   }
 
-  async _intentarProveedor(proveedor, prompt, tokensEstimados) {
+  async _intentarProveedor(proveedor, prompt, tokensEstimados, { modoEdicion = false, complejidad = null } = {}) {
     const advertencias = [];
-    const modelos = this.models[proveedor] || [];
+    // Una edición (chat) es delicada: siempre el modelo de las pantallas densas. Sin reparto configurado, la lista general.
+    const porComplejidad = proveedor === 'bedrock' ? AiModelConfig.mockups.bedrockPorComplejidad(modoEdicion ? 'densa' : complejidad) : null;
+    const modelos = porComplejidad || this.models[proveedor] || [];
     if (modelos.length === 0) return { texto: null, modelo: null, advertencias: [`${proveedor}: sin modelos configurados`] };
     const tieneCredencial = proveedor === 'gemini'
       ? Boolean(this.geminiApiKey)
       : proveedor === 'groq'
         ? Boolean(this.groqApiKey)
-        : Boolean(this.openrouterApiKey);
+        : proveedor === 'bedrock'
+          ? this.bedrock.configured
+          : Boolean(this.openrouterApiKey);
     if (!tieneCredencial) {
       return { texto: null, modelo: null, advertencias: [`${proveedor}: proveedor omitido porque no tiene credencial configurada`] };
     }
 
     if (proveedor === 'groq') {
-      const presupuesto = Number(process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000);
+      const presupuesto = Number(modoEdicion
+        ? (process.env.GROQ_MOCKUP_EDIT_INPUT_BUDGET || 7000)
+        : (process.env.GROQ_MOCKUP_INPUT_BUDGET || 3000));
       if (tokensEstimados > presupuesto) {
         return { texto: null, modelo: null, advertencias: [`Groq omitido: entrada estimada ${tokensEstimados} > presupuesto ${presupuesto}`] };
       }
@@ -165,7 +216,15 @@ class MockupIaService {
       }
       try {
         console.log(`[MockupIaService] Generando con ${clave} (~${tokensEstimados} tokens de entrada)...`);
-        const texto = await this._solicitar(proveedor, modelo, prompt);
+        // «Alta demanda» (503) es momentánea: se reintenta el mismo modelo con una espera corta antes de pasar al siguiente.
+        let texto = null;
+        for (let intento = 0; ; intento += 1) {
+          try { texto = await this._solicitar(proveedor, modelo, prompt, { modoEdicion }); break; } catch (error) {
+            if (this._clasificarError(error).tipo !== 'alta_demanda' || intento >= this.esperasAltaDemanda.length) throw error;
+            console.warn(`[MockupIaService] ${clave} con alta demanda; reintento ${intento + 1} en ${this.esperasAltaDemanda[intento] / 1000} s.`);
+            await new Promise((resolve) => setTimeout(resolve, this.esperasAltaDemanda[intento]));
+          }
+        }
         if (texto) {
           this.circuitos.delete(clave);
           return { texto, modelo, advertencias };
@@ -173,7 +232,7 @@ class MockupIaService {
       } catch (error) {
         const clasificacion = this._clasificarError(error);
         this._registrarFallo(clave, clasificacion);
-        const mensaje = error.response?.data?.error?.message || error.message;
+        const mensaje = BedrockClient.messageOf(error);
         console.warn(`[MockupIaService] ${clave} falló (${clasificacion.tipo}):`, mensaje);
         advertencias.push(`${clave}: ${clasificacion.tipo}`);
         if (clasificacion.tipo === 'autenticacion') break;
@@ -182,7 +241,7 @@ class MockupIaService {
     return { texto: null, modelo: null, advertencias };
   }
 
-  async _solicitar(proveedor, modelo, prompt) {
+  async _solicitar(proveedor, modelo, prompt, { modoEdicion = false } = {}) {
     if (proveedor === 'gemini') {
       if (!this.geminiApiKey) throw Object.assign(new Error('GEMINI_API_KEY no configurada'), { response: { status: 401 } });
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${this.geminiApiKey}`;
@@ -190,7 +249,21 @@ class MockupIaService {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.3, maxOutputTokens: 12000, responseMimeType: 'application/json' }
       }, { timeout: 90000 });
-      return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+      const candidate = res.data?.candidates?.[0];
+      if (candidate?.finishReason === 'MAX_TOKENS') throw Object.assign(new Error('Respuesta de mockup truncada por límite de salida; no se acepta como HTML completo.'), { code: 'MOCKUP_OUTPUT_TRUNCATED' });
+      return candidate?.content?.parts?.filter(part => !part.thought).map(part => part.text || '').join('') || null;
+    }
+
+    if (proveedor === 'bedrock') {
+      // Inferencia directa (Converse): un modelo Claude admite respuestas largas, así que el HTML de una pantalla no se trunca.
+      const maxTokens = Number(modoEdicion ? (process.env.BEDROCK_MOCKUP_EDIT_MAX_OUTPUT_TOKENS || 24000) : (process.env.BEDROCK_MOCKUP_MAX_OUTPUT_TOKENS || 16000));
+      const respuesta = await this.bedrock.converse({
+        modelId: modelo, prompt, maxTokens, temperature: 0.3,
+        system: 'Responde exclusivamente con un objeto JSON válido, sin texto adicional ni bloques de código.',
+        timeout: Number(process.env.BEDROCK_TIMEOUT_MS || 180000)
+      });
+      if (respuesta.truncated) throw Object.assign(new Error('Respuesta de mockup truncada por límite de salida; no se acepta como HTML completo.'), { code: 'MOCKUP_OUTPUT_TRUNCATED' });
+      return respuesta.text || null;
     }
 
     const apiKey = proveedor === 'groq' ? this.groqApiKey : this.openrouterApiKey;
@@ -200,17 +273,19 @@ class MockupIaService {
       : 'https://openrouter.ai/api/v1/chat/completions';
     const maxTokens = proveedor === 'groq'
       ? Number(process.env.GROQ_MOCKUP_MAX_OUTPUT_TOKENS || 4800)
-      : Number(process.env.OPENROUTER_MOCKUP_MAX_OUTPUT_TOKENS || 8000);
+      : Number(modoEdicion ? (process.env.OPENROUTER_MOCKUP_EDIT_MAX_OUTPUT_TOKENS || 12000) : (process.env.OPENROUTER_MOCKUP_MAX_OUTPUT_TOKENS || 12000));
     const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
     if (proveedor === 'openrouter') Object.assign(headers, { 'HTTP-Referer': 'https://icase.app', 'X-Title': 'I-CASE Mockups' });
     const res = await axios.post(url, {
       model: modelo,
       messages: [{ role: 'user', content: prompt }],
       max_tokens: maxTokens,
-      response_format: { type: 'json_object' },
+      ...(proveedor === 'openrouter' ? await require('./OpenRouterPolicy').parameters(modelo) : { response_format: { type: 'json_object' } }),
       temperature: 0.3
     }, { headers, timeout: 90000 });
-    return res.data?.choices?.[0]?.message?.content || null;
+    const choice = res.data?.choices?.[0];
+    if (choice?.finish_reason === 'length') throw Object.assign(new Error('Respuesta de mockup truncada por límite de salida; no se acepta como HTML completo.'), { code: 'MOCKUP_OUTPUT_TRUNCATED' });
+    return choice?.message?.content || null;
   }
 
   _construirPromptCompleto(promptBase, contextoProyecto, pantallas, insumoAdicional) {
@@ -231,6 +306,20 @@ class MockupIaService {
     prompt += '\n\nRECUERDA: Devuelve SOLO el JSON estricto con la clave "mockups". Sin texto extra, sin markdown, sin explicaciones.';
 
     return prompt;
+  }
+
+  _construirPromptCompactoGroq(contextoProyecto, pantallas, insumoAdicional, presupuestoTokens = 3000) {
+    const maxChars = Math.max(2400, (presupuestoTokens - 150) * 4);
+    const cabecera = [
+      'Diseña mockups HTML5 + Tailwind CSS completos y autocontenidos.',
+      'Devuelve SOLO JSON estricto: {"mockups":[{"nombre_pantalla":"slug","tipo":"...","descripcion":"...","rf_trazabilidad":["RF-01"],"preview_code":"<!DOCTYPE html><html lang=\\"es\\">...</html>"}]}',
+      'Botones/formularios que ejecutan un RF llevan data-accion="RF-xx.verbo" (consultar|crear|editar|eliminar) con las OPERACIONES DISPONIBLES y name de campo del backend; los solo visuales, data-accion="ui".',
+      pantallas.length ? `PANTALLAS A GENERAR (exactamente este nombre_pantalla): ${pantallas.join(', ')}` : ''
+    ].filter(Boolean).join('\n');
+    const instruccion = insumoAdicional ? `\nINSTRUCCIÓN DEL USUARIO:\n${String(insumoAdicional).slice(0, Math.floor(maxChars * 0.55))}` : '';
+    const espacioContexto = Math.max(600, maxChars - cabecera.length - instruccion.length - 120);
+    const contextoRecortado = String(contextoProyecto || '').slice(0, espacioContexto);
+    return `${cabecera}\nCONTEXTO:\n${contextoRecortado}${instruccion}\nResponde SOLO JSON válido.`;
   }
 
   _parsearTolerante(rawText) {

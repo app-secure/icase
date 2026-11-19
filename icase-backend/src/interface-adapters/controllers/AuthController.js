@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { randomUUID } = require('node:crypto');
 const { getJwtSecret } = require('../../infrastructure/security/jwtSecret');
 const RateLimiter = require('../../infrastructure/security/RateLimiter');
 
@@ -12,8 +13,12 @@ const MAX_PASSWORD_BYTES = 72; // límite de bcrypt: más allá se ignora en sil
 const text = (value) => (typeof value === 'string' ? value.trim() : '');
 
 class AuthController {
-  constructor({ usuarioRepository, env = process.env, now = Date.now }) {
+  constructor({ usuarioRepository, sessionService, env = process.env, now = Date.now }) {
     this.usuarioRepository = usuarioRepository;
+    this.sessionService = sessionService;
+    this.secret = getJwtSecret(env);
+    if (env.AUTH_REGISTRATION_ENABLED !== undefined && !['true', 'false'].includes(env.AUTH_REGISTRATION_ENABLED)) throw new Error('AUTH_REGISTRATION_ENABLED debe ser true o false.');
+    this.registrationEnabled = env.AUTH_REGISTRATION_ENABLED === undefined ? env.NODE_ENV !== 'production' : env.AUTH_REGISTRATION_ENABLED === 'true';
     this.expiresIn = env.JWT_EXPIRES_IN || '12h';
     this.loginAttempts = new RateLimiter({ max: 5, windowMs: 15 * 60 * 1000, now });
     this.loginAttemptsByIp = new RateLimiter({ max: 30, windowMs: 15 * 60 * 1000, now });
@@ -25,8 +30,8 @@ class AuthController {
   _token(usuario) {
     return jwt.sign(
       { id: String(usuario.id), correo: usuario.correo, nombre: usuario.nombre, apellido: usuario.apellido },
-      getJwtSecret(),
-      { algorithm: 'HS256', expiresIn: this.expiresIn }
+      this.secret,
+      { algorithm: 'HS256', expiresIn: this.expiresIn, jwtid: randomUUID() }
     );
   }
 
@@ -43,6 +48,7 @@ class AuthController {
 
   async registro(req, res) {
     try {
+      if (!this.registrationEnabled) return res.status(403).json({ error: 'El registro público está deshabilitado. Contacta al responsable de la instalación.' });
       const key = req.ip;
       const wait = this.registrations.blockedFor(key);
       if (wait) return this._blocked(res, wait);
@@ -73,6 +79,19 @@ class AuthController {
     } catch (err) {
       console.error('[AuthController] Error en registro:', err);
       return res.status(500).json({ error: 'Error en el servidor al registrar usuario' });
+    }
+  }
+
+  configuracion(req, res) {
+    return res.json({ registro_publico: this.registrationEnabled });
+  }
+
+  async logout(req, res) {
+    try {
+      await this.sessionService.revocar(req.sessionToken, req.usuario);
+      return res.json({ success: true, message: 'Sesión cerrada en el servidor.' });
+    } catch {
+      return res.status(503).json({ error: 'No se pudo cerrar la sesión en el servidor.' });
     }
   }
 

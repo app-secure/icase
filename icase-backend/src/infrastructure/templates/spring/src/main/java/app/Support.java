@@ -148,8 +148,9 @@ public final class Support {
             Map.Entry<String, JsonNode> field = fields.next();
             Model.Column column = table.byName().get(field.getKey());
             if (RESERVED.contains(field.getKey()) && column == null) continue; // gestionados por el sistema
+            if (column != null && (column.internal() || "owner_id".equals(column.column()))) continue;
             if (column != null) values.put(column.column(), coerce(column, field.getValue()));
-            else extra.put(field.getKey(), field.getValue());
+            else if (!"owner_id".equals(field.getKey())) extra.put(field.getKey(), field.getValue());
         }
         return new Split(values, extra);
     }
@@ -215,6 +216,7 @@ public final class Support {
                 });
             }
             for (Model.Column column : table.columns()) {
+                if (column.internal() || "owner_id".equals(column.column()) || "__owner".equals(column.name())) continue;
                 Object value = row.get(column.column());
                 if (value != null) data.put(column.name(), fromStorage(column, value));
             }

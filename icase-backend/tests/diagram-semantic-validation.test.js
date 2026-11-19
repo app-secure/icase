@@ -11,6 +11,12 @@ describe('validación semántica de diagramas', () => {
     { identificador: 'RF-03', tipo: 'RF', nombre: 'Procesar cobros y pagos', prioridad: 'Media', aprobado: true }
   ];
 
+  test('no exige repetir el actor o conectores en la etiqueta de toma de pedidos', () => {
+    const requirement = [{ identificador: 'RF-08', tipo: 'RF', nombre: 'Toma de pedidos por meseros', prioridad: 'Alta', aprobado: true }];
+    expect(semanticValidator.validar({ tipo: 'casos_de_uso', codigo: '@startuml\nactor Mesero\nusecase "Registrar pedidos" as UC\nMesero --> UC\n@enduml', requisitos: requirement }).valido).toBe(true);
+    expect(semanticValidator.validar({ tipo: 'casos_de_uso', codigo: '@startuml\nusecase "Consultar menú" as UC\n@enduml', requisitos: requirement }).valido).toBe(false);
+  });
+
   test('detecta un RF de prioridad alta omitido en casos de uso', () => {
     const codigo = `@startuml
 actor Cliente

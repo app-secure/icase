@@ -55,23 +55,75 @@ class RequerimientoController {
       }
       if (Array.isArray(requerimientos)) {
         const existentes = await this.requerimientoRepository.listarPorProyecto(proyectoId);
-        const normalizados = requerimientos.map((r, idx) => ({
-          identificador: r.identificador || r.id || `${(r.tipo || 'RF').toUpperCase()}-${String(idx + 1).padStart(2, '0')}`,
-          tipo: (r.tipo || (r.category ? 'RNF' : 'RF')).toUpperCase(),
-          nombre: r.nombre || r.name || r.category || 'Requerimiento',
-          descripcion: r.descripcion || r.description || '',
-          prioridad: r.prioridad || r.priority || 'Alta',
-          actores: Array.isArray(r.actores) ? r.actores : (r.actors ? (Array.isArray(r.actors) ? r.actors : [r.actors]) : ['Usuario']),
-          precondiciones: r.precondiciones || r.precondition || '',
-          poscondiciones: r.poscondiciones || r.postcondition || '',
-          metrica_medible: r.metrica_medible || r.metric || '',
-          origen: r.origen || r.origin || 'manual',
-          evidencia: r.evidencia || r.evidence || '',
-          fuentes_origen: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : (Array.isArray(r.sourceNames) ? r.sourceNames : []),
-          requiere_confirmacion: Boolean(r.requiere_confirmacion ?? r.requiresConfirmation)
-        }));
+        const seenIds = new Set();
+        let rfCount = 1;
+        let rnfCount = 1;
+
+        const normalizados = requerimientos.map((r) => {
+          const tipo = (r.tipo || (r.category ? 'RNF' : 'RF')).toUpperCase();
+          let identificador = String(r.identificador || r.id || '').trim();
+          if (!identificador || seenIds.has(identificador)) {
+            const count = tipo === 'RF' ? rfCount++ : rnfCount++;
+            identificador = `${tipo}-${String(count).padStart(2, '0')}`;
+            while (seenIds.has(identificador)) {
+              const next = tipo === 'RF' ? rfCount++ : rnfCount++;
+              identificador = `${tipo}-${String(next).padStart(2, '0')}`;
+            }
+          }
+          seenIds.add(identificador);
+
+          return {
+            identificador,
+            tipo,
+            nombre: r.nombre || r.name || r.category || 'Requerimiento',
+            descripcion: r.descripcion || r.description || '',
+            prioridad: r.prioridad || r.priority || 'Alta',
+            actores: Array.isArray(r.actores) ? r.actores : (r.actors ? (Array.isArray(r.actors) ? r.actors : [r.actors]) : ['Usuario']),
+            precondiciones: r.precondiciones || r.precondition || '',
+            poscondiciones: r.poscondiciones || r.postcondition || '',
+            metrica_medible: r.metrica_medible || r.metric || '',
+            origen: r.origen || r.origin || 'manual',
+            evidencia: r.evidencia || r.evidence || '',
+            evidencias: r.evidencias || r.evidences || [],
+            fuentes_origen: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : (Array.isArray(r.sourceNames) ? r.sourceNames : []),
+            necesidades_origen: Array.isArray(r.necesidades_origen) ? r.necesidades_origen : (r.needIds || []),
+            criterios_aceptacion: Array.isArray(r.criterios_aceptacion) ? r.criterios_aceptacion : (r.acceptanceCriteria || []),
+            reglas_relacionadas: Array.isArray(r.reglas_relacionadas) ? r.reglas_relacionadas : (r.ruleIds || []),
+            estado_decision: r.estado_decision || r.decisionStatus || 'confirmado',
+            restricciones_excluidas: r.restricciones_excluidas || r.excludedConstraints || [],
+            requiere_confirmacion: Boolean(r.requiere_confirmacion ?? r.requiresConfirmation)
+          };
+        });
         if (!this.requirementChangeService.changed(existentes, normalizados)) {
-          return res.json({ success: true, changed: false, count: existentes.length, requerimientos: existentes });
+          // Una corrección de cita no invalida los diagramas, pero sí debe guardarse.
+          const guardados = await Promise.all(existentes.map(async existente => {
+            const next = normalizados.find(item => item.identificador === existente.identificador && item.tipo === existente.tipo);
+            if (!next) return existente;
+            const trace = { evidencia: next.evidencia, evidencias: next.evidencias, fuentes_origen: next.fuentes_origen };
+            const before = { evidencia: existente.evidencia, evidencias: existente.evidencias || [], fuentes_origen: existente.fuentes_origen || [] };
+            return JSON.stringify(trace) === JSON.stringify(before) ? existente : this.requerimientoRepository.actualizar(existente.id, trace);
+          }));
+          return res.json({ success: true, changed: false, count: guardados.length, requerimientos: guardados });
+        }
+        const projects = this.requirementChangeService.proyectoRepository;
+        const project = projects ? await projects.obtenerPorId(proyectoId) : null;
+        if (project?.version_flujo_analisis === 2) {
+          const removed = existentes.filter(old => !normalizados.some(next => next.identificador === old.identificador));
+          if (removed.length) await projects.actualizar(proyectoId, { auditoria_requisitos: { ...project.auditoria_requisitos, historial_requisitos: [
+            ...(project.auditoria_requisitos?.historial_requisitos || []), ...removed.map(contenido => ({ accion: 'retiro_manual_explicito', contenido, fecha: new Date(), usuario_id: req.usuario.id }))
+          ] } });
+          const saved = [];
+          for (const next of normalizados) {
+            const old = existentes.find(r => r.identificador === next.identificador);
+            if (!old) saved.push(await this.requerimientoRepository.crear({ proyecto_id: proyectoId, ...next, aprobado: false }));
+            else if (this.requirementChangeService.changed([old], [next])) {
+              const { historial_versiones, ...snapshot } = old;
+              saved.push(await this.requerimientoRepository.actualizar(old.id, { ...next, aprobado: false, historial_versiones: [...(historial_versiones || []), { contenido: snapshot, fecha: new Date(), accion: 'edicion_manual' }] }));
+            } else saved.push(old);
+          }
+          for (const old of removed) await this.requerimientoRepository.eliminar(old.id);
+          await this.requirementChangeService.invalidate(proyectoId);
+          return res.json({ success: true, changed: true, count: saved.length, requerimientos: saved });
         }
         await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
         const docs = normalizados.map((r) => ({

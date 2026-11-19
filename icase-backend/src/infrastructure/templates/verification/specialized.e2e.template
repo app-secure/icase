@@ -1,0 +1,30 @@
+import {test,expect} from '@playwright/test';
+__SAMPLES__
+const fixture=__FIXTURE__,enabled=__ENABLED__,screens=__SCREENS__,base=process.env.BASE_API_URL||'http://localhost:3000';
+test('SSO OIDC con PKCE, firma JWKS y cuenta local preautorizada',async({page})=>{
+ test.skip(!fixture||!process.env.TEST_PROVIDER_URL||!enabled.includes('sso_oidc'),'No hay fixture/proveedor OIDC configurado');
+ await page.goto('/');await page.getByRole('link',{name:'Ingresar con SSO',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Cerrar sesión',exact:true})).toBeVisible({timeout:15000});
+ await expect(page).not.toHaveURL(/(?:access_token|id_token|token)=/);
+});
+test('mapa, checkout y cámara QR simulada desde la interfaz',async({page})=>{
+ test.skip(!fixture||!process.env.TEST_PROVIDER_URL,'No hay fixture de integración configurado');
+ const login=await makeApi(base,null)('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});expect(login.status).toBe(200);
+ const api=makeApi(base,login.data.token),contract=(await api('/api/contract')).data,operation=contract.operations.find(op=>op.key===fixture.operation),cleanups=[];
+ try{
+  const created=await createValidRecord(api,contract.operations,operation,cleanups,0);
+  if(enabled.includes('mapas'))expect((await api(operation.collectionPath+'/'+created.id,'PATCH',{[fixture.latitude]:-0.2,[fixture.longitude]:-78.5})).status).toBe(200);
+  if(enabled.includes('camara_qr')){
+   const png=Buffer.from(await(await fetch(process.env.TEST_PROVIDER_URL+'/qr.png')).arrayBuffer()).toString('base64');
+   await page.addInitScript(data=>{
+    Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{
+     const image=new Image();image.src='data:image/png;base64,'+data;await image.decode();const canvas=document.createElement('canvas');canvas.width=320;canvas.height=320;const context=canvas.getContext('2d');context.drawImage(image,0,0);const stream=canvas.captureStream(5);window.__cameraTracks=stream.getTracks();const draw=setInterval(()=>{if(stream.active)context.drawImage(image,0,0);else clearInterval(draw);},100);return stream;
+    }}});
+   },png);
+  }
+  await page.addInitScript(token=>localStorage.setItem('icase_token',token),login.data.token);await page.goto(screens.find(screen=>screen.operations.includes(operation.key)).route);
+  if(enabled.includes('mapas')){await page.getByRole('button',{name:'Mostrar mapa',exact:true}).first().click();await expect(page.locator('.leaflet-container').first()).toBeVisible();await expect(page.locator('.leaflet-tile-loaded').first()).toBeVisible();}
+  if(enabled.includes('pagos_prueba')){await page.getByRole('button',{name:'Preparar pago de prueba',exact:true}).first().click();await expect(page.getByRole('link',{name:'Abrir checkout de prueba',exact:true}).first()).toBeVisible();const popup=page.waitForEvent('popup');await page.getByRole('link',{name:'Abrir checkout de prueba',exact:true}).first().click();const checkout=await popup;await expect(checkout.getByRole('heading')).toHaveText('Checkout local simulado: no se cobra dinero');await checkout.close();}
+  if(enabled.includes('camara_qr')){await page.getByRole('button',{name:'Escanear QR',exact:true}).click();await expect(page.getByText('Contenido leído (no validado): qr-local-no-validado',{exact:true})).toBeVisible();await expect.poll(()=>page.evaluate(()=>window.__cameraTracks.every(track=>track.readyState==='ended'))).toBe(true);}
+ }finally{for(const cleanup of cleanups){try{await cleanup();}catch{}}}
+});

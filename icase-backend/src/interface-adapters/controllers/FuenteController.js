@@ -39,9 +39,9 @@ class FuenteController {
       `Archivo: ${fuente.nombre_archivo}`,
       `Categoría: ${fuente.categoria || this._categoriaDeArchivo({ tipo: fuente.tipo, nombreArchivo: fuente.nombre_archivo })}`,
       `Tipo de contenido: ${fuente.tipo_contenido || 'Sin especificar'}`,
-      fuente.descripcion ? `Descripción aportada por el usuario: ${fuente.descripcion}` : '',
+      fuente.descripcion ? `Descripción ${fuente.metadatos_generados_ia ? 'sugerida por IA' : 'registrada en la fuente'}: ${fuente.descripcion}` : '',
       fuente.autor_origen ? `Autor u origen: ${fuente.autor_origen}` : '',
-      fuente.fecha_documento ? `Fecha del contenido: ${fuente.fecha_documento}` : '',
+      fuente.fecha_documento ? `Fecha del contenido${fuente.fecha_documento_origen === 'metadatos_pdf' ? ' (sugerida por metadatos internos del PDF; verificar)' : ''}: ${fuente.fecha_documento}` : '',
       etiquetas.length ? `Etiquetas: ${etiquetas.join(', ')}` : '',
       fuente.tipo === 'audio' ? `Transcripción revisada por el usuario: ${fuente.transcripcion_verificada ? 'sí' : 'no'}` : ''
     ].filter(Boolean).join('\n');
@@ -93,6 +93,7 @@ class FuenteController {
 
       // Procesar e ingerir texto (transcripción para audios o extracción para PDFs)
       const textoExtraido = await this.ingestionService.procesarArchivo(file, tipo);
+      const fechaDetectada = await this.ingestionService.extraerFechaDocumento?.(file.path, tipo) || '';
 
       // Verificar si ya existe una fuente con el mismo nombre en este proyecto para evitar duplicados
       const fuentesExistentes = await this.fuenteRepo.listarPorProyecto(proyectoId);
@@ -108,6 +109,8 @@ class FuenteController {
           ruta_archivo: file.path,
           texto_transcrito: textoExtraido,
           categoria,
+          fecha_documento: primera.fecha_documento && primera.fecha_documento_origen !== 'metadatos_pdf' ? primera.fecha_documento : fechaDetectada,
+          fecha_documento_origen: primera.fecha_documento && primera.fecha_documento_origen !== 'metadatos_pdf' ? 'usuario' : (fechaDetectada ? 'metadatos_pdf' : ''),
           estado: 'transcrito'
         });
 
@@ -129,6 +132,8 @@ class FuenteController {
           texto_transcrito: textoExtraido,
           categoria,
           tipo_contenido: this._tipoContenidoSugerido({ tipo, nombre_archivo: nombreArchivo, texto_transcrito: textoExtraido }),
+          fecha_documento: fechaDetectada,
+          fecha_documento_origen: fechaDetectada ? 'metadatos_pdf' : '',
           estado: 'transcrito'
         });
       }
@@ -160,13 +165,20 @@ class FuenteController {
       const existente = await this.fuenteRepo.obtenerPorId(id);
       if (!existente) return res.status(404).json({ error: 'Fuente no encontrada' });
 
-      const permitidos = ['categoria', 'tipo_contenido', 'descripcion', 'autor_origen', 'fecha_documento', 'texto_transcrito', 'transcripcion_verificada'];
+      const permitidos = ['categoria', 'tipo_contenido', 'descripcion', 'autor_origen', 'fecha_documento', 'fecha_documento_origen', 'texto_transcrito', 'transcripcion_verificada'];
       const cambios = {};
       for (const campo of permitidos) {
         if (Object.prototype.hasOwnProperty.call(req.body || {}, campo)) cambios[campo] = req.body[campo];
       }
       if (cambios.categoria && !['textos', 'documentos', 'audios', 'videos', 'otros'].includes(cambios.categoria)) {
         return res.status(400).json({ error: 'Categoría de fuente inválida' });
+      }
+      if (Object.prototype.hasOwnProperty.call(cambios, 'fecha_documento')) {
+        const origin = cambios.fecha_documento_origen;
+        if (origin !== undefined && !['', 'usuario', 'metadatos_pdf'].includes(origin)) return res.status(400).json({ error: 'Origen de fecha invÃ¡lido' });
+        cambios.fecha_documento_origen = cambios.fecha_documento
+          ? (origin || (String(cambios.fecha_documento) === String(existente.fecha_documento || '') ? existente.fecha_documento_origen : 'usuario'))
+          : '';
       }
       if (Object.prototype.hasOwnProperty.call(req.body || {}, 'etiquetas')) cambios.etiquetas = this._normalizarEtiquetas(req.body.etiquetas);
       if (Object.prototype.hasOwnProperty.call(cambios, 'transcripcion_verificada')) cambios.transcripcion_verificada = Boolean(cambios.transcripcion_verificada);
@@ -193,12 +205,13 @@ class FuenteController {
         descripcion: fuente.descripcion || `Fuente ${fuente.nombre_archivo} utilizada como contexto para el levantamiento y validación de requisitos.`,
         autor_origen: fuente.autor_origen || '',
         fecha_documento: fuente.fecha_documento || '',
+        fecha_documento_origen: fuente.fecha_documento_origen || '',
         etiquetas: fuente.etiquetas?.length ? fuente.etiquetas : []
       };
 
       if (!this.modelosIaService) return res.json({ ...fallback, generado_por_ia: false });
       const contenido = String(fuente.texto_transcrito || '').slice(0, 12000);
-      const prompt = `Analiza esta fuente de un proyecto de software y devuelve EXCLUSIVAMENTE JSON válido con estas claves: categoria (una de textos, documentos, audios, videos, otros), tipo_contenido (ej. Entrevista, Acta de reunión, Especificación), descripcion (máximo 450 caracteres, concreta y útil para otra IA), autor_origen (vacío si se desconoce), fecha_documento (vacío si se desconoce), etiquetas (arreglo de 3 a 8 términos). No inventes autor ni fecha.\n\nArchivo: ${fuente.nombre_archivo}\nFormato: ${fuente.tipo}\nContenido:\n${contenido}`;
+      const prompt = `Analiza esta fuente de un proyecto de software y devuelve EXCLUSIVAMENTE JSON válido con estas claves: categoria (una de textos, documentos, audios, videos, otros), tipo_contenido (ej. Entrevista, Acta de reunión, Especificación), descripcion (máximo 450 caracteres, concreta y útil para otra IA), autor_origen (vacío si se desconoce), fecha_documento (siempre cadena vacía: solo se toma de metadatos estructurados del archivo o del usuario), etiquetas (arreglo de 3 a 8 términos). No inventes autor ni fecha.\n\nArchivo: ${fuente.nombre_archivo}\nFormato: ${fuente.tipo}\nContenido:\n${contenido}`;
 
       let sugerencia = null;
       const proveedorSolicitado = String(req.body?.provider || '').toLowerCase();
@@ -215,7 +228,9 @@ class FuenteController {
         tipo_contenido: String(resultado.tipo_contenido || fallback.tipo_contenido).slice(0, 100),
         descripcion: String(resultado.descripcion || fallback.descripcion).slice(0, 1200),
         autor_origen: String(resultado.autor_origen || '').slice(0, 160),
-        fecha_documento: String(resultado.fecha_documento || '').slice(0, 40),
+        // La IA no propone fechas: se conserva el valor detectado del archivo o confirmado manualmente.
+        fecha_documento: fallback.fecha_documento,
+        fecha_documento_origen: fallback.fecha_documento_origen || '',
         etiquetas: this._normalizarEtiquetas(resultado.etiquetas || fallback.etiquetas),
         generado_por_ia: Boolean(sugerencia)
       });

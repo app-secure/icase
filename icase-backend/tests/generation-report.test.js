@@ -41,7 +41,8 @@ describe('informe de generación', () => {
     const [capability] = report.requisitos[0].capacidades;
     expect(capability).toMatchObject({ id: 'archivos' });
     expect(capability.evidencia).toMatch(/descripción: «subir»/);
-    expect(capability.alternativa).toMatch(/No hay subida ni descarga/);
+    expect(capability.alternativa).toMatch(/módulo opcional archivos_imagenes/);
+    expect(capability.alternativa).toMatch(/No incluye S3/);
   });
 
   test.each([
@@ -106,7 +107,7 @@ describe('informe de generación', () => {
   test('el Markdown resume niveles, tabla y límites generales', () => {
     const markdown = service.toMarkdown(service.build({ proyecto: { nombre: 'Gourmet' }, requisitos: [rf('RF-01', 'Gestionar reservas'), rf('RF-03', 'Enviar correo')], contrato }));
     expect(markdown).toMatch(/^# Informe de generación — Gourmet/);
-    expect(markdown).toMatch(/\| RF-01 \| Gestionar reservas \| Completo \| Reserva \| 1 \|/);
+    expect(markdown).toMatch(/\| RF-01 \| Gestionar reservas \| CRUD tipado generado \| Reserva \| 1 \|/);
     expect(markdown).toMatch(/\| RF-03 \| Enviar correo \| No soportado \| — \| 0 \|/);
     expect(markdown).toMatch(/Las listas devuelven todos los registros/);
   });
@@ -140,7 +141,7 @@ describe('el informe viaja con el backend generado', () => {
     expect(report.requisitos.map((item) => [item.id, item.nivel])).toEqual([['RF-01', 'completo'], ['RF-02', 'completo'], ['RF-03', 'no_soportado']]);
     expect(report.notas.join(' ')).toMatch(/Expo/);
     expect(file(result, 'backend/GENERATION-REPORT.md').contenido).toMatch(/RF-03 · Enviar confirmación por correo electrónico \(No soportado\)/);
-    expect(result.advertencias.join('\n')).toMatch(/Informe de generación: 2 requisitos completos, 0 solo con datos y 1 no soportados/);
+    expect(result.advertencias.join('\n')).toMatch(/Informe de generación: 2 con CRUD tipado, 0 solo con datos y 1 no soportados/);
     expect(result.archivos.every((item) => item.huella.length === 64)).toBe(true);
   });
 

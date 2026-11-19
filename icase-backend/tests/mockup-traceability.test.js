@@ -33,6 +33,63 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
     expect(trace).not.toContain('RF-99');
   });
 
+  test('el shell común, CSS y referencias declaradas no acreditan cobertura', () => {
+    const mockup = {
+      nombre_pantalla: 'menu', roles: ['Cliente'], rf_trazabilidad: ['RF-01', 'RF-02', 'RF-03'],
+      preview_code: '<style>.reserva-mesa-pago {color:red}</style><nav>Reserva de mesa Procesar pago</nav><aside>Crear reserva</aside><main><h1>Menú disponible</h1><button>Consultar menú</button></main>'
+    };
+    const inherited = { ...screens[0], modulo: 'Reservas y pagos', flujo: 'Cliente: reserva de mesa', rf_trazabilidad: ['RF-02', 'RF-03'] };
+    expect(service.enrichMockup(mockup, inherited, requirements)).toEqual(['RF-01']);
+    expect(service.buildManifest([{ nombre: 'Menú', modulo: 'Pago y reservas', flujo: 'reserva mesa' }], requirements)[0].rf_trazabilidad).toEqual(['RF-01']);
+  });
+
+  test('no infiere cobertura por metadatos si el HTML no muestra el requisito', () => {
+    expect(service.enrichMockup({ nombre_pantalla: 'reserva', acciones_principales: ['Crear reserva de mesa'], preview_code: '<main><h1>Inicio</h1></main>' }, screens[1], requirements)).toEqual([]);
+  });
+
+  test('la auditoría avisa si la evidencia local pertenece a otro rol', () => {
+    const result = service.validate({ manifest: [{ pantalla_id: 'pago' }], requirements: [requirements[2]], mockups: [{ pantalla_id: 'pago', nombre_pantalla: 'pago', roles: ['Cliente'], rf_trazabilidad: ['RF-03'], preview_code: '<main>Procesar pago <button>Pagar</button></main>' }] });
+    // Un requisito del cajero no se asocia a una pantalla del cliente, y el aviso dice por qué.
+    expect(result.advertencias.join(' ')).toContain('lo ejecuta cajero, y esta pantalla es de cliente');
+  });
+
+  test('funciona en otro dominio sin inferir préstamos desde la navegación del catálogo', () => {
+    const library = [
+      { identificador: 'RF-20', tipo: 'RF', nombre: 'Consultar catálogo', aprobado: true },
+      { identificador: 'RF-21', tipo: 'RF', nombre: 'Renovar préstamo', aprobado: true }
+    ];
+    expect(service.enrichMockup({ preview_code: '<nav>Renovar préstamo</nav><main><h1>Cat&#225;logo</h1></main>' }, null, library)).toEqual(['RF-20']);
+  });
+
+  test('un dato secundario no vincula un RF ajeno al propósito de la pantalla', () => {
+    const rf = [{ identificador: 'RF-30', tipo: 'RF', aprobado: true, nombre: 'Consultar facturas pendientes' }];
+    expect(service.enrichMockup({ preview_code: '<main><h1>Catálogo de libros</h1><p>Facturas pendientes: 3</p></main>' }, null, rf)).toEqual([]);
+  });
+
+  test('generar un código no equivale a validarlo', () => {
+    const rf = [{ identificador: 'RF-31', tipo: 'RF', aprobado: true, nombre: 'Validación de código QR' }];
+    expect(service.enrichMockup({ preview_code: '<main><h1>Código QR</h1><button>Generar código QR</button></main>' }, null, rf)).toEqual([]);
+    expect(service.enrichMockup({ preview_code: '<main><h1>Código QR</h1><button>Validar código QR</button></main>' }, null, rf)).toEqual(['RF-31']);
+  });
+
+  test('overflow-hidden no oculta contenido y el encabezado local del catálogo cuenta', () => {
+    expect(service.enrichMockup({ preview_code: '<nav>Crear reserva de mesa</nav><main class="overflow-hidden"><header><h1>Menú disponible</h1></header><div>Consultar menú</div></main>' }, null, requirements)).toEqual(['RF-01']);
+  });
+
+  test('cuenta títulos de pantalla fuera de main y estados en plural', () => {
+    const rf = [{ identificador: 'RF-40', tipo: 'RF', nombre: 'Visualización de pedidos en tiempo real en cocina', descripcion: 'Mostrar pedidos en tiempo real', actores: ['Cocina'], prioridad: 'Alta', aprobado: true }];
+    const mockup = { pantalla_id: 'cocina', nombre_pantalla: 'cocina', roles: ['Personal de Cocina'], rf_trazabilidad: ['RF-40'], preview_code: '<header><h1>Panel de Cocina</h1></header><main><h2>Pendientes</h2><p>Pedido 1</p><button>Iniciar preparación</button></main>' };
+    expect(service.enrichMockup(mockup, null, rf)).toEqual(['RF-40']);
+    expect(service.validate({ manifest: [{ pantalla_id: 'cocina' }], mockups: [mockup], requirements: rf }).valido).toBe(true);
+  });
+
+  test('la auditoría no cuenta referencias antiguas sin evidencia local', () => {
+    const result = service.validate({ manifest: screens, requirements, mockups: [{ pantalla_id: 'menu', nombre_pantalla: 'menu', rf_trazabilidad: ['RF-01', 'RF-02'], preview_code: '<nav>Reserva de mesa</nav><main>Menú disponible</main>' }] });
+    expect(result.metricas.rf_altos_ui_sin_cobertura).toContain('RF-02');
+    expect(result.metricas.referencias_sin_evidencia).toContainEqual({ pantalla: 'menu', requisito: 'RF-02' });
+    expect(result.advertencias.join(' ')).toContain('no contabilizadas');
+  });
+
   test('detecta pantallas faltantes, mockups huérfanos y RF altos sin cobertura', () => {
     const manifest = service.buildManifest(screens, requirements);
     const result = service.validate({
@@ -47,7 +104,7 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
     expect(result.valido).toBe(false);
     expect(result.errores.join(' ')).toContain('Formulario de reserva');
     expect(result.errores.join(' ')).toContain('Pantalla inventada');
-    expect(result.errores.join(' ')).toContain('RF-02');
+    expect(result.advertencias.join(' ')).toContain('RF-02');
     expect(result.metricas.cobertura_rf_altos_porcentaje).toBe(50);
   });
 
@@ -85,11 +142,11 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
       mockups: [{ pantalla_id: 'pedido', nombre_pantalla: 'pedido', rf_trazabilidad: ['RF-10'] }]
     });
 
-    expect(result.valido).toBe(false);
-    expect(result.errores.join(' ')).toContain('roles');
-    expect(result.errores.join(' ')).toContain('campos de entrada');
-    expect(result.errores.join(' ')).toContain('acciones');
-    expect(result.errores.join(' ')).toContain('estados');
+    expect(result.valido).toBe(true);
+    expect(result.advertencias.join(' ')).toContain('roles');
+    expect(result.advertencias.join(' ')).toContain('campos de entrada');
+    expect(result.advertencias.join(' ')).toContain('acciones');
+    expect(result.advertencias.join(' ')).toContain('estados');
   });
 
   test('AprobarFase bloquea mockups con cobertura incompleta', async () => {
@@ -115,5 +172,21 @@ describe('trazabilidad árbol de navegación, mockups y requisitos', () => {
     await expect(useCase.ejecutar({ proyectoId: 'p1', fase: 'mockups' }))
       .rejects.toThrow('inconsistencias de trazabilidad');
     expect(guardarOActualizar).toHaveBeenCalledWith('p1', expect.objectContaining({ trazabilidad_mockups: expect.any(Object) }));
+  });
+});
+
+describe('sinónimos de respaldo y recuperación', () => {
+  const service = new MockupTraceabilityService();
+  const rf14 = { identificador: 'RF-14', tipo: 'RF', nombre: 'Permitir respaldos de la base de datos y recuperación de información', descripcion: 'El sistema deberá permitir respaldos de la base de datos y recuperación de información.', prioridad: 'Alta', actores: ['Administrador'], aprobado: true };
+  const html = '<main><h1>Copias de Seguridad</h1><p>Respaldo completado</p><button>Restaurar</button></main>';
+
+  test('una pantalla de copias de seguridad con restaurar evidencia el RF de respaldos y recuperación', () => {
+    const mockup = { nombre_pantalla: 'vista-de-copias-de-seguridad', nombre_visible: 'Vista de Copias de Seguridad', preview_code: html };
+    expect(service.enrichMockup(mockup, { slug: mockup.nombre_pantalla }, [rf14])).toEqual(['RF-14']);
+  });
+
+  test('comportamiento previo: una pantalla sin relación no se enlaza', () => {
+    const mockup = { nombre_pantalla: 'menu', nombre_visible: 'Menú', preview_code: '<main><h1>Menú del día</h1><p>Lomo saltado</p></main>' };
+    expect(service.enrichMockup(mockup, { slug: 'menu' }, [rf14])).toEqual([]);
   });
 });

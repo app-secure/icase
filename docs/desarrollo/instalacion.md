@@ -11,6 +11,8 @@
 
 Consulta los `package.json` y lockfiles de backend/frontend para las dependencias efectivas. No mezcles el stack de I-CASE con el de una aplicación exportada.
 
+En `icase-backend/package.json`, `dependencies` cubre el runtime del servidor I-CASE (`express`, `mongoose`, `parse5`, etc.). Paquetes como `socket.io`, `nodemailer`, `redis`, `helmet` o `pdfkit` aparecen en `devDependencies` porque solo las usan las **plantillas** bajo `src/infrastructure/templates/` (código de la app exportada) y los tests que las cargan en memoria: el ZIP generado declara esas dependencias en su propio `backend/package.json`. El script `test:e2e:real` fija `RUN_REAL_AI_E2E` con `env` (Linux/macOS y Git Bash); requiere claves de IA reales para ejecutar, no solo para arrancar el runner.
+
 ## Instalación
 
 Desde la raíz del repositorio, abre una terminal para backend:

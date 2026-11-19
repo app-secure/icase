@@ -49,7 +49,7 @@ class RequirementSemanticsService {
     return {
       ...requirement,
       metrica_medible: metric || requirement?.metrica_medible,
-      requiere_confirmacion: requiresConfirmation && !metric,
+      requiere_confirmacion: requiresConfirmation && (!metric || requirement?.estado_decision === 'pendiente'),
       estado_decision: ['confirmado', 'pendiente', 'rechazado', 'fuera_de_alcance'].includes(state) ? state : 'pendiente',
       restricciones_excluidas: [...restrictions]
     };

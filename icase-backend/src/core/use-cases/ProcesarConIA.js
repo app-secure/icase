@@ -8,6 +8,7 @@ const {
 } = require('../constants/DiagramTypes');
 const { DiagramWorkflowService, DIAGRAM_STATES } = require('../services/DiagramWorkflowService');
 const crypto = require('crypto');
+const { contextOf } = require('../services/RequirementAnalysisContext');
 
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
@@ -73,6 +74,24 @@ function asegurarActoresCasosUso(diagramas, requerimientos) {
   return diagramas;
 }
 
+function completarDisenoDesdeDominio(resultado, diagramasAprobados) {
+  if (!Array.isArray(resultado?.diagramas)) return resultado;
+  const domain = (diagramasAprobados || [])
+    .filter((diagram) => normalizeDiagramType(diagram?.tipo) === 'clases_dominio' && diagram.aprobado !== false)
+    .sort((left, right) => Number(right.version || 1) - Number(left.version || 1))[0];
+  if (!domain?.codigo_plantuml) return resultado;
+  const completion = new (require('../../infrastructure/services/DesignDiagramCompletion'))();
+  let changed = false;
+  const diagramas = resultado.diagramas.map((diagram) => {
+    if (normalizeDiagramType(diagram?.tipo) !== 'clases_diseno') return diagram;
+    const next = completion.complete(diagram.codigo_plantuml, domain.codigo_plantuml);
+    if (next === diagram.codigo_plantuml) return diagram;
+    changed = true;
+    return { ...diagram, codigo_plantuml: next, codigo_mermaid: next };
+  });
+  return changed ? { ...resultado, diagramas } : resultado;
+}
+
 class ProcesarConIA {
   constructor({
     proyectoRepository,
@@ -82,7 +101,8 @@ class ProcesarConIA {
     fuenteRepository,
     disenoRepository,
     plantumlValidatorService,
-    aiOrchestratorService
+    aiOrchestratorService,
+    requirementChangeService = null
   }) {
     this.proyectoRepository = proyectoRepository;
     this.requerimientoRepository = requerimientoRepository;
@@ -92,18 +112,19 @@ class ProcesarConIA {
     this.disenoRepository = disenoRepository;
     this.plantumlValidatorService = plantumlValidatorService;
     this.aiOrchestratorService = aiOrchestratorService;
+    this.requirementChangeService = requirementChangeService;
     this.diagramWorkflowService = new DiagramWorkflowService();
     this.generacionesEnCurso = new Set();
   }
 
-  async obtenerModelosDisponibles() {
+  async obtenerModelosDisponibles(options = {}) {
     if (this.aiOrchestratorService && typeof this.aiOrchestratorService.obtenerModelosDisponibles === 'function') {
-      return await this.aiOrchestratorService.obtenerModelosDisponibles();
+      return await this.aiOrchestratorService.obtenerModelosDisponibles(options);
     }
     return { provider_defecto: 'auto', proveedores: [] };
   }
 
-  _detectarProblemasDiagrama(resultadoIA, tipo, requerimientos, diagramasAprobados) {
+  _detectarProblemasDiagrama(resultadoIA, tipo, requerimientos, diagramasAprobados, analisisRequisitos = {}) {
     const diagramas = Array.isArray(resultadoIA?.diagramas) ? resultadoIA.diagramas : [];
     const objetivo = diagramas.find((diagram) => normalizeDiagramType(diagram?.tipo) === tipo);
     if (!objetivo?.codigo_plantuml || !String(objetivo.codigo_plantuml).includes('@start')) {
@@ -112,22 +133,36 @@ class ProcesarConIA {
     if (!this.plantumlValidatorService) return '';
     const result = this.plantumlValidatorService.validar(objetivo.codigo_plantuml, {
       tipo,
+      analisisRequisitos,
       rnfList: requerimientos.filter((requirement) => String(requirement.tipo || '').toUpperCase() === 'RNF'),
       trazabilidad_rnf: objetivo.trazabilidad_rnf,
       requisitos: requerimientos,
       requisitos_relacionados: objetivo.requisitos_relacionados,
       diagramasDependencia: diagramasAprobados
     });
-    return result.valido ? '' : (result.errores || [result.error]).filter(Boolean).join(' | ');
+    if (!result.valido) return (result.errores || [result.error]).filter(Boolean).join(' | ');
+    if (tipo === 'arquitectura_software') return (result.advertencias || [])
+      .filter(message => /^(?:Tecnología aprobada por verificar:|Claridad de arquitectura por verificar:|El RNF .* no tiene trazabilidad|La trazabilidad de|Revisa elementos del artefacto origen)/.test(message)).join(' | ');
+    if (tipo === 'arquitectura_sistema') return (result.advertencias || [])
+      .filter(message => message.startsWith('Despliegue por verificar:')).join(' | ');
+    // Una revisión acotada, no una regeneración ilimitada ni un bloqueo por léxico.
+    if (tipo === 'clases_dominio') return (result.advertencias || [])
+      .filter(message => /^(?:Cobertura de dominio|Modelo de dominio) por verificar:/.test(message)).join(' | ');
+    if (tipo === 'clases_diseno') return (result.advertencias || [])
+      .filter(message => message.startsWith('Diseño por verificar:')).join(' | ');
+    return '';
   }
 
   _payloadReparacion(payload, resultadoIA, tipo, problemas, intento) {
     const diagram = (resultadoIA?.diagramas || []).find((item) => normalizeDiagramType(item?.tipo) === tipo);
-    const codigoAnterior = String(diagram?.codigo_plantuml || '').slice(0, 14000);
+    const codigoAnterior = String(diagram?.codigo_plantuml || '');
+    const requisitos = payload.contexto_proyecto?.requerimientos_aprobados || [];
+    const covered = tipo === 'casos_de_uso' ? new (require('../../infrastructure/services/DiagramSemanticValidatorService'))().validarCasosUso(codigoAnterior, requisitos.filter(item => item.tipo === 'RF'), []).metricas.rf_cubiertos_ids : [];
     const instruccion = [
       `REPARACIÓN CONTROLADA ${intento}: corrige únicamente el diagrama ${tipo}.`,
       `Problemas exactos detectados: ${problemas}`,
       'Conserva todos los elementos correctos, nombres, relaciones y decisiones existentes.',
+      ...(tipo === 'casos_de_uso' ? [`No pierdas la cobertura ya conseguida: ${covered.join(', ')}. No elimines casos para caber en un máximo fijo de 14; organiza por módulos. Incluye los RF faltantes en etiquetas o notas asociadas a sus casos conectados.`] : []),
       'Añade o ajusta solamente los elementos omitidos o inválidos indicados. No regeneres otro artefacto.',
       'Devuelve exactamente un diagrama del mismo tipo dentro del JSON esperado.',
       `CÓDIGO ANTERIOR A REPARAR:\n${codigoAnterior}`
@@ -142,10 +177,26 @@ class ProcesarConIA {
     };
   }
 
-  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null }) {
+  async ejecutar({ proyectoId, insumoBrutoInput = '', insumoAdicional = '', provider = 'auto', specificModel = null, objetivo = 'completo', tipoDiagrama = null, regenerar = false, operacion = 'legacy', usuarioId = null, analisisId = null, instruccion = '', actualizarIds = [], elementosIds = [], respuesta = '', preguntaId = null, desdeCero = false }) {
     const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
     if (!proyecto) {
       throw new Error(`Proyecto con ID ${proyectoId} no encontrado.`);
+    }
+    if (proyecto.version_flujo_analisis === 2 && ['analisis_inicial', 'correccion_analisis_inicial', 'analisis_respuesta', 'revision_calidad'].includes(operacion)) {
+      return this.initialAnalysis.generate({ proyectoId, usuarioId, insumoBrutoInput, insumoAdicional, provider, specificModel, operacion, instruccion, elementosIds, regenerar, analisisId, respuesta, preguntaId, desdeCero });
+    }
+    let initial = null;
+    let previousRequirements = [];
+    if (proyecto.version_flujo_analisis === 2 && objetivo !== 'diagramas') {
+      if (operacion !== 'redaccion_requisitos' || !require('../../infrastructure/services/RequirementExecutionContext').current()) throw Object.assign(new Error('Usa el flujo de análisis inicial y apruébalo antes de redactar.'), { status: 409 });
+      initial = await this.initialAnalysis.requireApproved(proyectoId, usuarioId, analisisId);
+      insumoAdicional = initial.insumo_adicional || '';
+      insumoBrutoInput = initial.insumo_directo || '';
+      previousRequirements = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      const newNeeds = initial.contenido.inventario.filter(n => ['RF', 'RNF'].includes(n.tipo)).some(n => !previousRequirements.some(r => (r.necesidades_origen || []).includes(n.id)));
+      if (regenerar && previousRequirements.some(item => item.aprobado)) throw Object.assign(new Error('Los requisitos ya están aprobados. No se reemplazan.'), { status: 409, code: 'REQUIREMENTS_CONFLICT' });
+      if (!regenerar && previousRequirements.length && !actualizarIds.length && !newNeeds) throw Object.assign(new Error('Ya existen requisitos. Confirma la actualización puntual; no se reemplazarán automáticamente.'), { status: 409, code: 'REQUIREMENTS_CONFLICT' });
+      if (actualizarIds.some(id => !previousRequirements.some(r => r.identificador === id))) throw Object.assign(new Error('La selección de requisitos cambió; recarga.'), { status: 409 });
     }
     const objetivoNormalizado = ['requisitos', 'diagramas', 'completo'].includes(objetivo) ? objetivo : 'completo';
     const tipoDiagramaNormalizado = tipoDiagrama ? normalizeDiagramType(tipoDiagrama) : null;
@@ -153,7 +204,11 @@ class ProcesarConIA {
       throw new Error(`Tipo de diagrama inválido: ${tipoDiagrama}.`);
     }
     if (objetivoNormalizado === 'diagramas') {
-      const estadosPermitidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
+      if (proyecto.version_flujo_analisis === 2) {
+        const approved = await this.initialAnalysis.requireApproved(proyectoId, proyecto.usuario_id);
+        if (proyecto.auditoria_requisitos?.referencia_analisis_inicial?.id !== approved.id) throw new Error('Los requisitos deben revisarse contra el análisis inicial vigente antes de generar diagramas.');
+      }
+      const estadosPermitidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (!estadosPermitidos.has(proyecto.estado_fase)) {
         throw new Error('Los requisitos deben estar aprobados antes de generar los diagramas.');
       }
@@ -163,12 +218,20 @@ class ProcesarConIA {
     let textoBase = insumoBrutoInput && insumoBrutoInput.trim() !== ''
       ? insumoBrutoInput
       : (proyecto.insumo_bruto || '');
+    let pistasFuentesRequisitos = [];
 
     // Concatenar fuentes transcritas e ingeridas de la base de datos (PDFs y Audios procesados en backend)
     if (this.fuenteRepository) {
       try {
         const fuentesBd = await this.fuenteRepository.listarPorProyecto(proyectoId);
         if (Array.isArray(fuentesBd) && fuentesBd.length > 0) {
+          if (objetivoNormalizado === 'requisitos') {
+            const context = require('../../infrastructure/services/RequirementSourceContext').build(fuentesBd);
+            if (context.content) {
+              textoBase = context.content;
+              pistasFuentesRequisitos = context.hints;
+            }
+          } else {
           const textoFuentes = fuentesBd
             .filter(f => f.texto_transcrito && f.texto_transcrito.trim().length > 0)
             .map(f => {
@@ -189,6 +252,7 @@ class ProcesarConIA {
             // La versión persistida contiene la transcripción corregida y los metadatos más recientes.
             textoBase = textoFuentes;
           }
+          }
         }
       } catch (errFuentes) {
         console.warn('[ProcesarConIA] Error consultando fuentes del proyecto:', errFuentes.message);
@@ -196,7 +260,7 @@ class ProcesarConIA {
     }
 
     // Si se envió insumoBrutoInput y el proyecto no lo tenía, persistirlo en base de datos
-    if (insumoBrutoInput && (!proyecto.insumo_bruto || proyecto.insumo_bruto.trim() === '')) {
+    if (insumoBrutoInput && (!proyecto.insumo_bruto || proyecto.insumo_bruto.trim() === '') && !require('../../infrastructure/services/RequirementExecutionContext').current()) {
       await this.proyectoRepository.actualizar(proyectoId, { insumo_bruto: insumoBrutoInput });
     }
 
@@ -239,6 +303,8 @@ class ProcesarConIA {
       requerimientos_aprobados: requerimientosAprobados,
       diagramas_aprobados: diagramasAprobados,
       requerimientos_actuales: requerimientosPrevios,
+      analisis_requisitos: contextOf(proyecto.auditoria_requisitos, { includeContext: true }),
+      auditoria_requisitos: proyecto.auditoria_requisitos || null,
       diagramas_actuales: diagramasPrevios,
       retroalimentacion_diagrama: retroalimentacionAplicable
     };
@@ -265,16 +331,18 @@ class ProcesarConIA {
         prioridad: requirement.prioridad,
         precondiciones: requirement.precondiciones,
         poscondiciones: requirement.poscondiciones,
-        metrica_medible: requirement.metrica_medible
+        metrica_medible: requirement.metrica_medible,
+        criterios_aceptacion: requirement.criterios_aceptacion || []
       })).sort((a, b) => String(a.identificador).localeCompare(String(b.identificador))),
       dependencias: dependencyVersions,
-      retroalimentacion: contextoProyecto.retroalimentacion_diagrama
+      retroalimentacion: contextoProyecto.retroalimentacion_diagrama,
+      decisiones_analisis: contextOf(proyecto.auditoria_requisitos, { includeContext: true })
     }) : null;
 
     const reusableDiagram = inputFingerprint && diagramaObjetivoActual?.huella_entrada === inputFingerprint &&
       ['pendiente_revision', 'aprobado'].includes(diagramaObjetivoActual.estado) &&
       ['valido', 'advertencia'].includes(diagramaObjetivoActual.estado_calidad);
-    if (reusableDiagram) {
+    if (reusableDiagram && regenerar !== true) {
       return {
         proyecto_id: proyectoId,
         nombre_proyecto: proyecto.nombre,
@@ -291,9 +359,11 @@ class ProcesarConIA {
     // Construcción del payload de tres bloques explícitos
     const payload = {
       proyecto_id: proyectoId,
+      ...(initial ? { approvedInitialAnalysis: { ...initial.contenido, aprobado: true, requisitos_previos: regenerar ? [] : previousRequirements, actualizar_ids: regenerar ? [] : actualizarIds, instruccion_redaccion: instruccion, referencia: { id: initial.id, version: initial.version, huella: initial.contenido_hash || require('../../infrastructure/services/RequirementExecutionContext').hash(initial.contenido) } } } : {}),
       nombre_proyecto: proyecto.nombre,
       // Las instrucciones adicionales tienen su bloque propio en el prompt; no deben duplicarse en el insumo principal.
       insumo_bruto: textoBase,
+      ...(objetivoNormalizado === 'requisitos' ? { pistas_fuentes: pistasFuentesRequisitos } : {}),
       insumo_adicional: insumoAdicional,
       provider,
       specificModel,
@@ -315,11 +385,12 @@ class ProcesarConIA {
       resultadoIA = await this.aiOrchestratorService.procesar(payload);
       if (objetivoNormalizado === 'diagramas' && Array.isArray(resultadoIA?.diagramas)) {
         resultadoIA.diagramas = asegurarActoresCasosUso(resultadoIA.diagramas, requerimientosAprobados);
+        resultadoIA = completarDisenoDesdeDominio(resultadoIA, diagramasAprobados);
       }
       if (objetivoNormalizado === 'diagramas' && tipoDiagramaNormalizado) {
         const maxReparaciones = Math.max(0, Math.min(2, Number(process.env.AI_DIAGRAM_REPAIR_RETRIES ?? 1)));
         let problemas = this._detectarProblemasDiagrama(
-          resultadoIA, tipoDiagramaNormalizado, requerimientosAprobados, diagramasAprobados
+          resultadoIA, tipoDiagramaNormalizado, requerimientosAprobados, diagramasAprobados, contextoProyecto.analisis_requisitos
         );
         while (problemas && reparacionesControladas < maxReparaciones) {
           reparacionesControladas += 1;
@@ -327,12 +398,54 @@ class ProcesarConIA {
           const repairPayload = this._payloadReparacion(
             payload, resultadoIA, tipoDiagramaNormalizado, problemas, reparacionesControladas
           );
+          const anterior = resultadoIA;
           resultadoIA = await this.aiOrchestratorService.procesar(repairPayload);
+          if (['clases_dominio', 'arquitectura_software', 'arquitectura_sistema'].includes(tipoDiagramaNormalizado)) {
+            const before = anterior?.diagramas?.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
+            const after = resultadoIA?.diagramas?.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
+            const options = { tipo: tipoDiagramaNormalizado, requisitos: requerimientosAprobados, analisisRequisitos: contextoProyecto.analisis_requisitos, diagramasDependencia: diagramasAprobados };
+            const previousValid = before?.codigo_plantuml && this.plantumlValidatorService?.validar(before.codigo_plantuml, options).valido;
+            const nextValid = after?.codigo_plantuml && this.plantumlValidatorService?.validar(after.codigo_plantuml, options).valido;
+            // Una reparación de advertencias no puede destruir un borrador válido.
+            // Conserva sus advertencias: no equivale a aprobarlo ni a corregirlas.
+            if (previousValid && !nextValid) {
+              console.warn(`[ProcesarConIA] Reparación de ${tipoDiagramaNormalizado} descartada: no devolvió un diagrama estructuralmente válido; se conserva el borrador anterior con sus advertencias.`);
+              resultadoIA = anterior;
+            }
+          }
+          if (tipoDiagramaNormalizado === 'clases_diseno') {
+            const before = anterior.diagramas?.find(item => normalizeDiagramType(item.tipo) === tipoDiagramaNormalizado);
+            const after = resultadoIA.diagramas?.find(item => normalizeDiagramType(item.tipo) === tipoDiagramaNormalizado);
+            // Solo protege reparaciones automáticas. Una edición explícita puede cambiar el diseño.
+            const previousValidation = before && this.plantumlValidatorService?.validar(before.codigo_plantuml, {
+              tipo: tipoDiagramaNormalizado, requisitos: requerimientosAprobados, diagramasDependencia: diagramasAprobados
+            });
+            if (previousValidation?.valido) {
+              const lost = new (require('../../infrastructure/services/DesignGenerationPolicy'))().lostMembers(before.codigo_plantuml, after?.codigo_plantuml);
+              if (lost.length) {
+                console.warn(`[ProcesarConIA] Reparación de diseño descartada: eliminó clases u operaciones existentes: ${lost.join(', ')}`);
+                resultadoIA = anterior;
+              }
+            }
+          }
           if (Array.isArray(resultadoIA?.diagramas)) {
             resultadoIA.diagramas = asegurarActoresCasosUso(resultadoIA.diagramas, requerimientosAprobados);
+            resultadoIA = completarDisenoDesdeDominio(resultadoIA, diagramasAprobados);
+          }
+          if (tipoDiagramaNormalizado === 'casos_de_uso') {
+            const before = anterior.diagramas?.find(item => normalizeDiagramType(item.tipo) === tipoDiagramaNormalizado);
+            const after = resultadoIA.diagramas?.find(item => normalizeDiagramType(item.tipo) === tipoDiagramaNormalizado);
+            if (before && after) {
+              const merged = new (require('../../infrastructure/services/UseCaseRepairMerger'))().merge(before.codigo_plantuml, after.codigo_plantuml, requerimientosAprobados.filter(item => item.tipo === 'RF'));
+              if (merged) {
+                const traced = new (require('../../infrastructure/services/DiagramSemanticValidatorService'))().validarCasosUso(merged, requerimientosAprobados.filter(item => item.tipo === 'RF'), []).metricas.rf_cubiertos_ids;
+                const joined = { ...anterior, diagramas: anterior.diagramas.map(item => item === before ? { ...item, codigo_plantuml: merged, codigo_mermaid: merged, requisitos_relacionados: [...new Set([...(Array.isArray(item.requisitos_relacionados) ? item.requisitos_relacionados : []), ...traced])] } : item) };
+                if (!this._detectarProblemasDiagrama(joined, tipoDiagramaNormalizado, requerimientosAprobados, diagramasAprobados)) resultadoIA = joined;
+              }
+            }
           }
           problemas = this._detectarProblemasDiagrama(
-            resultadoIA, tipoDiagramaNormalizado, requerimientosAprobados, diagramasAprobados
+            resultadoIA, tipoDiagramaNormalizado, requerimientosAprobados, diagramasAprobados, contextoProyecto.analisis_requisitos
           );
         }
       }
@@ -353,8 +466,14 @@ class ProcesarConIA {
       // flujo y la exportación final sí exigen los seis tipos canónicos.
       const cantidadEsperada = tipoDiagramaNormalizado ? 1 : 4;
       if (diagramasValidos.length < cantidadEsperada) {
+        const received = Array.isArray(resultadoIA?.diagramas) ? resultadoIA.diagramas : [];
+        const target = received.find(item => normalizeDiagramType(item?.tipo) === tipoDiagramaNormalizado);
+        const cause = !received.length ? 'La respuesta no contiene diagramas.'
+          : !target && tipoDiagramaNormalizado ? 'La respuesta no contiene el tipo solicitado.'
+          : !String(target?.codigo_plantuml || '').trim() ? 'El código PlantUML recibido está vacío.'
+          : 'El código recibido no contiene un inicio PlantUML utilizable o es un marcador de ausencia.';
         throw new Error(tipoDiagramaNormalizado
-          ? `La IA no devolvió un diagrama válido de tipo ${tipoDiagramaNormalizado}. Puedes reintentar sin perder los artefactos aprobados.`
+          ? `La IA no devolvió un diagrama válido de tipo ${tipoDiagramaNormalizado}. ${cause} Puedes reintentar sin perder los artefactos aprobados.`
           : 'La IA no devolvió suficientes diagramas válidos. Puedes reintentar sin perder los requisitos aprobados.');
       }
       if (!tipoDiagramaNormalizado && diagramasValidos.length >= DIAGRAM_TYPE_VALUES.length) {
@@ -373,6 +492,7 @@ class ProcesarConIA {
             tipo: diagrama.tipo,
             resultado: this.plantumlValidatorService.validar(diagrama.codigo_plantuml, {
               tipo: diagrama.tipo,
+              analisisRequisitos: contextoProyecto.analisis_requisitos,
               rnfList: rnfsAprobados,
               trazabilidad_rnf: diagrama.trazabilidad_rnf,
               requisitos: requerimientosAprobados,
@@ -419,13 +539,17 @@ class ProcesarConIA {
       }
     }
 
+    return require('../../infrastructure/services/RequirementExecutionContext').commit(async () => {
     // Persistir requerimientos únicamente durante la fase de análisis.
     const requerimientosGenerados = [];
     if (objetivoNormalizado !== 'diagramas' && resultadoIA.requerimientos && Array.isArray(resultadoIA.requerimientos)) {
       // Reemplazamos requerimientos no aprobados previos o anexamos
-      await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
+      if (!initial) await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
 
-      let idx = 1;
+      const seenIdentifiers = new Set();
+      let rfCounter = 1;
+      let rnfCounter = 1;
+
       for (const reqData of resultadoIA.requerimientos) {
         let tipo = String(reqData.tipo || 'RF').toUpperCase();
         if (tipo !== 'RF' && tipo !== 'RNF') {
@@ -437,13 +561,22 @@ class ProcesarConIA {
         else if (prioridad.includes('baj') || prioridad.includes('low')) prioridad = 'Baja';
         else prioridad = 'Media';
 
-        const defaultId = `${tipo}-${String(idx++).padStart(2, '0')}`;
+        let id = String(reqData.identificador || '').trim();
+        if (!id || seenIdentifiers.has(id)) {
+          const counter = tipo === 'RF' ? rfCounter++ : rnfCounter++;
+          id = `${tipo}-${String(counter).padStart(2, '0')}`;
+          while (seenIdentifiers.has(id)) {
+            const next = tipo === 'RF' ? rfCounter++ : rnfCounter++;
+            id = `${tipo}-${String(next).padStart(2, '0')}`;
+          }
+        }
+        seenIdentifiers.add(id);
 
         const reqEntity = new Requerimiento({
           proyecto_id: proyectoId,
           tipo,
-          identificador: reqData.identificador || defaultId,
-          nombre: reqData.nombre || `Requerimiento ${defaultId}`,
+          identificador: id,
+          nombre: reqData.nombre || `Requerimiento ${id}`,
           descripcion: reqData.descripcion || '',
           prioridad,
           actores: Array.isArray(reqData.actores) ? reqData.actores : (reqData.actores ? [String(reqData.actores)] : []),
@@ -452,7 +585,11 @@ class ProcesarConIA {
           metrica_medible: reqData.metrica_medible || '',
           origen: reqData.origen || 'inferido',
           evidencia: reqData.evidencia || '',
+          evidencias: reqData.evidencias || [],
           fuentes_origen: Array.isArray(reqData.fuentes_origen) ? reqData.fuentes_origen : [],
+          necesidades_origen: Array.isArray(reqData.necesidades_origen) ? reqData.necesidades_origen : [],
+          criterios_aceptacion: Array.isArray(reqData.criterios_aceptacion) ? reqData.criterios_aceptacion : [],
+          reglas_relacionadas: Array.isArray(reqData.reglas_relacionadas) ? reqData.reglas_relacionadas : [],
           requiere_confirmacion: Boolean(reqData.requiere_confirmacion),
           estado_decision: reqData.estado_decision || (reqData.requiere_confirmacion ? 'pendiente' : 'confirmado'),
           restricciones_excluidas: Array.isArray(reqData.restricciones_excluidas) ? reqData.restricciones_excluidas : [],
@@ -460,9 +597,31 @@ class ProcesarConIA {
         });
         requerimientosGenerados.push(reqEntity);
       }
-      await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
+      if (regenerar) {
+        await this.requerimientoRepository.eliminarPorProyecto(proyectoId);
+        await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
+      } else if (initial && previousRequirements.length) {
+        for (const row of requerimientosGenerados) {
+          const previous = previousRequirements.find(r => r.identificador === row.identificador);
+          if (previous && !actualizarIds.includes(row.identificador)) continue;
+          if (previous) {
+            const { historial_versiones, ...snapshot } = previous;
+            await this.requerimientoRepository.actualizar(previous.id || previous._id, { ...row, desactualizado: false, historial_versiones: [...(historial_versiones || []), { fecha: new Date(), contenido: snapshot, analisis_inicial: proyecto.auditoria_requisitos?.referencia_analisis_inicial }] });
+          } else await this.requerimientoRepository.crear(row);
+        }
+        const produced = new Set(requerimientosGenerados.map(r => r.identificador));
+        for (const previous of previousRequirements) if (actualizarIds.includes(previous.identificador) && !produced.has(previous.identificador)) await this.requerimientoRepository.actualizar(previous.id || previous._id, { desactualizado: true, aprobado: false });
+      } else await this.requerimientoRepository.crearMuchos(requerimientosGenerados);
+      if (resultadoIA.auditoria_requisitos) {
+        const RequirementApprovalService = require('../services/RequirementApprovalService');
+        resultadoIA.auditoria_requisitos = {
+          ...resultadoIA.auditoria_requisitos,
+          control_aprobacion: new RequirementApprovalService().evaluate(requerimientosGenerados, resultadoIA.auditoria_requisitos)
+        };
+      }
       // Cualquier modelado anterior queda obsoleto al regenerar los requisitos.
-      await this.diagramaRepository.eliminarPorProyecto(proyectoId);
+      if (initial) await this.requirementChangeService?.invalidate(proyectoId, 'Se redactaron requisitos desde el análisis inicial aprobado.');
+      else await this.diagramaRepository.eliminarPorProyecto(proyectoId);
       if (this.disenoRepository && typeof this.disenoRepository.invalidarDerivados === 'function') {
         await this.disenoRepository.invalidarDerivados(proyectoId);
       }
@@ -535,6 +694,7 @@ class ProcesarConIA {
         const validacionCalidad = this.plantumlValidatorService
           ? this.plantumlValidatorService.validar(diagData.codigo_plantuml || diagData.codigo_puml || '', {
             tipo,
+            analisisRequisitos: contextoProyecto.analisis_requisitos,
             rnfList: requerimientosAprobados.filter((req) => String(req.tipo || '').toUpperCase() === 'RNF'),
             trazabilidad_rnf: diagData.trazabilidad_rnf,
             requisitos: requerimientosAprobados,
@@ -592,6 +752,20 @@ class ProcesarConIA {
       descripcion: descripcionFinal,
       estado_fase: objetivoNormalizado === 'diagramas' ? 'diseno_pendiente' : 'analisis_pendiente'
     };
+    if (insumoBrutoInput && !proyecto.insumo_bruto) updates.insumo_bruto = insumoBrutoInput;
+    if (objetivoNormalizado === 'requisitos' && resultadoIA.auditoria_requisitos) {
+      await this.requirementChangeService?.invalidateCode(proyectoId, 'Se generó una nueva versión del análisis de requisitos.');
+      const previous = proyecto.auditoria_requisitos;
+      if (initial && previousRequirements.length && !regenerar) {
+        const state = await this.initialAnalysis.get(proyectoId, usuarioId);
+        resultadoIA.auditoria_requisitos.pendientes_analisis_inicial = state.impacto.requisitos_afectados.filter(id => !actualizarIds.includes(id));
+      }
+      updates.auditoria_requisitos = { ...resultadoIA.auditoria_requisitos,
+        version_analisis: Number(previous?.version_analisis || 0) + 1,
+        historial_analisis: [...(previous?.historial_analisis || []), ...(previous ? [{ fecha: new Date().toISOString(), version: previous.version_analisis || 0,
+          inventario: previous.inventario, necesidades_pendientes: previous.necesidades_pendientes, revision_semantica: previous.revision_semantica }] : [])] };
+      resultadoIA.auditoria_requisitos = updates.auditoria_requisitos;
+    }
 
     if (resultadoIA.resumen && resultadoIA.resumen.trim()) updates.resumen = resultadoIA.resumen.trim();
     if (resultadoIA.introduccion && resultadoIA.introduccion.trim()) updates.introduccion = resultadoIA.introduccion.trim();
@@ -604,6 +778,18 @@ class ProcesarConIA {
     }
 
     await this.proyectoRepository.actualizar(proyectoId, updates);
+    const execution = require('../../infrastructure/services/RequirementExecutionContext').current();
+    if (initial && objetivoNormalizado === 'requisitos' && execution?.jobId && updates.auditoria_requisitos) {
+      // Commit receipt lives with the persisted audit, not only in the worker.
+      // A restart after this write must not interpret its own output as an edit.
+      const savedRequirements = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      updates.auditoria_requisitos.registro_generacion = {
+        trabajo_id: execution.jobId, entrada_snapshot: execution.inputSnapshot,
+        requisitos_hash: require('../../infrastructure/services/RequirementExecutionContext').hash(savedRequirements),
+        salida_hash: await execution.outputSnapshot()
+      };
+      await this.proyectoRepository.actualizar(proyectoId, { auditoria_requisitos: updates.auditoria_requisitos });
+    }
     console.log(`[ProcesarConIA] Proyecto actualizado en MongoDB: "${nombreFinal}"`);
 
     const diagramasActuales = await this.diagramaRepository.listarPorProyecto(proyectoId);
@@ -612,6 +798,7 @@ class ProcesarConIA {
       nombre_proyecto: nombreFinal,
       descripcion_proyecto: descripcionFinal,
       objetivo: objetivoNormalizado,
+      auditoria_requisitos: resultadoIA.auditoria_requisitos || undefined,
       requerimientos: await this.requerimientoRepository.listarPorProyecto(proyectoId),
       diagramas: diagramasActuales,
       flujoDiagramas: objetivoNormalizado === 'diagramas'
@@ -619,6 +806,7 @@ class ProcesarConIA {
         : undefined,
       reparaciones_controladas: reparacionesControladas
     };
+    });
   }
 }
 

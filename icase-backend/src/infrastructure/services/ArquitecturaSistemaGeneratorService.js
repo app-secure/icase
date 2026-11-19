@@ -86,6 +86,8 @@ class ArquitecturaSistemaGeneratorService {
     if (hasWeb) {
       lines.push(`Deployment_Node(webDevice, "Dispositivo Web", "Plataforma por definir") {`,
         `  Container(webArtifact, "Aplicación Web", "${webTech}", "Artefacto cliente")`, '}');
+      lines.push('Deployment_Node(webHosting, "Alojamiento Web", "Alojamiento web por definir") {',
+        `  Container(webDistribution, "Aplicación Web", "${webTech}", "Distribución de los recursos estáticos a navegadores")`, '}');
     }
     if (!hasMobile && !hasWeb) {
       lines.push('Deployment_Node(userDevice, "Dispositivo de Usuario", "Plataforma por definir") {',
@@ -121,7 +123,8 @@ class ArquitecturaSistemaGeneratorService {
     }
     if (backupRnf && needsData) {
       lines.push('Deployment_Node(backupNode, "Infraestructura de Respaldo", "Ubicación por definir") {',
-        `  ContainerDb(backupStore, "Almacén de Respaldos", "${dataTech}", "Copias y recuperación solicitadas")`, '}');
+        '  Container(backupTask, "Tarea de Respaldo y Restauración", "Mecanismo por definir", "Ejecuta las copias y su recuperación bajo las condiciones aprobadas")',
+        '  ContainerDb(backupStore, "Almacén de Respaldos", "Almacenamiento por definir", "Conserva copias; separación y retención según lo aprobado")', '}');
     }
     lines.push('');
 
@@ -129,6 +132,7 @@ class ArquitecturaSistemaGeneratorService {
       ? [['mobileArtifact', hasMobile], ['webArtifact', hasWeb]].filter(([, enabled]) => enabled).map(([alias]) => alias)
       : ['clientArtifact'];
     const entry = hasHA ? 'trafficManager' : 'appInstance';
+    if (hasWeb) lines.push('Rel(webDistribution, webArtifact, "Entrega recursos web", "Canal por definir")');
     clients.forEach((client) => lines.push(`Rel(${client}, ${entry}, "Accede", "${externalProtocol}")`));
     if (hasHA) {
       lines.push('Rel(trafficManager, appInstance1, "Distribuye", "Canal por definir")',
@@ -142,7 +146,14 @@ class ArquitecturaSistemaGeneratorService {
       lines.push('Rel(appInstance, dataInstance, "Lee y escribe", "Protocolo por definir")');
     }
     if (monitoringRnf) lines.push(`Rel(monitoringAgent, ${hasHA ? 'appInstance1' : 'appInstance'}, "Observa", "Canal por definir")`);
-    if (backupRnf && needsData) lines.push(`Rel(${hasHA ? 'dataPrimary' : 'dataInstance'}, backupStore, "Genera respaldos", "Frecuencia y retención aprobadas o pendientes")`);
+    if (backupRnf && needsData) {
+      const data = hasHA ? 'dataPrimary' : 'dataInstance';
+      lines.push(`Rel(backupTask, ${data}, "Extrae copia de datos", "Canal por definir")`,
+        'Rel(backupTask, backupStore, "Conserva copias", "Canal por definir")',
+        'Rel(backupStore, backupTask, "Entrega copia para restaurar", "Canal por definir")',
+        `Rel(backupTask, ${data}, "Restaura copia seleccionada", "Canal por definir")`,
+        `note right of backupTask\n  ${safe(backupRnf.identificador || backupRnf.id || 'Respaldo')}: ${safe(textOf([backupRnf]))}\n  Parámetros ausentes: por definir; no se acredita recuperación mediante pruebas.\nend note`);
+    }
     lines.push('@enduml');
 
     return {

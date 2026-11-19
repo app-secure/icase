@@ -13,15 +13,17 @@ const slug = (value) => String(value || '')
 
 class BackendScaffoldGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
-    const { decisiones, requerimientos, diagramaDominio } = insumos;
+    const { decisiones, requerimientos, diagramaDominio, verbosPorRf = null } = insumos;
     const stack = decisiones.stack_tecnologico || {};
     const arquitectura = decisiones.arquitectura_codigo || {};
     const rf = requerimientos.filter((item) => item.aprobado && item.tipo === 'RF');
     const modulos = [...new Set(rf.map((item) => slug(item.nombre)))].slice(0, 12);
     const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
-    const { reglas, descartadas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf);
+    const spec = this._especificacion(decisiones.especificacion_aplicacion, domainModel, rf);
+    const { reglas, descartadas, omitidas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf, spec);
     const access = this._acceso(decisiones.control_acceso, rf);
-    const generados = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos });
+    const fresh = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos, verbosPorRf, spec });
+    const generados = new (require('./IncrementalMigrationGenerator'))().apply(fresh,insumos.backendAnterior);
     const informe = this._informe({ proyecto, insumos, decisiones, archivos: generados });
     const archivos = [
       ...generados,
@@ -41,23 +43,51 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
         access?.autenticacion?.metodo === 'jwt'
           ? `Autenticación JWT con ${access.roles.filter((rol) => rol.incluir).length} roles de negocio más el administrador; define JWT_SECRET, ADMIN_EMAIL y ADMIN_PASSWORD antes de producción.`
           : 'La API se generó SIN autenticación, por decisión aprobada en la etapa de control de acceso.',
+        ...this._operacionesReducidas(archivos),
         `Reglas de negocio aplicadas: ${reglas.length}${descartadas ? `; ${descartadas} rechazadas por el usuario no se generaron` : ''}.`,
-        `Informe de generación: ${informe.resumen.completo} requisitos completos, ${informe.resumen.solo_datos} solo con datos y ${informe.resumen.no_soportado} no soportados (ver backend/GENERATION-REPORT.md).`
+        ...(omitidas.length ? [`${omitidas.length} reglas «obligatorio» no se generaron porque la operación que crea el registro no aporta ese dato (se rellena después o lo completa el sistema): ${omitidas.join(', ')}.`] : []),
+        `Informe de generación: ${informe.resumen.completo} con CRUD tipado, ${informe.resumen.solo_datos} solo con datos y ${informe.resumen.no_soportado} no soportados (ver backend/GENERATION-REPORT.md).`
       ],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_backend_generico_v2'
     };
   }
 
+  /** Solo las operaciones confirmadas por la persona llegan al contrato; las pendientes o rechazadas se ignoran. */
+  /**
+   * Solo lo confirmado llega al generador. Se revalida antes con el dominio vigente: una especificación aprobada antes de que
+   * existieran el estado inicial o los códigos generados por el servidor se completa aquí, sin tener que reabrir la etapa.
+   */
+  _especificacion(decision, domainModel = null, rf = []) {
+    const Service = require('./ApplicationSpecService');
+    if (!decision || !domainModel) return Service.confirmada(decision);
+    const revisada = new Service({}).validar(decision, { modelo: domainModel, rf, pantallas: [], cablear: false });
+    if (revisada.errores.length) return Service.confirmada(decision);
+    return Service.confirmada({ ...decision, operaciones: revisada.operaciones, pantallas: revisada.pantallas });
+  }
+
+  /** Avisa qué operaciones quedaron sin el CRUD completo porque los mockups aprobados solo declaran algunos verbos. */
+  _operacionesReducidas(archivos) {
+    const manifest = JSON.parse(archivos.find((item) => item.ruta === 'backend/icase.manifest.json').contenido);
+    const reducidas = (manifest.operations || []).filter((item) => !item.support && Array.isArray(item.methods) && item.methods.length < 4);
+    return reducidas.length
+      ? [`Operaciones con métodos reducidos por los enlaces de los mockups aprobados: ${reducidas.map((item) => `${item.id} (${item.methods.join(', ')})`).join('; ')}. Regenera los mockups si falta alguna acción.`]
+      : [];
+  }
+
   /** Qué se generó de cada RF; sale del contrato que ya viaja en el manifiesto, sin volver a derivarlo. */
   _informe({ proyecto, insumos, decisiones, archivos }) {
     const manifest = JSON.parse(archivos.find((item) => item.ruta === 'backend/icase.manifest.json').contenido);
     const aprobados = insumos.requerimientos.filter((item) => item.aprobado);
-    const plataformas = [...(decisiones.alcance_plataforma?.plataformas || []), ...(decisiones.stack_tecnologico?.plataformas || [])];
+    const plataformas = (decisiones.stack_tecnologico?.plataformas ?? decisiones.alcance_plataforma?.plataformas ?? []);
     const modules = new ModuleService();
     const activos = modules.activos(decisiones.modulos);
+    const rawCoverage = decisiones.modulos?.cobertura || {};
+    // Igual que en la etapa Módulos: el reconocimiento de pendientes está marcado salvo que el usuario lo desmarque.
+    const declaracion = { modo_entrega: 'parcial', ...rawCoverage, aceptar_pendientes: rawCoverage.aceptar_pendientes ?? true };
     return new GenerationReportService().build({
       proyecto, requisitos: aprobados, contrato: manifest, stack: decisiones.stack_tecnologico || {}, plataformas,
+      declaracion,
       modulos: {
         modo: decisiones.modulos ? (decisiones.modulos.modo || 'automatico') : 'automatico',
         incluidos: modules.incluidos(decisiones).filter((item) => item.activo),
@@ -75,15 +105,32 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
   }
 
   /** Solo las reglas confirmadas llegan al código; si no son coherentes con el modelo aprobado, la generación falla. */
-  _reglas(propuestas, domainModel, rf) {
-    if (!Array.isArray(propuestas) || !propuestas.length) return { reglas: [], descartadas: 0 };
+  _reglas(propuestas, domainModel, rf, spec = null) {
+    if (!Array.isArray(propuestas) || !propuestas.length) return { reglas: [], descartadas: 0, omitidas: [] };
     if (!domainModel) throw new Error('Hay reglas de negocio aprobadas, pero no existe un diagrama de dominio aprobado y vigente que las respalde.');
     const service = new BusinessRuleService();
     const { reglas, errores } = service.validar(propuestas, { entidades: domainModel.entities, requerimientos: rf });
     if (errores.length) throw new Error(`Las reglas de negocio aprobadas ya no son coherentes con el modelo de dominio: ${errores.join(' ')} Vuelve a revisar la etapa de reglas de negocio.`);
     const pendientes = service.pendientes(reglas);
     if (pendientes.length) throw new Error(`Hay reglas de negocio pendientes de decisión: ${pendientes.join(', ')}.`);
-    return { reglas: service.confirmadas(reglas), descartadas: reglas.length - service.confirmadas(reglas).length };
+    const confirmadas = service.confirmadas(reglas);
+    // «Obligatorio» se infiere de que el atributo no es opcional en el diagrama, pero muchos se rellenan después (la hora a la que
+    // se sirve un pedido, la liberación de una reserva) o los completa el sistema. Si la especificación define cómo se crea una
+    // entidad, al crearla solo se exigen los datos que esa operación aporta: lo contrario haría fallar siempre el alta.
+    const aporta = new Map();
+    for (const op of (spec?.operaciones || []).filter((item) => item.tipo === 'crear')) {
+      const campos = aporta.get(op.entidad) || new Set();
+      [...(op.entradas || []), ...(op.autoEntradas || []).map((item) => item.campo), ...(op.sesionEntradas || []).map((item) => item.campo)].forEach((campo) => campos.add(campo));
+      aporta.set(op.entidad, campos);
+    }
+    const omitidas = [];
+    const vigentes = confirmadas.filter((regla) => {
+      const inferida = regla.origen !== 'explicito' && String(regla.id).startsWith('DOM-');
+      if (regla.tipo !== 'requerido' || !inferida || !aporta.has(regla.entidad) || aporta.get(regla.entidad).has(regla.campo)) return true;
+      omitidas.push(regla.id);
+      return false;
+    });
+    return { reglas: vigentes, descartadas: reglas.length - confirmadas.length, omitidas };
   }
 
   _modelWarnings(archivos) {

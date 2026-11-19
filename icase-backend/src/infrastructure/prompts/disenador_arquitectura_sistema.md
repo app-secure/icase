@@ -13,7 +13,10 @@ No uses conocimiento de otros proyectos ni conviertas una recomendación, ejempl
 ## Consistencia obligatoria con arquitectura de software
 
 - Conserva los clientes, aplicaciones, servicios y almacenes definidos en `arquitectura_software`.
-- Cada contenedor de software debe aparecer desplegado dentro de exactamente un nodo apropiado o quedar señalado como `Despliegue por definir`.
+- Cada contenedor de software debe tener un alojamiento identificado o señalado como `Despliegue por definir`. Puede haber varias instancias del mismo artefacto en dispositivos diferentes: usa alias únicos y conserva el mismo nombre de la aplicación aprobada, distinguiendo rol/módulo en la descripción, sin convertir pantallas en aplicaciones nuevas.
+- Distingue el alojamiento de los recursos web de su ejecución en el navegador. Una SPA en un dispositivo no explica desde dónde se distribuye. Si el hosting no está aprobado, indica `Alojamiento web por definir`, sin elegir proveedor ni servidor adicional por defecto. Varios dispositivos pueden ejecutar instancias de la misma aplicación; no son sistemas nuevos.
+- Representa explícitamente el artefacto web distribuido en su alojamiento y su relación de entrega a los navegadores. No basta con que la descripción del nodo del backend diga «frontend y backend» si solo contiene el backend. No presupongas que datos y caché comparten servidor; si se desconoce, deja su ubicación por definir.
+- Distingue roles de dispositivos: mostrar administración en el PC de caja no autoriza al cajero a ejercer funciones administrativas. Conserva el control de acceso aprobado y deja la ubicación del administrador por definir si no está especificada.
 - No cambies nombres, tecnologías ni protocolos ya aprobados.
 - No agregues módulos funcionales nuevos.
 - Los dispositivos representados deben corresponder a plataformas o canales exigidos por requisitos aprobados.
@@ -36,9 +39,12 @@ No uses conocimiento de otros proyectos ni conviertas una recomendación, ejempl
 
 - Comienza con `@startuml` y termina con `@enduml`.
 - Usa `!include <C4/C4_Deployment>` o nodos PlantUML estándar.
+- Para teléfonos, tabletas y PC usa `Deployment_Node(alias, "Nombre", "Tipo") { ... }`. No inventes macros de dispositivo como `kiosk_or_tablet`. Representa procesos internos mediante `Container` o `Component` y el almacén de copias mediante `ContainerDb`, no mediante un sistema externo ni un Boundary vacío. Enlaza las llamadas API con los alias de las aplicaciones, no con el hardware que las aloja.
 - Incluye al menos los nodos necesarios para alojar clientes, aplicación y persistencia cuando esos elementos existan en la arquitectura aprobada.
 - Usa relaciones de red legibles. Un protocolo o puerto solo puede aparecer si figura en los artefactos autorizados; de lo contrario indica `Canal por definir`.
+- En `Rel(origen, destino, "operación", "protocolo")`, describe la operación en el tercer argumento y el protocolo aprobado en el cuarto. No pongas «HTTPS / WSS» como operación mientras el protocolo dice «Canal por definir».
 - Evita cruces, etiquetas largas y detalles internos propios de un diagrama de clases o componentes.
+- Separa herramientas de aplicación y protocolos: Prisma, Hibernate, TypeORM y otros ORM se ejecutan con el backend; no son protocolos de red ni tecnologías del servidor de base de datos. Ubícalos en el backend o en una nota. Usa el protocolo aprobado en la relación (o `Canal por definir`), sin inventar puertos.
 
 ## Trazabilidad RNF
 
@@ -46,6 +52,8 @@ No uses conocimiento de otros proyectos ni conviertas una recomendación, ejempl
 - Cada entrada usa `rnf_id`, `elemento_id`, `elemento` y `justificacion`; `elemento_id` es el alias exacto usado en PlantUML.
 - Una decisión rechazada o incluida en `restricciones_excluidas` no es un RNF a realizar. No dibujes balanceadores, réplicas ni failover cuando alta disponibilidad fue descartada.
 - Respaldo/recuperación y alta disponibilidad son decisiones diferentes: un respaldo solicitado no autoriza redundancia activa.
+- Cuando se soliciten respaldos, representa la responsabilidad de ejecutar y conservar las copias y la ruta de recuperación; si el mecanismo, destino, frecuencia, retención o tiempos no están aprobados, decláralos por definir. No asumas que un cilindro PostgreSQL satisface por sí solo el respaldo ni inventes un producto o servidor de copias.
+- Modela el circuito completo: proceso/tarea que lee o exporta el origen persistente, almacena copias en el destino y permite restaurarlas hacia los datos de origen. El proceso puede alojarse en un nodo existente; no implica otro servidor. Usa artefactos con nombre, nunca un `Boundary` vacío como sustituto de las copias. Conserva en notas frecuencia, retención, separación del almacenamiento y objetivos de recuperación aprobados, sin inventar sus valores. «Por definir» informa de una decisión pendiente, no acredita un mecanismo implementado.
 - Copia literalmente identificadores y métricas; no inventes umbrales.
 - Si no hay RNF de infraestructura aplicables, devuelve `trazabilidad_rnf: []`.
 

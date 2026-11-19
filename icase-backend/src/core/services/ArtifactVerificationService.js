@@ -40,20 +40,38 @@ class ArtifactVerificationService {
           const driver = { postgres: 'org.postgresql', mysql: 'mysql-connector-j' }[engine];
           if (!driver) errores.push('El backend Java solo admite PostgreSQL o MySQL.');
           else if (!(files.get('backend/pom.xml') || '').includes(driver)) errores.push(`Se declara ${engine}, pero el pom.xml no incluye su controlador (${driver}).`);
-        } else if (/postgres/i.test(text) && !/(?:\bpg\b|prisma|typeorm|sequelize|knex)/i.test(files.get('backend/package.json') || '')) {
-          errores.push('Se declara PostgreSQL, pero el backend no incluye un controlador de base de datos.');
+        } else {
+          const engine = (() => { try { return JSON.parse(files.get('backend/icase.manifest.json') || '{}').database; } catch { return null; } })();
+          // Las plantillas compartidas pueden mencionar otros motores; manda el contrato, no una búsqueda global.
+          if ((engine ? engine === 'postgres' : /postgres/i.test(text)) && !/(?:\bpg\b|prisma|typeorm|sequelize|knex)/i.test(files.get('backend/package.json') || '')) errores.push('Se declara PostgreSQL, pero el backend no incluye un controlador de base de datos.');
         }
         try {
           const manifest = JSON.parse(files.get('backend/icase.manifest.json') || '{}');
           if (!Array.isArray(manifest.operations) || !manifest.operations.length) errores.push('El contrato del backend no declara operaciones derivadas de los RF.');
           for (const operation of manifest.operations || []) {
             if (!operation.id || !operation.key || !operation.collectionPath) errores.push('Hay una operación sin RF, clave o ruta de colección.');
-            if (!['GET', 'POST', 'PATCH', 'DELETE'].every((method) => (operation.methods || []).includes(method))) errores.push(`La operación ${operation.id || operation.key} no ofrece un ciclo CRUD verificable.`);
+            // Basta con GET y métodos conocidos: una operación de consulta no necesita el ciclo CRUD completo.
+            const methods = operation.methods || [];
+            if (!methods.includes('GET') || methods.some((method) => !['GET', 'POST', 'PATCH', 'DELETE'].includes(method))) errores.push(`La operación ${operation.id || operation.key} no declara GET y métodos válidos (GET, POST, PATCH, DELETE).`);
           }
         } catch { /* requireJson ya registra el error. */ }
         break;
       }
       case 'codigo_frontend': {
+        if (files.has('mobile/package.json')) {
+          requireJson('mobile/package.json');
+          requireFile('mobile/App.js');
+          requireJson('mobile/icase.manifest.json');
+          try {
+            const mobile = JSON.parse(files.get('mobile/icase.manifest.json') || '{}');
+            if (!Array.isArray(mobile.pantallas) || !mobile.pantallas.length) {
+              errores.push('La aplicación móvil no contiene pantallas del árbol aprobado.');
+            } else if (mobile.pantallas.some((screen) => !screen.id || !(screen.operations || []).length)) {
+              errores.push('La aplicación móvil contiene pantallas sin operaciones RF conectadas.');
+            }
+          } catch { /* requireJson ya registra el error. */ }
+          if (!files.has('frontend/package.json')) break;
+        }
         requireJson('frontend/package.json');
         requireFile('frontend/src/App.jsx');
         const pages = [...files].filter(([path]) => /^frontend\/src\/pages\/.*\.(?:jsx|tsx)$/.test(path));
@@ -61,13 +79,43 @@ class ArtifactVerificationService {
         if (pages.some(([, content]) => /dangerouslySetInnerHTML/.test(content))) {
           errores.push('Las pantallas solo incrustan HTML de mockups; no son componentes interactivos conectados al backend.');
         }
-        if (![...files].some(([path, content]) => /^frontend\/src\//.test(path) && /\bfetch\s*\(|\baxios\b|useMutation|useQuery/.test(content))) {
+        // El archivo de sesión siempre contiene un fetch (login): no prueba que ninguna pantalla consuma la API.
+        if (![...files].some(([path, content]) => /^frontend\/src\//.test(path) && path !== 'frontend/src/session.jsx' && /\bapi\s*\(|\bfetch\s*\(|\baxios\b|useMutation|useQuery/.test(content))) {
           errores.push('Ninguna pantalla consume una API del backend.');
         }
         try {
           const manifest = JSON.parse(files.get('frontend/icase.manifest.json') || '{}');
-          const disconnected = (manifest.pantallas || []).filter((screen) => !(screen.operations || []).length);
+          const isAuthScreen = (item) => /inicio.*sesion|login|autentic/i.test(item.id || item.name || item.nombre || item.route || '');
+          const disconnected = (manifest.pantallas || []).filter((screen) => !(screen.operations || []).length && !isAuthScreen(screen));
           if (disconnected.length) errores.push(`Hay pantallas sin operaciones RF conectadas: ${disconnected.map((item) => item.name || item.nombre || item.id).join(', ')}.`);
+          if (files.has('mobile/icase.manifest.json')) {
+            const mobile = JSON.parse(files.get('mobile/icase.manifest.json'));
+            const webIds = new Set((manifest.pantallas || []).map((screen) => screen.id));
+            const shared = (mobile.pantallas || []).filter((screen) => webIds.has(screen.id));
+            if (shared.length) errores.push(`Hay pantallas mezcladas entre web y móvil: ${shared.map((screen) => screen.name || screen.id).join(', ')}.`);
+          }
+          // Una vista diseñada con controles sin destino no debe aprobarse como aplicación funcional.
+          for (const screen of manifest.pantallas || []) {
+            const links = screen.enlaces;
+            if (!links) continue;
+            const label = screen.name || screen.nombre || screen.id;
+            const loginOperations = new Set((manifest.identidad?.login || []).map((id) => String(id).toLowerCase()));
+            if ((links.acciones || []).some((action) => loginOperations.has(String(action.operacion).toLowerCase()))) {
+              errores.push(`La pantalla «${label}» conecta el RF de autenticación a un registro de datos: el acceso lo resuelve la sesión de la aplicación.`);
+            }
+            if (links.cableados > 0 && !(files.get(`frontend/src/pages/${screen.id}.jsx`) || '').includes('handleAction(')) {
+              errores.push(`La pantalla «${label}» declara enlaces cableados, pero su página no los ejecuta.`);
+            }
+            const unlinked = links.sin_enlace_total ?? (links.sin_enlace || []).length;
+            const names = (links.sin_enlace || []).slice(0, 5).join(', ');
+            const unlinkedText = `${unlinked} control${unlinked === 1 ? '' : 'es'} sin enlace${names ? ` (${names})` : ''}`;
+            if (!links.cableados && (unlinked || links.invalidos)) {
+              errores.push(`La vista diseñada de «${label}» no ejecuta ninguna acción del backend${unlinked ? `: ${unlinkedText}` : ''}.`);
+            } else if (unlinked) {
+              errores.push(`La vista diseñada de «${label}» tiene ${unlinkedText}.`);
+            }
+            if (links.invalidos) errores.push(`La vista diseñada de «${label}» tiene ${links.invalidos} enlace${links.invalidos === 1 ? '' : 's'} inválido${links.invalidos === 1 ? '' : 's'}.`);
+          }
           if ((manifest.plataformas_solicitadas || []).some((item) => /m[oó]vil|android|ios|react native/i.test(item)) && !files.has('mobile/package.json')) {
             errores.push('El alcance aprobado incluye una aplicación móvil, pero no se generó un proyecto React Native.');
           }
@@ -80,7 +128,7 @@ class ArtifactVerificationService {
         if (!testFiles.some(([, content]) => /\b(?:post|put|patch|delete)\b|method:\s*['"](?:POST|PUT|PATCH|DELETE)/i.test(content))) {
           errores.push('Las pruebas no ejercitan ninguna operación de escritura del negocio.');
         }
-        if (!testFiles.some(([, content]) => /\.click\(|\.fill\(|\.submit\(/.test(content))) {
+        if (!files.has('tests/mobile-platform.json') && !testFiles.some(([, content]) => /\.click\(|\.fill\(|\.submit\(/.test(content))) {
           errores.push('Las pruebas de navegador no verifican interacciones de usuario.');
         }
         break;
@@ -88,7 +136,7 @@ class ArtifactVerificationService {
       case 'infraestructura': {
         requireFile('ops/docker-compose.yml');
         requireFile('ops/docker/backend.Dockerfile');
-        requireFile('ops/docker/frontend.Dockerfile');
+        if (!files.has('ops/mobile-platform.json')) requireFile('ops/docker/frontend.Dockerfile');
         if (files.has('ops/docker-compose.ha.yml') && !/replicas:\s*[2-9]/.test(files.get('ops/docker-compose.ha.yml'))) {
           errores.push('El perfil de alta disponibilidad no define réplicas.');
         }
@@ -109,7 +157,7 @@ class ArtifactVerificationService {
         break;
       }
       case 'paquete_entrega': {
-        for (const path of [files.has('backend/pom.xml') ? 'backend/pom.xml' : 'backend/package.json', 'frontend/package.json', 'tests/package.json', 'ops/docker-compose.yml', 'delivery-manifest.json']) requireFile(path);
+        for (const path of [files.has('backend/pom.xml') ? 'backend/pom.xml' : 'backend/package.json', files.has('mobile/package.json') ? 'mobile/package.json' : 'frontend/package.json', 'tests/package.json', 'ops/docker-compose.yml', 'delivery-manifest.json']) requireFile(path);
         requireJson('delivery-manifest.json');
         break;
       }

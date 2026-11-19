@@ -13,7 +13,7 @@ class ArquitecturaSoftwareValidatorService {
    * @param {Array} [params.trazabilidad_rnf] - Mapeo explícito RNF -> elemento
    * @returns {Object} { valido, errores, advertencias, trazabilidad, componentes_detectados }
    */
-  validar({ codigo, rnfList = [], trazabilidad_rnf = [] } = {}) {
+  validar({ codigo, rnfList = [], trazabilidad_rnf = [], requisitos = [], analisisRequisitos = {} } = {}) {
     const errores = [];
     const advertencias = [];
     const componentesDetectados = [];
@@ -39,6 +39,37 @@ class ArquitecturaSoftwareValidatorService {
     }
 
     const lowerCode = trimmed.toLowerCase();
+    const businessRf = requisitos.some(r => r.tipo === 'RF' && r.aprobado !== false &&
+      !/autentic|iniciar sesi|cerrar sesi|control de acceso|copias de seguridad/i.test(r.nombre || ''));
+    for (const match of trimmed.matchAll(/\bContainer(?:Db|Queue)?\s*\(\s*([^,]+),\s*"([^"]*)"\s*,\s*"([^"]*)"\s*,\s*"([^"]*)"/gim)) {
+      const description = match[4];
+      const alias = match[1].trim();
+      if (/\bContainerDb\s*\(/i.test(match[0]) && /\b(?:prisma|typeorm|sequelize|hibernate|entity framework)\b/i.test(match[3])) {
+        advertencias.push(`Claridad de arquitectura por verificar: "${match[2]}" sitúa un ORM en la tecnología del almacén. Identifica el motor de datos aquí y el ORM en la aplicación que lo ejecuta, conservando ambos si están aprobados.`);
+      }
+      if (businessRf && /api|backend|servicio.*aplicaci/i.test(`${alias} ${match[2]}`)) {
+        const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const notes = [...trimmed.matchAll(new RegExp(`^\\s*note\\s+(?:right|left|top|bottom)\\s+of\\s+${escaped}\\s*(?:as\\s+\\w+\\s*)?\\n([\\s\\S]*?)^\\s*end\\s*note\\b|^\\s*note\\s+(?:right|left|top|bottom)\\s+of\\s+${escaped}\\s*:\\s*(.+)$`, 'gim'))].map(m => m[1] || m[2]).join(' ');
+        const concrete = `${description} ${notes}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+          .replace(/\b(?:rnf|rf)-\d+\b/g, '').replace(/\\[nr]/g, ' ')
+          .replace(/\b(?:logica|negocio|negocios|de|del|la|el|los|las|y|en|para|con|servicios?|aplicacion|backend|api|responsabilidades|modulos|autenticacion|autorizacion|jwt|seguridad|tiempo|real|socket|io|gestion|eventos|procesa|procesamiento|operaciones|datos)\b/g, '').replace(/[^a-z]/g, '');
+        if (!concrete) advertencias.push(`Claridad de arquitectura por verificar: "${match[2]}" solo describe responsabilidades genéricas o transversales. Identifica capacidades de los RF aprobados en su descripción o notas vinculadas, sin crear un contenedor por RF.`);
+      }
+      if (!/\bRF[- ]?\d+/i.test(description)) continue;
+      const meaning = description.replace(/\\[nr]/g, ' ').replace(/\bRF[- ]?\d+\b/gi, '')
+        .replace(/\b(?:a|al|y|de|del|los|realiza|realizar|procesa|procesar|incluye|implementa|cubre|soporta|rf|requisitos?|funcionales?)\b/gi, '')
+        .replace(/[^\p{L}]/gu, '').trim();
+      if (!meaning) errores.push(`Claridad funcional: el contenedor "${match[2]}" (${match[1].trim()}) solo enumera RF. Describe responsabilidades de negocio concretas y conserva los IDs como trazabilidad adicional, sin crear un contenedor por RF.`);
+    }
+    const approvedText = [
+      ...(Array.isArray(requisitos) ? requisitos : []).filter(r => r.aprobado !== false).map(r => `${r.nombre || ''} ${r.descripcion || ''}`),
+      ...['restricciones_tecnicas', 'decisiones'].flatMap(section => (analisisRequisitos[section] || [])
+        .filter(item => item.estado === 'confirmado').map(item => item.necesidad || ''))
+    ].join('\n');
+    const visible = trimmed.split(/\r?\n/).filter(line => !/^\s*(?:'|!|title\b)/i.test(line)).join('\n');
+    if (/socket[.]io/i.test(approvedText) && !/socket[.]io/i.test(visible)) {
+      advertencias.push('Tecnología aprobada por verificar: Socket.IO no está identificado en los elementos o relaciones. Puede estar integrado en el backend; no exige un servidor independiente.');
+    }
 
     // 2. Componentes de Software requeridos (aplicaciones, capas, servicios, base de datos, mensajería)
     const tieneContenedores = /container(?:db)?\s*\(|component\s+|rectangle\s+/i.test(trimmed);

@@ -29,11 +29,16 @@ class CodificacionController {
     }
   }
 
+  async vistaPrevia(req, res) {
+    try { res.json(await this.gestionarPlanCodificacion.vistaPrevia(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
   async sugerirEtapa(req, res) {
     try {
       res.json(await this.gestionarPlanCodificacion.sugerir({
         proyectoId: req.params.id,
-        etapa: req.params.etapa
+        etapa: req.params.etapa, inicial: req.query.inicial === '1'
       }));
     } catch (error) {
       res.status(this._status(error)).json({ error: error.message });
@@ -137,6 +142,14 @@ class CodificacionController {
   }
 
   async _ejecutarVerificacion(trabajoId, proyectoId, artefactoId) {
+    let leaseLost = false;
+    const heartbeat = typeof this.trabajoGeneracionRepository.renovarLeaseVerificacion === 'function'
+      ? setInterval(() => {
+          this.trabajoGeneracionRepository.renovarLeaseVerificacion(trabajoId)
+            .then(renewed => { if (!renewed) leaseLost = true; }).catch(() => { leaseLost = true; });
+        }, Math.max(250, Number(this.trabajoGeneracionRepository.leaseMs || 120000) / 3))
+      : null;
+    heartbeat?.unref?.();
     try {
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'procesando',
@@ -144,6 +157,7 @@ class CodificacionController {
         mensaje: 'Iniciando verificación en contenedor Docker aislado'
       });
       const verificacion = await this.gestionarArtefactosCodigo.verificarArtefacto(proyectoId, artefactoId);
+      if (leaseLost) return;
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'completado',
         progreso: 100,
@@ -152,12 +166,15 @@ class CodificacionController {
         error: null
       }, true);
     } catch (err) {
+      if (leaseLost) return;
       await this.trabajoGeneracionRepository.actualizar(trabajoId, {
         estado: 'fallido',
         progreso: 100,
         mensaje: 'La verificación falló',
         error: err.message
       }, true);
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
     }
   }
 
@@ -203,7 +220,7 @@ class CodificacionController {
 
   async generarFrontend(req, res) {
     try {
-      res.status(201).json(await this.gestionarArtefactosCodigo.generarFrontend(req.params.id));
+      res.status(201).json(await this.gestionarArtefactosCodigo.generarFrontend(req.params.id, req.body?.plataforma));
     } catch (error) {
       res.status(this._status(error)).json({ error: error.message });
     }
@@ -229,7 +246,8 @@ class CodificacionController {
     try {
       res.json(await this.gestionarArtefactosCodigo.revisarPruebas({
         proyectoId: req.params.id, artefactoId: req.params.artefactoId,
-        decision: req.body.decision, observaciones: req.body.observaciones
+        decision: req.body.decision, observaciones: req.body.observaciones,
+        modo_permisivo: req.body.modo_permisivo === true
       }));
     } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
@@ -262,6 +280,31 @@ class CodificacionController {
     } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
 
+  async puertaFuncional(req, res) {
+    try { res.json(await this.gestionarArtefactosCodigo.evaluarPuertaFuncional(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async aceptarPuertaFuncional(req, res) {
+    try { res.json(await this.gestionarArtefactosCodigo.aceptarPuertaFuncional({ proyectoId: req.params.id, excepciones: req.body?.excepciones, aceptadoPor: req.usuario?.id || null })); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async estadoEjecucion(req, res) {
+    try { res.json(await this.gestionarArtefactosCodigo.estadoEjecucion(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async iniciarEjecucion(req, res) {
+    try { res.status(202).json(await this.gestionarArtefactosCodigo.iniciarEjecucion(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async detenerEjecucion(req, res) {
+    try { res.status(202).json(await this.gestionarArtefactosCodigo.detenerEjecucion(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
   async generarPaquete(req, res) {
     try { res.status(201).json(await this.gestionarArtefactosCodigo.generarPaquete(req.params.id)); }
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }
@@ -271,8 +314,25 @@ class CodificacionController {
     try {
       res.json(await this.gestionarArtefactosCodigo.revisarPaquete({
         proyectoId: req.params.id, artefactoId: req.params.artefactoId,
-        decision: req.body.decision, observaciones: req.body.observaciones
+        decision: req.body.decision, observaciones: req.body.observaciones,
+        modo_permisivo: req.body.modo_permisivo === true
       }));
+    } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async descargarArtefacto(req, res) {
+    try {
+      const item = await this.artefactoRepository.obtenerPorId(req.params.artefactoId);
+      if (!item || String(item.proyecto_id) !== req.params.id || item.tipo === 'paquete_entrega') {
+        throw new Error('Artefacto no encontrado para este proyecto.');
+      }
+      const parte = req.query.plataforma;
+      if (parte && (item.tipo !== 'codigo_frontend' || !['web', 'móvil'].includes(parte))) throw new Error('Plataforma no válida.');
+      const carpeta = parte === 'web' ? 'frontend/' : 'mobile/';
+      const archivos = parte ? item.archivos.filter(file => file.ruta.startsWith(carpeta)) : item.archivos;
+      if (!archivos?.length) throw new Error('Todavía no hay archivos para esta descarga.');
+      res.attachment(item.tipo + '-' + (parte === 'móvil' ? 'mobile-' : parte ? 'web-' : '') + 'v' + item.version + '.zip');
+      res.send(this.zipArchiveService.crear(archivos));
     } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
 

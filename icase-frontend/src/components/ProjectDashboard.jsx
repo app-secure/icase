@@ -1,8 +1,14 @@
  import React, { useState, useRef, useEffect } from "react";
+import ProjectTransferDialog from './ProjectTransferDialog';
+import CopyProjectDialog from './CopyProjectDialog';
+import AnalysisModal from './AnalysisModal';
+import { updateProjectApi } from '../services/api';
 import {
   Plus,
   CheckCircle2,
   Trash2,
+  Copy,
+  Pencil,
   Search,
   ChevronDown,
   LayoutGrid,
@@ -15,9 +21,30 @@ export default function ProjectDashboard({
   projects,
   onSelectProject,
   onCreateProject,
-  onDeleteProject
+  onDeleteProject,
+  onImported
 }) {
   const [projectToDelete, setProjectToDelete] = useState(null);
+  const [projectToCopy, setProjectToCopy] = useState(null);
+  const [rename, setRename] = useState(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState('');
+  const renameLock = useRef(false);
+  const openRename = project => { setRename({ project, name: project.name }); setRenameError(''); setActiveMenuProjectId(null); };
+  const saveRename = async e => {
+    e.preventDefault();
+    if (renameLock.current || !rename.name.trim()) return;
+    renameLock.current = true; setRenaming(true); setRenameError('');
+    try {
+      const result = await updateProjectApi(rename.project.backendId || rename.project.id, { nombre: rename.name.trim() });
+      if (!result) throw new Error('No se pudo guardar el nombre. Reintenta.');
+      await onImported?.();
+      setRename(null);
+    } catch (error) { setRenameError(error.message); }
+    finally { renameLock.current = false; setRenaming(false); }
+  };
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [activeMenuProjectId, setActiveMenuProjectId] = useState(null);
   const [viewMode, setViewMode] = useState(() => {
     return localStorage.getItem("icase_dashboard_view_mode") || "grid";
@@ -59,6 +86,7 @@ export default function ProjectDashboard({
 
   const handleQuickCreate = () => {
     const newProject = {
+      analysisFlowVersion: 2,
       id: "draft-" + Date.now(),
       name: "Proyecto sin nombre",
       description: "",
@@ -158,6 +186,7 @@ export default function ProjectDashboard({
 
           {/* Barra de Filtros estilo NotebookLM (Buscador circular, Toggle Cuadrícula/Tabla y Dropdown Ordenar) */}
           <div className="flex items-center gap-2.5 self-start sm:self-auto">
+            <button type="button" onClick={() => setTransferOpen(true)} className="cursor-pointer rounded-full border border-violet-200 bg-white px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-50">Importar / exportar</button>
             {/* Buscador expandible circular */}
             <div className="relative flex items-center">
               {isSearchOpen || searchQuery ? (
@@ -334,6 +363,12 @@ export default function ProjectDashboard({
                   )}
 
                   {/* Botón de eliminar en esquina superior derecha */}
+                  <button type="button" onClick={e => { e.stopPropagation(); openRename(proj); }}
+                    className="absolute top-3.5 right-20 p-1.5 text-violet-600 hover:bg-violet-50 rounded-lg cursor-pointer z-10"
+                    title="Renombrar proyecto" aria-label={`Renombrar proyecto ${proj.name}`}><Pencil size={14} /></button>
+                  <button type="button" onClick={e => { e.stopPropagation(); setProjectToCopy(proj); }}
+                    className="absolute top-3.5 right-12 p-1.5 text-violet-600 hover:bg-violet-50 rounded-lg cursor-pointer z-10"
+                    title="Copiar proyecto" aria-label={`Copiar proyecto ${proj.name}`}><Copy size={14} /></button>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -446,6 +481,12 @@ export default function ProjectDashboard({
                         </button>
                         <button
                           type="button"
+                          onClick={() => { setActiveMenuProjectId(null); setProjectToCopy(proj); }}
+                          className="w-full text-left px-4 py-2 text-xs md:text-sm text-violet-700 hover:bg-violet-50 cursor-pointer"
+                        >Copiar proyecto</button>
+                        <button type="button" onClick={() => openRename(proj)} className="w-full text-left px-4 py-2 text-xs md:text-sm text-violet-700 hover:bg-violet-50 cursor-pointer">Renombrar</button>
+                        <button
+                          type="button"
                           onClick={() => {
                             setActiveMenuProjectId(null);
                             setProjectToDelete(proj);
@@ -467,6 +508,18 @@ export default function ProjectDashboard({
       </div>
 
       {/* Modal de confirmación con diseño inspirado en Google Gemini */}
+      {transferOpen && <ProjectTransferDialog open onClose={() => setTransferOpen(false)} projects={projects} onImported={onImported} />}
+      {projectToCopy && <CopyProjectDialog project={projectToCopy} onClose={() => setProjectToCopy(null)} onCopied={onImported} />}
+      {rename && <AnalysisModal open title="Renombrar proyecto" busy={renaming} onClose={() => setRename(null)} footer={
+        <div className="flex justify-end gap-2">
+          <button type="button" disabled={renaming} onClick={() => setRename(null)} className="cursor-pointer rounded-xl border border-violet-200 px-4 py-2 text-violet-700">Cancelar</button>
+          <button type="submit" form="rename-project" disabled={renaming || !rename.name.trim()} className="cursor-pointer rounded-xl bg-violet-600 px-4 py-2 text-white disabled:opacity-50">{renaming ? 'Guardando…' : 'Guardar cambios'}</button>
+        </div>}>
+        <form id="rename-project" onSubmit={saveRename} className="space-y-3">
+          <label className="block text-sm font-semibold text-slate-700">Nombre del proyecto<input autoFocus required maxLength={200} disabled={renaming} value={rename.name} onChange={e => setRename({ ...rename, name: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-200 p-3 outline-none focus:border-violet-500" /></label>
+          {renameError && <p role="alert" className="text-sm text-red-700">{renameError}</p>}
+        </form>
+      </AnalysisModal>}
       {projectToDelete && (
         <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-4 animate-in fade-in duration-150 font-inter"
@@ -487,7 +540,7 @@ export default function ProjectDashboard({
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
-                onClick={() => setProjectToDelete(null)}
+                onClick={() => !isDeletingProject && setProjectToDelete(null)}
                 className="px-5 py-2 rounded-full text-sm font-normal bg-[#f1f3f4] hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer font-inter"
               >
                 Cancelar
@@ -495,13 +548,22 @@ export default function ProjectDashboard({
 
               <button
                 type="button"
-                onClick={() => {
-                  onDeleteProject(projectToDelete.id);
-                  setProjectToDelete(null);
+                disabled={isDeletingProject}
+                onClick={async () => {
+                  if (isDeletingProject) return;
+                  setIsDeletingProject(true);
+                  try {
+                    await onDeleteProject(projectToDelete.id);
+                    setProjectToDelete(null);
+                  } catch {
+                    // Mantener el modal abierto para que el usuario pueda reintentar.
+                  } finally {
+                    setIsDeletingProject(false);
+                  }
                 }}
-                className="px-5 py-2 rounded-full text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer font-inter shadow-xs"
+                className="px-5 py-2 rounded-full text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer font-inter shadow-xs disabled:opacity-60 disabled:cursor-wait"
               >
-                Eliminar
+                {isDeletingProject ? "Eliminando…" : "Eliminar"}
               </button>
             </div>
           </div>

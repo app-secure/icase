@@ -23,7 +23,7 @@ Eres el Auditor de Calidad del software. Tu función es verificar y asegurar que
    - El árbol debe iniciar con el producto y contener solo rutas derivadas de RF/casos de uso. Acceso, recuperación, registro y panel principal no son obligatorios si los artefactos aprobados no los solicitan.
    - PROHIBIDA la palabra "WBS" en `titulo`, `descripcion`, `descripcion_jerarquica` y en los nombres de nodo de `codigo_plantuml`. Las directivas dePlantUML `@startwbs` y `@endwbs` son obligatorias y NO deben eliminarse.
    - Verificar que la jerarquía no exceda 4 niveles (`*`, `**`, `***`, `****`) y que el total de nodos se ajuste al alcance real del proyecto, sin pantallas genéricas vacías.
-   - Contrastar actores y canales de los RF contra el árbol: cada actor con interfaz debe conservar un flujo explícito en la plataforma indicada por los insumos. No mezcles recorridos de roles o plataformas distintas ni inventes un canal ausente.
+   - Contrastar actores y canales de los RF contra el árbol: el nivel 2 son las aplicaciones (una por plataforma, con la plataforma en su nombre) y cada actor con interfaz debe tener su módulo dentro de la aplicación que le corresponde. Ningún nodo nombra dos plataformas, cada aplicación tiene su propio inicio de sesión y no se inventa un canal ausente.
 4. Cero Mención de Herramientas CASE:
    - Garantizar que ni en el título, ni en los requerimientos, ni en los diagramas aparezca la palabra "I-CASE" o "ICase".
 5. Formato de Salida:

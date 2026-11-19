@@ -1,3 +1,4 @@
+const HtmlToJsxTransformer = require('./HtmlToJsxTransformer');
 class MockupValidatorService {
   constructor() {
     this.cdnPermitido = 'https://cdn.tailwindcss.com';
@@ -37,8 +38,22 @@ class MockupValidatorService {
       return { html: '', advertencias: ['HTML vacío o inválido'] };
     }
 
-    let sanitizado = html;
+    // Reparaciones léxicas de contorno, nunca completar contenido perdido.
+    let sanitizado = html.replace(/^\uFEFF/, '').trim();
     const advertencias = [];
+    const original = sanitizado;
+    sanitizado = sanitizado.replace(/^```(?:html)?\s*([\s\S]*?)\s*```$/i, '$1').trim()
+      .replace(/^<+(?=<!doctype\s+html\b|<html\b)/i, '')
+      .replace(/(<\/html\s*>)>+\s*$/i, '$1');
+    if (sanitizado !== original) advertencias.push('Delimitadores externos de HTML normalizados sin modificar el contenido');
+
+    // Comillas escapadas (class=\"a\"): la IA a veces entrega el HTML como si aún fuera una cadena JSON. Sin repararlo,
+    // los atributos quedan rotos y la pantalla no compila.
+    const sinEscapes = HtmlToJsxTransformer.unescapeQuotes(sanitizado);
+    if (sinEscapes !== sanitizado) {
+      sanitizado = sinEscapes;
+      advertencias.push('Comillas escapadas en los atributos corregidas');
+    }
 
     // Preservar tailwind cdn y tailwind.config, remover cualquier otro script
     sanitizado = sanitizado.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (match, attrs, content) => {
@@ -46,7 +61,11 @@ class MockupValidatorService {
         return '<script src="https://cdn.tailwindcss.com"></script>';
       }
       if (content.includes('tailwind.config')) {
-        return `<script>${content}</script>`;
+        // Solo se conserva la configuración como datos, normalizada: cualquier otro código del script se descarta.
+        const config = HtmlToJsxTransformer.parseTailwindConfig(content);
+        if (config) return `<script>tailwind.config = ${JSON.stringify(config).replace(/</g, '\\u003c')}</script>`;
+        advertencias.push('Script de configuración de Tailwind no admitido eliminado');
+        return '';
       }
       advertencias.push('Script peligroso o no autorizado eliminado');
       return '';
@@ -99,6 +118,8 @@ class MockupValidatorService {
 
     if (!this.listo(codigo)) errores.push('El documento HTML está incompleto o truncado');
     if (!/<body\b/i.test(codigo)) errores.push('Falta la etiqueta body');
+    // Atributos corruptos (restos de comillas escapadas): la pantalla no compilaría y el error aparece recién en la verificación.
+    if (/\\&quot;|<[^>]*\s[^\s=>"']*\\"=/.test(codigo)) errores.push('Los atributos HTML están corruptos por comillas escapadas; regenera la pantalla');
     if (!/(?:<style\b|cdn\.tailwindcss\.com|class=["'][^"']*(?:flex|grid|bg-|p-|m-|text-))/i.test(codigo)) {
       errores.push('La pantalla no contiene estilos verificables');
     }
@@ -150,8 +171,8 @@ html,body{background-color:var(--icase-bg)!important;color:var(--icase-text)!imp
       return false;
     }
     const trimmed = html.trim().toLowerCase();
-    return (trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html')) &&
-           trimmed.includes('</html>');
+    return /^(?:<!doctype\s+html[^>]*>\s*)?<html\b[^>]*>/i.test(trimmed) &&
+           /<head\b[^>]*>[\s\S]*<\/head\s*>\s*<body\b[^>]*>[\s\S]*<\/body\s*>\s*<\/html\s*>\s*$/i.test(trimmed);
   }
 }
 

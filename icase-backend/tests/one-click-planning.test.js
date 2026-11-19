@@ -95,7 +95,7 @@ class Libro {
     );
   });
 
-  test('ejecuta las 7 etapas con valores seguros y produce informe con dudas', async () => {
+  test('ejecuta las 6 etapas con valores seguros y produce informe con dudas', async () => {
     const fakeRuleInference = {
       inferir: jest.fn(async () => ({
         reglas: [
@@ -145,11 +145,11 @@ class Libro {
 
     expect(resultado.proyecto.id).toBe('p1');
     expect(resultado.informe).toBeDefined();
-    expect(resultado.informe.etapas_aprobadas).toHaveLength(7);
+    expect(resultado.informe.etapas_aprobadas).toHaveLength(6);
     expect(resultado.informe.valores_seguros.autenticacion).toBe('jwt');
     expect(resultado.informe.valores_seguros.autoregistro).toBe('desactivado');
     expect(resultado.informe.valores_seguros.reglas_confirmadas).toBe(1);
-    expect(resultado.informe.valores_seguros.reglas_descartadas).toBe(1);
+    expect(resultado.informe.valores_seguros.reglas_descartadas).toBe(3);
 
     // Debe existir duda sobre la regla descartada por falta de evidencia literal
     const dudaRegla = resultado.informe.dudas.find(
@@ -162,7 +162,6 @@ class Libro {
     for (const etapaId of [
       'alcance_plataforma',
       'stack_tecnologico',
-      'arquitectura_codigo',
       'estructura_carpetas',
       'reglas_negocio',
       'control_acceso',

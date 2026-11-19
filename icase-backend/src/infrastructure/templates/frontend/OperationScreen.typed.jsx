@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from './session';
+import AssociationsPanel from './AssociationsPanel';
 import { JsonRecords } from './JsonOperationScreen';
 
 // Formulario y tabla por campo, derivados del esquema de la entidad y de sus reglas (GET /api/contract).
@@ -36,6 +37,7 @@ const INPUT_TYPE = { number: 'number', date: 'date', datetime: 'datetime-local',
 function TypedRecords({ capability, contract }) {
   const { api, can } = useSession();
   const operation = contract.operations.find((item) => item.key === capability);
+  const calculated=Object.entries(operation.schema?.properties||{}).filter(([name,property])=>name!=='id'&&property.readOnly);
   const rules = operation.rules || [];
   const fields = useMemo(() => Object.entries(operation.schema.properties || {})
     .filter(([name, property]) => name !== 'id' && !property.readOnly)
@@ -202,7 +204,7 @@ function TypedRecords({ capability, contract }) {
           aria-label="Buscar en registros"
           placeholder="Buscar..."
           className="field"
-          style={{ maxWidth: '250px' }}
+          style={{ maxWidth: '250px', minHeight: 'auto', padding: '0.45rem 0.75rem', background: 'white' }}
           value={search}
           onChange={(event) => { setSearch(event.target.value); setPage(1); }}
         />
@@ -210,9 +212,10 @@ function TypedRecords({ capability, contract }) {
       <button type="button" className="button" onClick={refresh}>Actualizar lista</button>
       {records.length === 0 ? <p>No hay registros todavía.</p> : <div className="table-wrap"><table className="records">
         <caption className="sr-only">Registros de {humanize(capability)}</caption>
-        <thead><tr>{fields.map((field) => <th scope="col" key={field.name}>{humanize(field.name)}</th>)}<th scope="col">Acciones</th></tr></thead>
+        <thead><tr>{fields.map((field) => <th scope="col" key={field.name}>{humanize(field.name)}</th>)}{calculated.map(([name])=><th scope="col" key={name}>{humanize(name)} (calculado)</th>)}<th scope="col">Acciones</th></tr></thead>
         <tbody>{records.map((record) => <tr key={record.id || record._id}>
           {fields.map((field) => <td key={field.name}>{show(field, record)}</td>)}
+          {calculated.map(([name])=><td key={name}>{String(dataOf(record)[name]??'')}</td>)}
           <td>
             {can(capability, 'PATCH') && <button type="button" className="button" onClick={() => edit(record)}>Editar</button>}
             {can(capability, 'DELETE') && <button type="button" className="button danger" onClick={() => remove(record.id || record._id)}>Eliminar</button>}
@@ -230,7 +233,7 @@ function TypedRecords({ capability, contract }) {
   </>;
 }
 
-export default function OperationScreen({ title, capabilities, referenceText }) {
+export default function OperationScreen({ title, capabilities, referenceText, asChild }) {
   const { api, can } = useSession();
   const readable = capabilities.filter((key) => can(key, 'GET'));
   const [capability, setCapability] = useState(readable[0] || '');
@@ -247,18 +250,28 @@ export default function OperationScreen({ title, capabilities, referenceText }) 
   const operation = contract && contract.operations.find((item) => item.key === capability);
   const typed = operation && operation.schema && Object.keys(operation.schema.properties || {}).some((name) => name !== 'id');
   const denied = capabilities.length > 0 && readable.length === 0;
-  return <main className="screen" data-screen={capability || 'sin-operacion'}>
-    <h1>{title}</h1>
-    {referenceText && <p>{referenceText}</p>}
-    {readable.length > 1 && <div className="tabs">{readable.map((value) => <button className="button" key={value} onClick={() => setCapability(value)}>{value}</button>)}</div>}
-    {!capabilities.length && <p className="error">Esta pantalla no tiene RF asociado; corrige la trazabilidad antes de aprobarla.</p>}
-    {denied && <p role="alert" className="error">Tu rol no tiene permiso para ver esta pantalla.</p>}
-    {capability && !contract && <p aria-busy="true">Cargando formulario…</p>}
-    {capability && contract && (typed
-      ? <TypedRecords key={capability} capability={capability} contract={contract} />
-      : <>
-        <p>Esta operación no tiene campos declarados en el modelo de dominio: se editan como JSON.</p>
-        <JsonRecords key={capability} capability={capability} />
-      </>)}
-  </main>;
+
+  const content = (
+    <>
+      <h1>{title}</h1>
+      {referenceText && <p style={{ display: 'none' }}>{referenceText}</p>}
+      {readable.length > 1 && <div className="tabs">{readable.map((value) => <button className="button" key={value} onClick={() => setCapability(value)}>{value}</button>)}</div>}
+      {!capabilities.length && <p className="error">Esta pantalla no tiene RF asociado; corrige la trazabilidad antes de aprobarla.</p>}
+      {denied && <p role="alert" className="error">Tu rol no tiene permiso para ver esta pantalla.</p>}
+      {capability && !contract && <p aria-busy="true">Cargando formulario…</p>}
+      {capability && contract && (typed
+        ? <TypedRecords key={capability} capability={capability} contract={contract} />
+        : <>
+          <p>Esta operación no tiene campos declarados en el modelo de dominio: se editan como JSON.</p>
+          <JsonRecords key={capability} capability={capability} />
+        </>)}
+      <AssociationsPanel key={capability} capability={capability} />
+    </>
+  );
+
+  if (asChild) {
+    return <div className="screen" data-screen-op={capability || 'sin-operacion'}>{content}</div>;
+  }
+
+  return <main className="screen" data-screen={capability || 'sin-operacion'}>{content}</main>;
 }

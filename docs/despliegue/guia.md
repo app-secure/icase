@@ -33,9 +33,19 @@ Errores habituales: motor detenido, permiso de conexión, descarga lenta, imagen
 
 El ZIP incluye `ops/`, ejemplos de entorno, manifiestos y documentación de entrega. Configura secretos nuevos y revisa los Dockerfiles antes de desplegar.
 
-La validación del paquete usa un entorno controlado y comprueba configuración Compose; no demuestra por sí sola HA, backups, TLS, todas las reglas de negocio o seguridad del despliegue final. Si el perfil HA presenta advertencias, resuélvelas antes de prometer disponibilidad.
+La validación del paquete también arranca sus propios Dockerfiles y Compose y ejerce CRUD, permisos, N:M y navegador. Solo se aíslan red/puertos y se configura el entorno con secretos temporales; no se prueba exposición pública. La evidencia `compose-exportado-v1` no demuestra por sí sola HA, backups, TLS, todas las reglas de negocio o seguridad del despliegue final. Si el perfil HA presenta advertencias, resuélvelas antes de prometer disponibilidad.
 
-## Publicar la documentación
+## Limpieza de archivos de fuentes
+
+La tarea de limpieza está desactivada por defecto. Configura `UPLOAD_CLEANUP_ENABLED=true` para ejecutarla al iniciar y cada hora. Mantén `UPLOAD_CLEANUP_DRY_RUN=true` inicialmente: solo registra conteos, sin modificar archivos. Cambia esta última variable a `false` para activar movimientos y purga. Reinicia el backend tras cambiar la configuración.
+
+Solo considera archivos con el nombre generado por la carga de I-CASE y más de siete días de antigüedad. Conserva cualquier archivo referenciado por una fuente en MongoDB y las subidas activas del proceso. Si falla la consulta a MongoDB, aborta sin limpiar. No recorre subcarpetas ni sigue enlaces simbólicos o junctions.
+
+Los huérfanos se trasladan a `icase-backend/uploads/.quarantine/<fecha>--<nombre-original>`. Durante siete días adicionales pueden recuperarse manualmente, con el backend detenido, devolviéndolos a `uploads/` con el nombre original. Después se eliminan de forma irreversible si siguen sin referencias. Mantén backups y ejecuta esta tarea en una sola instancia cuando compartas el directorio de uploads entre procesos; el registro de subidas activas no es distribuido.
+
+Esta política no caduca fuentes válidas ni elimina archivos originales asociados a proyectos por su antigüedad.
+
+## Publicar la documentación (GitHub Pages)
 
 Instala las dependencias documentales, ejecuta sincronización y validación, y construye con MkDocs en modo estricto. En GitHub habilita Settings → Pages → GitHub Actions.
 

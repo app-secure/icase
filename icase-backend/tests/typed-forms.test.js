@@ -96,6 +96,16 @@ describe('módulo de formularios tipados', () => {
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   });
 
+  test('la prueba de regla incumplida también cambia a la vista de datos antes de buscar el formulario', async () => {
+    const { tests } = await pipeline();
+    const spec = file(tests, 'tests/e2e/typed-forms.spec.js').contenido;
+    const rule = spec.slice(spec.indexOf('una regla incumplida'));
+    const toggle = rule.indexOf('Gestión de Datos');
+    expect(toggle).toBeGreaterThan(-1);
+    expect(toggle).toBeLessThan(rule.indexOf("getByRole('form'"));
+    expect(spec.indexOf('Gestión de Datos')).toBeLessThan(spec.indexOf('una regla incumplida'));
+  });
+
   test('el contrato que consume la pantalla trae esquema y reglas por operación', async () => {
     const { backend } = await pipeline();
     const contract = JSON.parse(file(backend, 'backend/icase.manifest.json').contenido);

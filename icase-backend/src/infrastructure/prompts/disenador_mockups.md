@@ -29,7 +29,16 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
    - Cada mockup debe incluir los enlaces de navegación hacia sus pantallas hermanas y su pantalla padre, respetando el árbol.
    - Si el listado marca "componentes que DEBEN aparecer dentro de esta misma pantalla", esos elementos (botones, campos, indicadores, teclados, displays, etc.) son PARTE de esa pantalla: dibújalos dentro de su propio mockup, nunca como pantallas independientes.
 
+2b. **ENLACES CON EL BACKEND (`data-accion`)**:
+   - Todo botón o formulario que ejecuta un RF lleva `data-accion="RF-xx.verbo"` con un RF del bloque OPERACIONES DISPONIBLES y un verbo `consultar`, `crear`, `editar` o `eliminar`.
+   - Los campos de ese formulario usan en `name` los nombres indicados en el bloque OPERACIONES DISPONIBLES para ese RF.
+   - Un formulario con `crear` incluye un control con `name` para CADA campo listado de ese RF (un campo como `estado` puede ir en un `select` o en un `<input type="hidden">` con un valor razonable): el backend rechaza el registro si falta un campo obligatorio. Los campos de referencia (terminan en `_id`) van en un `select`.
+   - Un control solo visual (cancelar, cerrar, abrir menú, cambiar pestaña) lleva `data-accion="ui"`.
+   - No inventes RF, verbos ni campos. No uses `onclick` ni scripts: el enlace es solo el atributo.
+
 3. **SISTEMA DE DISEÑO OBLIGATORIO (todas las pantallas del proyecto comparten el mismo lenguaje visual)**:
+
+   > **PREVALECE sobre 3.1 y el esqueleto de referencia:** la estructura común (cabecera, barra lateral o pestañas, topbar, breadcrumb, nombre de la aplicación) la agrega el sistema. NO la dibujes ni nombres el módulo o el flujo dentro de la pantalla: entrega solo el contenido de `<main>`, empezando por su título. Las pantallas de acceso llevan solo título corto, campos y botón. Cada pantalla contiene únicamente acciones de los RF asociados a ella.
 
    3.1 **Shell de la aplicación (idéntico en todas las pantallas, salvo Login y Recoverer Contraseña, que son centradas)**:
    - `<body class="min-h-screen bg-slate-50 font-sans antialiased text-slate-900">` y contenedor raíz `<div class="flex min-h-screen">`.
@@ -92,7 +101,10 @@ Recibes en `{{CONTEXTO_PROYECTO}}`:
 5. **HTML AUTOCONTENIDO Y LISTO PARA IFRAME**:
    - Código HTML5 completo (`<!DOCTYPE html><html>...</html>`) sin librerías externas pesadas más allá de Tailwind CDN.
    - Iconos como SVG inline estilizados (`w-4 h-4`, `stroke-current`).
-   - Cero JavaScript malicioso o bloqueante; permitir scripts básicos de maquetación (como abrir/cerrar modal o tabs sencillos si se requiere).
+   - Maqueta ESTÁTICA: sin `<script>` (salvo el de Tailwind CDN). Cualquier script se elimina al guardar y deja la pantalla vacía.
+   - Las tablas y listas llevan siempre 3 a 5 filas de ejemplo ESCRITAS en el HTML, con datos coherentes con el negocio (platos, mesas, clientes, importes). PROHIBIDO dejar filas «Cargando…», «Sin datos» o cuerpos de tabla vacíos para que un script los llene.
+   - Todo estilo se escribe con clases de Tailwind o con un `<style>` propio. No uses clases inventadas sin definirlas (`btn-primary`, `table-container`...).
+   - Los importes usan la moneda indicada en el contexto («MONEDA DEL PROYECTO»); si no se indica, escribe solo el número (45.50), sin símbolo.
 
 6. **ESTRUCTURA DE SALIDA (JSON ESTRICTO)**:
    Genera un mockup COMPLETO por cada pantalla del listado, respetando su orden y sin omitir ninguna. NUNCA trunques el JSON.
@@ -172,11 +184,11 @@ Este esqueleto define el shell y los tokens que TODAS las pantallas deben compar
             placeholder="[Placeholder real]" value="[Valor de ejemplo del dominio]">
         </div>
         <div class="flex gap-3 pt-2">
-          <button type="submit"
+          <button type="submit" data-accion="RF-xx.crear"
             class="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-xl transition-colors">
             [Acción principal del RF]
           </button>
-          <button type="button"
+          <button type="button" data-accion="ui"
             class="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
             Cancelar
           </button>
@@ -197,6 +209,7 @@ Este esqueleto define el shell y los tokens que TODAS las pantallas deben compar
 - [ ] Cero pantallas inventadas fuera del listado del Árbol de Navegación
 - [ ] Los "componentes que DEBEN aparecer" están dibujados dentro de su pantalla, no como pantallas aparte
 - [ ] Cada pantalla refleja los campos y validaciones de los RF y del Diagrama de Clases asociados a esa pantalla
+- [ ] Cada botón o formulario que ejecuta un RF lleva `data-accion="RF-xx.verbo"`, los solo visuales llevan `data-accion="ui"` y los `name` coinciden con OPERACIONES DISPONIBLES
 - [ ] El número de mockups generados coincide exactamente con el número de pantallas del listado, empezando por acceso y panel principal
 - [ ] Todas las pantallas comparten el mismo shell: barra lateral con la navegación del árbol, topbar con breadcrumb y encabezado con título, descripción y acciones
 - [ ] La pantalla actual aparece resaltada en la barra lateral

@@ -4,6 +4,7 @@ const BusinessRuleService = require('../services/BusinessRuleService');
 const AccessControlService = require('../services/AccessControlService');
 const ModuleService = require('../services/ModuleService');
 const StackCatalog = require('../services/StackCatalog');
+const GenerationCoverageService = require('../services/GenerationCoverageService');
 const DomainModelExtractor = require('../../infrastructure/services/DomainModelExtractor');
 
 const PROJECT_STATES_WITH_APPROVED_DESIGN = new Set([
@@ -16,13 +17,19 @@ class GestionarPlanCodificacion {
     planCodificacionRepository,
     requerimientoRepository = null,
     diagramaRepository = null,
-    proposalService = null
+    disenoRepository = null,
+    artefactoRepository = null,
+    proposalService = null,
+    specService = null
   }) {
     this.proyectoRepository = proyectoRepository;
     this.planCodificacionRepository = planCodificacionRepository;
     this.requerimientoRepository = requerimientoRepository;
     this.diagramaRepository = diagramaRepository;
+    this.disenoRepository = disenoRepository;
+    this.artefactoRepository = artefactoRepository;
     this.proposalService = proposalService;
+    this.specService = specService || proposalService?.specService || null;
     this.workflow = new CodeGenerationWorkflowService();
     this.ruleService = new BusinessRuleService();
     this.accessService = new AccessControlService();
@@ -30,7 +37,7 @@ class GestionarPlanCodificacion {
     this.domainExtractor = new DomainModelExtractor();
   }
 
-  async sugerir({ proyectoId, etapa }) {
+  async sugerir({ proyectoId, etapa, inicial = false }) {
     const proyecto = await this._obtenerProyectoListo(proyectoId);
     const definition = this.workflow.obtenerDefinicion(etapa);
     if (definition.tipo !== 'decision') {
@@ -41,12 +48,32 @@ class GestionarPlanCodificacion {
     }
 
     const plan = await this._obtenerOCrear(proyectoId);
-    this.workflow.validarDependencias(plan, etapa);
+
     const [requerimientos, diagramas] = await Promise.all([
       this.requerimientoRepository.listarPorProyecto(proyectoId),
       this.diagramaRepository.listarPorProyecto(proyectoId)
     ]);
-    return this.proposalService.generar({ etapa, proyecto, requerimientos, diagramas, plan });
+    const diseno = ['estructura_carpetas', 'especificacion_aplicacion', 'alcance_plataforma'].includes(etapa) ? await this.disenoRepository?.obtenerPorProyecto(proyectoId) : null;
+    return this.proposalService.generar({ etapa, proyecto, requerimientos, diagramas, diseno, plan, inicial });
+  }
+
+  /**
+   * Qué se va a generar, antes de generarlo: pantallas con sus componentes y botones, operaciones con su endpoint,
+   * requisitos sin cubrir y contenedores. Usa las decisiones vigentes aunque aún estén en revisión.
+   */
+  async vistaPrevia(proyectoId) {
+    const proyecto = await this._obtenerProyectoListo(proyectoId);
+    if (!this.requerimientoRepository || !this.diagramaRepository) throw new Error('La vista previa necesita requisitos y diagramas.');
+    const [plan, requerimientos, diagramas, diseno] = await Promise.all([
+      this._obtenerOCrear(proyectoId),
+      this.requerimientoRepository.listarPorProyecto(proyectoId),
+      this.diagramaRepository.listarPorProyecto(proyectoId),
+      this.disenoRepository?.obtenerPorProyecto(proyectoId)
+    ]);
+    const vigentes = (diagramas || []).filter((item) => item.aprobado === true && item.estado === 'aprobado' && !item.desactualizado);
+    const decisiones = Object.fromEntries((plan.etapas || []).filter((item) => item.propuesta && item.estado !== CODE_PHASE_STATES.REJECTED).map((item) => [item.etapa, item.propuesta]));
+    const GenerationPreviewService = require('../../infrastructure/services/GenerationPreviewService');
+    return new GenerationPreviewService().construir({ proyecto, requerimientos, diagramas: vigentes, diseno: diseno || {}, decisiones });
   }
 
   async obtener(proyectoId) {
@@ -58,7 +85,20 @@ class GestionarPlanCodificacion {
         etapas: this.workflow.crearEtapasIniciales()
       });
     }
-    return { proyecto: { id: proyecto.id, nombre: proyecto.nombre }, ...this._conModulos(this.workflow.enriquecer(plan)) };
+    plan = await this.workflow.reconciliarPlan({
+      plan,
+      proyectoId,
+      planRepository: this.planCodificacionRepository,
+      artefactoRepository: this.artefactoRepository
+    });
+    const result = { proyecto: { id: proyecto.id, nombre: proyecto.nombre }, ...this._conModulos(this.workflow.enriquecer(plan)) };
+    const requirements = this.requerimientoRepository ? await this.requerimientoRepository.listarPorProyecto(proyectoId) : [];
+    const coverage = new GenerationCoverageService();
+    result.modulos.requisitos = requirements.filter((item) => item.aprobado && item.tipo === 'RF').map((item) => ({
+      identificador: item.identificador, nombre: item.nombre, huella_requisito: coverage.huellaRequisito(item),
+      sugerencias: coverage.capabilities.sugerir(item)
+    }));
+    return result;
   }
 
   async proponer({ proyectoId, etapa, propuesta, observaciones = '' }) {
@@ -73,10 +113,25 @@ class GestionarPlanCodificacion {
 
     const plan = await this._obtenerOCrear(proyectoId);
     this.workflow.validarDependencias(plan, etapa);
-    if (etapa === 'stack_tecnologico') StackCatalog.resolve(propuesta); // lanza un error claro si algo no está soportado
+    if (etapa === 'alcance_plataforma') {
+      if (!Array.isArray(propuesta.plataformas) || !propuesta.plataformas.length || propuesta.plataformas.some(p => !['web', 'móvil'].includes(p))) throw new Error('Selecciona plataformas válidas.');
+      const detectadas = propuesta.detectadas?.filter?.(p => ['web', 'móvil'].includes(p));
+      // `moviles_en_web`: sin aplicación móvil, las pantallas pensadas para móvil se sirven también en la web (adaptadas), en lugar de perderse.
+      propuesta = { plataformas: [...new Set(propuesta.plataformas)], ...(detectadas?.length ? { detectadas: [...new Set(detectadas)] } : {}), ...(typeof propuesta.moviles_en_web === 'boolean' ? { moviles_en_web: propuesta.moviles_en_web } : {}) };
+    }
+    if (etapa === 'stack_tecnologico') {
+      const stack = StackCatalog.resolve(propuesta);
+      const gestor = stack.language === 'java' ? 'Maven' : 'npm';
+      if (propuesta.gestor_paquetes && propuesta.gestor_paquetes !== gestor) throw new Error('El gestor compatible es ' + gestor + '.');
+      if (propuesta.tiempo_real && propuesta.tiempo_real !== 'Socket.IO') throw new Error('Selecciona Socket.IO o ninguno.');
+      if (propuesta.estilos && !['Tailwind CSS', 'Estilos del mockup'].includes(propuesta.estilos)) throw new Error('Selecciona un sistema de estilos compatible.');
+      const seleccion = plan.etapas.find(item => item.etapa === 'alcance_plataforma')?.propuesta;
+      if (seleccion) propuesta = { ...propuesta, plataformas: seleccion.plataformas };
+    } // lanza un error claro si algo no está soportado
     if (etapa === 'reglas_negocio') propuesta = await this._normalizarReglas(proyectoId, propuesta);
     if (etapa === 'control_acceso') propuesta = await this._normalizarAcceso(proyectoId, propuesta);
-    if (etapa === 'modulos') propuesta = this._normalizarModulos(propuesta);
+    if (etapa === 'especificacion_aplicacion') propuesta = await this._normalizarEspecificacion(proyectoId, propuesta);
+    if (etapa === 'modulos') propuesta = await this._normalizarModulos(propuesta, proyectoId);
     const actual = plan.etapas.find((item) => item.etapa === etapa);
     const cambioReal = JSON.stringify(actual?.propuesta || null) !== JSON.stringify(propuesta);
     let etapas = plan.etapas.map((item) => item.etapa === etapa ? {
@@ -88,6 +143,7 @@ class GestionarPlanCodificacion {
       aprobada_por: null,
       aprobada_en: null
     } : item);
+    if (!cambioReal && actual.estado === CODE_PHASE_STATES.APPROVED) return this._conModulos(this.workflow.enriquecer(plan));
     if (cambioReal) etapas = this.workflow.invalidarDependientes(etapas, etapa);
     etapas = this.workflow.sincronizarBloqueos(etapas);
 
@@ -95,6 +151,13 @@ class GestionarPlanCodificacion {
       etapas,
       version: (plan.version || 0) + 1
     });
+    if (cambioReal && this.artefactoRepository) {
+      const tipos = new Set(etapas.filter(item => item.estado === CODE_PHASE_STATES.STALE)
+        .map(item => this.workflow.obtenerDefinicion(item.etapa).artefacto).filter(Boolean));
+      const artefactos = await this.artefactoRepository.listarPorProyecto(proyectoId);
+      await Promise.all(artefactos.filter(item => tipos.has(item.tipo) && ['en_revision', 'aprobado'].includes(item.estado))
+        .map(item => this.artefactoRepository.actualizar(item.id, { estado: 'desactualizado', aprobado: false })));
+    }
     return this._conModulos(this.workflow.enriquecer(guardado));
   }
 
@@ -123,6 +186,13 @@ class GestionarPlanCodificacion {
       // Los RF pudieron cambiar desde que se guardó la propuesta.
       await this._normalizarAcceso(proyectoId, actual.propuesta);
     }
+    if (etapa === 'especificacion_aplicacion' && decision === 'aprobar') {
+      // El dominio o los RF pudieron cambiar desde que se guardó la propuesta.
+      const { operaciones } = await this._normalizarEspecificacion(proyectoId, actual.propuesta);
+      const pendientes = operaciones.filter((op) => op.estado_decision === 'pendiente').map((op) => op.nombre);
+      if (pendientes.length) throw new Error(`Confirma o rechaza las operaciones pendientes antes de aprobar la etapa: ${pendientes.join(', ')}.`);
+    }
+    if (etapa === 'modulos' && decision === 'aprobar') await this._normalizarModulos(actual.propuesta, proyectoId);
 
     let etapas = plan.etapas.map((item) => item.etapa === etapa ? {
       ...item,
@@ -179,15 +249,6 @@ class GestionarPlanCodificacion {
     await this.proponer({ proyectoId, etapa: 'stack_tecnologico', propuesta: sugStack.propuesta, observaciones: 'Stack seguro derivado de los requisitos.' });
     await this.revisar({ proyectoId, etapa: 'stack_tecnologico', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
     etapasAprobadas.push('stack_tecnologico');
-
-    // 3. Arquitectura de código
-    const sugArqui = await this.sugerir({ proyectoId, etapa: 'arquitectura_codigo' });
-    if (sugArqui.advertencias?.length) {
-      dudas.push(...sugArqui.advertencias.map((adv) => ({ etapa: 'arquitectura_codigo', tipo: 'advertencia', detalle: adv })));
-    }
-    await this.proponer({ proyectoId, etapa: 'arquitectura_codigo', propuesta: sugArqui.propuesta, observaciones: 'Arquitectura modular por capas.' });
-    await this.revisar({ proyectoId, etapa: 'arquitectura_codigo', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
-    etapasAprobadas.push('arquitectura_codigo');
 
     // 4. Estructura de carpetas
     const sugCarpetas = await this.sugerir({ proyectoId, etapa: 'estructura_carpetas' });
@@ -298,13 +359,20 @@ class GestionarPlanCodificacion {
     await this.revisar({ proyectoId, etapa: 'control_acceso', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
     etapasAprobadas.push('control_acceso');
 
+    // 6b. Comportamiento: se confirman las operaciones propuestas con IA; las derivadas sin IA quedan fuera y se reportan.
+    const sugEspec = await this.sugerir({ proyectoId, etapa: 'especificacion_aplicacion' });
+    const operacionesEspec = sugEspec.propuesta?.operaciones || [];
+    if (operacionesEspec.length) {
+      dudas.push(...(sugEspec.advertencias || []).map((adv) => ({ etapa: 'especificacion_aplicacion', tipo: 'advertencia', detalle: adv })));
+      const decididas = operacionesEspec.map((op) => ({ ...op, estado_decision: op.origen === 'ia' ? 'confirmado' : 'rechazado' }));
+      await this.proponer({ proyectoId, etapa: 'especificacion_aplicacion', propuesta: { ...sugEspec.propuesta, operaciones: decididas }, observaciones: 'Operaciones con IA confirmadas en modo un clic; las derivadas quedaron fuera.' });
+      await this.revisar({ proyectoId, etapa: 'especificacion_aplicacion', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+      etapasAprobadas.push('especificacion_aplicacion');
+    }
+
     // 7. Módulos: modo automático con valores recomendados por defecto
-    const propModulos = {
-      modo: 'automatico',
-      modulos: this.moduleService.automatico(),
-      notas: 'Modo un clic: valores automáticos recomendados.'
-    };
-    await this.proponer({ proyectoId, etapa: 'modulos', propuesta: propModulos, observaciones: 'Módulos en modo automático.' });
+    const { propuesta: propModulos } = await this.sugerir({ proyectoId, etapa: 'modulos' });
+    await this.proponer({ proyectoId, etapa: 'modulos', propuesta: propModulos, observaciones: 'Módulos sugeridos por los requisitos y las decisiones aprobadas.' });
     await this.revisar({ proyectoId, etapa: 'modulos', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
     etapasAprobadas.push('modulos');
 
@@ -327,7 +395,7 @@ class GestionarPlanCodificacion {
         autoregistro: 'desactivado',
         reglas_confirmadas: reglasConfirmadas,
         reglas_descartadas: reglasDescartadas,
-        modulos: 'automatico'
+        modulos: propModulos.modo
       },
       dudas,
       total_dudas: dudas.length
@@ -343,6 +411,30 @@ class GestionarPlanCodificacion {
       plan: resultadoEnriquecido,
       informe
     };
+  }
+
+  /**
+   * Revalida la especificación contra el dominio y los RF aprobados vigentes. Conserva la decisión de cada operación
+   * (confirmada, rechazada o pendiente) y falla si alguna ya no es válida.
+   */
+  async _normalizarEspecificacion(proyectoId, propuesta) {
+    const operaciones = propuesta?.operaciones === undefined ? [] : propuesta.operaciones;
+    if (!Array.isArray(operaciones)) throw new Error('Las operaciones deben enviarse como una lista en "operaciones".');
+    if (!operaciones.length) return { ...propuesta, operaciones: [], pantallas: [] };
+    if (!this.specService) throw new Error('El servicio de especificación no está configurado.');
+    const [requerimientos, diagramas] = await Promise.all([
+      this.requerimientoRepository.listarPorProyecto(proyectoId),
+      this.diagramaRepository.listarPorProyecto(proyectoId)
+    ]);
+    const modelo = this.domainExtractor.fromDiagrams(diagramas);
+    if (!modelo) throw new Error('No hay un diagrama de clases de dominio aprobado y vigente.');
+    const rf = requerimientos.filter((item) => item.aprobado === true && String(item.tipo).toUpperCase() === 'RF');
+    // El árbol de navegación aporta los roles de cada pantalla: sin él, «Editar» podía cablearse a la pantalla de otro rol.
+    const diseno = this.disenoRepository ? await this.disenoRepository.obtenerPorProyecto(proyectoId) : null;
+    const pantallas = Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
+    const resultado = this.specService.validar({ operaciones, pantallas: propuesta.pantallas }, { modelo, rf, pantallas, verbosPorRf: require('../services/MockupVerbs').verbosPorRf(diseno) });
+    if (resultado.errores.length) throw new Error(`Especificación inválida: ${resultado.errores.join(' ')}`);
+    return { ...propuesta, operaciones: resultado.operaciones, pantallas: resultado.pantallas };
   }
 
   /** Valida las reglas contra el modelo de dominio y los RF aprobados; devuelve la propuesta con reglas normalizadas. */
@@ -362,16 +454,26 @@ class GestionarPlanCodificacion {
     return { ...propuesta, reglas: resultado.reglas };
   }
 
-  _normalizarModulos(propuesta) {
+  async _normalizarModulos(propuesta, proyectoId) {
     const resultado = this.moduleService.validar(propuesta);
     if (resultado.errores.length) throw new Error(`Módulos no válidos: ${resultado.errores.join(' ')}`);
+    if (resultado.propuesta.cobertura.requisitos.length) {
+      if (!this.requerimientoRepository) throw new Error('No se puede validar la cobertura sin requisitos.');
+      const requirements = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      const coverage = new GenerationCoverageService();
+      for (const item of resultado.propuesta.cobertura.requisitos) {
+        const rf = requirements.find((requirement) => requirement.identificador === item.requisito && requirement.aprobado && requirement.tipo === 'RF');
+        if (!rf) throw new Error(`La cobertura cita un RF no aprobado de este proyecto: ${item.requisito}.`);
+        if (item.confirmado && item.huella_requisito !== coverage.huellaRequisito(rf)) throw new Error(`La confirmación de ${item.requisito} está desactualizada. Reabre el plan y revísala.`);
+      }
+    }
     return resultado.propuesta;
   }
 
   /** Añade al plan qué módulos incluye la aplicación según las decisiones aprobadas (se recalcula, no se guarda). */
   _conModulos(plan) {
     const decisiones = Object.fromEntries((plan.etapas || []).filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta).map((item) => [item.etapa, item.propuesta]));
-    return { ...plan, modulos: { incluidos: this.moduleService.incluidos(decisiones), opcionales: ModuleService.opcionales(), activos: this.moduleService.activos(decisiones.modulos) } };
+    return { ...plan, modulos: { incluidos: this.moduleService.incluidos(decisiones), opcionales: ModuleService.opcionales(), activos: this.moduleService.activos(decisiones.modulos), capacidades: ModuleService.capacidades() } };
   }
 
   /** Valida la política de acceso contra los RF aprobados; devuelve la propuesta normalizada. */

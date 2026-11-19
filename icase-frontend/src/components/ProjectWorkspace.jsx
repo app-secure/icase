@@ -1,9 +1,18 @@
 import React, { useState } from "react";
+import { ArrowLeft, Files, FileText, Pencil } from "lucide-react";
+import { RequirementsReferencePanel } from "./ApprovedRequirementsSidebar";
+import PhaseBar from "./PhaseBar";
+import StepSidebar from "./StepSidebar";
+import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
+import SourcesDrawer from "./SourcesDrawer";
 import RequirementsView from "./RequirementsView";
+import InitialAnalysisView from './InitialAnalysisView';
+import RequirementJobStatus from './RequirementJobStatus';
 import DiagramsView from "./DiagramsView";
 import DocumentViewer from "./DocumentViewer";
 import CodePlanningView from "./CodePlanningView";
+import { ToastContainer, useToasts } from "./Toast";
 import {
   createProjectApi,
   updateProjectApi,
@@ -13,10 +22,19 @@ import {
   deleteFuenteApi,
   fetchFuentesApi,
   processWithAiApi,
+  startRequirementJobApi,
+  fetchRequirementJobApi,
+  fetchLatestRequirementJobApi,
+  resumeRequirementJobApi,
+  cancelRequirementJobApi,
+  fetchInitialAnalysisApi,
+  initialAnalysisActionApi,
   startDiagramJobApi,
   fetchDiagramJobApi,
   fetchLatestDiagramJobApi,
   approvePhaseApi,
+  reviewRequirementsApi,
+  resolveRequirementNeedApi,
   approveDiagramApi,
   rejectDiagramApi,
   updateDiagramApi,
@@ -30,6 +48,7 @@ import {
 } from "../services/api";
 import { sanitizePlantUML } from "../utils/plantumlEncoder";
 import { DIAGRAM_TYPES } from "../constants/diagramTypes";
+import { completedDiagramAlreadyLoaded } from '../utils/diagramJobRecovery';
 
 const DIAGRAM_KEY_BY_TYPE = Object.freeze({
   [DIAGRAM_TYPES.USE_CASES]: "useCase",
@@ -58,7 +77,7 @@ const extractInsumoBruto = async (sources) => {
         `Archivo: ${s.name}`,
         `Categoría: ${s.category || s.type}`,
         `Tipo de contenido: ${s.contentType || "Sin especificar"}`,
-        s.description ? `Descripción aportada por el usuario: ${s.description}` : "",
+        s.description ? `Descripción ${s.aiMetadata ? "sugerida por IA" : "registrada en la fuente"}: ${s.description}` : "",
         s.authorOrigin ? `Autor u origen: ${s.authorOrigin}` : "",
         s.documentDate ? `Fecha del contenido: ${s.documentDate}` : "",
         s.tags?.length ? `Etiquetas: ${s.tags.join(", ")}` : "",
@@ -183,40 +202,79 @@ const transformAiOutput = (aiResult, fallbackName = "Sistema", existingDiagrams 
   let diags = null;
 
   if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
+    const seenIds = new Set();
+    let rfCount = 1;
+    let rnfCount = 1;
+
     const funcReqs = (aiResult.requerimientos || [])
       .filter(r => (r.tipo || "").toUpperCase() === "RF")
-      .map((r, i) => ({
-        id: r.identificador || `RF-${String(i + 1).padStart(2, "0")}`,
-        name: r.nombre || "Requerimiento Funcional",
-        description: r.descripcion || "",
-        dependencies: r.dependencias || "Ninguna",
-        actors: Array.isArray(r.actores) ? r.actores : [],
-        priority: r.prioridad || "Alta",
-        precondition: r.precondiciones || "",
-        postcondition: r.poscondiciones || "",
-        origin: r.origen || "inferido",
-        evidence: r.evidencia || "",
-        sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
-        requiresConfirmation: Boolean(r.requiere_confirmacion),
-        approved: Boolean(r.aprobado)
-      }));
+      .map((r) => {
+        let id = String(r.identificador || r.id || "").trim();
+        if (!id || seenIds.has(id)) {
+          id = `RF-${String(rfCount++).padStart(2, "0")}`;
+          while (seenIds.has(id)) {
+            id = `RF-${String(rfCount++).padStart(2, "0")}`;
+          }
+        }
+        seenIds.add(id);
+
+        return {
+          id,
+          name: r.nombre || "Requerimiento Funcional",
+          description: r.descripcion || "",
+          dependencies: r.dependencias || "Ninguna",
+          actors: Array.isArray(r.actores) ? r.actores : [],
+          priority: r.prioridad || "Alta",
+          precondition: r.precondiciones || "",
+          postcondition: r.poscondiciones || "",
+          origin: r.origen || "inferido",
+          evidence: r.evidencia || "",
+          evidences: r.evidencias || [],
+          decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
+          excludedConstraints: r.restricciones_excluidas || [],
+          sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+          needIds: r.necesidades_origen || [],
+          acceptanceCriteria: (r.criterios_aceptacion || []).filter(criterion => String(criterion?.descripcion || "").trim()),
+          ruleIds: r.reglas_relacionadas || [],
+          requiresConfirmation: Boolean(r.requiere_confirmacion),
+          approved: Boolean(r.aprobado)
+        };
+      });
 
     const nonFuncReqs = (aiResult.requerimientos || [])
       .filter(r => (r.tipo || "").toUpperCase() === "RNF")
-      .map((r, i) => ({
-        id: r.identificador || `RNF-${String(i + 1).padStart(2, "0")}`,
-        category: r.nombre || "Requisito No Funcional",
-        description: r.descripcion || "",
-        dependencies: r.dependencias || "Ninguna",
-        priority: r.prioridad || "Alta",
-        metric: r.metrica_medible || "Por confirmar con el usuario",
-        compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
-        origin: r.origen || "inferido",
-        evidence: r.evidencia || "",
-        sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
-        requiresConfirmation: Boolean(r.requiere_confirmacion),
-        approved: Boolean(r.aprobado)
-      }));
+      .map((r) => {
+        let id = String(r.identificador || r.id || "").trim();
+        if (!id || seenIds.has(id)) {
+          id = `RNF-${String(rnfCount++).padStart(2, "0")}`;
+          while (seenIds.has(id)) {
+            id = `RNF-${String(rnfCount++).padStart(2, "0")}`;
+          }
+        }
+        seenIds.add(id);
+
+        return {
+          id,
+          category: r.nombre || "Requisito No Funcional",
+          description: r.descripcion || "",
+          dependencies: r.dependencias || "Ninguna",
+          priority: r.prioridad || "Alta",
+          metric: r.metrica_medible || "Por confirmar con el usuario",
+          compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
+          origin: r.origen || "inferido",
+          evidence: r.evidencia || "",
+          evidences: r.evidencias || [],
+          decisionStatus: r.estado_decision || (r.requiere_confirmacion ? 'pendiente' : 'confirmado'),
+          excludedConstraints: r.restricciones_excluidas || [],
+          sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+          needIds: r.necesidades_origen || [],
+          acceptanceCriteria: (r.criterios_aceptacion || []).filter(criterion => String(criterion?.descripcion || "").trim()),
+          ruleIds: r.reglas_relacionadas || [],
+          requiresConfirmation: Boolean(r.requiere_confirmacion),
+          questionIds: r.preguntas_relacionadas || [],
+          approved: Boolean(r.aprobado)
+        };
+      });
 
     reqs = {
       functional: funcReqs,
@@ -314,14 +372,72 @@ export default function ProjectWorkspace({
   const project = rawProject || defaultEmptyProject;
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [resilientRequirements, setResilientRequirements] = useState(false);
+  const [requirementJob, setRequirementJob] = useState(null);
+  const [initialState, setInitialState] = useState(null);
+  const [showInitial, setShowInitial] = useState(false);
+  const [initialBusy, setInitialBusy] = useState(false);
+  const [initialDirty, setInitialDirty] = useState(false);
+  const canLeaveInitial = () => !showInitial || !initialDirty || window.confirm('Hay cambios del análisis sin guardar. ¿Salir sin guardarlos?');
+  React.useEffect(() => {
+    if (!initialDirty) return;
+    const warn = event => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
+  }, [initialDirty]);
+  const [initialProposal, setInitialProposal] = useState(null);
+  const projectBackendId = project.backendId || (/^[a-f\d]{24}$/i.test(project.id || '') ? project.id : null);
+  const loadInitial = async () => {
+    if (!projectBackendId) return null;
+    const state = await fetchInitialAnalysisApi(projectBackendId); setInitialState(state); return state;
+  };
+  React.useEffect(() => {
+    let active = true; setInitialState(null); setShowInitial(false); setInitialProposal(null);
+    if (projectBackendId) fetchInitialAnalysisApi(projectBackendId).then(state => {
+      if (!active) return; setInitialState(state);
+      if (state.version_flujo === 2 && !project.isProcessed && (state.borrador || state.aprobado)) setShowInitial(true);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [projectBackendId]);
+  const initialAction = async action => { setInitialBusy(true); try { return await action(); } finally { setInitialBusy(false); } };
+  const appliedRequirementJobs = React.useRef(new Set());
+  const [processProgress, setProcessProgress] = useState(0);
+  const [processStage, setProcessStage] = useState("");
+  const { toasts, addToast, removeToast } = useToasts();
+  const [alertModal, setAlertModal] = useState(null);
   const [isGeneratingDiagrams, setIsGeneratingDiagrams] = useState(false);
   const [diagramJob, setDiagramJob] = useState(null);
   const handledDiagramJobs = React.useRef(new Set());
   const diagramPollingFailures = React.useRef(0);
   const [selectedAiProvider, setSelectedAiProvider] = useState("auto");
   const [availableProviders, setAvailableProviders] = useState([]);
-  const [isSourcesCollapsed, setIsSourcesCollapsed] = useState(false);
+  const [isRequirementsSidebarOpen, setIsRequirementsSidebarOpen] = useState(false);
+  const [isManagingSources, setIsManagingSources] = useState(false);
+  const [analysisSourcesOpen, setAnalysisSourcesOpen] = useState(false);
+  const [stepsCollapsed, setStepsCollapsed] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState("");
   const [isReviewingRequirements, setIsReviewingRequirements] = useState(false);
+
+  const cleanProjectTitle = (name) => {
+    if (!name || name === "Proyecto sin nombre") return "Nuevo Proyecto";
+    const cleaned = name
+      .replace(/^(Sistema de|Sistema para|Sistema|Software de|Software para|Aplicación de|Plataforma de)\s+/i, "")
+      .trim();
+    return cleaned ? (cleaned.charAt(0).toUpperCase() + cleaned.slice(1)) : name;
+  };
+
+  const handleStartEditName = () => {
+    setEditedName(cleanProjectTitle(project.name));
+    setIsEditingName(true);
+  };
+
+  const handleSaveEditName = () => {
+    const trimmed = editedName.trim();
+    if (trimmed && trimmed !== project.name) {
+      handleUpdateProjectName(trimmed);
+    }
+    setIsEditingName(false);
+  };
 
   const applyDiagramJobResponse = React.useCallback((response) => {
     const job = response?.trabajo;
@@ -332,6 +448,7 @@ export default function ProjectWorkspace({
     if (job.estado === 'completado' && response.resultado && !handledDiagramJobs.current.has(job.id)) {
       handledDiagramJobs.current.add(job.id);
       const current = project;
+      if (completedDiagramAlreadyLoaded(job, response.resultado, current.diagrams, DIAGRAM_KEY_BY_TYPE)) return;
       const { diags } = transformAiOutput(response.resultado, current.name, current.diagrams || {});
       onUpdateProject({
         ...current,
@@ -374,9 +491,10 @@ export default function ProjectWorkspace({
   }, [diagramJob?.id, diagramJob?.estado, applyDiagramJobResponse]);
 
   React.useEffect(() => {
-    fetchAiModelsApi()
+    fetchAiModelsApi(project.isAnalysisApproved ? null : 'requisitos')
       .then((data) => {
         if (data?.proveedores?.length) {
+          setResilientRequirements(data.requisitos_resilientes === true);
           setAvailableProviders(data.proveedores);
           const defaultProvId = data.provider_defecto || "auto";
           const matchProv = data.proveedores.find((p) => p.id === defaultProvId && p.disponible !== false);
@@ -386,7 +504,58 @@ export default function ProjectWorkspace({
       .catch((err) => {
         console.warn("[Workspace] Error consultando modelos de IA:", err);
       });
-  }, []);
+  }, [project.isAnalysisApproved]);
+
+  React.useEffect(() => {
+    const id = project.backendId || (project.id?.length === 24 ? project.id : null);
+    if ((!resilientRequirements && project.analysisFlowVersion !== 2) || !id) return;
+    let active = true;
+    fetchLatestRequirementJobApi(id).then(job => { if (active) setRequirementJob(job); }).catch(() => {});
+    return () => { active = false; };
+  }, [resilientRequirements, project.backendId, project.id, project.isAnalysisApproved]);
+
+  React.useEffect(() => {
+    if (!requirementJob?.id || String(requirementJob.proyecto_id) !== String(project.backendId || project.id)) return;
+    if (requirementJob.operacion === 'analisis_respuesta') return;
+    if (project.isAnalysisApproved && !['analisis_inicial', 'correccion_analisis_inicial', 'revision_calidad'].includes(requirementJob.operacion)) return;
+    if (requirementJob.estado === 'completado') {
+      if (!appliedRequirementJobs.current.has(requirementJob.id)) {
+        appliedRequirementJobs.current.add(requirementJob.id);
+        if (['analisis_inicial', 'correccion_analisis_inicial', 'revision_calidad'].includes(requirementJob.operacion)) {
+          if (['correccion_analisis_inicial', 'revision_calidad'].includes(requirementJob.operacion)) setInitialProposal({ ...requirementJob.resultado_analisis_inicial, trabajo_id: requirementJob.id });
+          loadInitial().then(() => { setShowInitial(true); setIsManagingSources(false); }).catch(error => setAlertModal({ title: 'No se pudo cargar el análisis', message: error.message }));
+          return;
+        }
+        const result = requirementJob.resultado_requisitos;
+        if (result) {
+          const { reqs } = transformAiOutput(result, project.name, project.diagrams);
+          onUpdateProject({ ...project, requirements: reqs, requirementAudit: result.auditoria_requisitos, isProcessed: true,
+            currentPhase: 1, isAnalysisApproved: false, isDiagramsApproved: false, isMockupsApproved: false,
+            diagrams: project.analysisFlowVersion === 2 ? project.diagrams : {}, mockups: project.analysisFlowVersion === 2 ? project.mockups : [], name: result.nombre_proyecto || project.name });
+          setShowInitial(false);
+          setIsManagingSources(false);
+        }
+      }
+      return;
+    }
+    if (!['encolado', 'procesando'].includes(requirementJob.estado)) return;
+    let active = true, polling = false;
+    const timer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try { const next = await fetchRequirementJobApi(requirementJob.id); if (active) setRequirementJob(next); }
+      catch { if (active) setProcessStage('No se pudo consultar el avance; el trabajo sigue guardado.'); }
+      finally { polling = false; }
+    }, 2000);
+    return () => { active = false; clearInterval(timer); };
+  }, [requirementJob, project, onUpdateProject]);
+
+  const resumeRequirements = async () => {
+    try {
+      const next = await resumeRequirementJobApi(requirementJob.id);
+      setRequirementJob({ ...next, estado: ['esperando_proveedor', 'interrumpido'].includes(next.estado) ? 'encolado' : next.estado });
+    } catch (error) { setAlertModal({ title: 'No se pudo reanudar', message: error.message }); }
+  };
 
   // Subida / Eliminación de fuentes
   const handleAddSource = async (newSource) => {
@@ -419,6 +588,7 @@ export default function ProjectWorkspace({
       sources: updatedSources
     });
 
+    let uploadError = null;
     // 2. Si no existe ID en backend, crearlo para poder asociar y procesar fuentes de inmediato
     if (!backendId) {
       try {
@@ -439,6 +609,7 @@ export default function ProjectWorkspace({
         }
       } catch (errCreate) {
         console.warn("[Workspace] Error inicializando proyecto en backend:", errCreate);
+        uploadError = errCreate;
       }
     }
 
@@ -447,12 +618,14 @@ export default function ProjectWorkspace({
       try {
         const uploaded = await uploadFuenteApi(backendId, newSource.rawFile);
         if (uploaded) {
+          if (!(uploaded.id || uploaded._id)) throw new Error("El servidor no confirmó el guardado de la fuente.");
           const finalSources = updatedSources.map((s) => {
             if (s.name === newSource.name || s.id === newSource.id) {
               return {
                 ...s,
                 id: uploaded.id || uploaded._id || s.id,
                 uploaded: true,
+                uploadError: null,
                 isUploading: false,
                 rawFile: null,
                 contentSnippet: uploaded.texto_transcrito || s.contentSnippet,
@@ -461,6 +634,7 @@ export default function ProjectWorkspace({
                 description: uploaded.descripcion || s.description || "",
                 authorOrigin: uploaded.autor_origen || s.authorOrigin || "",
                 documentDate: uploaded.fecha_documento || s.documentDate || "",
+                documentDateSource: uploaded.fecha_documento_origen || s.documentDateSource || "",
                 tags: Array.isArray(uploaded.etiquetas) ? uploaded.etiquetas : (s.tags || []),
                 transcriptionVerified: Boolean(uploaded.transcripcion_verificada)
               };
@@ -477,15 +651,18 @@ export default function ProjectWorkspace({
           });
           return finalSources.find((source) => source.name === newSource.name || source.id === newSource.id);
         }
+        uploadError = new Error("El servidor no confirmó el guardado de la fuente.");
       } catch (err) {
         console.warn("[Workspace] Error subiendo fuente al backend:", err);
+        uploadError = err;
       }
     }
 
-    // En caso de que no requiera upload de archivo o falle, quitar bandera isUploading
+    const failureMessage = (uploadError || new Error("No se pudo guardar la fuente en el servidor. Vuelve a subir el archivo.")).message;
+    // Conservar el archivo para reintentar, pero nunca presentarlo como persistido.
     const finalizedSources = updatedSources.map((s) =>
       s.name === newSource.name || s.id === newSource.id
-        ? { ...s, isUploading: false }
+        ? { ...s, isUploading: false, uploaded: false, uploadError: failureMessage }
         : s
     );
     onUpdateProject({
@@ -495,7 +672,7 @@ export default function ProjectWorkspace({
       name: updatedName,
       sources: finalizedSources
     });
-    return finalizedSources.find((source) => source.name === newSource.name || source.id === newSource.id);
+    throw new Error(failureMessage);
   };
 
   const handleDeleteSource = async (sourceId) => {
@@ -540,6 +717,14 @@ export default function ProjectWorkspace({
   const handleProcess = async (targetProvider) => {
     const providerToUse = targetProvider || selectedAiProvider || 'auto';
     setIsProcessing(true);
+    setProcessProgress(8);
+    setProcessStage("");
+
+    let progressVal = 8;
+    const progressTimer = setInterval(() => {
+      progressVal = Math.min(95, progressVal + (progressVal < 30 ? 4 : progressVal < 60 ? 3 : progressVal < 85 ? 2 : 1));
+      setProcessProgress(progressVal);
+    }, 600);
 
     try {
       let updatedName = project.name;
@@ -606,10 +791,19 @@ export default function ProjectWorkspace({
       let aiResult = null;
       if (backendId) {
         try {
+          if (resilientRequirements || project.analysisFlowVersion === 2) {
+            onUpdateProject({ ...project, backendId, id: backendId });
+            const job = await startRequirementJobApi(backendId, { insumo_bruto: insumoBruto, provider: providerToUse });
+            setRequirementJob(job);
+            return;
+          }
           aiResult = await processWithAiApi(backendId, insumoBruto, '', providerToUse, null, 'requisitos');
         } catch (errAi) {
           console.error("[Workspace] Error en procesamiento con IA:", errAi.message);
-          alert(`⚠️ ${errAi.message}`);
+          setAlertModal({
+            title: "Error al procesar con IA",
+            message: errAi.message
+          });
           setIsProcessing(false);
           return;
         }
@@ -652,6 +846,11 @@ export default function ProjectWorkspace({
         return true;
       });
 
+      clearInterval(progressTimer);
+      setProcessProgress(100);
+      setProcessStage("¡Especificación completada con éxito!");
+      await new Promise((r) => setTimeout(r, 450));
+
       onUpdateProject({
         ...project,
         id: backendId,
@@ -664,61 +863,148 @@ export default function ProjectWorkspace({
         isDiagramsApproved: false,
         isMockupsApproved: false,
         requirements: reqs,
+        requirementAudit: aiResult?.auditoria_requisitos || null,
         diagrams: {},
         mockups: []
       });
+      setIsManagingSources(false);
+
+      addToast({
+        type: "success",
+        title: "Especificación Generada",
+        message: "Los requerimientos funcionales y no funcionales se estructuraron correctamente."
+      });
     } catch (err) {
+      clearInterval(progressTimer);
       console.error("[Workspace] Error procesando con IA:", err);
-      alert(`No se pudo generar una especificación trazable.\n\n${err.message}`);
+      addToast({
+        type: "error",
+        title: "Error de Generación",
+        message: err.message || "No se pudo generar una especificación trazable."
+      });
     } finally {
+      clearInterval(progressTimer);
       setIsProcessing(false);
+      setProcessProgress(0);
+      setProcessStage("");
     }
+  };
+
+  const handleRequirementReview = async (payload) => {
+    const backendId = project.backendId || (project.id?.length === 24 ? project.id : null);
+    if (!backendId) throw new Error('El proyecto todavía no está guardado.');
+    const seenIds = new Set();
+    let rfCount = 1;
+    let rnfCount = 1;
+
+    const list = [
+      ...(project.requirements?.functional || []).map(item => {
+        let id = String(item.identificador || item.id || '').trim();
+        if (!id || seenIds.has(id)) {
+          id = `RF-${String(rfCount++).padStart(2, '0')}`;
+          while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+        }
+        seenIds.add(id);
+        return { ...item, tipo: 'RF', identificador: id, id };
+      }),
+      ...(project.requirements?.nonFunctional || []).map(item => {
+        let id = String(item.identificador || item.id || '').trim();
+        if (!id || seenIds.has(id)) {
+          id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+          while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+        }
+        seenIds.add(id);
+        return { ...item, tipo: 'RNF', identificador: id, id };
+      })
+    ];
+    if (!project.isAnalysisApproved) await syncProjectRequirementsApi(backendId, list);
+    const result = payload.scope === 'necesidad'
+      ? await resolveRequirementNeedApi(backendId, payload.id, payload.data)
+      : await reviewRequirementsApi(backendId, payload);
+    const actorKey = value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const replacements = payload.accion?.endsWith('_actor') ? result.auditoria_requisitos?.cambios_actores || [] : [];
+    const updateActors = row => ({ ...row, actors: [...new Set((row.actors || row.actores || []).map(name => replacements.find(([old]) => actorKey(old) === actorKey(name))?.[1] || name))] });
+    onUpdateProject({ ...project, requirementAudit: result.auditoria_requisitos, requirements: replacements.length ? {
+      ...project.requirements, functional: (project.requirements?.functional || []).map(updateActors), nonFunctional: (project.requirements?.nonFunctional || []).map(updateActors)
+    } : project.requirements });
+    return result;
   };
 
   const handleApproveAnalysis = async () => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
     if (!backendId) {
-      alert("No se encontró el proyecto persistido. Guarda o reprocesa las fuentes antes de aprobar los requisitos.");
+      setAlertModal({
+        title: "Proyecto no persistido",
+        message: "No se encontró el proyecto persistido. Guarda o reprocesa las fuentes antes de aprobar los requisitos."
+      });
       return { success: false, error: "Proyecto no persistido" };
     }
-    setIsGeneratingDiagrams(true);
     let approvalCompleted = Boolean(project.isAnalysisApproved);
     try {
+      const seenIds = new Set();
+      let rfCount = 1;
+      let rnfCount = 1;
       const latestRequirements = [
-        ...(project.requirements?.functional || []).map((requirement, index) => ({
-          ...requirement,
-          tipo: 'RF',
-          identificador: requirement.identificador || requirement.id || `RF-${String(index + 1).padStart(2, '0')}`
-        })),
-        ...(project.requirements?.nonFunctional || []).map((requirement, index) => ({
-          ...requirement,
-          tipo: 'RNF',
-          identificador: requirement.identificador || requirement.id || `RNF-${String(index + 1).padStart(2, '0')}`
-        }))
+        ...(project.requirements?.functional || []).map((requirement) => {
+          let id = String(requirement.identificador || requirement.id || '').trim();
+          if (!id || seenIds.has(id)) {
+            id = `RF-${String(rfCount++).padStart(2, '0')}`;
+            while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+          }
+          seenIds.add(id);
+          return {
+            ...requirement,
+            tipo: 'RF',
+            identificador: id,
+            id
+          };
+        }),
+        ...(project.requirements?.nonFunctional || []).map((requirement) => {
+          let id = String(requirement.identificador || requirement.id || '').trim();
+          if (!id || seenIds.has(id)) {
+            id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+            while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+          }
+          seenIds.add(id);
+          return {
+            ...requirement,
+            tipo: 'RNF',
+            identificador: id,
+            id
+          };
+        })
       ];
       const syncResult = await syncProjectRequirementsApi(backendId, latestRequirements);
-      if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de generar los diagramas.");
-      await approvePhaseApi(backendId, "analisis");
+      if (!syncResult) throw new Error("No se pudo guardar la versión final de los requisitos antes de aprobar.");
+      const approveResult = await approvePhaseApi(backendId, "analisis");
       approvalCompleted = true;
-      const jobResponse = await startDiagramJobApi(backendId, DIAGRAM_TYPES.USE_CASES, '', '', selectedAiProvider || 'auto');
-      applyDiagramJobResponse(jobResponse);
+      const workflow = approveResult?.flujoDiagramas || await fetchDiagramWorkflowApi(backendId).catch(() => null);
       onUpdateProject({
         ...project,
         isAnalysisApproved: true,
         currentPhase: 2,
+        diagramFlow: workflow || project.diagramFlow,
         diagrams: project.diagrams || {}
       });
-      return { success: true, pending: true, job: jobResponse.trabajo };
+      return { success: true };
     } catch (e) {
-      setIsGeneratingDiagrams(false);
-      console.warn("[Workspace] Error generando diagramas después de aprobar requisitos:", e);
-      onUpdateProject({ ...project, isAnalysisApproved: approvalCompleted, currentPhase: 1, diagrams: {} });
-      alert(`${approvalCompleted ? "Los requisitos fueron aprobados, pero no se pudieron generar los diagramas." : "No se pudieron aprobar los requisitos."} Puedes reintentar desde esta pantalla.\n\n${e.message}`);
+      console.warn("[Workspace] Error al aprobar requisitos:", e);
+      onUpdateProject({
+        ...project,
+        isAnalysisApproved: approvalCompleted,
+        currentPhase: approvalCompleted ? 2 : 1,
+        diagrams: project.diagrams || {},
+        requirementAudit: e.controlRequisitos ? { ...project.requirementAudit, control_aprobacion: e.controlRequisitos } : project.requirementAudit
+      });
+      setAlertModal({
+        title: approvalCompleted ? "Requisitos aprobados con observaciones" : "No se pudieron aprobar los requisitos",
+        message: `${approvalCompleted ? "Los requisitos fueron aprobados." : "No se pudieron aprobar los requisitos. Puedes reintentar desde esta pantalla."}\n\n${e.message}`
+      });
       return { success: false, error: e.message };
     }
   };
 
-  const handleGenerateDiagram = async (diagramType) => {
+  const handleGenerateDiagram = async (diagramType, { regenerar = false } = {}) => {
     const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
     if (!backendId) return { success: false, error: "Proyecto no persistido" };
     setIsGeneratingDiagrams(true);
@@ -729,7 +1015,8 @@ export default function ProjectWorkspace({
         '',
         '',
         selectedAiProvider || 'auto',
-        null
+        null,
+        regenerar
       );
       applyDiagramJobResponse(response);
       return {
@@ -749,7 +1036,6 @@ export default function ProjectWorkspace({
     if (!backendId) return { success: false, error: "Proyecto no persistido" };
     try {
       const result = await approveDiagramApi(backendId, diagramType);
-      if (result.flujoDiagramas?.todos_aprobados) setIsSourcesCollapsed(true);
       const key = DIAGRAM_KEY_BY_TYPE[diagramType];
       const updatedDiagrams = {
         ...(project.diagrams || {}),
@@ -826,6 +1112,7 @@ export default function ProjectWorkspace({
     const source = (project.sources || []).find((item) => item.id === sourceId);
     if (!source) throw new Error("No se encontró la fuente que deseas actualizar.");
     const backendSourceId = source.backendId || source.id;
+    if (source.uploadError) throw new Error(`La fuente no se guardó: ${source.uploadError} Vuelve a subir el archivo.`);
     if (!backendSourceId || backendSourceId.startsWith("src-")) {
       throw new Error("Espera a que la fuente termine de cargarse antes de guardar sus detalles.");
     }
@@ -836,6 +1123,7 @@ export default function ProjectWorkspace({
       descripcion: changes.description,
       autor_origen: changes.authorOrigin,
       fecha_documento: changes.documentDate,
+      fecha_documento_origen: changes.documentDateSource,
       etiquetas: changes.tags,
       texto_transcrito: changes.contentSnippet,
       transcripcion_verificada: changes.transcriptionVerified,
@@ -849,6 +1137,7 @@ export default function ProjectWorkspace({
       description: saved.descripcion,
       authorOrigin: saved.autor_origen,
       documentDate: saved.fecha_documento,
+      documentDateSource: saved.fecha_documento_origen || "",
       tags: saved.etiquetas || [],
       contentSnippet: saved.texto_transcrito || "",
       transcriptionVerified: Boolean(saved.transcripcion_verificada),
@@ -861,6 +1150,7 @@ export default function ProjectWorkspace({
   const handleSuggestSourceMetadata = async (sourceId) => {
     const source = (project.sources || []).find((item) => item.id === sourceId);
     const backendSourceId = source?.backendId || source?.id;
+    if (source?.uploadError) throw new Error(`La fuente no se guardó: ${source.uploadError} Vuelve a subir el archivo.`);
     if (!backendSourceId || backendSourceId.startsWith("src-")) {
       throw new Error("Espera a que la fuente termine de cargarse para usar el rellenado con IA.");
     }
@@ -870,7 +1160,8 @@ export default function ProjectWorkspace({
       contentType: suggestion.tipo_contenido,
       description: suggestion.descripcion,
       authorOrigin: suggestion.autor_origen,
-      documentDate: suggestion.fecha_documento,
+      documentDate: source.documentDate || "",
+      documentDateSource: source.documentDateSource || "",
       tags: suggestion.etiquetas || [],
       aiMetadata: Boolean(suggestion.generado_por_ia)
     };
@@ -971,6 +1262,44 @@ export default function ProjectWorkspace({
           return { success: true, pending: true, job: response.trabajo };
         }
         const objetivo = phase === "diagrams" ? "diagramas" : "requisitos";
+        if (objetivo === 'requisitos' && project.analysisFlowVersion === 2) {
+          const state = await loadInitial();
+          if (!state?.aprobado || !state.vigente) return { success: false, error: 'Revisa y aprueba primero el análisis inicial vigente.' };
+          const all = [...(project.requirements?.functional || []), ...(project.requirements?.nonFunctional || [])];
+          const requestedIds = new Set((promptText.match(/\b(?:RF|RNF)-\d+\b/gi) || []).map(id => id.toUpperCase()));
+          const ids = all.map(r => r.identificador || r.id).filter(id => requestedIds.has(String(id).toUpperCase()));
+          if (!ids.length) return { success: false, error: 'Indica los IDs de los requisitos a corregir, por ejemplo RF-01. Para añadir necesidades o cambiar el alcance, revisa el análisis inicial.' };
+          const job = await startRequirementJobApi(backendId, { operacion: 'redaccion_requisitos', analisis_id: state.aprobado.id, actualizar_ids: ids, instruccion: promptText, provider: selectedAiProvider || 'auto' });
+          setRequirementJob(job); return { success: true, pending: true, job };
+        }
+        if (objetivo === "requisitos" && !project.isAnalysisApproved) {
+          const seenIds = new Set();
+          let rfCount = 1;
+          let rnfCount = 1;
+          const currentRequirements = [
+            ...(project.requirements?.functional || []).map((item) => {
+              let id = String(item.identificador || item.id || '').trim();
+              if (!id || seenIds.has(id)) {
+                id = `RF-${String(rfCount++).padStart(2, '0')}`;
+                while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+              }
+              seenIds.add(id);
+              return { ...item, tipo: 'RF', identificador: id, id };
+            }),
+            ...(project.requirements?.nonFunctional || []).map((item) => {
+              let id = String(item.identificador || item.id || '').trim();
+              if (!id || seenIds.has(id)) {
+                id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+                while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+              }
+              seenIds.add(id);
+              return { ...item, tipo: 'RNF', identificador: id, id };
+            })
+          ];
+          if (currentRequirements.length > 0) {
+            await syncProjectRequirementsApi(backendId, currentRequirements);
+          }
+        }
         const aiResult = await processWithAiApi(backendId, insumoBruto, insumoAdicional, selectedAiProvider || 'auto', null, objetivo, phase === "diagrams" ? targetType : null);
         if (aiResult && (aiResult.requerimientos?.length || aiResult.diagramas?.length)) {
           const { reqs, diags } = transformAiOutput(aiResult, project.name, project.diagrams);
@@ -990,6 +1319,7 @@ export default function ProjectWorkspace({
             },
             diagrams: phase === "diagrams" ? (diags || project.diagrams) : {},
             diagramFlow: phase === "diagrams" ? (aiResult.flujoDiagramas || project.diagramFlow) : null,
+            requirementAudit: phase === "diagrams" ? project.requirementAudit : (aiResult.auditoria_requisitos || null),
             ...(phase === "diagrams" ? {} : {
               isAnalysisApproved: false,
               isDiagramsApproved: false,
@@ -1063,72 +1393,134 @@ export default function ProjectWorkspace({
   };
 
   return (
-    <div className="flex-1 flex h-full overflow-hidden bg-white">
-      {/* SECCIÓN IZQUIERDA: Fuentes y Chat de Ajustes a la IA */}
-      <SourcesPanel
-        sources={project.sources || []}
-        requirements={project.requirements}
-        referenceMode={project.currentPhase >= 2}
-        onAddSource={handleAddSource}
-        onUpdateSource={handleUpdateSource}
-        onSuggestSourceMetadata={handleSuggestSourceMetadata}
-        onDeleteSource={handleDeleteSource}
-        onProcess={(prov) => handleProcess(prov)}
-        selectedProvider={selectedAiProvider}
-        onSelectProvider={setSelectedAiProvider}
-        availableProviders={availableProviders}
-        collapsed={isSourcesCollapsed}
-        onToggleCollapsed={() => setIsSourcesCollapsed(value => !value)}
-        isProcessing={isProcessing || isGeneratingDiagrams}
-        isProcessed={project.isProcessed}
-        projectName={project.name}
-        onUpdateProjectName={handleUpdateProjectName}
-        onBackToDashboard={onBackToDashboard}
-        user={user}
-        onLogout={onLogout}
-        onApplyAiCorrection={(prompt) => {
-          const activePhase = project.currentPhase === 2 ? "diagrams" : "analysis";
-          return handleApplyAiCorrection(activePhase, prompt);
-        }}
-      />
-
-      {/* SECCIÓN DERECHA: Contenido Organizado con Máximo Espacio de Visualización */}
-      <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
+      {/* CONTENIDO PRINCIPAL A PANTALLA COMPLETA (100% ANCHO) */}
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {(project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <>
+      <SourcesDrawer open={analysisSourcesOpen} onClose={() => setAnalysisSourcesOpen(false)}><SourcesPanel compact sources={project.sources || []} onAddSource={async source => { await handleAddSource(source); await loadInitial(); }} readOnly={project.isAnalysisApproved} isProcessing={['encolado', 'procesando'].includes(requirementJob?.estado)} /></SourcesDrawer>
+      </>}
+      {project.isAnalysisApproved && project.currentPhase > 1 && !showInitial && !isManagingSources && !isReviewingRequirements && (
+        <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
+      )}
+      <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
+        {projectBackendId && project.isProcessed && !isProcessing && <PhaseBar
+          project={project}
+          disabled={isProcessing}
+          sourcesAvailable={project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements}
+          requirementsAvailable={Boolean(project.isAnalysisApproved && project.currentPhase > 1 && !showInitial && !isManagingSources && !isReviewingRequirements)}
+          onToggleSources={() => setAnalysisSourcesOpen(open => !open)}
+          onToggleRequirements={() => setIsRequirementsSidebarOpen(open => !open)}
+          onSelect={(phase) => {
+            if (!canLeaveInitial()) return;
+            setShowInitial(false); setIsManagingSources(false);
+            if (phase === 1) {
+              if (project.isAnalysisApproved) { setIsReviewingRequirements(true); if (project.currentPhase > 1) onUpdateProject({ ...project, currentPhase: 1 }); }
+              else onUpdateProject({ ...project, currentPhase: 1 });
+              return;
+            }
+            setIsReviewingRequirements(false);
+            if (project.currentPhase !== phase) onUpdateProject({ ...project, currentPhase: phase });
+          }} />}
+        <RequirementJobStatus key={requirementJob?.id} job={requirementJob} onResume={resumeRequirements} onCancel={async () => { const next = await cancelRequirementJobApi(requirementJob.id); setRequirementJob(next); }} />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+        {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <StepSidebar
+          title="Análisis del proyecto" ariaLabel="Pasos del análisis" collapsed={stepsCollapsed} onToggleCollapsed={() => setStepsCollapsed(value => !value)}
+          currentKey={showInitial ? 'analysis' : isManagingSources || !project.isProcessed ? 'sources' : project.currentPhase > 1 && !isReviewingRequirements ? null : 'requirements'}
+          steps={[
+            { key: 'sources', label: 'Fuentes', state: project.sources?.length ? 'done' : 'pending', title: 'Fuentes: información del proyecto' },
+            { key: 'analysis', label: 'Análisis inicial', state: initialState?.aprobado ? 'done' : 'pending', title: 'Análisis inicial: comprender y aprobar' },
+            { key: 'requirements', label: 'Requisitos', state: !project.isProcessed ? 'blocked' : project.isAnalysisApproved ? 'done' : 'pending', title: project.isProcessed ? 'Requisitos: definir y validar RF / RNF' : 'Disponible después de generar los requisitos' }
+          ]}
+          onSelect={key => {
+            if (key === 'analysis') { if (showInitial) return; loadInitial().then(() => { setShowInitial(true); setIsManagingSources(false); }).catch(error => setAlertModal({ title: 'Análisis inicial', message: error.message })); return; }
+            if (!canLeaveInitial()) return;
+            setShowInitial(false); setIsManagingSources(key === 'sources');
+            if (key === 'requirements') { if (project.isAnalysisApproved) setIsReviewingRequirements(true); else onUpdateProject({ ...project, currentPhase: 1 }); }
+          }} />}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {isProcessing ? (
-          /* Efecto Gemini en procesamiento */
+          /* Barra Dinámica Minimalista con Porcentaje */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
-            <div className="w-full flex flex-col items-center space-y-4">
-              <div className="w-48 h-48 rounded-full gemini-aura-glow absolute -z-10 pointer-events-none"></div>
-              <h3 className="text-base font-semibold gemini-gradient-text tracking-normal">
-                {project.isProcessed ? "Reprocesando insumos y actualizando requisitos..." : "Generando especificación de requisitos..."}
-              </h3>
-              <div className="w-56 h-1.5 rounded-full gemini-wave-bar shadow-xs"></div>
-              <p className="text-xs text-slate-400 font-normal">
-                {project.isProcessed
-                  ? "Analizando nuevos insumos y actualizando únicamente los requisitos"
-                  : "Extrayendo y estructurando los requisitos del sistema para su revisión"}
-              </p>
+            <div className="w-full flex flex-col items-center">
+              <div className="w-56 h-56 rounded-full gemini-aura-glow absolute -z-10 pointer-events-none"></div>
 
-              <div className="w-full max-w-sm mt-4 space-y-2.5">
-                <div className="h-4 rounded-md gemini-skeleton-loader w-full"></div>
-                <div className="h-4 rounded-md gemini-skeleton-loader w-4/5 mx-auto"></div>
-                <div className="h-4 rounded-md gemini-skeleton-loader w-3/5 mx-auto"></div>
+              <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
+                {project.isProcessed ? "Reprocesando especificación de requisitos..." : "Generando especificación de requisitos..."}
+              </h3>
+
+              {/* Barra de progreso limpia sin contenedor de tarjeta ni textos redundantes */}
+              <div className="w-full mt-6 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-600">
+                    Progreso
+                  </span>
+                  <span className="text-violet-700 font-bold text-sm bg-violet-50 px-2.5 py-0.5 rounded-md border border-violet-200">
+                    {processProgress}%
+                  </span>
+                </div>
+                <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
+                  <div
+                    className="h-full bg-linear-to-r from-violet-600 via-indigo-600 to-purple-500 rounded-full transition-all duration-300 ease-out shadow-xs"
+                    style={{ width: `${Math.max(processProgress, 4)}%` }}
+                  />
+                </div>
               </div>
             </div>
           </div>
-        ) : !project.isProcessed ? (
-          /* Estado Inicial: Efecto Gemini en reposo */
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
-            <div className="flex flex-col items-center">
-              <div className="w-24 h-1 rounded-full gemini-wave-bar mb-4 opacity-70"></div>
-              <p className="text-xs text-slate-400 max-w-xs font-normal">
-                Carga tus insumos en el panel izquierdo y presiona Procesar
-              </p>
-            </div>
-          </div>
+        ) : showInitial && initialState ? (
+          <InitialAnalysisView onRefresh={loadInitial} sources={project.sources || []} state={initialState} proposal={initialProposal} busy={initialBusy || ['encolado', 'procesando'].includes(requirementJob?.estado)} provider={selectedAiProvider}
+            onReviewQuality={() => initialAction(async () => { const job = await startRequirementJobApi(projectBackendId, { operacion: 'revision_calidad', analisis_id: initialState.borrador.id, provider: selectedAiProvider }); setRequirementJob(job); })}
+            onAnalyzeAnswer={async (questionId, answer, resumeId) => {
+              let job = resumeId ? await resumeRequirementJobApi(resumeId) : await startRequirementJobApi(projectBackendId, { operacion: 'analisis_respuesta', analisis_id: initialState.borrador.id, pregunta_id: questionId, respuesta: answer, provider: selectedAiProvider });
+              const deadline = Date.now() + 210000;
+              while (['encolado', 'procesando'].includes(job.estado)) {
+                if (Date.now() >= deadline) throw Object.assign(new Error('La consulta tardó más de lo esperado. Tu respuesta se conserva; consulta nuevamente el trabajo antes de crear otra propuesta.'), { trabajoId: job.id });
+                await new Promise(resolve => setTimeout(resolve, 1200)); job = await fetchRequirementJobApi(job.id);
+              }
+              if (job.estado !== 'completado' || !job.resultado_analisis_inicial?.elementos) throw Object.assign(new Error(job.mensaje || 'Propuesta pendiente. Puedes reanudar o introducir elementos manualmente.'), { trabajoId: job.id });
+              return { ...job.resultado_analisis_inicial, trabajo_id: job.id };
+            }}
+            onDirtyChange={setInitialDirty}
+            onViewVersion={async id => (await fetchInitialAnalysisApi(projectBackendId, id)).version_consultada}
+            onExtract={id => initialAction(async () => { const job = await startRequirementJobApi(projectBackendId, { operacion: 'analisis_inicial', analisis_id: id, regenerar: true, desde_cero: true, provider: selectedAiProvider }); setRequirementJob(job); })}
+            onBack={() => { if (!canLeaveInitial()) return; setShowInitial(false); setIsManagingSources(true); }}
+            onRequirements={() => { if (!canLeaveInitial()) return; setShowInitial(false); setIsManagingSources(false); if (project.isAnalysisApproved) setIsReviewingRequirements(true); else if (project.isProcessed) onUpdateProject({ ...project, currentPhase: 1 }); }}
+            onSave={body => initialAction(async () => { await initialAnalysisActionApi(projectBackendId, '', body); await loadInitial(); })}
+            onReopen={() => initialAction(async () => { if (initialState.version_flujo !== 2 && !window.confirm('¿Adoptar el flujo separado? No se regenerarán ni borrarán tus requisitos o diagramas.')) return; await initialAnalysisActionApi(projectBackendId, 'reabrir', { adoptar: true }); onUpdateProject({ ...project, analysisFlowVersion: 2 }); await loadInitial(); })}
+            onApprove={version => initialAction(async () => {
+              const result = await initialAnalysisActionApi(projectBackendId, 'aprobar', { version_esperada: version, aceptar_advertencias: true, provider: selectedAiProvider });
+              await loadInitial(); if (result.trabajo) setRequirementJob(result.trabajo);
+              if (result.generacion_pendiente) setAlertModal({ title: 'Análisis aprobado; generación pendiente', message: result.mensaje });
+            })}
+            onProposal={(instruction, ids) => initialAction(async () => { const job = await startRequirementJobApi(projectBackendId, { operacion: 'correccion_analisis_inicial', instruccion: instruction, elementos_ids: ids, provider: selectedAiProvider }); setRequirementJob(job); })}
+            onApplyProposal={() => initialAction(async () => { await initialAnalysisActionApi(projectBackendId, '', { accion: 'aplicar_propuesta', trabajo_id: initialProposal.trabajo_id, version_esperada: initialState.borrador.id, justificacion: 'Propuesta de IA revisada y aceptada por el usuario.' }); setInitialProposal(null); await loadInitial(); })}
+            onUpdateRequirements={() => initialAction(async () => {
+              const state = await loadInitial();
+              if (state.impacto.requisitos_existentes && !window.confirm(`¿Actualizar explícitamente ${state.impacto.requisitos_afectados.join(', ') || 'las necesidades nuevas'}? Se conservarán las versiones anteriores y los requisitos no afectados.`)) return;
+              const job = await startRequirementJobApi(projectBackendId, { operacion: 'redaccion_requisitos', analisis_id: state.aprobado.id, actualizar_ids: state.impacto.requisitos_afectados, provider: selectedAiProvider }); setRequirementJob(job);
+            })}
+          />
+        ) : !project.isProcessed || isManagingSources ? (
+          /* PANTALLA 0 (Inicial al crear proyecto): Cargar Insumos */
+          <SourcesPanel
+            sources={project.sources || []}
+            onAddSource={handleAddSource}
+            onUpdateSource={handleUpdateSource}
+            onSuggestSourceMetadata={handleSuggestSourceMetadata}
+            onDeleteSource={handleDeleteSource}
+            onProcess={(prov) => handleProcess(prov)}
+            selectedProvider={selectedAiProvider}
+            onSelectProvider={setSelectedAiProvider}
+            availableProviders={availableProviders}
+            isProcessing={isProcessing || isGeneratingDiagrams || ['encolado', 'procesando'].includes(requirementJob?.estado)}
+            isProcessed={project.isProcessed}
+            onContinueToProject={project.isProcessed ? () => setIsManagingSources(false) : null}
+          />
         ) : isReviewingRequirements ? (
           <RequirementsView
             requirements={project.requirements}
+            audit={project.requirementAudit}
+            onReview={handleRequirementReview}
             isApproved={project.isAnalysisApproved}
             readOnly
             onBackToDesign={() => setIsReviewingRequirements(false)}
@@ -1137,6 +1529,8 @@ export default function ProjectWorkspace({
           /* FASE 1: Análisis (Requerimientos en texto estructurado limpio) */
           <RequirementsView
             requirements={project.requirements}
+            audit={project.requirementAudit}
+            onReview={handleRequirementReview}
             onUpdateRequirements={(newReqs) => {
               const staleDiagrams = Object.fromEntries(Object.entries(project.diagrams || {}).map(([key, diagram]) => [
                 key,
@@ -1160,9 +1554,28 @@ export default function ProjectWorkspace({
               });
               const backendId = project.backendId || (project.id && project.id.length === 24 ? project.id : null);
               if (backendId) {
+                const seenIds = new Set();
+                let rfCount = 1;
+                let rnfCount = 1;
                 const flatList = [
-                  ...(newReqs.functional || []).map((r, i) => ({ ...r, tipo: 'RF', identificador: r.identificador || r.id || `RF-0${i + 1}` })),
-                  ...(newReqs.nonFunctional || []).map((r, i) => ({ ...r, tipo: 'RNF', identificador: r.identificador || r.id || `RNF-0${i + 1}` }))
+                  ...(newReqs.functional || []).map((r) => {
+                    let id = String(r.identificador || r.id || '').trim();
+                    if (!id || seenIds.has(id)) {
+                      id = `RF-${String(rfCount++).padStart(2, '0')}`;
+                      while (seenIds.has(id)) id = `RF-${String(rfCount++).padStart(2, '0')}`;
+                    }
+                    seenIds.add(id);
+                    return { ...r, tipo: 'RF', identificador: id, id };
+                  }),
+                  ...(newReqs.nonFunctional || []).map((r) => {
+                    let id = String(r.identificador || r.id || '').trim();
+                    if (!id || seenIds.has(id)) {
+                      id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+                      while (seenIds.has(id)) id = `RNF-${String(rnfCount++).padStart(2, '0')}`;
+                    }
+                    seenIds.add(id);
+                    return { ...r, tipo: 'RNF', identificador: id, id };
+                  })
                 ];
                 syncProjectRequirementsApi(backendId, flatList).catch((err) => {
                   console.warn("[Workspace] Error persistiendo requerimientos editados:", err);
@@ -1171,6 +1584,16 @@ export default function ProjectWorkspace({
             }}
             onApprovePhase={handleApproveAnalysis}
             isApproved={project.isAnalysisApproved}
+            regenerating={requirementJob?.operacion === 'redaccion_requisitos' && ['encolado', 'procesando'].includes(requirementJob?.estado)}
+            onRegenerate={project.analysisFlowVersion === 2 ? async () => {
+              if (!window.confirm('Se reemplazarán los requisitos actuales con una nueva redacción del análisis inicial aprobado.')) return;
+              try {
+                const state = await loadInitial();
+                if (!state?.aprobado?.id) { setAlertModal({ title: 'Análisis inicial', message: 'Aprueba el análisis inicial antes de regenerar los requisitos.' }); return; }
+                const job = await startRequirementJobApi(projectBackendId, { operacion: 'redaccion_requisitos', analisis_id: state.aprobado.id, regenerar: true, provider: selectedAiProvider || 'auto' });
+                setRequirementJob(job);
+              } catch (error) { setAlertModal({ title: 'No se pudo regenerar', message: error.message }); }
+            } : undefined}
             onApplyAiCorrection={(prompt) => handleApplyAiCorrection("analysis", prompt)}
           />
         ) : project.currentPhase === 2 ? (
@@ -1183,6 +1606,7 @@ export default function ProjectWorkspace({
               const diagId = project.diagrams?.[key]?.id;
               if (diagId && diagId.length === 24) {
                 const updated = await updateDiagramApi(diagId, {
+                  version_esperada: Number(project.diagrams[key].version || 1),
                   codigo_plantuml: newCode,
                   codigo_mermaid: newCode
                 });
@@ -1237,7 +1661,42 @@ export default function ProjectWorkspace({
             onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 3 })}
           />
         )}
+        </div>
+        </div>
       </main>
+      </div>
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      {/* Modal sobrio y sencillo para avisos del sistema (sin gradientes ni colores estridentes) */}
+      {alertModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={() => setAlertModal(null)}
+        >
+          <div
+            className="bg-white rounded-lg border border-slate-200 shadow-xl max-w-md w-full p-6 text-left"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {alertModal.title && (
+              <h4 className="text-sm font-semibold text-slate-900 mb-2">
+                {alertModal.title}
+              </h4>
+            )}
+            <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+              {alertModal.message}
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAlertModal(null)}
+                className="px-4 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-md transition-colors cursor-pointer"
+              >
+                Aceptar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

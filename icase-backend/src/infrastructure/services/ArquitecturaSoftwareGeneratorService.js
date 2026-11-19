@@ -70,7 +70,7 @@ class ArquitecturaSoftwareGeneratorService {
     const actors = [...new Set(rfs.flatMap((item) => Array.isArray(item.actores) ? item.actores : [item.actores])
       .flatMap((item) => String(item || '').split(/[,;|]/))
       .map((item) => safe(item))
-      .filter(Boolean))].slice(0, 4);
+      .filter(Boolean))];
 
     const trace = rnfs.map((rnf) => {
       const rnfText = requirementsText([rnf]);

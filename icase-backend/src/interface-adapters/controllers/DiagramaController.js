@@ -105,14 +105,14 @@ class DiagramaController {
     try {
       const { id } = req.params;
       // Solo contenido: la aprobación, la versión y el proyecto los gestiona el flujo, no el cliente.
-      const datos = pick(req.body, DIAGRAM_EDITABLE);
+      const datos = pick(req.body, [...DIAGRAM_EDITABLE, 'version_esperada']);
       const actualizado = await this.actualizarDiagramaManualUseCase.ejecutar({
         id,
         datos
       });
       res.json(actualizado);
     } catch (err) {
-      res.status(400).json({ error: err.message });
+      res.status(err.status === 409 ? 409 : 400).json({ error: err.message });
     }
   }
 

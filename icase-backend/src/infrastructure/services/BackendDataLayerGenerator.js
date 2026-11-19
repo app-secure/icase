@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const ModuleService = require('../../core/services/ModuleService');
 
 const TEMPLATES = path.join(__dirname, '..', 'templates', 'data-layer');
@@ -7,7 +8,7 @@ const MIGRATION_ID = '0001_init';
 const AUTH_MIGRATION_ID = '0002_auth';
 const GENERIC_TABLE = 'icase_records';
 const RESERVED_TABLES = ['icase_users', 'schema_migrations'];
-const SYSTEM_COLUMNS = new Set(['id', 'extra', 'created_at', 'updated_at', 'capability']);
+const SYSTEM_COLUMNS = new Set(['id', 'extra', 'created_at', 'updated_at', 'capability', 'owner_id']);
 
 const identifier = (value, fallback) => {
   const text = String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -27,6 +28,8 @@ class BackendDataLayerGenerator {
    */
   build({ contract, database, policy = null, modules = null }) {
     const model = this._model(contract, database);
+    this._markIdentity(model, contract);
+    this._applyOwnership(model, policy);
     const rules = this._rules(contract.rules || [], model);
     this._applyUniques(model, contract.rules || []);
     const migration = database === 'mongodb' ? this._mongoMigration(model) : this._sqlMigration(model, database);
@@ -43,6 +46,23 @@ class BackendDataLayerGenerator {
       ...(seedMigration ? [seedMigration] : [])
     ];
     return { model, rules, migration, migrations, files: this._files(model, rules, migrations, database) };
+  }
+
+  /**
+   * La entidad de cuentas del dominio (Usuario) y las cuentas reales de la aplicación son lo mismo: se marca la tabla y sus columnas
+   * para que el almacén cree y mantenga en ella el perfil de cada cuenta con el mismo identificador. Así una referencia a Usuario
+   * (el mesero de una mesa) apunta a una cuenta real y la sesión puede filtrar por ella.
+   */
+  _markIdentity(model, contract) {
+    const operation = (contract.operations || []).find((item) => item.identity === 'usuarios' && item.entity);
+    const entity = operation && (contract.entities || []).find((item) => item.key === operation.entity || item.name === operation.entity);
+    const found = entity && Object.entries(model.tables).find(([, table]) => table.entity === entity.name);
+    if (!found) return;
+    const columns = found[1].columns.filter((column) => !column.internal);
+    const pick = (pattern) => columns.find((column) => pattern.test(column.name) && column.type === 'string')?.column;
+    const email = pick(/^(correo|email|mail)/i);
+    if (!email) return;
+    model.identity = { table: found[0], email, rol: pick(/^rol$/i) || null, nombre: pick(/^(nombre|name)$/i) || null };
   }
 
   _model(contract, database) {
@@ -71,7 +91,7 @@ class BackendDataLayerGenerator {
           const targetTable = byEntity.get(target);
           columns.push({ name: property, column, type: 'id', references: targetTable, enforced: reachable.has(this._key(contract, target)) });
         } else {
-          columns.push({ name: property, column, type: this._type(schema), ...(schema.enum ? { enum: schema.enum } : {}) });
+          columns.push({ name: property, column, type: this._type(schema), ...(schema.enum ? { enum: schema.enum } : {}), ...(schema['x-sensitive'] ? { sensitive: true } : {}) });
         }
       }
       tables[name] = {
@@ -86,7 +106,36 @@ class BackendDataLayerGenerator {
       operations[operation.key] = entity ? byEntity.get(entity.name) : GENERIC_TABLE;
     }
     if (Object.values(operations).includes(GENERIC_TABLE)) tables[GENERIC_TABLE] = { entity: null, generic: true, columns: [], references: [] };
-    return { database, tables, operations };
+    const associations = [];
+    const seen = new Set();
+    for (const relation of contract.relations || []) {
+      if (relation.cardinalidad !== 'muchos_a_muchos') continue;
+      const endpoints = [relation.from, relation.to].sort();
+      const key = JSON.stringify([endpoints, relation.label || '']);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const targets = endpoints.map((entity) => byEntity.get(entity));
+      if (targets.some((target) => !target)) throw new Error('Relación N:M con entidades inexistentes.');
+      const hash = crypto.createHash('sha256').update(key).digest('hex').slice(0, 12);
+      let name = `rel_${targets.join('_').slice(0, 30)}_${hash}`;
+      while (taken.has(name)) name += '_t';
+      taken.add(name);
+      // Roles estables incluso para autorrelaciones y nombres físicos truncados iguales.
+      const columns = targets.map((target, index) => ({ name: index === 0 ? 'source_id' : 'target_id', column: index === 0 ? 'source_id' : 'target_id', type: 'id', references: target, enforced: database !== 'mongodb', nullable: false }));
+      tables[name] = { entity: null, junction: true, columns, references: columns.map((column) => ({ column: column.column, table: column.references })),
+        unique: [{ columns: ['source_id', 'target_id'], types: ['id', 'id'] }] };
+      associations.push({ table: name, entities: endpoints, label: relation.label || null, fields: ['source_id', 'target_id'], endpoints_generated: false });
+    }
+    return { database, tables, operations, associations };
+  }
+
+  _applyOwnership(model, policy) {
+    const { policyUsesOwnership } = require('../templates/auth/ownership');
+    if (!policyUsesOwnership(policy)) return;
+    for (const table of Object.values(model.tables)) {
+      if (table.junction || table.columns.some((column) => column.column === 'owner_id')) continue;
+      table.columns.push({ name: '__owner', column: 'owner_id', type: 'id', internal: true });
+    }
   }
 
   /** Reglas confirmadas por tabla, sin metadatos de revisión: es lo único que el motor del backend necesita. */
@@ -140,13 +189,16 @@ class BackendDataLayerGenerator {
       const columns = [
         pg ? `${q('id')} BIGSERIAL PRIMARY KEY` : `${q('id')} BIGINT AUTO_INCREMENT PRIMARY KEY`,
         ...(table.generic ? [`${q('capability')} ${pg ? 'TEXT' : 'VARCHAR(191)'} NOT NULL`] : []),
-        ...table.columns.map((column) => `${q(column.column)} ${!pg && column.unique && column.type === 'string' ? 'VARCHAR(255)' : types[column.type]}`),
+        ...table.columns.map((column) => `${q(column.column)} ${!pg && column.unique && column.type === 'string' ? 'VARCHAR(255)' : types[column.type]}${column.nullable === false ? ' NOT NULL' : ''}`),
         pg ? `${q('extra')} JSONB NOT NULL DEFAULT '{}'::jsonb` : `${q('extra')} JSON NOT NULL`,
         pg ? `${q('created_at')} TIMESTAMPTZ NOT NULL DEFAULT now()` : `${q('created_at')} DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)`,
         pg ? `${q('updated_at')} TIMESTAMPTZ NOT NULL DEFAULT now()` : `${q('updated_at')} DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)`
       ];
       statements.push(`CREATE TABLE IF NOT EXISTS ${q(name)} (\n  ${columns.join(',\n  ')}\n)`);
       if (table.generic) statements.push(`CREATE INDEX ${pg ? 'IF NOT EXISTS ' : ''}${q(`idx_${name}_capability`)} ON ${q(name)} (${q('capability')})`);
+      if (table.columns.some((column) => column.column === 'owner_id')) {
+        statements.push(`CREATE INDEX ${pg ? 'IF NOT EXISTS ' : ''}${q(`idx_${name}_owner_id`.slice(0, 60))} ON ${q(name)} (${q('owner_id')})`);
+      }
       for (const column of table.columns.filter((item) => item.references)) {
         const index = `idx_${name}_${column.column}`.slice(0, 60);
         statements.push(`CREATE INDEX ${pg ? 'IF NOT EXISTS ' : ''}${q(index)} ON ${q(name)} (${q(column.column)})`);
@@ -195,8 +247,13 @@ class BackendDataLayerGenerator {
     const indexes = [];
     for (const [name, table] of Object.entries(model.tables)) {
       if (table.generic) indexes.push({ collection: name, keys: { capability: 1 } });
+      if (table.columns.some((column) => column.column === 'owner_id')) indexes.push({ collection: name, keys: { owner_id: 1 }, options: { name: 'idx_owner_id' } });
       for (const column of table.columns.filter((item) => item.references)) indexes.push({ collection: name, keys: { [column.column]: 1 } });
       for (const unique of table.unique || []) {
+        if (table.junction) {
+          indexes.push({ collection: name, keys: { source_id: 1, target_id: 1 }, options: { unique: true, name: 'uq_association_pair' } });
+          continue;
+        }
         // Índice parcial: los documentos sin el campo (o con null) no compiten por la unicidad, igual que NULL en SQL.
         const bson = { string: 'string', uuid: 'string', date: 'string', time: 'string', integer: 'number', number: 'number', boolean: 'bool', datetime: 'date' };
         indexes.push({
@@ -279,6 +336,7 @@ class BackendDataLayerGenerator {
     const pg = database === 'postgres';
     const row = { id: i };
     for (const column of table.columns) {
+      if (column.internal || column.column === 'owner_id') continue;
       if (column.references) {
         row[column.column] = i === 1 ? 1 : 2;
         continue;
@@ -291,8 +349,12 @@ class BackendDataLayerGenerator {
             row[column.column] = `'contacto${i}@ejemplo.com'`;
           } else if (column.column.includes('tel') || column.name.includes('tel')) {
             row[column.column] = `'+5199988877${i}'`;
-          } else {
+          } else if (/^(nombre|name|titulo)$/i.test(column.name)) {
             row[column.column] = `'${table.entity} ${i}'`;
+          } else {
+            // «Categoría 1», «Zona 2»: el nombre del campo, no el de la entidad, que sonaba a dato equivocado.
+            const label = String(column.name).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
+            row[column.column] = `'${label.charAt(0).toUpperCase() + label.slice(1)} ${i}'`;
           }
           break;
         case 'integer':
@@ -337,6 +399,7 @@ class BackendDataLayerGenerator {
       _id: `60000000000000000000000${i}`
     };
     for (const column of table.columns) {
+      if (column.internal || column.column === 'owner_id') continue;
       if (column.references) {
         doc[column.column] = `60000000000000000000000${i === 1 ? 1 : 2}`;
         continue;
@@ -400,11 +463,14 @@ class BackendDataLayerGenerator {
     return {
       store,
       shared: [
+        { ruta: 'backend/src/data/associations.js', lenguaje: 'javascript', contenido: read('associations.js') },
+        ...(database === 'mongodb' ? [{ ruta: 'backend/src/data/mongo-associations.js', lenguaje: 'javascript', contenido: read('mongo-associations.js') }] : []),
         { ruta: 'backend/src/data/store-support.js', lenguaje: 'javascript', contenido: read('store-support.js') },
         { ruta: 'backend/src/data/model.js', lenguaje: 'javascript', contenido: modulo(model) },
         { ruta: 'backend/src/data/migrations.js', lenguaje: 'javascript', contenido: modulo(migrations) },
         { ruta: 'backend/src/data/rules.js', lenguaje: 'javascript', contenido: modulo(rules) },
         { ruta: 'backend/src/data/rules-engine.js', lenguaje: 'javascript', contenido: read('rules-engine.js') },
+        { ruta: 'backend/src/data/calculations.js', lenguaje: 'javascript', contenido: read('calculations.js') },
         ...documentation
       ]
     };

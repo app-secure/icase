@@ -1,0 +1,61 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+__SAMPLES__
+const base=process.env.BASE_API_URL||'http://localhost:3000';
+const extensions=__EXTENSIONS__;
+test('módulos: adjuntos privados, agregados y exportación',async()=>{
+  const session=await makeApi(base,null)('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});
+  assert.equal(session.status,200);const token=session.data.token,api=makeApi(base,token);
+  const contract=(await api('/api/contract')).data;const operation=contract.operations[0];const cleanups=[];
+  try {
+    const record=await createValidRecord(api,contract.operations,operation,cleanups,0);
+    for(const rule of operation.rules.filter(rule=>rule.tipo==='calculo')) {
+      const evaluate=(node,data)=>typeof node==='number'?node:node.campo?data[node.campo]:node.op==='+'?evaluate(node.izquierda,data)+evaluate(node.derecha,data):node.op==='-'?evaluate(node.izquierda,data)-evaluate(node.derecha,data):node.op==='*'?evaluate(node.izquierda,data)*evaluate(node.derecha,data):evaluate(node.izquierda,data)/evaluate(node.derecha,data);
+      const stored=record.response.data.data||record.response.data;
+      const expected=Number(evaluate(rule.expresion,stored).toFixed(rule.decimales));
+      assert.equal(stored[rule.campo],expected,'El backend no calculó la fórmula aprobada');
+      const forged=await api(operation.collectionPath+'/'+record.id,'PATCH',{...record.body,[rule.campo]:expected+999});
+      assert.equal(forged.status,200);assert.equal((forged.data.data||forged.data)[rule.campo],expected,'Se aceptó una salida calculada proporcionada por el cliente');
+    }
+    if(extensions.includes('archivos_imagenes')) {
+      const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6HkAAAAAASUVORK5CYII=','base64');
+      const url=base+'/api/files/'+operation.key+'/'+record.id;
+      assert.equal((await fetch(url,{method:'POST',headers:{'Content-Type':'image/png'},body:bytes})).status,401);
+      const upload=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'image/png','X-File-Name':'prueba.png'},body:bytes});
+      assert.equal(upload.status,201);const file=await upload.json();
+      const download=await fetch(base+'/api/download/'+file.id,{headers:{Authorization:'Bearer '+token}});assert.equal(download.status,200);assert.deepEqual(Buffer.from(await download.arrayBuffer()),bytes);
+      assert.equal((await api('/api/download/'+file.id,'DELETE')).status,200);
+      assert.equal((await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'image/jpeg'},body:bytes})).status,400);
+    }
+    if(extensions.includes('reportes_calculos')) {
+      const report=await api('/api/reports/'+operation.key);assert.equal(report.status,200);assert.ok(report.data.count>=1);
+      for(const format of ['csv','pdf']) {
+        const response=await fetch(base+'/api/reports/'+operation.key+'?format='+format,{headers:{Authorization:'Bearer '+token}});assert.equal(response.status,200);
+        const text=await response.text();assert.ok(format==='pdf'?text.startsWith('%PDF'):text.length>0);
+      }
+    }
+  }finally{for(const cleanup of cleanups){try{await cleanup();}catch{}}}
+});
+test('SMTP real: recuperación, contraseña nueva, revocación y token de un uso',{skip:!extensions.includes('recuperacion_cuentas')||!process.env.TEST_SMTP_URL},async()=>{
+  const anonymous=makeApi(base,null);const login=await anonymous('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});assert.equal(login.status,200);
+  const admin=makeApi(base,login.data.token);const email='reset-'+Date.now()+'@example.test';const password='Verify-Reset-123!';let user;
+  try{
+    user=(await admin('/api/users','POST',{email,password,rol:'administrador'})).data;assert.ok(user.id);
+    const old=await anonymous('/api/auth/login','POST',{email,password});assert.equal(old.status,200);
+    const request=await anonymous('/api/auth/forgot-password','POST',{email});assert.equal(request.status,202);
+    const unknown=await anonymous('/api/auth/forgot-password','POST',{email:'missing-'+Date.now()+'@example.test'});assert.equal(unknown.status,202);assert.deepEqual(request.data,unknown.data);
+    let token;
+    for(let attempt=0;attempt<20&&!token;attempt++) {
+      const messages=await (await fetch(process.env.TEST_SMTP_URL+'/api/v1/messages')).json();
+      const mail=(messages.messages||[]).find(mail=>(mail.To||[]).some(recipient=>recipient.Address===email));
+      if(mail){const message=await (await fetch(process.env.TEST_SMTP_URL+'/api/v1/message/'+mail.ID)).json();token=/reset=([a-f0-9]{64})/.exec(message.Text||'')?.[1];}
+      if(!token)await new Promise(resolve=>setTimeout(resolve,250));
+    }
+    assert.ok(token,'No llegó el enlace a Mailpit');
+    assert.equal((await anonymous('/api/auth/reset-password','POST',{token,password:'New-Password-123!'})).status,200);
+    assert.equal((await anonymous('/api/auth/reset-password','POST',{token,password:'Other-Password-123!'})).status,400);
+    assert.equal((await makeApi(base,old.data.token)('/api/auth/me')).status,401);
+    assert.equal((await anonymous('/api/auth/login','POST',{email,password})).status,401);
+    assert.equal((await anonymous('/api/auth/login','POST',{email,password:'New-Password-123!'})).status,200);
+  }finally{if(user?.id)await admin('/api/users/'+user.id,'DELETE');}
+});

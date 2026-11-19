@@ -5,7 +5,7 @@ import { fetchGenerationReportApi } from '../services/api';
 const REPORT_FILE = 'backend/GENERATION-REPORT.json';
 
 const LEVELS = {
-  completo: { label: 'Completo', style: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  completo: { label: 'CRUD tipado generado', style: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
   solo_datos: { label: 'Solo datos', style: 'border-amber-200 bg-amber-50 text-amber-700' },
   no_soportado: { label: 'No soportado', style: 'border-red-200 bg-red-50 text-red-700' }
 };
@@ -40,6 +40,13 @@ export default function GenerationReport({ projectId, artifact }) {
     </div>
     {error && <p role="alert" className="mt-2 text-red-600">{error}</p>}
     {report && <div className="mt-3 space-y-3">
+      {report.cobertura_funcional && <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-slate-700">
+        <p className="font-semibold">Alcance funcional: {report.cobertura_funcional.estado} · entrega {report.cobertura_funcional.modo_entrega}</p>
+        <p className="mt-1">{report.cobertura_funcional.semantica}</p>
+        <p className="mt-1">{report.cobertura_funcional.ejecucion}</p>
+        {!report.cobertura_funcional.exportable && <p className="mt-1 font-medium text-amber-800">La modalidad de entrega aún no permite exportar. Revisa Módulos y regenera el backend.</p>}
+        <ul className="mt-2 list-disc pl-4">{report.cobertura_funcional.bloqueos.map((item) => <li key={item}>{item}</li>)}</ul>
+      </div>}
       <div className="flex flex-wrap gap-2">
         {Object.entries(LEVELS).map(([id, level]) => <span key={id} className={`rounded-full border px-2 py-0.5 font-semibold ${level.style}`}>{level.label}: {report.resumen?.[id] ?? 0}</span>)}
       </div>

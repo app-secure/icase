@@ -21,6 +21,7 @@ export function sanitizePlantUML(code) {
 
   let normalized = decodeHtmlEntities(code)
     .replace(/\\([<>])/g, "$1")
+    .replace(/\\"/g, '"')
     .replace(/\\\r?\n/g, "\n");
 
   // Algunos proveedores duplican el escape JSON y devuelven todo el diagrama

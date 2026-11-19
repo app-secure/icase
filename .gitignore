@@ -9,6 +9,8 @@ node_modules/
 **/.env
 **/.env.*
 !**/.env.example
+env
+**/env
 
 # Archivos subidos en tiempo de ejecución (audios, PDFs procesados)
 icase-backend/uploads/*
@@ -38,6 +40,9 @@ Thumbs.db
 
 # Reportes de pruebas y cobertura
 coverage/
+
+# Proyecto de agente local, fuera del repositorio
+/agente-proyectos/
 
 # Sitio documental y cachés Python
 /site/

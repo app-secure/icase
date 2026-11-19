@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { authMiddleware } = require('../infrastructure/middlewares/authMiddleware');
+const { activeUploads } = require('../infrastructure/services/UploadCleanupService');
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -23,7 +24,14 @@ const storage = multer.diskStorage({
     const ext = path.extname(safeName) || '';
     const base = path.basename(safeName, ext).replace(/[^a-zA-Z0-9_\-\.]/g, '_');
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, `${uniqueSuffix}-${base}${ext}`);
+    const filename = `${uniqueSuffix}-${base}${ext}`;
+    const target = path.join(uploadDir, filename);
+    activeUploads.add(target);
+    // Proteger incluso subidas/transcripciones largas o conexiones abortadas.
+    req.once('aborted', () => activeUploads.delete(target));
+    req.res.once('finish', () => activeUploads.delete(target));
+    req.res.once('close', () => activeUploads.delete(target));
+    cb(null, filename);
   }
 });
 

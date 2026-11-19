@@ -11,14 +11,18 @@ El explorador requiere JavaScript e Internet para cargar Swagger UI desde el CDN
 
 ## Autenticación real
 
-`POST /auth/registro` recibe nombre, apellido, correo, celular y password. `POST /auth/login` recibe correo y password, y devuelve `token` y `usuario`. Los tokens actuales expiran a los siete días. Envía:
+`POST /auth/registro` recibe nombre, apellido, correo, celular y password. `POST /auth/login` recibe correo y password, y devuelve `token` y `usuario`. Los tokens expiran por defecto a las 12 horas (`JWT_EXPIRES_IN`). Envía:
 
 ```http
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-`GET /auth/perfil` y todas las rutas de codificación requieren JWT. Las rutas generales de proyectos usan autenticación **opcional**; fuentes, requisitos, diagramas y mockups no tienen middleware obligatorio en los routers revisados. Esto no acredita aislamiento de autorización entre usuarios. Es una limitación que debe corregirse antes de exponer datos privados en producción.
+Las rutas de proyectos, fuentes, requisitos, diagramas, mockups y codificación requieren JWT y verifican la pertenencia del recurso al usuario. Los recursos ajenos responden 404. Salud, configuración de acceso, registro e inicio de sesión son públicos.
+
+`GET /auth/config` informa `registro_publico`. `AUTH_REGISTRATION_ENABLED=false` cierra el registro (403), sin impedir el acceso de cuentas existentes. Sin esta variable, producción lo cierra y desarrollo lo permite. Para crear las cuentas iniciales, habilitar temporalmente el registro y deshabilitarlo después; no existe aún un panel de invitaciones.
+
+`POST /auth/logout` requiere el token actual y lo revoca en MongoDB antes de confirmar el cierre. Se almacena su hash SHA-256, no el token, con eliminación TTL al caducar. Otras sesiones permanecen abiertas. La revocación persiste entre reinicios; si no se puede consultar, las rutas protegidas responden 503 sin conceder acceso. La interfaz conserva la sesión para reintentar si falla el cierre. Los errores 500/503 devuelven mensajes genéricos y un `request_id`, también disponible en la cabecera `X-Request-ID`, para correlacionarlos con los registros del servidor.
 
 Ejemplo de inicio de sesión, con datos ficticios:
 

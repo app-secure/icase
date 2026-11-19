@@ -1,6 +1,6 @@
 // Almacén en memoria con la misma interfaz que los almacenes generados.
 // Se copia como `src/record.store.js` de un backend generado para probarlo sin base de datos.
-const { HttpError, split, viewOf, toRecord, tableFor } = require('./data/store-support');
+const { HttpError, split, viewOf, toRecord, tableFor, matchesOwner, assignOwner, ownerWhere } = require('./data/store-support');
 const model = require('./data/model');
 const rules = require('./data/rules-engine');
 
@@ -25,38 +25,63 @@ class RecordStore {
     return (table.references || []).some((ref) => values[ref.column] != null && !this._rows(ref.table).some((row) => String(row.id) === String(values[ref.column])));
   }
 
-  async list(operation) {
-    const { name, table } = tableFor(model, operation);
-    return this._rows(name).filter((row) => !table.generic || row.capability === operation).map((row) => toRecord(table, operation, row));
+  _owned(table, values, scope) {
+    const owner = ownerWhere(table, scope);
+    if (!owner) return;
+    for (const reference of table.references || []) {
+      const id = values[reference.column];
+      if (id == null) continue;
+      const target = model.tables[reference.table];
+      const row = this._rows(reference.table).find((item) => String(item.id) === String(id));
+      if (!target || !target.columns.some((column) => column.column === 'owner_id') || !row || row.owner_id == null || String(row.owner_id) !== owner) {
+        throw new HttpError(409, 'El registro referencia un dato ajeno.');
+      }
+    }
   }
 
-  async create(operation, body) {
+  async list(operation, query = {}, scope = null) {
+    const { name, table } = tableFor(model, operation);
+    const records = this._rows(name).filter((row) => (!table.generic || row.capability === operation) && matchesOwner(row, table, scope)).map((row) => toRecord(table, operation, row));
+    return records;
+  }
+
+  async getRecord(operation, id, scope = null) {
+    const { name, table } = tableFor(model, operation);
+    const row = this._rows(name).find((item) => String(item.id) === String(id) && (!table.generic || item.capability === operation) && matchesOwner(item, table, scope));
+    return row ? toRecord(table, operation, row) : null;
+  }
+
+  async create(operation, body, scope = null) {
     const { name, table } = tableFor(model, operation);
     const { values, extra } = split(table, rules.prepare(name, body));
+    assignOwner(table, values, extra, scope);
     rules.check(name, 'create', viewOf(table, values, extra), null);
     if (this._duplicated(table, name, values)) throw new HttpError(409, 'Ya existe un registro con esos valores.');
     if (this._dangling(table, values)) throw new HttpError(409, 'El registro referencia un dato inexistente.');
+    this._owned(table, values, scope);
     const row = { id: this.sequence++, ...(table.generic ? { capability: operation } : {}), ...values, extra, created_at: new Date(), updated_at: new Date() };
     this._rows(name).push(row);
     return toRecord(table, operation, row);
   }
 
-  async update(operation, id, body) {
+  async update(operation, id, body, scope = null) {
     const { name, table } = tableFor(model, operation);
-    const row = this._rows(name).find((item) => String(item.id) === String(id) && (!table.generic || item.capability === operation));
+    const row = this._rows(name).find((item) => String(item.id) === String(id) && (!table.generic || item.capability === operation) && matchesOwner(item, table, scope));
     if (!row) return null;
     const previous = toRecord(table, operation, row).data;
     const { values, extra } = split(table, body);
+    assignOwner(table, values, extra, null);
     rules.check(name, 'update', { ...previous, ...viewOf(table, values, extra) }, previous);
     if (this._duplicated(table, name, values, row.id)) throw new HttpError(409, 'Ya existe un registro con esos valores.');
+    this._owned(table, values, scope);
     Object.assign(row, values, { extra: { ...row.extra, ...extra }, updated_at: new Date() });
     return toRecord(table, operation, row);
   }
 
-  async remove(operation, id) {
+  async remove(operation, id, scope = null) {
     const { name, table } = tableFor(model, operation);
     const list = this._rows(name);
-    const row = list.find((item) => String(item.id) === String(id) && (!table.generic || item.capability === operation));
+    const row = list.find((item) => String(item.id) === String(id) && (!table.generic || item.capability === operation) && matchesOwner(item, table, scope));
     if (!row) return false;
     const referenced = Object.entries(model.tables).some(([other, definition]) => (definition.references || []).some((ref) => ref.table === name
       && this._rows(other).some((child) => String(child[ref.column]) === String(row.id))));

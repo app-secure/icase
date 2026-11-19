@@ -39,6 +39,15 @@ try {
     if (secured) {
       await exerciseAccess(access, CONFIG.operations, operation, CONFIG.auth.operaciones[operation.key] || {});
       console.log('Permisos por rol correctos para ' + operation.collectionPath + ` (${roles.length} roles + administrador + anónimo)`);
+      await exerciseOwnership(access, CONFIG.operations, operation, CONFIG.auth.operaciones[operation.key] || {}, { base, associations: CONFIG.associations || [], auth: CONFIG.auth });
+    }
+  }
+
+  // Operaciones de negocio de la especificación aprobada: se ejecutan contra el backend en marcha.
+  for (const operation of CONFIG.operations) {
+    for (const action of operation.actions || []) {
+      await exerciseAction(api, CONFIG.operations, action);
+      console.log('Operación de negocio correcta: ' + action.name + ' (' + action.type + ', ' + operation.id + ')');
     }
   }
 
@@ -49,12 +58,20 @@ try {
     console.log('Sin autenticación (decisión aprobada): la API es pública');
   }
 
+  for (const association of CONFIG.associations || []) {
+    await exerciseAssociation(api, CONFIG.operations, association, access, CONFIG.auth);
+    console.log('ICASE_ASSOCIATION_OK:' + association.table);
+  }
+
   // Integridad referencial: las claves foráneas declaradas deben respetarse en la base de datos elegida.
   for (const table of CONFIG.tables.filter((item) => item.references.length)) {
     for (const reference of table.references) {
       const child = CONFIG.operations.find((item) => CONFIG.map[item.key] === table.name);
       const parent = CONFIG.operations.find((item) => CONFIG.map[item.key] === reference.table);
       if (!child || !parent) continue;
+      // Solo se ejercen los métodos que cada operación declara: una hija o un padre reducidos no se crean ni se borran.
+      const allows = (operation, ...methods) => !operation.methods || methods.every((method) => operation.methods.includes(method));
+      if (!allows(child, 'POST', 'DELETE') || !allows(parent, 'POST', 'DELETE')) continue;
       const salt = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       const childSample = samplePayload(child.schema, child.rules, salt());
       const parentSample = samplePayload(parent.schema, parent.rules, salt());

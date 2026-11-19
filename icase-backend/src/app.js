@@ -3,6 +3,11 @@ const cors = require('cors');
 const { corsOptions, securityHeaders, jsonLimit } = require('./infrastructure/security/httpSecurity');
 const buildProjectAccess = require('./infrastructure/security/projectAccess');
 const { getJwtSecret } = require('./infrastructure/security/jwtSecret');
+const responseErrors = require('./infrastructure/security/responseErrors');
+const RequirementGenerationJobs = require('./core/services/RequirementGenerationJobs');
+const ProjectMutationLease = require('./infrastructure/services/ProjectMutationLease');
+const SessionRevocationService = require('./core/services/SessionRevocationService');
+const MongoSesionRevocadaRepository = require('./interface-adapters/repositories/MongoSesionRevocadaRepository');
 
 // Repositorios
 const MongoProyectoRepository = require('./interface-adapters/repositories/MongoProyectoRepository');
@@ -28,6 +33,8 @@ const FinalProjectAuditService = require('./infrastructure/services/FinalProject
 const RequirementChangeService = require('./core/services/RequirementChangeService');
 const CodePlanningProposalService = require('./core/services/CodePlanningProposalService');
 const BusinessRuleInferenceService = require('./infrastructure/services/BusinessRuleInferenceService');
+const ApplicationSpecService = require('./infrastructure/services/ApplicationSpecService');
+const LocalRunService = require('./infrastructure/services/LocalRunService');
 const BackendScaffoldGenerator = require('./infrastructure/services/BackendScaffoldGenerator');
 const FrontendScaffoldGenerator = require('./infrastructure/services/FrontendScaffoldGenerator');
 const TestSuiteGenerator = require('./infrastructure/services/TestSuiteGenerator');
@@ -80,6 +87,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   app.disable('x-powered-by');
   if (env.TRUST_PROXY) app.set('trust proxy', /^\d+$/.test(env.TRUST_PROXY) ? Number(env.TRUST_PROXY) : env.TRUST_PROXY);
   app.use(securityHeaders);
+  app.use(responseErrors);
   app.use(cors(corsOptions(env)));
   app.use(express.json({ limit: jsonLimit(env) }));
   app.use(express.urlencoded({ extended: true, limit: jsonLimit(env) }));
@@ -87,6 +95,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   // Inyección de Dependencias
   const proyectoRepo = repositories.proyecto || new MongoProyectoRepository();
   const usuarioRepo = repositories.usuario || new MongoUsuarioRepository();
+  app.locals.sessionRevocation = new SessionRevocationService(repositories.sesionRevocada || new MongoSesionRevocadaRepository());
+  app.locals.jwtSecret = getJwtSecret(env);
   const requerimientoRepo = repositories.requerimiento || new MongoRequerimientoRepository();
   const diagramaRepo = repositories.diagrama || new MongoDiagramaRepository();
   const estandarRepo = repositories.estandar || new MongoEstandarRepository();
@@ -96,16 +106,19 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const trabajoGeneracionRepo = repositories.trabajoGeneracion || new MongoTrabajoGeneracionRepository();
   const planCodificacionRepo = repositories.planCodificacion || new MongoPlanCodificacionRepository();
   const artefactoGeneradoRepo = repositories.artefactoGenerado || new MongoArtefactoGeneradoRepository();
+  const resilientRequirements = env.REQUIREMENTS_RESILIENT_ENABLED === 'true';
+  const mutationLease = resilientRequirements ? (repositories.projectMutationLease || new ProjectMutationLease()) : null;
   const access = buildProjectAccess({
     proyectoRepository: proyectoRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
     fuenteRepository: fuenteRepo,
     trabajoGeneracionRepository: trabajoGeneracionRepo,
-    artefactoRepository: artefactoGeneradoRepo
+    artefactoRepository: artefactoGeneradoRepo,
+    mutationLease
   });
 
-  const modelosIaService = new ModelosIaService();
+  const modelosIaService = new ModelosIaService({ env });
   const plantumlValidator = new PlantUMLValidatorService();
   const markdownCompiler = new MarkdownCompilerService();
   const fileIngestionService = new FileIngestionService();
@@ -113,7 +126,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const mockupTraceabilityService = new MockupTraceabilityService();
   const finalProjectAuditService = new FinalProjectAuditService({ mockupTraceabilityService });
   const codePlanningProposalService = new CodePlanningProposalService({
-    ruleInferenceService: new BusinessRuleInferenceService({ modelosIa: modelosIaService })
+    ruleInferenceService: new BusinessRuleInferenceService({ modelosIa: modelosIaService }),
+    specService: new ApplicationSpecService({ modelosIa: modelosIaService })
   });
   const backendScaffoldGenerator = new BackendScaffoldGenerator();
   const frontendScaffoldGenerator = new FrontendScaffoldGenerator();
@@ -122,10 +136,13 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const ciCdPipelineGenerator = new CiCdPipelineGenerator();
   const deliveryPackageGenerator = new DeliveryPackageGenerator();
   const zipArchiveService = new ZipArchiveService();
+  const localRunService = new LocalRunService();
   const requirementChangeService = new RequirementChangeService({
     proyectoRepository: proyectoRepo,
     diagramaRepository: diagramaRepo,
-    disenoRepository: disenoRepo
+    disenoRepository: disenoRepo,
+    planCodificacionRepository: planCodificacionRepo,
+    artefactoRepository: artefactoGeneradoRepo
   });
 
   const crearProyectoUseCase = new CrearProyecto({ proyectoRepository: proyectoRepo });
@@ -137,7 +154,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     estandarRepository: estandarRepo,
     fuenteRepository: fuenteRepo,
     plantumlValidatorService: plantumlValidator,
-    aiOrchestratorService: modelosIaService
+    aiOrchestratorService: modelosIaService,
+    requirementChangeService
   });
   const actualizarRequerimientoManualUseCase = new ActualizarRequerimientoManual({
     requerimientoRepository: requerimientoRepo
@@ -167,13 +185,17 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     mockupIaService
   });
   const actualizarMockupManualUseCase = new ActualizarMockupManual({
-    disenoRepository: disenoRepo
+    disenoRepository: disenoRepo,
+    requerimientoRepository: requerimientoRepo,
+    diagramaRepository: diagramaRepo
   });
   const gestionarPlanCodificacion = new GestionarPlanCodificacion({
     proyectoRepository: proyectoRepo,
     planCodificacionRepository: planCodificacionRepo,
     requerimientoRepository: requerimientoRepo,
     diagramaRepository: diagramaRepo,
+    disenoRepository: disenoRepo,
+    artefactoRepository: artefactoGeneradoRepo,
     proposalService: codePlanningProposalService
   });
   const gestionarArtefactosCodigo = new GestionarArtefactosCodigo({
@@ -188,7 +210,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     testGenerator: testSuiteGenerator,
     infrastructureGenerator,
     pipelineGenerator: ciCdPipelineGenerator,
-    deliveryGenerator: deliveryPackageGenerator
+    deliveryGenerator: deliveryPackageGenerator,
+    localRunService
   });
 
   const proyectoController = new ProyectoController({
@@ -203,8 +226,22 @@ function createApp({ repositories = {}, env = process.env } = {}) {
     disenoRepository: disenoRepo,
     markdownCompilerService: markdownCompiler,
     trabajoGeneracionRepository: trabajoGeneracionRepo,
-    finalProjectAuditService
+    finalProjectAuditService,
+    requirementChangeService
   });
+  const InitialAnalysisService = require('./core/services/InitialAnalysisService');
+  const MongoAnalisisInicialRepository = require('./interface-adapters/repositories/MongoAnalisisInicialRepository');
+  const initialAnalysis = new InitialAnalysisService({ projects: proyectoRepo, sources: fuenteRepo, requirements: requerimientoRepo,
+    versions: repositories.analisisInicial || new MongoAnalisisInicialRepository(), ai: modelosIaService, jobs: trabajoGeneracionRepo, changes: requirementChangeService });
+  proyectoController.initialAnalysis = initialAnalysis;
+  proyectoController.legacyRequirementJobsEnabled = resilientRequirements;
+  procesarConIAUseCase.initialAnalysis = initialAnalysis;
+  aprobarFaseUseCase.initialAnalysis = initialAnalysis;
+  proyectoController.requirementJobs = new RequirementGenerationJobs({
+    jobs: trabajoGeneracionRepo, projects: proyectoRepo, requirements: requerimientoRepo, sources: fuenteRepo,
+    execute: payload => procesarConIAUseCase.ejecutar(payload), mutationLease: mutationLease || repositories.projectMutationLease || new ProjectMutationLease()
+  });
+  proyectoController.requirementJobs.initialAnalysis = initialAnalysis;
 
   const requerimientoController = new RequerimientoController({
     actualizarRequerimientoManualUseCase,
@@ -228,6 +265,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
 
   const authController = new AuthController({
     usuarioRepository: usuarioRepo,
+    sessionService: app.locals.sessionRevocation,
     env
   });
 
@@ -256,6 +294,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
 
   // Montaje de rutas
   app.use('/auth', buildAuthRoutes(authController));
+  const projectTransfer = repositories.projectTransfer || new (require('./infrastructure/services/ProjectTransferService'))({});
+  app.use('/proyectos', require('./routes/projectTransferRoutes')(projectTransfer, access));
   app.use('/proyectos', buildProyectoRoutes(proyectoController, access));
   app.use('/proyectos', buildCodificacionRoutes(codificacionController, access));
   app.use('/requerimientos', buildRequerimientoRoutes(requerimientoController, access));
@@ -277,8 +317,15 @@ function createApp({ repositories = {}, env = process.env } = {}) {
 
   return {
     app,
+    gestionarArtefactosCodigo,
     estandarRepo,
-    reanudarTrabajosDiagrama: () => proyectoController.reanudarTrabajosDiagrama()
+    fuenteRepo,
+    recuperarImportaciones: () => projectTransfer.recover(),
+    reanudarTrabajosDiagrama: async () => {
+      if (resilientRequirements) await trabajoGeneracionRepo.requirementsRecover();
+      if (typeof trabajoGeneracionRepo.finalizarVerificacionesExpiradas === 'function') await trabajoGeneracionRepo.finalizarVerificacionesExpiradas();
+      return proyectoController.reanudarTrabajosDiagrama();
+    }
   };
 }
 

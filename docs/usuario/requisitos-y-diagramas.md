@@ -2,7 +2,31 @@
 
 ## Revisar los requisitos
 
-Solicita el análisis después de revisar las fuentes. La herramienta propone requisitos funcionales (RF: comportamientos del sistema) y no funcionales (RNF: restricciones y atributos de calidad).
+### Responder dudas del análisis inicial
+
+El modal utiliza dos pasos: escribe la respuesta y pulsa **Proponer cómo incorporar la respuesta**. Después revisa los elementos propuestos, sus categorías, estado, objetivos y evidencias. Una respuesta puede convertirse en varios elementos; no es necesario mezclar una tecnología con una cualidad. Solo se guardará después de tu confirmación. Si falla la IA, el texto no se pierde: puedes reanudar o **Añadir elemento manual**, incluyendo una cita literal de tu respuesta.
+
+Para comprobar un borrador ya guardado utiliza **Revisar calidad del análisis**. No vuelve a extraer las fuentes ni modifica el borrador automáticamente: muestra una propuesta que puedes comparar y aplicar. Si el análisis está aprobado, reábrelo primero. Un estado de revisión parcial no significa cero problemas; las señales orientativas tampoco prueban que haya que dividir una necesidad.
+
+En **Preguntas y aclaraciones**, pulsa **Responder pregunta**. Escribe el acuerdo, indica si corresponde a una decisión, cualidad (RNF), capacidad (RF), regla o restricción, y confirma que puede utilizarse para generar requisitos. Opcionalmente relaciona elementos existentes; estos vínculos no sustituyen su contenido. Para RF/RNF puedes complementar un objetivo de la misma categoría o crear uno nuevo.
+
+**Guardar respuesta y resolver duda** registra el texto como insumo adicional explícito, conserva la pregunta original y crea un elemento vinculado con evidencia en una nueva versión. No consume llamadas de IA ni aprueba automáticamente el análisis. Las respuestas quedan visibles como **Respondida** y no siguen contando como dudas abiertas. Si aún no existe un acuerdo, cancela y conserva la pregunta pendiente. Guarda antes cualquier otra edición para habilitar la respuesta.
+
+En proyectos nuevos primero se muestra **Análisis inicial**. Esta pantalla contiene contexto, problema, objetivos, alcance, actores, necesidades, cualidades, reglas, restricciones, decisiones y preguntas, con sus evidencias. Todavía no son requisitos formales. Revisa especialmente las necesidades que agrupan resultados independientes y las funciones que podrían estar ocultas en una regla de permisos.
+
+Puedes editar, reclasificar, separar resultados o fusionar elementos de la misma categoría. Al separar se conserva el ID original y se asigna uno nuevo al resultado adicional; al fusionar se conservan evidencias y se actualizan relaciones. Escribe una justificación. Para añadir obligaciones no presentes en las fuentes, registra su texto en **Insumo adicional explícito** y úsalo como evidencia; las etiquetas y descripciones de fuentes no son obligaciones.
+
+La corrección puntual con IA requiere indicar los IDs y una instrucción. La propuesta no se aplica sola: compara el antes y después y acéptala expresamente. Los elementos no seleccionados se conservan.
+
+Marca que revisaste las advertencias y pulsa **Aprobar análisis y generar requisitos**. Las preguntas abiertas o métricas desconocidas no se convierten en acuerdos. Las obligaciones con evidencia inválida o errores estructurales impiden aprobar. Esta aprobación inicial **no habilita diagramas**: después debes revisar y aprobar los RF/RNF redactados.
+
+Si falla el encolado, verás **Análisis aprobado; generación pendiente**: reintenta sin repetir la extracción. Si se interrumpe un trabajo, usa **Reanudar pendientes**. Cada etapa conserva su propio progreso y métricas.
+
+La navegación **Fuentes / Análisis inicial / Requisitos** solo cambia de pantalla. Volver o recargar no consume IA ni invalida aprobaciones. Para modificar un análisis aprobado usa **Revisar análisis inicial**: crea un borrador y conserva la versión anterior. Al aprobar cambios se muestra el impacto; actualizar requisitos existentes requiere una confirmación explícita y conserva versiones anteriores y requisitos no afectados. Cambiar solo metadatos no revoca una aprobación sustentada en contenido original sin cambios.
+
+Los proyectos anteriores mantienen su flujo. La pantalla muestra su análisis como heredado, sin atribuirle una aprobación inicial inexistente. Adoptar el flujo separado requiere confirmación y no regenera ni borra información automáticamente.
+
+La herramienta propone requisitos funcionales (RF: comportamientos del sistema) y no funcionales (RNF: restricciones y atributos de calidad).
 
 Para cada requisito revisa:
 

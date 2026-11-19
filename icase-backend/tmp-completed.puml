@@ -1,0 +1,377 @@
+@startuml
+top to bottom direction
+skinparam nodesep 50
+skinparam ranksep 60
+skinparam classAttributeIconSize 0
+
+package "Autenticacion y Usuarios" {
+  class AuthController <<Controller>> {
+    +login(dto: LoginDTO): Promise<AuthResponseDTO>
+  }
+  class GestionarUsuariosController <<Controller>> {
+    +crearUsuario(dto: CrearUsuarioDTO): Promise<UsuarioResponseDTO>
+    +listarUsuarios(): Promise<UsuarioResponseDTO[]>
+  }
+  class AutenticarAccesoUseCase <<UseCase>> {
+    +ejecutar(dto: LoginDTO): Promise<AuthResponseDTO>
+  }
+  class GestionarUsuariosUseCase <<UseCase>> {
+    +registrarUsuario(dto: CrearUsuarioDTO): Promise<Usuario>
+  }
+  interface IUsuarioRepository <<Repository>> {
+    +buscarPorCorreo(correo: String): Promise<Usuario>
+    +guardar(u: Usuario): Promise<void>
+  }
+  class PostgresUsuarioRepository <<Repository>> {
+    +buscarPorCorreo(correo: String): Promise<Usuario>
+    +guardar(u: Usuario): Promise<void>
+  }
+  class LoginDTO <<DTO>> {
+    +String correo
+    +String password
+  }
+  class AuthResponseDTO <<DTO>> {
+    +String token
+    +String rol
+  }
+  class CrearUsuarioDTO <<DTO>> {
+    +String nombre
+    +String correo
+    +String password
+    +String rol
+  }
+  class UsuarioResponseDTO <<DTO>> {
+    +String id
+    +String nombre
+    +String correo
+    +String rol
+  }
+  note top of AuthController : Origen: RF-12
+  note top of GestionarUsuariosController : Origen: RF-14
+}
+
+package "Menu y Disponibilidad" {
+  class MenuController <<Controller>> {
+    +obtenerMenu(): Promise<MenuResponseDTO>
+    +marcarAgotado(platoId: String): Promise<void>
+  }
+  class VisualizarMenuUseCase <<UseCase>> {
+    +ejecutar(): Promise<Menu>
+  }
+  class MarcarPlatoAgotadoUseCase <<UseCase>> {
+    +ejecutar(platoId: String): Promise<void>
+  }
+  interface IMenuRepository <<Repository>> {
+    +obtenerActual(): Promise<Menu>
+    +actualizarPlato(p: Plato): Promise<void>
+  }
+  class PostgresMenuRepository <<Repository>> {
+    +obtenerActual(): Promise<Menu>
+    +actualizarPlato(p: Plato): Promise<void>
+  }
+  class MenuResponseDTO <<DTO>> {
+    +String id
+    +List<PlatoResponseDTO> platos
+  }
+  class PlatoResponseDTO <<DTO>> {
+    +String id
+    +String nombre
+    +float precio
+    +boolean disponible
+  }
+  note top of MenuController : Origen: RF-01, RF-07, RNF-01
+}
+
+package "Reservas y Mesas" {
+  class ReservaController <<Controller>> {
+    +crearReserva(dto: CrearReservaDTO): Promise<ReservaResponseDTO>
+    +validarQR(dto: ValidarQRDTO): Promise<boolean>
+    +reasignarMesa(dto: ReasignarMesaDTO): Promise<void>
+  }
+  class CrearReservaUseCase <<UseCase>> {
+    +ejecutar(dto: CrearReservaDTO): Promise<Reserva>
+  }
+  class ValidarReservaQRUseCase <<UseCase>> {
+    +ejecutar(codigoQR: String): Promise<boolean>
+  }
+  class ReasignarMesaUseCase <<UseCase>> {
+    +ejecutar(mesaId: String, nuevoMeseroId: String): Promise<void>
+  }
+  interface IReservaRepository <<Repository>> {
+    +guardar(r: Reserva): Promise<void>
+    +buscarPorQR(qr: String): Promise<Reserva>
+  }
+  class PostgresReservaRepository <<Repository>> {
+    +guardar(r: Reserva): Promise<void>
+    +buscarPorQR(qr: String): Promise<Reserva>
+  }
+  class CrearReservaDTO <<DTO>> {
+    +String clienteId
+    +DateTime fechaHora
+    +String tipo
+    +String itemId
+  }
+  class ReservaResponseDTO <<DTO>> {
+    +String id
+    +String codigoQR
+    +String estado
+  }
+  class ValidarQRDTO <<DTO>> {
+    +String codigoQR
+  }
+  class ReasignarMesaDTO <<DTO>> {
+    +String mesaId
+    +String nuevoMeseroId
+  }
+  note top of ReservaController : Origen: RF-02, RF-05, RF-11
+}
+
+package "Pedidos y KDS" {
+  class PedidoController <<Controller>> {
+    +crearPedido(dto: CrearPedidoDTO): Promise<PedidoResponseDTO>
+    +obtenerComandas(): Promise<ComandaResponseDTO[]>
+  }
+  class TomarPedidoUseCase <<UseCase>> {
+    +ejecutar(dto: CrearPedidoDTO): Promise<Pedido>
+  }
+  class VisualizarComandasUseCase <<UseCase>> {
+    +ejecutar(): Promise<Comanda[]>
+  }
+  interface IPedidoRepository <<Repository>> {
+    +guardar(p: Pedido): Promise<void>
+    +listarComandasPendientes(): Promise<Comanda[]>
+  }
+  class PostgresPedidoRepository <<Repository>> {
+    +guardar(p: Pedido): Promise<void>
+    +listarComandasPendientes(): Promise<Comanda[]>
+  }
+  class CrearPedidoDTO <<DTO>> {
+    +String mesaId
+    +String meseroId
+    +List<String> platoIds
+  }
+  class PedidoResponseDTO <<DTO>> {
+    +String id
+    +float total
+    +String estado
+  }
+  class ComandaResponseDTO <<DTO>> {
+    +String id
+    +DateTime tiempoTranscurrido
+    +String estado
+  }
+  note top of PedidoController : Origen: RF-04, RF-06, RNF-03
+}
+
+package "Pagos y Caja" {
+  class CajaController <<Controller>> {
+    +procesarCobro(dto: ProcesarCobroDTO): Promise<VentaResponseDTO>
+    +comprarPaquete(dto: ComprarPaqueteDTO): Promise<void>
+    +cerrarCaja(cajaId: String): Promise<boolean>
+  }
+  class ProcesarCobroUseCase <<UseCase>> {
+    +ejecutar(dto: ProcesarCobroDTO): Promise<Venta>
+  }
+  class ComprarPaqueteUseCase <<UseCase>> {
+    +ejecutar(dto: ComprarPaqueteDTO): Promise<PaquetePrepagado>
+  }
+  class CerrarCajaUseCase <<UseCase>> {
+    +ejecutar(cajaId: String): Promise<boolean>
+  }
+  interface IVentaRepository <<Repository>> {
+    +guardarVenta(v: Venta): Promise<void>
+  }
+  class PostgresVentaRepository <<Repository>> {
+    +guardarVenta(v: Venta): Promise<void>
+  }
+  class ProcesarCobroDTO <<DTO>> {
+    +String pedidoId
+    +String metodoPago
+    +String paqueteId
+  }
+  class VentaResponseDTO <<DTO>> {
+    +String id
+    +float total
+    +String metodoPago
+  }
+  class ComprarPaqueteDTO <<DTO>> {
+    +String clienteId
+    +String descripcion
+    +float saldo
+  }
+  note top of CajaController : Origen: RF-03, RF-08, RF-10
+}
+
+package "Administracion y Persistencia" {
+  class AdminController <<Controller>> {
+    +revisarVentas(dto: ReporteVentasDTO): Promise<VentaResponseDTO[]>
+    +modificarPrecio(dto: ModificarPrecioDTO): Promise<void>
+    +ejecutarRespaldo(): Promise<RespaldoResponseDTO>
+  }
+  class ReportesUseCase <<UseCase>> {
+    +obtenerVentas(dto: ReporteVentasDTO): Promise<Venta[]>
+  }
+  class GestionarRespaldoUseCase <<UseCase>> {
+    +ejecutar(): Promise<RespaldoBaseDatos>
+  }
+  interface IRespaldoRepository <<Repository>> {
+    +guardarRespaldo(r: RespaldoBaseDatos): Promise<void>
+  }
+  class PostgresRespaldoRepository <<Repository>> {
+    +guardarRespaldo(r: RespaldoBaseDatos): Promise<void>
+  }
+  class ReporteVentasDTO <<DTO>> {
+    +DateTime inicio
+    +DateTime fin
+  }
+  class ModificarPrecioDTO <<DTO>> {
+    +String platoId
+    +float nuevoPrecio
+  }
+  class RespaldoResponseDTO <<DTO>> {
+    +String id
+    +String rutaArchivo
+    +String estado
+  }
+  note top of AdminController : Origen: RF-09, RF-13
+}
+
+package "Dominio" {
+  class Usuario {
+    +String id
+    +String nombre
+    +String correo
+    +String password
+    +String rol
+    +autenticar(): boolean
+  }
+  class Menu {
+    +String id
+    +DateTime ultimaActualizacion
+    +actualizarDisponibilidad(): void
+  }
+  class Plato {
+    +String id
+    +String nombre
+    +float precio
+    +boolean disponible
+    +validarDisponibilidad(): boolean
+  }
+  class Mesa {
+    +String id
+    +int numero
+    +String estado
+    +int capacidad
+  }
+  class Reserva {
+    +String id
+    +DateTime fechaHora
+    +String codigoQR
+    +String estado
+    +validarQR(): boolean
+  }
+  class Pedido {
+    +String id
+    +DateTime fechaHora
+    +String estado
+    +calcularTotal(): float
+  }
+  class Comanda {
+    +String id
+    +DateTime tiempoTranscurrido
+    +String estado
+    +actualizarEstado(): void
+  }
+  class PaquetePrepagado {
+    +String id
+    +String descripcion
+    +float saldo
+    +verificarSaldo(): boolean
+  }
+  class Venta {
+    +String id
+    +DateTime fecha
+    +float total
+    +String metodoPago
+  }
+  class RespaldoBaseDatos {
+    +String id
+    +DateTime fechaRespaldo
+    +String rutaArchivo
+    +String estado
+    +ejecutarRespaldo(): boolean
+    +restaurarInformacion(): boolean
+  }
+class Cliente {
+  +String telefono
+  +int puntos
+  +acumularPuntos(): void
+}
+class Mesero {
+  +String turno
+  +validarReserva(): boolean
+}
+class Cocinero {
+  +String area
+  +marcarPlatoAgotado(): void
+}
+class Cajero {
+  +String cajaId
+  +procesarCobro(): boolean
+  +cerrarCaja(): boolean
+}
+class Administrador {
+  +String nivelAcceso
+  +modificarPrecio(): void
+  +reasignarMesa(): void
+  +respaldarBD(): boolean
+  +recuperarInformacion(): boolean
+}
+class Silla {
+  +String id
+  +String estado
+}
+}
+
+PostgresUsuarioRepository ..|> IUsuarioRepository
+PostgresMenuRepository ..|> IMenuRepository
+PostgresReservaRepository ..|> IReservaRepository
+PostgresPedidoRepository ..|> IPedidoRepository
+PostgresVentaRepository ..|> IVentaRepository
+PostgresRespaldoRepository ..|> IRespaldoRepository
+
+AutenticarAccesoUseCase --> IUsuarioRepository : usa
+GestionarUsuariosUseCase --> IUsuarioRepository : usa
+VisualizarMenuUseCase --> IMenuRepository : usa
+MarcarPlatoAgotadoUseCase --> IMenuRepository : usa
+CrearReservaUseCase --> IReservaRepository : usa
+ValidarReservaQRUseCase --> IReservaRepository : usa
+TomarPedidoUseCase --> IPedidoRepository : usa
+ProcesarCobroUseCase --> IVentaRepository : usa
+ReportesUseCase --> IVentaRepository : usa
+GestionarRespaldoUseCase --> IRespaldoRepository : usa
+
+Menu "1" *-- "1..*" Plato : contiene
+Usuario <|-- Cliente
+Usuario <|-- Mesero
+Usuario <|-- Cocinero
+Usuario <|-- Cajero
+Usuario <|-- Administrador
+Cliente "1" --> "0..*" Reserva : solicita
+Mesa "1" *-- "1..*" Silla : compone
+Reserva "1" --> "1" Mesa : reservaMesa
+Reserva "1" --> "1" Silla : reservaSilla
+Mesero "1" --> "0..*" Mesa : asignado
+Mesero "1" --> "0..*" Pedido : toma
+Mesa "1" --> "0..*" Pedido : genera
+Pedido "1..*" --> "1..*" Plato : incluye
+Pedido "1" --> "1" Comanda : genera
+Cocinero "1" --> "0..*" Comanda : visualiza
+Cliente "1" --> "0..*" PaquetePrepagado : compra
+Cajero "1" --> "0..*" Venta : procesa
+Administrador "1" --> "0..*" RespaldoBaseDatos : administra
+note bottom of ReasignarMesaUseCase : Sin puerto propio: la operación no declara persistencia adicional.
+VisualizarComandasUseCase --> IPedidoRepository : usa
+note bottom of ComprarPaqueteUseCase : Sin puerto propio: la operación no declara persistencia adicional.
+note bottom of CerrarCajaUseCase : Sin puerto propio: la operación no declara persistencia adicional.
+@enduml

@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const EstandarSchema = new mongoose.Schema({
   categoria: {
-    type: String, // 'IEEE-830', 'RNF-Metricas', 'Diagramas-Permitidos'
+    type: String, // 'ISO/IEC/IEEE 29148:2018', 'RNF-Metricas', 'Diagramas-Permitidos'
     required: true,
     index: true
   },

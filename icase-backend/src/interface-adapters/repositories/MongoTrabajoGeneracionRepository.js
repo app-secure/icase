@@ -2,6 +2,58 @@ const TrabajoGeneracionModel = require('../../infrastructure/database/schemas/Tr
 const { randomUUID } = require('crypto');
 
 class MongoTrabajoGeneracionRepository {
+  async requirementsRecover() {
+    await TrabajoGeneracionModel.updateMany({ tipo: 'requisitos', estado: { $in: ['encolado', 'procesando'] }, lease_expires_at: { $lte: new Date() } },
+      { $set: { estado: 'interrumpido', lease_expires_at: null, mensaje: 'Trabajo interrumpido. Reanuda para continuar sin repetir etapas válidas.' } });
+  }
+  async requirementsGet(id) {
+    const row = await TrabajoGeneracionModel.findOne({ _id: id, tipo: 'requisitos' }).lean();
+    return row ? { ...row, id: String(row._id), proyecto_id: String(row.proyecto_id), usuario_id: String(row.usuario_id) } : null;
+  }
+  async requirementsLatest(projectId, operation = null) {
+    const row = await TrabajoGeneracionModel.findOne({ proyecto_id: projectId, tipo: 'requisitos', ...(operation ? { operacion_requisitos: operation } : {}) }).sort({ createdAt: -1 }).lean();
+    return row ? this.requirementsGet(row._id) : null;
+  }
+  async requirementsStart(data) {
+    await this.requirementsRecover();
+    const key = `requisitos:${data.proyecto_id}`;
+    const existing = await TrabajoGeneracionModel.findOne({ clave_activa: key }).lean();
+    if (existing) {
+      if (existing.entrada_hash === data.entrada_hash) return { job: await this.requirementsGet(existing._id), created: false };
+      if (['encolado', 'procesando'].includes(existing.estado)) throw Object.assign(new Error('Ya existe una generación activa.'), { status: 409 });
+      await TrabajoGeneracionModel.updateOne({ _id: existing._id, estado: existing.estado }, { $unset: { clave_activa: 1 }, $set: { estado: 'fallido', mensaje: 'La entrada cambió; inicia una nueva generación.' } });
+    }
+    try {
+      // El hash del prompt de cada etapa decide la reutilización. Nunca importar
+      // checkpoints de otro usuario/proyecto ni respuestas sin validar.
+      const previous = await TrabajoGeneracionModel.findOne({ proyecto_id: data.proyecto_id, usuario_id: data.usuario_id, tipo: 'requisitos' }).sort({ createdAt: -1 }).lean();
+      const reusable = Object.fromEntries(Object.entries(previous?.checkpoints_requisitos || {}).filter(([, entry]) => entry.validated));
+      const doc = await TrabajoGeneracionModel.create({ ...data, checkpoints_requisitos: reusable, tipo: 'requisitos', estado: 'encolado', clave_activa: key, ejecutor_id: this.ejecutorId, lease_expires_at: this.leaseUntil() });
+      return { job: await this.requirementsGet(doc._id), created: true };
+    } catch (err) {
+      if (err.code !== 11000) throw err;
+      const other = await TrabajoGeneracionModel.findOne({ clave_activa: key }).lean();
+      return { job: await this.requirementsGet(other._id), created: false };
+    }
+  }
+  async requirementsClaim(id) {
+    const row = await TrabajoGeneracionModel.findOneAndUpdate({ _id: id, tipo: 'requisitos', estado: { $in: ['encolado', 'interrumpido', 'esperando_proveedor'] } },
+      { $set: { estado: 'procesando', ejecutor_id: this.ejecutorId, lease_expires_at: this.leaseUntil(), error: null } }, { new: true }).lean();
+    return row ? this.requirementsGet(row._id) : null;
+  }
+  async requirementsCancel(id, userId) {
+    await TrabajoGeneracionModel.updateOne({ _id: id, tipo: 'requisitos', usuario_id: userId, estado: { $in: ['encolado', 'procesando', 'interrumpido', 'esperando_proveedor'] } }, {
+      $set: { estado: 'cancelado', mensaje: 'Procesamiento cancelado por el usuario. Se conservan las etapas guardadas.', lease_expires_at: null },
+      $unset: { clave_activa: 1 }
+    });
+    return this.requirementsGet(id);
+  }
+  async requirementsSave(id, changes, finish = false) {
+    const update = { $set: { ...changes, lease_expires_at: finish ? null : this.leaseUntil() } };
+    if (changes.estado === 'completado' || changes.estado === 'fallido') update.$unset = { clave_activa: 1 };
+    const res = await TrabajoGeneracionModel.updateOne({ _id: id, tipo: 'requisitos', ejecutor_id: this.ejecutorId, estado: 'procesando', lease_expires_at: { $gt: new Date() } }, update);
+    if (!res.matchedCount) throw Object.assign(new Error('El trabajo perdió su lease.'), { code: 'REQUIREMENTS_LEASE_LOST' });
+  }
   constructor() {
     this.ejecutorId = randomUUID();
     this.leaseMs = Number(process.env.GENERATION_JOB_LEASE_MS || 120000);
@@ -11,7 +63,7 @@ class MongoTrabajoGeneracionRepository {
     return new Date(Date.now() + this.leaseMs);
   }
 
-  async crearORecuperarActivo({ proyectoId, pantallas, insumoAdicional, requerimientosLocales }) {
+  async crearORecuperarActivo({ proyectoId, pantallas, insumoAdicional, requerimientosLocales, soloReparar = false }) {
     const claveActiva = `mockups:${proyectoId}`;
     let existente = await TrabajoGeneracionModel.findOne({ clave_activa: claveActiva });
     if (existente && existente.ejecutor_id === this.ejecutorId) {
@@ -35,6 +87,7 @@ class MongoTrabajoGeneracionRepository {
         proyecto_id: proyectoId,
         tipo: 'mockups',
         pantallas,
+        solo_reparar: soloReparar,
         insumo_adicional: insumoAdicional,
         requerimientos_locales: requerimientosLocales,
         ejecutor_id: this.ejecutorId,
@@ -50,7 +103,7 @@ class MongoTrabajoGeneracionRepository {
     }
   }
 
-  async crearORecuperarActivoDiagrama({ proyectoId, tipoDiagrama, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null }) {
+  async crearORecuperarActivoDiagrama({ proyectoId, tipoDiagrama, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, regenerar = false }) {
     const claveActiva = `diagrama:${proyectoId}:${tipoDiagrama}`;
     const existente = await TrabajoGeneracionModel.findOne({ clave_activa: claveActiva });
     if (existente && existente.lease_expires_at && existente.lease_expires_at > new Date()) {
@@ -63,7 +116,7 @@ class MongoTrabajoGeneracionRepository {
           estado: 'encolado', progreso: 0, mensaje: 'Reanudando generación de diagrama', error: null,
           ejecutor_id: this.ejecutorId, lease_expires_at: this.leaseUntil(),
           insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional,
-          provider, specific_model: specificModel, objetivo: 'diagramas', tipo_diagrama: tipoDiagrama
+          provider, specific_model: specificModel, regenerar: regenerar === true, objetivo: 'diagramas', tipo_diagrama: tipoDiagrama
         } },
         { new: true }
       );
@@ -78,6 +131,7 @@ class MongoTrabajoGeneracionRepository {
         insumo_adicional: insumoAdicional,
         provider,
         specific_model: specificModel,
+        regenerar: regenerar === true,
         objetivo: 'diagramas',
         ejecutor_id: this.ejecutorId,
         lease_expires_at: this.leaseUntil(),
@@ -93,15 +147,31 @@ class MongoTrabajoGeneracionRepository {
     }
   }
 
+  /**
+   * Un trabajo de mockups sigue «procesando» si el servidor se reinició a mitad de la generación (por ejemplo, un cambio
+   * de código con --watch). Su lease vencido prueba que ya no hay quien lo ejecute: se cierra como fallido para que la
+   * pantalla deje de esperar y permita iniciar un nuevo intento.
+   */
+  async _cerrarSiHuerfano(trabajo) {
+    if (!trabajo || trabajo.tipo !== 'mockups' || !['encolado', 'procesando'].includes(trabajo.estado)) return trabajo;
+    const vencido = trabajo.lease_expires_at ? trabajo.lease_expires_at <= new Date() : Date.now() - new Date(trabajo.updatedAt).getTime() > this.leaseMs;
+    if (!vencido) return trabajo;
+    await TrabajoGeneracionModel.updateOne({ _id: trabajo._id, estado: { $in: ['encolado', 'procesando'] } }, {
+      $set: { estado: 'fallido', progreso: 100, lease_expires_at: null, mensaje: 'Generación interrumpida', error: 'El servidor se reinició mientras se generaban los mockups. Inicia un nuevo intento: lo ya guardado se conserva.' },
+      $unset: { clave_activa: 1 }
+    });
+    return TrabajoGeneracionModel.findById(trabajo._id);
+  }
+
   async obtenerPorId(id) {
-    const trabajo = await TrabajoGeneracionModel.findById(id);
+    const trabajo = await this._cerrarSiHuerfano(await TrabajoGeneracionModel.findById(id));
     return trabajo ? trabajo.toJSON() : null;
   }
 
   async obtenerUltimoPorProyecto(proyectoId) {
-    const trabajo = await TrabajoGeneracionModel
+    const trabajo = await this._cerrarSiHuerfano(await TrabajoGeneracionModel
       .findOne({ proyecto_id: proyectoId, tipo: 'mockups' })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 }));
     return trabajo ? trabajo.toJSON() : null;
   }
 
@@ -114,7 +184,8 @@ class MongoTrabajoGeneracionRepository {
       insumoBruto: trabajo.insumo_bruto || '',
       insumoAdicional: trabajo.insumo_adicional || '',
       provider: trabajo.provider || 'auto',
-      specificModel: trabajo.specific_model || null
+      specificModel: trabajo.specific_model || null,
+      regenerar: trabajo.regenerar === true
     };
   }
 
@@ -192,6 +263,23 @@ class MongoTrabajoGeneracionRepository {
       .findOne({ proyecto_id: proyectoId, tipo: 'verificacion', artefacto_id: artefactoId })
       .sort({ createdAt: -1 });
     return trabajo ? trabajo.toJSON() : null;
+  }
+
+  async finalizarVerificacionesExpiradas() {
+    const now = new Date();
+    return TrabajoGeneracionModel.updateMany({
+      tipo: 'verificacion', estado: { $in: ['encolado', 'procesando'] },
+      $or: [{ lease_expires_at: { $lte: now } }, { lease_expires_at: null, updatedAt: { $lte: new Date(Date.now() - this.leaseMs) } }]
+    }, {
+      $set: { estado: 'fallido', progreso: 100, mensaje: 'Verificación interrumpida', error: 'La verificación perdió su proceso ejecutor. Inicia un nuevo intento; los archivos se conservaron.' },
+      $unset: { clave_activa: 1 }
+    });
+  }
+
+  async renovarLeaseVerificacion(id) {
+    const result = await TrabajoGeneracionModel.updateOne({ _id: id, tipo: 'verificacion', ejecutor_id: this.ejecutorId,
+      estado: { $in: ['encolado', 'procesando'] }, lease_expires_at: { $gt: new Date() } }, { $set: { lease_expires_at: this.leaseUntil() } });
+    return result.matchedCount === 1;
   }
 
   async actualizar(id, cambios, finalizar = false) {

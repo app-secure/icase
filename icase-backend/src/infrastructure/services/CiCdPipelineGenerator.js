@@ -6,15 +6,25 @@ class CiCdPipelineGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
     const { tests, infrastructure, decisiones } = insumos;
     const explicitGithub = /github/i.test(JSON.stringify(decisiones || {}));
-    const platforms = decisiones.alcance_plataforma?.plataformas || decisiones.stack_tecnologico?.plataformas || [];
+    const platforms = decisiones.stack_tecnologico?.plataformas || decisiones.alcance_plataforma?.plataformas || [];
     const mobile = platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item));
+    const web = !mobile || platforms.includes('web');
     const java = StackCatalog.resolve(decisiones.stack_tecnologico || {}).language === 'java';
     const files = [
-      { ruta: '.github/workflows/ci-cd.yml', lenguaje: 'yaml', contenido: this._workflow(mobile, java) },
-      { ruta: 'ops/ci/validate-artifacts.mjs', lenguaje: 'javascript', contenido: this._validator(java) },
+      { ruta: '.github/workflows/ci-cd.yml', lenguaje: 'yaml', contenido: this._workflow(mobile, java, web) },
+      { ruta: 'ops/ci/validate-artifacts.mjs', lenguaje: 'javascript', contenido: this._validator(java, web) },
       { ruta: 'ops/ci/README.md', lenguaje: 'markdown', contenido: this._readme(proyecto.nombre, tests.version, infrastructure.version) },
       { ruta: 'ops/ci/pipeline-manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: proyecto.nombre, proveedor: 'GitHub Actions', pruebas_version: tests.version, infraestructura_version: infrastructure.version, movil_incluido: mobile, despliegue_automatico: false }, null, 2) }
     ];
+    if(new (require('../../core/services/ModuleService'))().activos(decisiones.modulos).includes('eventos_replicas')) {
+      const workflow=files.find(file=>file.ruta==='.github/workflows/ci-cd.yml');
+      workflow.contenido=workflow.contenido.replace('jobs:\n','env:\n  EVENTS_NAMESPACE: ci-${{ github.repository_id }}-${{ github.run_id }}\n\njobs:\n');
+    }
+    if(new (require('../../core/services/ModuleService'))().activos(decisiones.modulos).includes('recuperacion_cuentas')) {
+      const workflow=files.find(file=>file.ruta==='.github/workflows/ci-cd.yml');
+      workflow.contenido=workflow.contenido.replaceAll('docker compose -f ops/docker-compose.yml','docker compose -f ops/docker-compose.yml -f ops/docker-compose.test-mail.yml')
+        .replace('      AUTH_RATE_MAX: 300','      AUTH_RATE_MAX: 300\n      TEST_SMTP_URL: http://localhost:8025');
+    }
     return {
       archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
       dependencias: [{ tipo: 'pruebas', version: tests.version }, { tipo: 'infraestructura', version: infrastructure.version }],
@@ -25,7 +35,7 @@ class CiCdPipelineGenerator extends IGeneradorArtefacto {
     };
   }
 
-  _workflow(mobile = false, java = false) {
+  _workflow(mobile = false, java = false, web = true) {
     return `name: CI/CD
 
 on:
@@ -43,7 +53,7 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,13 +69,16 @@ ${java ? `      - uses: actions/setup-java@v4
       - name: Build backend
         working-directory: backend
         run: mvn -B -q -DskipTests package
+      - name: Test generated Java HTTP security
+        working-directory: backend
+        run: mvn -B test
 ` : `      - name: Install and build backend
         working-directory: backend
         run: npm install && npm run build --if-present
-`}      - name: Install and build frontend
+`}${web ? `      - name: Install and build frontend
         working-directory: frontend
         run: npm install && npm run build
-${mobile ? `      - name: Bundle Android client
+` : ''}${mobile ? `      - name: Bundle Android client
         working-directory: mobile
         env:
           EXPO_PUBLIC_API_URL: http://localhost:3000
@@ -74,12 +87,19 @@ ${mobile ? `      - name: Bundle Android client
       - name: Install test dependencies
         working-directory: tests
         run: npm install
+      - name: Audit Node dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for directory in ${[...(!java ? ['backend'] : []), ...(web ? ['frontend'] : []), 'tests'].join(' ')}${mobile ? ' mobile' : ''}; do
+            (cd "$directory" && npm audit --audit-level=high)
+          done
       - name: Build deployment images
         run: docker compose -f ops/docker-compose.yml build
 
   test:
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       DB_NAME: icase_test
       DB_USER: icase_test
@@ -88,6 +108,9 @@ ${mobile ? `      - name: Bundle Android client
       JWT_SECRET: ci-only-secret-not-for-production
       ADMIN_EMAIL: admin@example.test
       ADMIN_PASSWORD: ci-admin-password-123
+      # Límites del entorno aislado: la batería concentra solicitudes de varios roles.
+      HTTP_RATE_MAX: 3000
+      AUTH_RATE_MAX: 300
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -102,7 +125,7 @@ ${mobile ? `      - name: Bundle Android client
         env:
           BASE_API_URL: http://localhost:3000
         run: npm install && npm test
-      - name: Install and run browser tests
+${web ? `      - name: Install and run browser tests
         working-directory: tests
         env:
           BASE_WEB_URL: http://localhost:8080
@@ -114,20 +137,20 @@ ${mobile ? `      - name: Bundle Android client
           name: playwright-report
           path: tests/playwright-report/
           if-no-files-found: ignore
-      - name: Stop application
+` : ''}      - name: Stop application
         if: always()
         run: docker compose -f ops/docker-compose.yml down -v
 
   package:
     if: github.ref == 'refs/heads/main'
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Build images
         run: docker compose -f ops/docker-compose.yml build
       - name: Export delivery bundle
-        run: tar -czf delivery-bundle.tgz backend frontend tests ops
+        run: tar -czf delivery-bundle.tgz backend${web ? ' frontend' : ''}${mobile ? ' mobile' : ''} tests ops
       - uses: actions/upload-artifact@v4
         with:
           name: delivery-bundle
@@ -135,16 +158,16 @@ ${mobile ? `      - name: Bundle Android client
 `;
   }
 
-  _validator(java = false) {
+  _validator(java = false, web = true) {
     return `import fs from 'node:fs';
 
-const required = ['${java ? 'backend/pom.xml' : 'backend/package.json'}','frontend/package.json','tests/package.json','ops/docker-compose.yml'];
+const required = ['${java ? 'backend/pom.xml' : 'backend/package.json'}','${web ? 'frontend' : 'mobile'}/package.json','tests/package.json','ops/docker-compose.yml'];
 const missing = required.filter((path) => !fs.existsSync(path));
 if (missing.length) {
   console.error('Faltan artefactos aprobados:', missing.join(', '));
   process.exit(1);
 }
-for (const path of ['backend/icase.manifest.json','frontend/icase.manifest.json','tests/coverage-matrix.json']) JSON.parse(fs.readFileSync(path, 'utf8'));
+for (const path of ['backend/icase.manifest.json',${web ? "'frontend/icase.manifest.json'," : ''}'tests/coverage-matrix.json']) JSON.parse(fs.readFileSync(path, 'utf8'));
 console.log('Artefactos y manifiestos válidos.');
 `;
   }

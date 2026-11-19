@@ -17,7 +17,7 @@ describe('servicio de módulos', () => {
   test('en modo automático ignora lo que el usuario mande', () => {
     const { propuesta, errores } = service.validar({ modo: 'automatico', modulos: [{ id: 'formularios_tipados', activo: false }] });
     expect(errores).toEqual([]);
-    expect(propuesta.modulos[0].activo).toBe(true);
+    expect(propuesta.modulos.find(item=>item.id==='formularios_tipados').activo).toBe(true);
   });
 
   test('en modo personalizado respeta la elección y completa lo omitido con el valor recomendado', () => {
@@ -25,8 +25,8 @@ describe('servicio de módulos', () => {
     expect(off.errores).toEqual([]);
     expect(off.propuesta.modulos).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'formularios_tipados', activo: false, motivo: 'Desactivado por ti.' })]));
     const omitted = service.validar({ modo: 'personalizado', modulos: [] });
-    expect(omitted.propuesta.modulos[0].activo).toBe(true);
-    expect(omitted.advertencias.join(' ')).toMatch(/valor recomendado para: formularios_tipados/);
+    expect(omitted.propuesta.modulos.find(item=>item.id==='formularios_tipados').activo).toBe(true);
+    expect(omitted.advertencias.join(' ')).toMatch(/valor recomendado para:.*formularios_tipados/);
   });
 
   test.each([
@@ -74,7 +74,7 @@ describe('la etapa Módulos es opcional', () => {
   test('se habilita al aprobar la estructura de carpetas, igual que reglas y acceso', () => {
     const etapas = workflow.crearEtapasIniciales();
     expect(state(etapas, 'modulos')).toBe(CODE_PHASE_STATES.BLOCKED);
-    const ready = workflow.sincronizarBloqueos(etapas.map((item) => ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas'].includes(item.etapa) ? { ...item, estado: CODE_PHASE_STATES.APPROVED } : item));
+    const ready = workflow.sincronizarBloqueos(etapas.map((item) => ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso'].includes(item.etapa) ? { ...item, estado: CODE_PHASE_STATES.APPROVED } : item));
     expect(state(ready, 'modulos')).toBe(CODE_PHASE_STATES.PENDING);
   });
 
@@ -102,6 +102,7 @@ describe('la etapa Módulos es opcional', () => {
     };
     const useCase = new GestionarPlanCodificacion({
       proyectoRepository: { obtenerPorId: jest.fn(async () => ({ id: 'p1', nombre: 'Demo', estado_fase: 'mockups_aprobados' })) },
+      requerimientoRepository: { listarPorProyecto: async () => [] },
       planCodificacionRepository: repo
     });
     return { useCase, repo };
@@ -111,7 +112,7 @@ describe('la etapa Módulos es opcional', () => {
     const { useCase } = crearCaso();
     const plan = await useCase.obtener('p1');
     expect(plan.etapas.find((item) => item.etapa === 'modulos')).toMatchObject({ opcional: true, tipo: 'decision' });
-    expect(plan.modulos.opcionales.map((item) => item.id)).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
+    expect(plan.modulos.opcionales.map((item) => item.id)).toEqual(['procesos_negocio','eventos_replicas','pagos_prueba','sso_oidc','mapas','camara_qr','archivos_imagenes', 'reportes_calculos', 'recuperacion_cuentas', 'formularios_tipados', 'paginacion_busqueda', 'datos_iniciales', 'eventos_cambios']);
     expect(plan.modulos.incluidos.map((item) => item.id)).toEqual(expect.arrayContaining(['datos', 'openapi', 'reglas', 'autenticacion']));
     expect(plan.modulos.activos).toEqual(['formularios_tipados', 'paginacion_busqueda', 'datos_iniciales']);
   });
@@ -119,8 +120,8 @@ describe('la etapa Módulos es opcional', () => {
   test('guarda la propuesta normalizada, rechaza las inválidas y refleja la elección aprobada', async () => {
     const { useCase, repo } = crearCaso();
     await useCase.obtener('p1');
-    for (const etapa of ['alcance_plataforma', 'stack_tecnologico', 'arquitectura_codigo', 'estructura_carpetas']) {
-      await useCase.proponer({ proyectoId: 'p1', etapa, propuesta: etapa === 'stack_tecnologico' ? { backend: 'Node.js + Express', base_datos: 'PostgreSQL' } : { dato: 'x' } });
+    for (const etapa of ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso']) {
+      await useCase.proponer({ proyectoId: 'p1', etapa, propuesta: etapa === 'stack_tecnologico' ? { backend: 'Node.js + Express', base_datos: 'PostgreSQL' } : { plataformas: ['web'] } });
       await useCase.revisar({ proyectoId: 'p1', etapa, decision: 'aprobar' });
     }
     await expect(useCase.proponer({ proyectoId: 'p1', etapa: 'modulos', propuesta: { modo: 'personalizado', modulos: [{ id: 'blockchain', activo: true }] } }))
@@ -134,10 +135,11 @@ describe('la etapa Módulos es opcional', () => {
     expect(repo.guardar).toHaveBeenCalled();
   });
 
-  test('la sugerencia de la etapa es el modo automático', async () => {
+  test('sin evidencia no sugiere módulos opcionales', async () => {
     const CodePlanningProposalService = require('../src/core/services/CodePlanningProposalService');
     const result = await new CodePlanningProposalService().generar({ etapa: 'modulos', proyecto: { nombre: 'Demo' }, requerimientos: [], diagramas: [], plan: { etapas: [] } });
-    expect(result.propuesta.modo).toBe('automatico');
+    expect(result.propuesta.modo).toBe('personalizado');
+    expect(result.propuesta.modulos.filter(m => m.activo)).toEqual([]);
     expect(result.etapa).toBe('modulos');
   });
 });

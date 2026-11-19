@@ -59,6 +59,11 @@ const FuenteSchema = new mongoose.Schema({
     trim: true,
     maxlength: 40
   },
+  fecha_documento_origen: {
+    type: String,
+    enum: ['', 'usuario', 'metadatos_pdf'],
+    default: ''
+  },
   etiquetas: {
     type: [String],
     default: []

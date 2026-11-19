@@ -10,11 +10,15 @@ class ActualizarDiagramaManual {
   }
 
   async ejecutar({ id, datos }) {
+    const { version_esperada: versionEsperada, ...contenido } = datos;
+    datos = contenido;
     const existente = await this.diagramaRepository.obtenerPorId(id);
     if (!existente) {
       throw new Error(`Diagrama con ID ${id} no encontrado.`);
     }
 
+    const conflicto = () => Object.assign(new Error('El diagrama cambió en otra sesión. Copia tus cambios antes de recargar la versión actual; no se sobrescribió el contenido guardado.'), { status: 409 });
+    if (versionEsperada !== undefined && (!Number.isInteger(versionEsperada) || versionEsperada !== Number(existente.version || 1))) throw conflicto();
     if (datos.codigo_plantuml && this.plantumlValidatorService) {
       const validacion = this.plantumlValidatorService.validar(datos.codigo_plantuml, {
         tipo: datos.tipo || existente.tipo,
@@ -63,7 +67,8 @@ class ActualizarDiagramaManual {
           version: Number(existente.version || 1) + 1
         }
       : datos;
-    const actualizado = await this.diagramaRepository.actualizar(id, cambios);
+    const actualizado = await this.diagramaRepository.actualizar(id, cambios, { versionEsperada: Number(existente.version || 1) });
+    if (!actualizado) throw conflicto();
 
     if (cambiaContenido && existente.proyecto_id) {
       const dependientes = this.diagramWorkflowService.dependentTypes(normalizeDiagramType(existente.tipo));

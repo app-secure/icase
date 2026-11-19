@@ -280,9 +280,11 @@ MongoUsuarioRepository --|> IUsuarioRepository
       // Validar el código PlantUML generado con los validadores
       const validacionPropia = validator.validar(resultado.codigo_plantuml, 'clases_diseno');
       expect(validacionPropia.valido).toBe(true);
+      expect(validacionPropia.advertencias.join(' ')).toContain('DTO genéricos');
 
       const validacionGeneral = plantUmlValidator.validar(resultado.codigo_plantuml, 'clases_diseno');
       expect(validacionGeneral.valido).toBe(true);
+      expect(validacionGeneral.advertencias.join(' ')).toContain('DTO genéricos');
     });
 
     test('incluye componentes de todas las capas y modularización por packages', () => {
@@ -343,7 +345,7 @@ note top of UsuarioController : Trazabilidad RF-01 | Origen: casos_de_uso
       expect(prompt).toContain('Data Transfer Objects');
     });
 
-    test('reemplaza una respuesta incompleta de IA por un diagrama válido trazado desde dependencias aprobadas', () => {
+    test('conserva la respuesta incompleta para reparación sin inventar repositorios ni trazabilidad', () => {
       const service = new ModelosIaService();
       const resultado = service.normalizarResultado({
         nombre_proyecto: 'GourmetFlow',
@@ -369,14 +371,10 @@ note top of UsuarioController : Trazabilidad RF-01 | Origen: casos_de_uso
       });
 
       expect(resultado.diagramas).toHaveLength(1);
-      expect(resultado.diagramas[0].codigo_plantuml).toContain('interface IPedidoRepository');
-      expect(resultado.diagramas[0].codigo_plantuml).toContain('class SqlPedidoRepository');
-      expect(resultado.diagramas[0].versiones_origen).toEqual({
-        casos_de_uso: 4,
-        clases_dominio: 2,
-        arquitectura_software: 3
-      });
-      expect(validator.validar(resultado.diagramas[0].codigo_plantuml, 'clases_diseno').valido).toBe(true);
+      expect(resultado.diagramas[0].codigo_plantuml).toContain('class CrearPedidoUseCase');
+      expect(resultado.diagramas[0].codigo_plantuml).not.toContain('interface IPedidoRepository');
+      expect(resultado.diagramas[0].versiones_origen).toBeUndefined();
+      expect(validator.validar(resultado.diagramas[0].codigo_plantuml, 'clases_diseno').valido).toBe(false);
     });
 
     test('normaliza entidades HTML, escapes y notas partidas antes de persistir', () => {

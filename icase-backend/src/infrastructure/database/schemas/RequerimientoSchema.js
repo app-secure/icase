@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const RequerimientoSchema = new mongoose.Schema({
+  historial_versiones: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  desactualizado: { type: Boolean, default: false },
+  evidencias: { type: [{ _id: false, texto: String, fuente: String, inicio: Number, fin: Number }], default: [] },
+  necesidades_origen: { type: [String], default: [] },
+  criterios_aceptacion: { type: [{ _id: false, descripcion: String, necesidades_origen: [String] }], default: [] },
+  reglas_relacionadas: { type: [String], default: [] },
   proyecto_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Proyecto',

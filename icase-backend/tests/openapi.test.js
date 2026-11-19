@@ -165,8 +165,40 @@ describe('documento OpenAPI generado', () => {
     expect((await fetch(`${booted.base}/api/openapi.json`)).status).toBe(401);
     const access = await runtime.setupAccess(booted.base, { base: booted.base, adminEmail: ENV.ADMIN_EMAIL, adminPassword: ENV.ADMIN_PASSWORD, roles: [] });
     expect((await access.admin('/api/openapi.json')).data).toEqual(booted.openapi);
-    expect(booted.manifest.docs).toEqual({ openapi: '/api/openapi.json', archivo: 'backend/openapi.json' });
-    expect(booted.files.map((file) => file.ruta)).toEqual(expect.arrayContaining(['backend/openapi.json', 'backend/src/docs/openapi.js']));
+    expect(booted.manifest.docs).toEqual({ openapi: '/api/openapi.json', docs: '/api/docs', archivo: 'backend/openapi.json' });
+    expect(booted.files.map((file) => file.ruta)).toEqual(expect.arrayContaining(['backend/openapi.json', 'backend/src/docs/openapi.js', 'backend/src/docs/swagger-ui.js']));
+  });
+
+  test('expone Swagger UI en /api/docs y ejemplos en POST', async () => {
+    const booted = await arrancar();
+    // La página es pública (un navegador no envía Authorization): incluye su propio inicio de sesión; el documento sigue protegido.
+    const publica = await fetch(`${booted.base}/api/docs`);
+    expect(publica.status).toBe(200);
+    const pagina = await publica.text();
+    expect(pagina).toContain('id="login"'); // formulario de inicio de sesión de la propia página
+    expect((await fetch(`${booted.base}/api/openapi.json`)).status).toBe(401);
+    // El código de la página es un archivo propio (la CSP no admite scripts en línea) y también es público.
+    expect(pagina).not.toMatch(/<script>/);
+    const init = await fetch(`${booted.base}/api/docs/init.js`);
+    expect(init.status).toBe(200);
+    expect(init.headers.get('content-type')).toMatch(/javascript/);
+    const codigo = await init.text();
+    expect(codigo).toContain('SwaggerUIBundle');
+    expect(codigo).toContain('/api/auth/login');
+    expect(codigo).toContain('icase_docs_token');
+    const login = await fetch(`${booted.base}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: ENV.ADMIN_EMAIL, password: ENV.ADMIN_PASSWORD })
+    });
+    const { token } = await login.json();
+    const docs = await fetch(`${booted.base}/api/docs`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(docs.status).toBe(200);
+    expect(await docs.text()).toMatch(/swagger-ui-bundle.js/);
+    const post = booted.openapi.paths['/api/operations/rf-01'].post;
+    expect(post.requestBody.content['application/json'].example).toEqual(expect.objectContaining({ email: expect.any(String) }));
+    expect(post.responses['201'].content['application/json'].example).toEqual(expect.objectContaining({ id: '1', capability: 'rf-01' }));
+    const pkg = JSON.parse(booted.files.find((file) => file.ruta === 'backend/package.json').contenido);
+    expect(pkg.dependencies['swagger-ui-dist']).toBe('5.18.2');
   });
 });
 
@@ -265,4 +297,18 @@ describe('conformidad: el backend real cumple lo que documenta', () => {
     wrongBound.components.schemas.Reserva.properties.comensales.maximum = 5;
     expect(checker(wrongBound)(records).join('\n')).toContain('la petición enviada incumple el esquema documentado');
   }, 120000);
+
+  test('exerciseOpenApi acepta reglas requerido sobre un campo con máquina de estados o valor por defecto', async () => {
+    const reglasConDomEstado = [...reglas, { ...base, id: 'DOM-reserva-estado', tipo: 'requerido', campo: 'estado', mensaje: 'estado es obligatorio.' }];
+    const booted = await arrancar(acceso(), { decisiones: { reglas_negocio: { reglas: reglasConDomEstado }, control_acceso: acceso() } });
+    const access = await runtime.setupAccess(booted.base, {
+      base: booted.base, adminEmail: ENV.ADMIN_EMAIL, adminPassword: ENV.ADMIN_PASSWORD,
+      roles: Object.entries(booted.manifest.auth.roles).map(([id, role]) => ({ id, autoregistro: role.autoregistro === true }))
+    });
+    try {
+      await expect(runtime.exerciseOpenApi(access.admin, booted.manifest.operations, booted.manifest.auth)).resolves.toBeUndefined();
+    } finally {
+      await access.cleanup();
+    }
+  });
 });

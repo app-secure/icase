@@ -80,4 +80,88 @@ describe('verificación de artefactos generados', () => {
     artifact.verificacion = { huella: 'huella-actual', estado: 'apta', nivel: 'ejecucion_aislada', pruebas: [{ paso: 'Integración', resultado: 'correcto' }] };
     expect(useCase._exigirVerificacion(artifact)).toBe(artifact.verificacion);
   });
+
+  test('el modo permisivo aprueba solo el fallo de los formularios del mockup', () => {
+    const useCase = new GestionarArtefactosCodigo({});
+    useCase.verifier.verificar = jest.fn().mockReturnValue({ estado: 'apta_estructuralmente', huella: 'huella-actual', errores: [] });
+    const base = {
+      tipo: 'pruebas',
+      verificacion: {
+        huella: 'huella-actual', estado: 'fallida', nivel: 'ejecucion_aislada',
+        pruebas: [
+          { paso: 'Compilación de backend, frontend y pruebas en Docker', resultado: 'correcto' },
+          { paso: 'Arranque de base de datos, backend y frontend con health checks', resultado: 'correcto' },
+          { paso: 'Prueba CRUD y N:M HTTP derivada del contrato', resultado: 'correcto' }
+        ],
+        errores: ['No pasó la ejecución aislada: locator.fill designed-ui.spec.js interfaz diseñada']
+      }
+    };
+    expect(() => useCase._exigirVerificacion(base)).toThrow('no fue satisfactoria');
+    const accepted = useCase._exigirVerificacion(base, { permisivo: true });
+    expect(accepted.estado).toBe('apta');
+    expect(accepted.modo_permisivo).toBe(true);
+    for (const errores of [['locator.fill: timeout'], ['designed-ui.spec.js y auth.spec.js']]) {
+      const mixed = { ...base, verificacion: { ...base.verificacion, errores } };
+      expect(() => useCase._exigirVerificacion(mixed, { permisivo: true })).toThrow();
+    }
+    expect(accepted.advertencias.join(' ')).toMatch(/Modo permisivo/);
+    const compile = { ...base, verificacion: { ...base.verificacion, errores: ['failed to solve'], pruebas: [] } };
+    expect(() => useCase._exigirVerificacion(compile, { permisivo: true })).toThrow('solo cubre el fallo de los formularios');
+  });
+
+  test('relee el plan más reciente al aprobar y revierte el artefacto si falla al guardar el plan', async () => {
+    const CodeGenerationWorkflowService = require('../src/core/services/CodeGenerationWorkflowService');
+    const workflow = new CodeGenerationWorkflowService();
+    const approvedDecisions = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
+    const baseEtapas = workflow.crearEtapasIniciales().map((item) =>
+      approvedDecisions.includes(item.etapa) ? { ...item, estado: 'aprobada' } : item
+    );
+    const stalePlan = {
+      proyecto_id: 'p1',
+      version: 10,
+      etapas: baseEtapas.map((item) =>
+        ['generacion_backend', 'generacion_frontend'].includes(item.etapa) ? { ...item, estado: 'en_revision' } : item
+      )
+    };
+    const latestPlan = {
+      proyecto_id: 'p1',
+      version: 11,
+      etapas: baseEtapas.map((item) =>
+        item.etapa === 'generacion_frontend' ? { ...item, estado: 'aprobada' }
+          : item.etapa === 'generacion_backend' ? { ...item, estado: 'en_revision' } : item
+      )
+    };
+    const artifact = { id: 'b1', proyecto_id: 'p1', tipo: 'codigo_backend', estado: 'en_revision', aprobado: false, verificacion: { estado: 'apta', nivel: 'ejecucion_aislada', huella: 'h1' }, archivos: [] };
+    const artifactRepo = {
+      obtenerPorId: jest.fn().mockResolvedValue(artifact),
+      obtenerUltimo: jest.fn().mockResolvedValue(artifact),
+      actualizar: jest.fn(async (_id, changes) => ({ ...artifact, ...changes }))
+    };
+    const planRepo = {
+      obtenerPorProyecto: jest.fn()
+        .mockResolvedValueOnce(stalePlan)
+        .mockResolvedValueOnce(latestPlan),
+      guardar: jest.fn(async (_id, changes) => ({ ...latestPlan, ...changes }))
+    };
+    const useCase = new GestionarArtefactosCodigo({ planCodificacionRepository: planRepo, artefactoRepository: artifactRepo });
+    useCase._exigirVerificacion = jest.fn(() => artifact.verificacion);
+
+    await useCase.revisarBackend({ proyectoId: 'p1', artefactoId: 'b1', decision: 'aprobar' });
+    const savedEtapas = planRepo.guardar.mock.calls[0][1].etapas;
+    expect(savedEtapas.find((e) => e.etapa === 'generacion_backend').estado).toBe('aprobada');
+    expect(savedEtapas.find((e) => e.etapa === 'generacion_frontend').estado).toBe('aprobada');
+    expect(savedEtapas.find((e) => e.etapa === 'generacion_pruebas').estado).toBe('pendiente');
+
+    const failPlanRepo = {
+      obtenerPorProyecto: jest.fn().mockResolvedValue(latestPlan),
+      guardar: jest.fn().mockRejectedValue(new Error('fallo de red al guardar plan'))
+    };
+    const failUseCase = new GestionarArtefactosCodigo({ planCodificacionRepository: failPlanRepo, artefactoRepository: artifactRepo });
+    failUseCase._exigirVerificacion = jest.fn(() => artifact.verificacion);
+    artifactRepo.actualizar.mockClear();
+
+    await expect(failUseCase.revisarBackend({ proyectoId: 'p1', artefactoId: 'b1', decision: 'aprobar' }))
+      .rejects.toThrow('fallo de red al guardar plan');
+    expect(artifactRepo.actualizar).toHaveBeenNthCalledWith(2, 'b1', { estado: 'en_revision', aprobado: false });
+  });
 });

@@ -1,0 +1,21 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+__SAMPLES__
+const base=process.env.BASE_API_URL||'http://localhost:3000',fixture=__FIXTURE__,enabled=__ENABLED__;
+test('integraciones locales: checkout idempotente, firma webhook y mapas',{skip:!process.env.TEST_PROVIDER_URL||!fixture},async()=>{
+ const login=await makeApi(base,null)('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});assert.equal(login.status,200);
+ const api=makeApi(base,login.data.token),contract=(await api('/api/contract')).data,operation=contract.operations.find(op=>op.key===fixture.operation),cleanups=[];
+ try{
+  const record=await createValidRecord(api,contract.operations,operation,cleanups,0);
+  if(enabled.includes('pagos_prueba')){
+   const results=await Promise.all(Array.from({length:5},()=>api('/api/integrations/payments/'+operation.key+'/'+record.id,'POST',{amount:1,currency:'invalid'})));
+   for(const result of results)assert.equal(result.status,200);assert.equal(new Set(results.map(result=>result.data.session)).size,1);
+   const payment=results[0].data;assert.equal(payment.amount,(record.response.data.data||record.response.data)[fixture.amountField]);
+   assert.equal((await fetch(base+'/api/integrations/payments/webhook',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,400);
+   for(let replay=0;replay<2;replay++){const response=await fetch(process.env.TEST_PROVIDER_URL+'/test/complete-payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session:payment.session})});assert.equal((await response.json()).status,200);}
+   assert.equal((await api('/api/integrations/payments/status/'+payment.reference)).data.status,'paid');
+  }
+  if(enabled.includes('mapas')){const config=await api('/api/integrations/maps/'+operation.key);assert.equal(config.status,200);assert.equal(config.data.latitude,fixture.latitude);assert.equal(config.data.longitude,fixture.longitude);}
+  if(enabled.includes('sso_oidc'))assert.equal((await fetch(base+'/api/integrations/sso/callback?state=bad&code=bad')).status,400);
+ }finally{for(const cleanup of cleanups){try{await cleanup();}catch{}}}
+});

@@ -19,6 +19,7 @@ nav:
   - Inicio: index.md
   - Manual de usuario:
       - Primeros pasos: usuario/primeros-pasos.md
+      - Compartir proyectos: usuario/transferencia-proyectos.md
       - Requisitos y diagramas: usuario/requisitos-y-diagramas.md
       - Mockups y exportación: usuario/mockups-y-exportacion.md
       - Codificación: usuario/codificacion.md
@@ -28,13 +29,19 @@ nav:
       - Explorador Swagger: api/explorador.html
   - Inteligencia artificial:
       - Funcionamiento: ia/funcionamiento.md
+      - Generación resiliente: ia/generacion-resiliente.md
       - Prompts por fase: ia/prompts.md
   - Desarrollo:
       - Instalación: desarrollo/instalacion.md
       - Arquitectura: desarrollo/arquitectura.md
       - Contrato de diagramas: desarrollo/contratos/diagram-generation-contract.md
+      - Contrato de enlaces de mockups: desarrollo/contratos/mockup-binding-contract.md
       - Contrato de codificación: desarrollo/contratos/code-generation-contract.md
+      - Módulos y actualización segura: desarrollo/contratos/modulos-y-actualizacion.md
+      - Tiempo real e integraciones: desarrollo/contratos/tiempo-real-integraciones.md
+      - Procesos de negocio: desarrollo/contratos/procesos-negocio.md
   - Pruebas:
+      - Evaluación de requisitos: pruebas/evaluacion-requisitos.md
       - Plan y ejecución: pruebas/plan-y-ejecucion.md
       - Resultados y pendientes: pruebas/resultados.md
   - Despliegue: despliegue/guia.md

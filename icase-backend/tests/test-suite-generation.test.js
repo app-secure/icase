@@ -21,6 +21,43 @@ describe('generación del artefacto de pruebas', () => {
     expect(result.advertencias).not.toContain('La suite solo cubre salud, navegación y trazabilidad; faltan pruebas funcionales.');
   });
 
+  test('genera unitarias de reglas confirmadas y de procesos', async () => {
+    const result = await new TestSuiteGenerator().generar({
+      proyecto: { nombre: 'Demo' }, versionesOrigen: {},
+      insumos: {
+        requerimientos: [{ aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Calcular total' }],
+        backend: {
+          version: 1, trazabilidad_rf: ['RF-01'], archivos: [{
+            ruta: 'backend/icase.manifest.json',
+            contenido: JSON.stringify({
+              operations: [{ id: 'RF-01', key: 'rf-01', collectionPath: '/api/operations/rf-01', schema: { title: 'Pedido' }, rules: [{ id: 'RN-01', tipo: 'calculo', campo: 'total', expresion: { op: '*', izquierda: { campo: 'precio' }, derecha: { campo: 'cantidad' } } }, { id: 'RN-02', tipo: 'requerido', campo: 'precio' }] }],
+              procesos: { enabled: true, definitions: [{ id: 'proc-1', initial: 'abierto', actions: [{ id: 'cerrar', from: 'abierto', to: 'cerrado', roles: ['administrador'] }] }] }
+            })
+          }]
+        },
+        frontend: { version: 1, trazabilidad_rf: ['RF-01'], archivos: [{ ruta: 'frontend/icase.manifest.json', contenido: JSON.stringify({ pantallas: [{ ruta: '/' }] }) }] }
+      }
+    });
+    expect(result.archivos.map((item) => item.ruta)).toEqual(expect.arrayContaining(['tests/unit/rules.test.js', 'tests/unit/processes.test.js', 'tests/support/calculations.cjs']));
+    const calculations = result.archivos.find((item) => item.ruta === 'tests/support/calculations.cjs').contenido;
+    expect(calculations).not.toContain('./store-support');
+    expect(calculations.match(/\bHttpError\b/g)?.length).toBeGreaterThan(1);
+    const loaded = { exports: {} };
+    new Function('module', 'exports', calculations)(loaded, loaded.exports);
+    expect(loaded.exports.derive([{ tipo: 'calculo', campo: 'total', expresion: { op: '*', izquierda: { campo: 'precio' }, derecha: { campo: 'cantidad' } } }], { precio: 3, cantidad: 4 }).total).toBe(12);
+  });
+
+  test('la configuración de Playwright tolera la carga de los contenedores de verificación', async () => {
+    const result = await new TestSuiteGenerator().generar({
+      proyecto: { nombre: 'Demo' }, versionesOrigen: {},
+      insumos: { requerimientos: [], backend: { version: 1, archivos: [] }, frontend: { version: 1, archivos: [] } }
+    });
+    const config = result.archivos.find((item) => item.ruta === 'tests/playwright.config.js').contenido;
+    expect(config).toContain('timeout: 120000');
+    expect(config).toContain('expect: { timeout: 15000 }');
+    expect(config).toContain('retries: 1');
+  });
+
   test('reporta RF que no aparecen en ninguno de los códigos aprobados', async () => {
     const result = await new TestSuiteGenerator().generar({
       proyecto: { nombre: 'Demo' }, versionesOrigen: {},

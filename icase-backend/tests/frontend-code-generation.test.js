@@ -24,11 +24,56 @@ describe('generación persistente del frontend', () => {
     expect(result.archivos.every((item) => item.huella.length === 64)).toBe(true);
   });
 
+  test('el HTML incrustado no conserva javascript, iframe ni manejadores', () => {
+    const html = FrontendScaffoldGenerator.sanitizeMarkup('<body><a href="javascript:alert(1)">x</a><iframe src="https://evil"></iframe><img src="x" onerror="steal()"><p>Hola</p></body>');
+    expect(html).toContain('Hola');
+    expect(html).not.toMatch(/javascript:/i);
+    expect(html).not.toMatch(/<iframe/i);
+    expect(html).not.toMatch(/onerror/i);
+  });
+
   test('advierte pantallas del árbol que no tienen mockup', async () => {
     const result = await new FrontendScaffoldGenerator().generar({
       proyecto: { nombre: 'Demo' }, versionesOrigen: {},
       insumos: { decisiones: {}, diseno: { manifiesto_navegacion: [{ pantalla_id: 'x', nombre: 'Reporte', slug: 'reporte' }], mockups: [] } }
     });
     expect(result.advertencias[0]).toContain('Reporte');
+  });
+
+  test('una lista corregida vacía del mockup no hereda referencias antiguas del árbol', async () => {
+    const result = await new FrontendScaffoldGenerator().generar({
+      proyecto: { nombre: 'Biblioteca' }, versionesOrigen: {},
+      insumos: { decisiones: {}, diseno: {
+        manifiesto_navegacion: [{ pantalla_id: 'catalogo', nombre: 'Catálogo', slug: 'catalogo', rf_trazabilidad: ['RF-99'] }],
+        mockups: [{ pantalla_id: 'catalogo', nombre_pantalla: 'catalogo', rf_trazabilidad: [], preview_code: '<main>Catálogo</main>' }]
+      } }
+    });
+    expect(result.trazabilidad_rf).toEqual([]);
+    expect(result.advertencias.join(' ')).toContain('sin trazabilidad RF');
+  });
+
+  test('conecta automáticamente pantallas auxiliares o de detalle sin RF directo a las operaciones RF relacionadas del proyecto', async () => {
+    const ArtifactVerificationService = require('../src/core/services/ArtifactVerificationService');
+    const result = await new FrontendScaffoldGenerator().generar({
+      proyecto: { nombre: 'Restaurante' }, versionesOrigen: {},
+      insumos: {
+        decisiones: {},
+        diseno: {
+          manifiesto_navegacion: [
+            { pantalla_id: 'vista-de-listado-de-menu', nombre: 'Vista de Listado de Menu', slug: 'vista-de-listado-de-menu', rf_trazabilidad: ['RF-01'] },
+            { pantalla_id: 'vista-de-detalle-de-plato', nombre: 'Vista de Detalle de Plato', slug: 'vista-de-detalle-de-plato', rf_trazabilidad: [] },
+            { pantalla_id: 'vista-de-gestion-y-marcado-de-plato-agotado', nombre: 'Vista de Gestion y Marcado de Plato Agotado', slug: 'vista-de-gestion-y-marcado-de-plato-agotado', rf_trazabilidad: ['RF-01', 'RF-10'] }
+          ],
+          mockups: [
+            { pantalla_id: 'vista-de-listado-de-menu', nombre_pantalla: 'vista-de-listado-de-menu', rf_trazabilidad: ['RF-01'], preview_code: '<main>Menú</main>' },
+            { pantalla_id: 'vista-de-detalle-de-plato', nombre_pantalla: 'vista-de-detalle-de-plato', rf_trazabilidad: [], preview_code: '<main>Detalle de plato</main>' },
+            { pantalla_id: 'vista-de-gestion-y-marcado-de-plato-agotado', nombre_pantalla: 'vista-de-gestion-y-marcado-de-plato-agotado', rf_trazabilidad: ['RF-01', 'RF-10'], preview_code: '<main>Plato agotado</main>' }
+          ]
+        }
+      }
+    });
+    const verification = new ArtifactVerificationService().verificar({ tipo: 'codigo_frontend', archivos: result.archivos });
+    expect(verification.estado).toBe('apta_estructuralmente');
+    expect(verification.errores).toEqual([]);
   });
 });

@@ -4,8 +4,9 @@ import ProjectDashboard from "./components/ProjectDashboard";
 import ProjectWorkspace from "./components/ProjectWorkspace";
 import AuthView from "./components/AuthView";
 import LoadingOverlay from "./components/LoadingOverlay";
-import { fetchProjects, fetchProjectById, deleteProjectApi, getAuthToken, getStoredUser, clearAuth } from "./services/api";
+import { fetchProjects, fetchProjectById, deleteProjectApi, getAuthToken, getStoredUser, clearAuth, logoutApi } from "./services/api";
 import { sanitizePlantUML } from "./utils/plantumlEncoder";
+import { upsertProject } from "./utils/projectState";
 
 export default function App() {
   const [user, setUser] = useState(getStoredUser());
@@ -13,6 +14,7 @@ export default function App() {
   const [sessionExpired, setSessionExpired] = useState(false);
 
   const [projects, setProjects] = useState([]);
+  const [projectsError, setProjectsError] = useState("");
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [view, setView] = useState("dashboard"); // "dashboard" | "workspace"
   const [loadingOverlay, setLoadingOverlay] = useState({ visible: false, message: "" });
@@ -93,6 +95,7 @@ export default function App() {
         description: f.descripcion || "",
         authorOrigin: f.autor_origen || "",
         documentDate: f.fecha_documento || "",
+        documentDateSource: f.fecha_documento_origen || "",
         tags: Array.isArray(f.etiquetas) ? f.etiquetas : [],
         transcriptionVerified: Boolean(f.transcripcion_verificada),
         aiMetadata: Boolean(f.metadatos_generados_ia),
@@ -178,6 +181,8 @@ export default function App() {
       backendId: p.id || p._id,
       name: finalCleanName,
       description: p.descripcion || "",
+      requirementAudit: p.auditoria_requisitos || null,
+      analysisFlowVersion: p.version_flujo_analisis || 1,
       resumen: p.resumen || "",
       introduccion: p.introduccion || "",
       objetivo_general: p.objetivo_general || "",
@@ -210,7 +215,11 @@ export default function App() {
             postcondition: r.poscondiciones,
             origin: r.origen || "inferido",
             evidence: r.evidencia || "",
+            evidences: r.evidencias || [],
             sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+            needIds: r.necesidades_origen || [],
+            acceptanceCriteria: (r.criterios_aceptacion || []).filter(criterion => String(criterion?.descripcion || "").trim()),
+            ruleIds: r.reglas_relacionadas || [],
             requiresConfirmation: Boolean(r.requiere_confirmacion),
             decisionStatus: r.estado_decision || (r.requiere_confirmacion ? "pendiente" : "confirmado"),
             excludedConstraints: r.restricciones_excluidas || [],
@@ -228,10 +237,15 @@ export default function App() {
             category: r.nombre,
             description: r.descripcion,
             metric: r.metrica_medible,
+            questionIds: r.preguntas_relacionadas || [],
             compliance: r.requiere_confirmacion ? "Pendiente de confirmación" : "Trazado al insumo",
             origin: r.origen || "inferido",
             evidence: r.evidencia || "",
+            evidences: r.evidencias || [],
             sourceNames: Array.isArray(r.fuentes_origen) ? r.fuentes_origen : [],
+            needIds: r.necesidades_origen || [],
+            acceptanceCriteria: (r.criterios_aceptacion || []).filter(criterion => String(criterion?.descripcion || "").trim()),
+            ruleIds: r.reglas_relacionadas || [],
             requiresConfirmation: Boolean(r.requiere_confirmacion),
             decisionStatus: r.estado_decision || (r.requiere_confirmacion ? "pendiente" : "confirmado"),
             excludedConstraints: r.restricciones_excluidas || [],
@@ -273,7 +287,11 @@ export default function App() {
   // Carga los proyectos reales desde MongoDB
   const loadBackendProjects = useCallback(async () => {
     if (!token) return;
+    try {
     const data = await fetchProjects();
+    if (getAuthToken() !== token) return false;
+    if (!Array.isArray(data)) throw new Error("El servidor devolvió una lista de proyectos inválida.");
+    setProjectsError("");
     if (data && Array.isArray(data)) {
       const mapped = data.map(mapBackendProject);
       setProjects((prev) => {
@@ -282,15 +300,30 @@ export default function App() {
         return [...mapped, ...drafts];
       });
       setActiveProjectId((curr) => curr || (mapped.length > 0 ? mapped[0].id : null));
-    } else {
-      setProjects((prev) => prev.filter((p) => p.id && p.id.startsWith("draft-")));
+    }
+    } catch (error) {
+      // Un fallo de conexión no significa que los proyectos se hayan eliminado.
+      if (getAuthToken() !== token) return false;
+      setProjectsError(error.message);
+      return error.retryable === true;
     }
   }, [token, mapBackendProject]);
 
   useEffect(() => {
-    if (token) {
-      loadBackendProjects();
-    }
+    if (!token) return;
+    let cancelled = false;
+    let timer;
+    const attempt = async (number = 0) => {
+      if (cancelled || getAuthToken() !== token) return;
+      const retryable = await loadBackendProjects();
+      // Vite can start before MongoDB/backend. Retry only this read operation,
+      // never uploads, mutations or invalid/expired sessions.
+      if (!cancelled && retryable && number < 12 && getAuthToken() === token) {
+        timer = setTimeout(() => attempt(number + 1), Math.min(1000 * 2 ** number, 5000));
+      }
+    };
+    attempt();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [token, loadBackendProjects]);
 
   useEffect(() => {
@@ -299,6 +332,7 @@ export default function App() {
       setUser(null);
       setToken(null);
       setProjects([]);
+      setProjectsError("");
       setActiveProjectId(null);
       setView('dashboard');
       setSessionExpired(true);
@@ -322,7 +356,13 @@ export default function App() {
 
   const handleLogout = async () => {
     setLoadingOverlay({ visible: true, message: "Cerrando sesión..." });
-    await new Promise((r) => setTimeout(r, 900));
+    try {
+      await logoutApi();
+    } catch (error) {
+      setLoadingOverlay({ visible: false, message: "" });
+      window.alert(`${error.message} Tu sesión sigue abierta; vuelve a intentarlo.`);
+      return;
+    }
     clearAuth();
     setUser(null);
     setToken(null);
@@ -343,6 +383,7 @@ export default function App() {
   }
 
   const createNewDraftProject = (id) => ({
+    analysisFlowVersion: 2,
     id: id || "draft-" + Date.now(),
     name: "Proyecto sin nombre",
     description: "",
@@ -402,13 +443,19 @@ export default function App() {
 
   const handleDeleteProject = async (projectId) => {
     const proj = projects.find((p) => p.id === projectId || p.backendId === projectId);
-    const targetBackendId = proj?.backendId || projectId;
-    try {
-      await deleteProjectApi(targetBackendId);
-    } catch (e) {
-      console.warn("[App] Error eliminando proyecto en backend:", e);
+    const candidateBackendId = proj?.backendId || projectId;
+    const targetBackendId = /^[a-f\d]{24}$/i.test(String(candidateBackendId)) ? candidateBackendId : null;
+    if (targetBackendId) {
+      try {
+        await deleteProjectApi(targetBackendId);
+      } catch (e) {
+        console.warn("[App] Error eliminando proyecto en backend:", e);
+        setProjectsError(`No se pudo eliminar el proyecto: ${e.message}`);
+        throw e;
+      }
     }
 
+    setProjectsError("");
     const filtered = projects.filter((p) => p.id !== projectId && p.backendId !== projectId);
     setProjects(filtered);
     if (activeProjectId === projectId || activeProjectId === targetBackendId) {
@@ -418,31 +465,7 @@ export default function App() {
 
   const handleUpdateProject = (updatedProject) => {
     const targetId = updatedProject.backendId || updatedProject.id;
-    const normalizedProject = {
-      ...updatedProject,
-      id: targetId,
-      backendId: updatedProject.backendId || (targetId && targetId.length === 24 ? targetId : undefined)
-    };
-
-    setProjects((prev) => {
-      const index = prev.findIndex(
-        (p) =>
-          p.id === targetId ||
-          p.id === updatedProject.id ||
-          (normalizedProject.backendId && (p.backendId === normalizedProject.backendId || p.id === normalizedProject.backendId)) ||
-          (activeProjectId && (p.id === activeProjectId || p.backendId === activeProjectId))
-      );
-
-      if (index >= 0) {
-        const next = [...prev];
-        next[index] = {
-          ...next[index],
-          ...normalizedProject
-        };
-        return next;
-      }
-      return [normalizedProject, ...prev];
-    });
+    setProjects((prev) => upsertProject(prev, updatedProject, activeProjectId));
 
     if (targetId) {
       setActiveProjectId(targetId);
@@ -458,6 +481,12 @@ export default function App() {
     <div className="flex flex-col h-screen w-screen bg-[#f8fafd] text-slate-900 overflow-hidden font-sans select-text">
       {/* Overlay de carga global */}
       <LoadingOverlay visible={loadingOverlay.visible} message={loadingOverlay.message} />
+      {projectsError && view === "dashboard" && token && (
+        <div role="alert" className="bg-red-50 px-5 py-3 text-sm text-red-700">
+          {projectsError}
+          <button type="button" onClick={loadBackendProjects} className="ml-3 underline">Reintentar</button>
+        </div>
+      )}
       {view === "dashboard" && (
         <Header
           activeView={view}
@@ -474,6 +503,7 @@ export default function App() {
             onSelectProject={handleSelectProject}
             onCreateProject={handleCreateProject}
             onDeleteProject={handleDeleteProject}
+            onImported={loadBackendProjects}
           />
         ) : (
           <ProjectWorkspace

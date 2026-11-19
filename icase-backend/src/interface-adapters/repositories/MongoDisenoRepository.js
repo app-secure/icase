@@ -1,6 +1,15 @@
 const DisenoModel = require('../../infrastructure/database/schemas/DisenoSchema');
 
 class MongoDisenoRepository {
+  async guardarSiNoCambio(proyectoId, datos, updatedAt) {
+    const diseno = await DisenoModel.findOneAndUpdate(
+      { proyecto_id: proyectoId, updatedAt: updatedAt || { $exists: false } },
+      { $set: datos },
+      { new: true }
+    );
+    return diseno ? diseno.toJSON() : null;
+  }
+
   async guardarOActualizar(proyectoId, datos) {
     const diseno = await DisenoModel.findOneAndUpdate(
       { proyecto_id: proyectoId },

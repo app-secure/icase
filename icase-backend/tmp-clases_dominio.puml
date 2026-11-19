@@ -1,0 +1,139 @@
+@startuml
+left to right direction
+skinparam linetype ortho
+skinparam nodesep 70
+skinparam ranksep 70
+skinparam classAttributeIconSize 0
+
+class Usuario {
+  +String id
+  +String nombre
+  +String correo
+  +String password
+  +String rol
+  +autenticar(): boolean
+}
+
+class Cliente {
+  +String telefono
+  +int puntos
+  +acumularPuntos(): void
+}
+
+class Mesero {
+  +String turno
+  +validarReserva(): boolean
+}
+
+class Cocinero {
+  +String area
+  +marcarPlatoAgotado(): void
+}
+
+class Cajero {
+  +String cajaId
+  +procesarCobro(): boolean
+  +cerrarCaja(): boolean
+}
+
+class Administrador {
+  +String nivelAcceso
+  +modificarPrecio(): void
+  +reasignarMesa(): void
+  +respaldarBD(): boolean
+  +recuperarInformacion(): boolean
+}
+
+class Menu {
+  +String id
+  +DateTime ultimaActualizacion
+  +actualizarDisponibilidad(): void
+}
+
+class Plato {
+  +String id
+  +String nombre
+  +float precio
+  +boolean disponible
+  +validarDisponibilidad(): boolean
+}
+
+class Mesa {
+  +String id
+  +int numero
+  +String estado
+  +int capacidad
+}
+
+class Silla {
+  +String id
+  +String estado
+}
+
+class Reserva {
+  +String id
+  +DateTime fechaHora
+  +String codigoQR
+  +String estado
+  +validarQR(): boolean
+}
+
+class Pedido {
+  +String id
+  +DateTime fechaHora
+  +String estado
+  +calcularTotal(): float
+}
+
+class Comanda {
+  +String id
+  +DateTime tiempoTranscurrido
+  +String estado
+  +actualizarEstado(): void
+}
+
+class PaquetePrepagado {
+  +String id
+  +String descripcion
+  +float saldo
+  +verificarSaldo(): boolean
+}
+
+class Venta {
+  +String id
+  +DateTime fecha
+  +float total
+  +String metodoPago
+}
+
+class RespaldoBaseDatos {
+  +String id
+  +DateTime fechaRespaldo
+  +String rutaArchivo
+  +String estado
+  +ejecutarRespaldo(): boolean
+  +restaurarInformacion(): boolean
+}
+
+Usuario <|-- Cliente
+Usuario <|-- Mesero
+Usuario <|-- Cocinero
+Usuario <|-- Cajero
+Usuario <|-- Administrador
+
+Menu "1" *-- "1..*" Plato : contiene
+Cliente "1" --> "0..*" Reserva : solicita
+Mesa "1" *-- "1..*" Silla : compone
+Reserva "1" --> "1" Mesa : reservaMesa
+Reserva "1" --> "1" Silla : reservaSilla
+Mesero "1" --> "0..*" Mesa : asignado
+Mesero "1" --> "0..*" Pedido : toma
+Mesa "1" --> "0..*" Pedido : genera
+Pedido "1..*" --> "1..*" Plato : incluye
+Pedido "1" --> "1" Comanda : genera
+Cocinero "1" --> "0..*" Comanda : visualiza
+Cliente "1" --> "0..*" PaquetePrepagado : compra
+Cajero "1" --> "0..*" Venta : procesa
+Administrador "1" --> "0..*" Usuario : gestiona
+Administrador "1" --> "0..*" RespaldoBaseDatos : administra
+@enduml

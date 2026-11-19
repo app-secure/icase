@@ -1,4 +1,46 @@
-const API_URL = 'http://localhost:5000';
+// En desarrollo Vite reenvía estas peticiones al backend desde el mismo origen.
+// Así cambiar de puerto del frontend no rompe CORS ni la sesión.
+const API_URL = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? '/icase-api' : 'http://localhost:5000')).replace(/\/$/, '');
+
+export async function exportProjectPackageApi(id) {
+  const res = await apiFetch(`${API_URL}/proyectos/${encodeURIComponent(id)}/transferencia/exportar`, { headers: getAuthHeaders() });
+  if (!res.ok) { const data = await res.json(); throw new Error(data.error || 'No se pudo exportar el proyecto.'); }
+  return res.blob();
+}
+export async function projectPackageApi(file, verification = null, name = '') {
+  const body = new FormData();
+  body.append('paquete', file);
+  if (verification) { body.append('confirmar', 'true'); body.append('sha256', verification.sha256); body.append('nombre', name); body.append('import_id', verification.import_id); }
+  const res = await apiFetch(`${API_URL}/proyectos/transferencias/${verification ? 'importar' : 'verificar'}`, { method: 'POST', headers: getAuthHeaders(), body });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudo completar la transferencia.');
+  return data;
+}
+
+async function requirementsJobRequest(route, body) {
+  const response = await apiFetch(`${API_URL}/proyectos/${route}`, {
+    method: body === undefined ? 'GET' : 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo consultar la generación de requisitos.');
+  return data;
+}
+export const startRequirementJobApi = (id, body) => requirementsJobRequest(`${id}/trabajos-requisitos`, body);
+export const fetchRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}`);
+export const fetchLatestRequirementJobApi = id => requirementsJobRequest(`${id}/trabajos-requisitos/ultimo`);
+export const resumeRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}/reanudar`, {});
+export const cancelRequirementJobApi = id => requirementsJobRequest(`trabajos-requisitos/${id}/cancelar`, {});
+export const fetchInitialAnalysisApi = async (id, version = null) => {
+  const response = await apiFetch(`${API_URL}/proyectos/${id}/analisis-inicial${version ? `?version=${encodeURIComponent(version)}` : ''}`, { headers: getAuthHeaders() });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo cargar el análisis inicial.'); return data;
+};
+export async function initialAnalysisActionApi(id, action, body = {}) {
+  const response = await apiFetch(`${API_URL}/proyectos/${id}/analisis-inicial${action ? `/${action}` : ''}`, {
+    method: action ? 'POST' : 'PATCH', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body)
+  });
+  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'No se pudo guardar el análisis inicial.'); return data;
+}
 
 // Gestión local de token de autenticación
 export function getAuthToken() {
@@ -43,8 +85,27 @@ function getAuthHeaders(extraHeaders = {}) {
  * revocada o dejó de ser válida: se avisa a la aplicación para volver a la pantalla de acceso.
  * El inicio de sesión y el registro devuelven 401/409 por motivos propios y quedan fuera.
  */
+// Mientras el backend arranca o se reinicia, el proxy de desarrollo responde 500 sin JSON (o 502/503/504) y las conexiones
+// fallan. Las lecturas (GET) son idempotentes: se reintentan unos segundos en lugar de mostrar un error que desaparece al recargar.
+const GET_RETRY_DELAYS_MS = [500, 1000, 2000, 3000];
+const isTransientResponse = (res) => [502, 503, 504].includes(res.status)
+  || (res.status === 500 && !/json/i.test(res.headers.get('content-type') || ''));
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function apiFetch(url, options) {
-  const res = await fetch(url, options);
+  const retries = String(options?.method || 'GET').toUpperCase() === 'GET' ? GET_RETRY_DELAYS_MS : [];
+  let res;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      res = await fetch(url, options);
+    } catch (error) {
+      if (error?.name === 'AbortError' || attempt >= retries.length) throw error;
+      await wait(retries[attempt]);
+      continue;
+    }
+    if (!isTransientResponse(res) || attempt >= retries.length) break;
+    await wait(retries[attempt]);
+  }
   if (res.status === 401 && getAuthToken() && !/\/auth\/(login|registro)$/.test(String(url))) {
     window.dispatchEvent(new Event('icase:session-expired'));
   }
@@ -52,6 +113,19 @@ async function apiFetch(url, options) {
 }
 
 // === AUTENTICACIÓN ===
+export async function fetchAuthConfigApi() {
+  const res = await fetch(`${API_URL}/auth/config`);
+  if (!res.ok) throw new Error('No se pudo consultar la configuración de acceso.');
+  return res.json();
+}
+
+export async function logoutApi() {
+  const res = await apiFetch(`${API_URL}/auth/logout`, { method: 'POST', headers: getAuthHeaders() });
+  if (res.status === 401) return;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudo cerrar la sesión en el servidor.');
+}
+
 export async function registroApi({ nombre, apellido, correo, celular, password }) {
   const res = await fetch(`${API_URL}/auth/registro`, {
     method: 'POST',
@@ -97,11 +171,14 @@ export async function fetchProjects() {
     const res = await apiFetch(`${API_URL}/proyectos`, {
       headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error('Error al listar proyectos');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(data.error || `Error al listar proyectos (${res.status})`), { retryable: [500, 502, 503, 504].includes(res.status) });
+    }
     return await res.json();
   } catch (err) {
     console.warn('[API] Backend no disponible o error:', err.message);
-    return null;
+    throw Object.assign(new Error(`No se pudieron cargar los proyectos: ${err.message}. Comprueba que el backend esté disponible y que tu sesión sea válida.`), { retryable: err.retryable === true || err instanceof TypeError });
   }
 }
 
@@ -125,11 +202,14 @@ export async function createProjectApi(data) {
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data)
     });
-    if (!res.ok) throw new Error('Error al crear proyecto');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Error al crear proyecto (${res.status})`);
+    }
     return await res.json();
   } catch (err) {
     console.warn('[API] Error al crear proyecto:', err.message);
-    return null;
+    throw err;
   }
 }
 
@@ -149,17 +229,13 @@ export async function updateProjectApi(projectId, data) {
 }
 
 export async function deleteProjectApi(projectId) {
-  try {
-    const res = await apiFetch(`${API_URL}/proyectos/${projectId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
-    });
-    if (!res.ok) throw new Error('Error al eliminar proyecto');
-    return await res.json();
-  } catch (err) {
-    console.warn('[API] Error al eliminar proyecto:', err.message);
-    return null;
-  }
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo eliminar el proyecto.');
+  return data;
 }
 
 // === FUENTES ===
@@ -180,7 +256,7 @@ export async function uploadFuenteApi(projectId, file) {
     return await res.json();
   } catch (err) {
     console.warn('[API] Error al subir fuente:', err.message);
-    return null;
+    throw err;
   }
 }
 
@@ -248,9 +324,9 @@ export async function deleteFuenteApi(fuenteId, proyectoId = null, nombreArchivo
 }
 
 // === PROCESAMIENTO CON IA ===
-export async function fetchAiModelsApi() {
+export async function fetchAiModelsApi(objetivo = null) {
   try {
-    const res = await apiFetch(`${API_URL}/proyectos/modelos-ia`, {
+    const res = await apiFetch(`${API_URL}/proyectos/modelos-ia${objetivo ? `?objetivo=${encodeURIComponent(objetivo)}` : ''}`, {
       headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al obtener modelos de IA');
@@ -287,6 +363,20 @@ export async function processWithAiApi(projectId, insumoBruto = '', insumoAdicio
 }
 
 // === FASES Y DOCUMENTO ===
+export async function reviewRequirementsApi(projectId, data = { accion: 'validar' }) {
+  const response = await apiFetch(`${API_URL}/proyectos/${projectId}/revision-requisitos`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(data) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'No se pudo guardar la revisión.');
+  return result;
+}
+
+export async function resolveRequirementNeedApi(projectId, needId, data) {
+  const response = await apiFetch(`${API_URL}/proyectos/${projectId}/necesidades/${encodeURIComponent(needId)}/resolver`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(data) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'No se pudo resolver la necesidad.');
+  return result;
+}
+
 export async function approvePhaseApi(projectId, fase) {
   const res = await apiFetch(`${API_URL}/proyectos/${projectId}/aprobar-fase`, {
     method: 'POST',
@@ -295,17 +385,30 @@ export async function approvePhaseApi(projectId, fase) {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Error al aprobar fase');
+    throw Object.assign(new Error(data.error || 'Error al aprobar fase'), { controlRequisitos: data.control_requisitos });
   }
   return await res.json();
 }
 
-export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null) {
-  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
+export async function startDiagramJobApi(projectId, diagramType, insumoBruto = '', insumoAdicional = '', provider = 'auto', specificModel = null, regenerar = false) {
+  const recover = async () => {
+    try {
+      const recovered = await fetchLatestDiagramJobApi(projectId, diagramType);
+      if (recovered.trabajo?.tipo_diagrama === diagramType && ['encolado', 'procesando'].includes(recovered.trabajo.estado)) return { ...recovered, reutilizado: true, recuperado_tras_desconexion: true };
+    } catch { /* No reenviar POST: podría duplicar un trabajo ya aceptado. */ }
+    return null;
+  };
+  let res;
+  try { res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ tipo_diagrama: diagramType, insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional, provider, specificModel })
-  });
+    body: JSON.stringify({ tipo_diagrama: diagramType, insumo_bruto: insumoBruto, insumo_adicional: insumoAdicional, provider, specificModel, regenerar: regenerar === true })
+  }); } catch {
+    const recovered = await recover();
+    if (recovered) return recovered;
+    throw new Error('Se interrumpió la conexión al iniciar el diagrama. Comprueba el backend; al reintentar se recuperará un trabajo activo si ya fue aceptado.');
+  }
+  if ([502, 503, 504].includes(res.status)) { const recovered = await recover(); if (recovered) return recovered; }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo iniciar la generación del diagrama.');
   return data;
@@ -318,8 +421,8 @@ export async function fetchDiagramJobApi(jobId) {
   return data;
 }
 
-export async function fetchLatestDiagramJobApi(projectId) {
-  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo`, { headers: getAuthHeaders() });
+export async function fetchLatestDiagramJobApi(projectId, diagramType = null) {
+  const res = await apiFetch(`${API_URL}/proyectos/${projectId}/trabajos-diagramas/ultimo${diagramType ? `?tipo_diagrama=${encodeURIComponent(diagramType)}` : ''}`, { headers: getAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo recuperar la generación del diagrama.');
   return data;
@@ -376,10 +479,14 @@ export async function updateDiagramApi(diagramId, data) {
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data)
     });
-    if (!res.ok) throw new Error('Error al actualizar diagrama');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(body.error || 'Error al actualizar diagrama'), { status: res.status });
+    }
     return await res.json();
   } catch (err) {
     console.warn('[API] Error al actualizar diagrama:', err.message);
+    if (err.status === 409) throw err;
     return null;
   }
 }
@@ -425,11 +532,11 @@ export async function generateMockupsApi(projectId, pantallas = [], insumoAdicio
   }
 }
 
-export async function startMockupJobApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null) {
+export async function startMockupJobApi(projectId, pantallas = [], insumoAdicional = '', requerimientos = null, soloReparar = false) {
   const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/trabajos`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ pantallas, insumoAdicional, requerimientos })
+    body: JSON.stringify({ pantallas, insumoAdicional, requerimientos, soloReparar })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo iniciar la generación de mockups.');
@@ -506,6 +613,15 @@ export async function updateMockupApi(projectId, nombrePantalla, previewCode) {
   }
 }
 
+export async function markMockupControlsUiApi(projectId, nombrePantalla, controles = null, modo = 'ui') {
+  const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}/marcar-ui`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ controles, modo })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudieron marcar los controles.');
+  return data;
+}
+
 export async function deleteMockupApi(projectId, nombrePantalla) {
   try {
     const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {
@@ -545,7 +661,7 @@ export async function fetchCodePlanApi(projectId) {
     headers: getAuthHeaders()
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'No se pudo cargar el plan de codificación.');
+  if (!res.ok) throw new Error(data.error || (res.status >= 500 ? 'El servidor no respondió (puede estar reiniciándose). Vuelve a intentarlo en unos segundos.' : 'No se pudo cargar el plan de codificación.'));
   return data;
 }
 
@@ -560,8 +676,15 @@ export async function proposeCodePhaseApi(projectId, phase, propuesta, observaci
   return data;
 }
 
-export async function suggestCodePhaseApi(projectId, phase) {
-  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}/sugerencia`, {
+export async function fetchGenerationPreviewApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/vista-previa`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo calcular la vista previa.');
+  return data;
+}
+
+export async function suggestCodePhaseApi(projectId, phase, inicial = false) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/etapas/${phase}/sugerencia${inicial ? "?inicial=1" : ""}`, {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' })
   });
@@ -673,8 +796,8 @@ export async function reviewBackendArtifactApi(projectId, artifactId, decision, 
   return data;
 }
 
-export async function generateFrontendArtifactApi(projectId) {
-  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/frontend/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+export async function generateFrontendArtifactApi(projectId, plataforma) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/frontend/generar`, { method: 'POST', body: JSON.stringify({ plataforma }), headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo generar el frontend.');
   return data;
@@ -696,9 +819,9 @@ export async function generateTestArtifactApi(projectId) {
   return data;
 }
 
-export async function reviewTestArtifactApi(projectId, artifactId, decision, observaciones = '') {
+export async function reviewTestArtifactApi(projectId, artifactId, decision, observaciones = '', extra = {}) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/pruebas/${artifactId}/revision`, {
-    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones, modo_permisivo: extra.modo_permisivo === true })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo revisar la suite de pruebas.');
@@ -737,6 +860,34 @@ export async function reviewPipelineArtifactApi(projectId, artifactId, decision,
   return data;
 }
 
+export async function fetchFunctionalGateApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/puerta-funcional`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo evaluar la puerta de calidad.');
+  return data;
+}
+
+export async function acceptFunctionalGateApi(projectId, excepciones) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/puerta-funcional/aceptar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ excepciones }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo guardar la aceptación.');
+  return data;
+}
+
+export async function fetchLocalRunApi(projectId) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/ejecucion`, { headers: getAuthHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo consultar la ejecución local.');
+  return data;
+}
+
+export async function controlLocalRunApi(projectId, action) {
+  const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/ejecucion/${action}`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo completar la operación.');
+  return data;
+}
+
 export async function generateDeliveryArtifactApi(projectId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/generar`, { method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }) });
   const data = await res.json().catch(() => ({}));
@@ -744,9 +895,9 @@ export async function generateDeliveryArtifactApi(projectId) {
   return data;
 }
 
-export async function reviewDeliveryArtifactApi(projectId, artifactId, decision, observaciones = '') {
+export async function reviewDeliveryArtifactApi(projectId, artifactId, decision, observaciones = '', extra = {}) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/${artifactId}/revision`, {
-    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones })
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ decision, observaciones, modo_permisivo: extra.modo_permisivo === true })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'No se pudo revisar el paquete final.');
@@ -755,9 +906,18 @@ export async function reviewDeliveryArtifactApi(projectId, artifactId, decision,
 
 export async function downloadDeliveryArtifactApi(projectId, artifactId) {
   const res = await fetchCodeApi(`${API_URL}/proyectos/${projectId}/codificacion/paquete/${artifactId}/descargar`, { headers: getAuthHeaders() });
+  return saveZip(res);
+}
+
+export async function downloadCodeArtifactApi(projectId, artifactId, plataforma = '') {
+  const url = `${API_URL}/proyectos/${projectId}/artefactos/${artifactId}/descargar?plataforma=${encodeURIComponent(plataforma)}`;
+  return saveZip(await fetchCodeApi(url, { headers: getAuthHeaders() }));
+}
+
+async function saveZip(res) {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'No se pudo descargar el paquete final.');
+    throw new Error(data.error || 'No se pudo descargar el ZIP.');
   }
   const blob = await res.blob();
   const disposition = res.headers.get('Content-Disposition') || '';

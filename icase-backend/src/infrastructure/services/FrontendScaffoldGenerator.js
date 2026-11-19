@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const IGeneradorArtefacto = require('../../core/services/IGeneradorArtefacto');
 const GenericFrontendGenerator = require('./GenericFrontendGenerator');
 const StackCatalog = require('../../core/services/StackCatalog');
+const PlatformPolicy = require('../../core/services/PlatformPolicy');
 
 const slug = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pantalla';
@@ -9,19 +10,25 @@ const componentName = (value) => slug(value).split('-').map((part) => part.charA
 
 class FrontendScaffoldGenerator extends IGeneradorArtefacto {
   async generar({ proyecto, insumos, versionesOrigen }) {
-    const { decisiones, diseno } = insumos;
+    const { decisiones, diseno, requerimientos = [], identidad = null, referencias = null, especificacion = null, acciones = [] } = insumos;
     StackCatalog.resolve(decisiones.stack_tecnologico || {}); // no se sustituye en silencio un stack no soportado
     const manifest = Array.isArray(diseno.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
     const mockups = Array.isArray(diseno.mockups) ? diseno.mockups : [];
     const mockupMap = new Map(mockups.map((item) => [item.pantalla_id || item.nombre_pantalla, item]));
-    const screens = manifest.length ? manifest.map((screen) => ({ ...screen, mockup: mockupMap.get(screen.pantalla_id) || mockupMap.get(screen.slug) }))
+    const screens = manifest.length ? manifest.map((screen) => {
+      const mockup = mockupMap.get(screen.pantalla_id) || mockupMap.get(screen.slug);
+      return { ...screen, mockup, rf_trazabilidad: Array.isArray(mockup?.rf_trazabilidad) ? mockup.rf_trazabilidad : (screen.rf_trazabilidad || []) };
+    })
       : mockups.map((mockup) => ({ ...mockup, nombre: mockup.nombre_visible, slug: mockup.nombre_pantalla, mockup }));
-    const files = new GenericFrontendGenerator().generate({ proyecto, screens, decisiones, sistemaDiseno: diseno.sistema_diseno || {} });
+    const files = new GenericFrontendGenerator().generate({ proyecto, screens, decisiones, sistemaDiseno: diseno.sistema_diseno || {}, requerimientos, identidad, referencias, spec: especificacion && acciones.length ? { pantallas: especificacion.pantallas, acciones } : null });
     const missing = screens.filter((screen) => !screen.mockup).map((screen) => screen.nombre || screen.slug);
+    // Una pantalla de una aplicación que no está en el alcance no se genera: se avisa en lugar de omitirla en silencio.
+    const selected = decisiones.stack_tecnologico?.plataformas ?? decisiones.alcance_plataforma?.plataformas ?? ['web'];
+    const notGenerated = PlatformPolicy.missing(screens, selected).map((app) => `${PlatformPolicy.count(screens)[app]} pantalla(s) ${app === 'móvil' ? 'móviles' : 'web'} del árbol de navegación no se generaron porque la plataforma ${app} no está en el alcance.`);
     return {
       archivos: files.map((file) => ({ ...file, huella: crypto.createHash('sha256').update(file.contenido).digest('hex') })),
       trazabilidad_rf: [...new Set(screens.flatMap((screen) => screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || []))],
-      advertencias: [...(missing.length ? [`Pantallas del árbol sin mockup asociado: ${missing.join(', ')}.`] : []), ...(!screens.length ? ['No existen pantallas aprobadas para conectar.'] : []), ...(screens.some((screen) => !(screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || []).length) ? ['Hay pantallas sin trazabilidad RF; no tendrán una operación de negocio asociada.'] : [])],
+      advertencias: [...notGenerated, ...(missing.length ? [`Pantallas del árbol sin mockup asociado: ${missing.join(', ')}.`] : []), ...(!screens.length ? ['No existen pantallas aprobadas para conectar.'] : []), ...(screens.some((screen) => !(screen.rf_trazabilidad || screen.mockup?.rf_trazabilidad || []).length) ? ['Hay pantallas sin trazabilidad RF; no tendrán una operación de negocio asociada.'] : [])],
       versiones_origen: versionesOrigen,
       generado_por: 'generador_frontend_generico_v2'
     };
@@ -57,9 +64,39 @@ class FrontendScaffoldGenerator extends IGeneradorArtefacto {
   }
 
   _body(html) {
-    const safe = String(html || '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*(["']).*?\1/gi, '');
-    return safe.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1]?.trim() || safe || '<section><h1>Pantalla pendiente</h1></section>';
+    return FrontendScaffoldGenerator.sanitizeMarkup(html);
   }
 }
+
+const BLOCKED_TAGS = new Set(['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'svg']);
+
+FrontendScaffoldGenerator.sanitizeMarkup = function sanitizeMarkup(html) {
+  const { parse, serialize } = require('parse5');
+  const source = String(html || '').trim() || '<section><h1>Pantalla pendiente</h1></section>';
+  const wrapped = /<html[\s>]/i.test(source) ? source : `<!DOCTYPE html><html><body>${source}</body></html>`;
+  const document = parse(wrapped);
+  const clean = (node) => {
+    if (!node || !node.childNodes) return;
+    node.childNodes = node.childNodes.filter((child) => {
+      if (child.tagName && BLOCKED_TAGS.has(child.tagName)) return false;
+      if (child.attrs) {
+        child.attrs = child.attrs.filter((attr) => {
+          const name = String(attr.name || '').toLowerCase();
+          const value = String(attr.value || '');
+          if (name.startsWith('on')) return false;
+          if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action') && /^\s*(javascript|data|vbscript):/i.test(value)) return false;
+          return true;
+        });
+      }
+      clean(child);
+      return true;
+    });
+  };
+  clean(document);
+  const htmlNode = document.childNodes.find((node) => node.tagName === 'html') || document;
+  const body = (htmlNode.childNodes || []).find((node) => node.tagName === 'body');
+  const inner = body ? body.childNodes.map((node) => serialize(node)).join('').trim() : serialize(document);
+  return inner || '<section><h1>Pantalla pendiente</h1></section>';
+};
 
 module.exports = FrontendScaffoldGenerator;

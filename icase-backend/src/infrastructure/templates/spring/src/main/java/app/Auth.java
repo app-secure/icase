@@ -67,6 +67,7 @@ public class Auth {
 
     private final RecordStore store;
     private final JsonNode policy;
+    private final JsonNode contract;
     private final boolean enabled;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
     private final Limiter logins = new Limiter(5, Duration.ofMinutes(15));
@@ -74,6 +75,7 @@ public class Auth {
     private final String dummyHash = encoder.encode(UUID.randomUUID().toString());
 
     public Auth(RecordStore store, Data data) {
+        this.contract = data.contract();
         this.store = store;
         this.policy = data.policy();
         this.enabled = data.authEnabled();
@@ -258,14 +260,40 @@ public class Auth {
             || ("POST".equals(method) && ("/api/auth/login".equals(path) || "/api/auth/register".equals(path)));
     }
 
+    /** Métodos permitidos: array legado o { metodos, alcance }. */
+    static List<String> methodsOf(JsonNode entry) {
+        if (entry == null || entry.isMissingNode() || entry.isNull()) return List.of();
+        if (entry.isArray()) {
+            List<String> methods = new ArrayList<>();
+            entry.forEach(item -> { if (item.isTextual()) methods.add(item.asText()); });
+            return methods;
+        }
+        JsonNode methods = entry.path("metodos");
+        if (!methods.isArray()) return List.of();
+        List<String> list = new ArrayList<>();
+        methods.forEach(item -> { if (item.isTextual()) list.add(item.asText()); });
+        return list;
+    }
+
+    /** null = sin filtro; id de usuario = solo registros propios. */
+    public String ownerScope(Map<String, Object> user, String operation) {
+        if (user == null || ADMIN.equals(user.get("rol"))) return null;
+        JsonNode entry = policy.path("operaciones").path(operation).path(String.valueOf(user.get("rol")));
+        if (entry.isMissingNode() || entry.isNull() || entry.isArray()) return null;
+        if (!"propios".equals(entry.path("alcance").asText(""))) return null;
+        Object id = user.get("id");
+        return id == null ? null : String.valueOf(id);
+    }
+
     public void authorize(Map<String, Object> user, String method, String path) {
+        var association = Pattern.compile("^/api/associations/([^/]+)(?:/|$)").matcher(path);
+        if (association.find()) { AssociationPermissions.check(policy, contract, user, method, association.group(1)); return; }
         java.util.regex.Matcher operation = OPERATION.matcher(path);
         boolean admin = ADMIN.equals(user.get("rol"));
         if (operation.find()) {
             JsonNode byRole = policy.path("operaciones").get(operation.group(1));
             if (byRole == null) return; // operación inexistente: responde 404 la ruta
-            boolean allowed = admin;
-            for (JsonNode allowedMethod : byRole.path(String.valueOf(user.get("rol")))) allowed = allowed || allowedMethod.asText().equals(method);
+            boolean allowed = admin || methodsOf(byRole.path(String.valueOf(user.get("rol")))).contains(method);
             if (!allowed) throw new HttpError(403, "No tienes permiso para esta operación.");
             return;
         }

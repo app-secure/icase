@@ -5,6 +5,7 @@
  * Para añadir un stack basta con registrarlo aquí y en el generador; solo se considera soportado cuando pasa las
  * pruebas HTTP de verificación (CRUD, reglas, permisos, autenticación y OpenAPI).
  */
+const NestRuntimePolicy = require('./NestRuntimePolicy');
 const BACKENDS = Object.freeze([
   { id: 'express', etiqueta: 'Node.js + Express', lenguaje: 'node', patron: /express|^\s*node(?:\.?js)?\s*$/i },
   { id: 'nest', etiqueta: 'Node.js + NestJS', lenguaje: 'node', patron: /nest/i },
@@ -41,6 +42,10 @@ class StackCatalog {
     if (!backend) {
       throw new Error(`El backend «${requestedBackend}» no está soportado todavía. Opciones disponibles: ${options(BACKENDS)}.`);
     }
+    if (backend.id === 'nest') {
+      NestRuntimePolicy.validate(requestedBackend);
+      if (stack.version_backend) NestRuntimePolicy.validate('NestJS ' + stack.version_backend);
+    }
     const database = requestedDatabase
       ? DATABASES.find((item) => item.patron.test(requestedDatabase))
       : DATABASES.find((item) => item.id === (backend.id === 'spring' ? 'postgres' : 'mongodb')); // sin indicación: MongoDB (histórico); Java solo admite relacionales
@@ -61,6 +66,7 @@ class StackCatalog {
     const requested = String(text || '').trim();
     const backend = requested ? BACKENDS.find((item) => item.patron.test(requested)) : BACKENDS[0];
     if (!backend) throw new Error(`El backend «${requested}» no está soportado todavía. Opciones disponibles: ${options(BACKENDS)}.`);
+    if (backend.id === 'nest') NestRuntimePolicy.validate(requested);
     return { backend: backend.id, language: backend.lenguaje };
   }
 

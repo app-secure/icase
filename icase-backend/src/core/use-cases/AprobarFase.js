@@ -1,5 +1,6 @@
 const { normalizeDiagramType, isValidDiagramType } = require('../constants/DiagramTypes');
 const { DiagramWorkflowService, DIAGRAM_STATES } = require('../services/DiagramWorkflowService');
+const RequirementApprovalService = require('../services/RequirementApprovalService');
 
 class AprobarFase {
   constructor({ proyectoRepository, requerimientoRepository, diagramaRepository, disenoRepository, plantumlValidatorService = null, mockupTraceabilityService = null }) {
@@ -21,9 +22,27 @@ class AprobarFase {
     let nuevoEstado = proyecto.estado_fase;
 
     if (fase === 'analisis') {
+      if (proyecto.version_flujo_analisis === 2) {
+        const initial = await this.initialAnalysis.requireApproved(proyectoId, proyecto.usuario_id);
+        if (proyecto.auditoria_requisitos?.referencia_analisis_inicial?.id !== initial.id) throw new Error('Los requisitos no corresponden a la versión aprobada del análisis inicial. Revisa los cambios antes de aprobar.');
+      }
+      const reqs = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+      if (proyecto.version_flujo_analisis === 2 && reqs.some(r => !(r.necesidades_origen || []).length)) throw new Error('Vincula cada requisito con una necesidad del análisis inicial aprobado; las obligaciones nuevas deben revisarse primero allí.');
+      const control = new RequirementApprovalService().evaluate(reqs, proyecto.auditoria_requisitos);
+      if (control.bloqueado) {
+        throw Object.assign(new Error(`No se puede aprobar el análisis: ${control.errores_criticos.map((item) => item.mensaje).join(' ')}`), {
+          code: 'REQUIREMENTS_COVERAGE_BLOCKED', controlRequisitos: control
+        });
+      }
       nuevoEstado = 'analisis_aprobado';
+      if (typeof this.proyectoRepository.actualizar === 'function') {
+        await this.proyectoRepository.actualizar(proyectoId, { auditoria_requisitos: { ...(proyecto.auditoria_requisitos || {}), control_aprobacion: control,
+          revision_actual: { fecha: new Date().toISOString(), errores: control.errores_criticos, advertencias: control.advertencias },
+          analisis_aprobado: { fecha: new Date().toISOString(), usuario_id: aprobadoPor, version: proyecto.auditoria_requisitos?.version_analisis || 1,
+            contexto: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos) }
+        } });
+      }
       if (aprobarTodosLosElementos) {
-        const reqs = await this.requerimientoRepository.listarPorProyecto(proyectoId);
         for (const r of reqs) {
           await this.requerimientoRepository.actualizar(r.id, { aprobado: true });
         }
@@ -36,7 +55,7 @@ class AprobarFase {
       if (!isValidDiagramType(tipo)) {
         throw new Error(`Tipo de diagrama inválido: ${tipoDiagrama || 'no especificado'}.`);
       }
-      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
+      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (!estadosValidos.has(proyecto.estado_fase)) {
         throw new Error('Los requisitos deben estar aprobados antes de aprobar un diagrama.');
       }
@@ -153,7 +172,7 @@ class AprobarFase {
         nuevoEstado
       };
     } else if (fase === 'diagramas' || fase === 'diseno') {
-      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes']);
+      const estadosValidos = new Set(['analisis_aprobado', 'diseno_pendiente', 'diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (proyecto.estado_fase && !estadosValidos.has(proyecto.estado_fase)) {
         throw new Error('La fase de análisis debe estar aprobada antes de aprobar los diagramas.');
       }
@@ -174,7 +193,7 @@ class AprobarFase {
       }
       nuevoEstado = 'mockups_pendientes';
     } else if (fase === 'mockups') {
-      const estadosValidos = new Set(['diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado']);
+      const estadosValidos = new Set(['diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (proyecto.estado_fase && !estadosValidos.has(proyecto.estado_fase)) {
         throw new Error('Los diagramas deben estar aprobados antes de aprobar los mockups.');
       }
@@ -214,7 +233,8 @@ class AprobarFase {
           throw new Error(`No se pueden aprobar los mockups por inconsistencias de trazabilidad: ${trazabilidad.errores.join(' ')}`);
         }
       }
-      nuevoEstado = 'mockups_aprobados';
+      // Si el proyecto ya avanzó a codificación y se vuelve a aprobar un mockup corregido, el proyecto no retrocede de etapa.
+      nuevoEstado = proyecto.estado_fase === 'finalizado' ? 'finalizado' : 'mockups_aprobados';
     } else if (fase === 'finalizar') {
       const estadosValidos = new Set(['mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (proyecto.estado_fase && !estadosValidos.has(proyecto.estado_fase)) {

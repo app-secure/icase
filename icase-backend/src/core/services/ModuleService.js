@@ -10,6 +10,8 @@
  * propuesta aprobada sea reproducible aunque el catálogo cambie de valores por defecto.
  */
 const MODES = Object.freeze(['automatico', 'personalizado']);
+const GenerationCoverageService = require('./GenerationCoverageService');
+const GenerationCapabilityService = require('./GenerationCapabilityService');
 
 // Los incluidos se calculan desde las decisiones ya aprobadas.
 const INCLUDED = Object.freeze([
@@ -32,13 +34,22 @@ const INCLUDED = Object.freeze([
   },
   {
     id: 'app_movil', etiqueta: 'App móvil (Expo)', categoria: 'interfaz', descripcion: 'Paquete Expo con las mismas operaciones; no es un APK ni un IPA firmado.',
-    activo: (decisions) => [...(decisions.alcance_plataforma?.plataformas || []), ...(decisions.stack_tecnologico?.plataformas || [])].includes('móvil'),
-    motivo: (decisions) => [...(decisions.alcance_plataforma?.plataformas || []), ...(decisions.stack_tecnologico?.plataformas || [])].includes('móvil')
+    activo: (decisions) => (decisions.stack_tecnologico?.plataformas ?? decisions.alcance_plataforma?.plataformas ?? []).includes('móvil'),
+    motivo: (decisions) => (decisions.stack_tecnologico?.plataformas ?? decisions.alcance_plataforma?.plataformas ?? []).includes('móvil')
       ? 'La plataforma móvil está incluida en el alcance.' : 'El alcance no incluye plataforma móvil.'
   }
 ]);
 
 const OPTIONAL = Object.freeze([
+  {id:'procesos_negocio',etiqueta:'Procesos transaccionales (experimental)',categoria:'datos',porDefecto:false,descripcion:'Estados persistentes, acciones por rol, bloqueo CRUD, bandeja web/móvil PostgreSQL, reapertura opt-in y correo SMTP opcional por acción; outbox durable al activar eventos. Solo definiciones confirmadas.',sinEfecto:'Sin BPMN, creación de registros en pasos ni servicios externos. Los avisos pueden duplicarse y no confirman recepción por cliente.',requiere:[]},
+  {id:'eventos_replicas',etiqueta:'Coordinación de eventos entre réplicas',categoria:'api',porDefecto:false,descripcion:'Redis Pub/Sub para invalidaciones CRUD/N:M con reautorización local. Requiere eventos_cambios y namespace por aplicación.',sinEfecto:'No proporciona replay ni garantiza entrega o latencia.',requiere:['eventos_cambios']},
+  {id:'pagos_prueba',etiqueta:'Pagos Stripe (sandbox)',categoria:'integraciones',porDefecto:false,descripcion:'Checkout de prueba, importe desde registro aprobado, idempotencia y webhook firmado. No acepta claves de cobros reales.',sinEfecto:'Requiere configuración Stripe test y campos aprobados; no incluye facturación fiscal.',requiere:[]},
+  {id:'sso_oidc',etiqueta:'SSO OpenID Connect',categoria:'integraciones',porDefecto:false,descripcion:'Authorization Code con PKCE, state, nonce y validación de firma/issuer/audience. Identidades preautorizadas.',sinEfecto:'Requiere proveedor y cuentas locales preaprovisionadas; no autoasigna roles desde correo.',requiere:[]},
+  {id:'mapas',etiqueta:'Mapas por coordenadas',categoria:'integraciones',porDefecto:false,descripcion:'Leaflet con latitud/longitud existentes y proveedor de tiles configurado. No inventa direcciones ni hace geocodificación.',sinEfecto:'No incluye rutas ni geocercas; acceso al proveedor solo después de solicitar el mapa.',requiere:[]},
+  {id:'camara_qr',etiqueta:'Cámara y lector QR',categoria:'integraciones',porDefecto:false,descripcion:'Escáner web/Expo con permiso explícito, sin ejecutar ni navegar automáticamente al contenido.',sinEfecto:'No supone que un QR sea válido para una operación de negocio.',requiere:[]},
+  { id:'archivos_imagenes', etiqueta:'Archivos e imágenes', categoria:'datos', porDefecto:false, descripcion:'Adjuntos privados por registro PNG/JPEG/PDF, hasta 512 KiB, permisos y almacenamiento local persistente. Express/NestJS con JWT.', sinEfecto:'No incluye S3, antivirus ni almacenamiento compartido entre réplicas.', requiere:[] },
+  { id:'reportes_calculos', etiqueta:'Reportes y cálculos aprobados', categoria:'api', porDefecto:false, descripcion:'Agregados numéricos y exportación CSV/PDF; cálculos declarativos confirmados, sin ejecutar código de IA.', sinEfecto:'Solo Express/NestJS con JWT; no inventa fórmulas ni procesos contables.', requiere:[] },
+  { id:'recuperacion_cuentas', etiqueta:'Recuperación de cuentas por correo', categoria:'seguridad', porDefecto:false, descripcion:'Tokens de un uso, caducidad y correo SMTP; requiere configurar proveedor y URL pública.', sinEfecto:'No incluye SMS, WhatsApp o MFA.', requiere:[] },
   {
     id: 'formularios_tipados', etiqueta: 'Formularios y tablas por campo', categoria: 'interfaz', porDefecto: true,
     descripcion: 'La interfaz web muestra un formulario con un control por campo (texto, número, fecha, lista de opciones, casilla, entidad relacionada) y una tabla de registros, en lugar de pedir JSON a mano.',
@@ -56,6 +67,11 @@ const OPTIONAL = Object.freeze([
     descripcion: 'Genera y carga registros iniciales reproducibles para cada entidad a partir de sus tipos, restricciones y valores de ejemplo.',
     sinEfecto: 'Si no hay entidades en el modelo de dominio no se generan registros de prueba.',
     requiere: []
+  },
+  {
+    id: 'eventos_cambios', etiqueta: 'Eventos de cambios (experimental)', categoria: 'api', porDefecto: false,
+    descripcion: 'Socket.IO con JWT para invalidaciones CRUD y N:M en React/Expo. Revalida permisos y reconcilia por HTTP. Solo Express/NestJS.',
+    sinEfecto: 'Sin replay ni SLA. Para varios procesos activar eventos_replicas con Redis y namespace propio.', requiere: []
   }
 ]);
 
@@ -79,6 +95,7 @@ class ModuleService {
       valor: {
         modo: 'automatico',
         modulos: OPTIONAL.map((item) => ({ id: item.id, activo: item.porDefecto, motivo: item.porDefecto ? 'Activado por el modo automático.' : 'Desactivado por el modo automático.' })),
+        cobertura: { modo_entrega: 'parcial', aceptar_pendientes: true, requisitos: [] },
         notas: 'El modo automático usa los módulos recomendados. Cambia a personalizado para activar o desactivar módulos opcionales.'
       },
       advertencias: []
@@ -110,8 +127,11 @@ class ModuleService {
       }
       for (const [id, active] of chosen) {
         for (const required of known.get(id).requiere) {
-          if (active && chosen.get(required) === false) errores.push(`El módulo «${id}» necesita «${required}».`);
+          if (active && !(chosen.get(required)??known.get(required)?.porDefecto)) errores.push(`El módulo «${id}» necesita «${required}».`);
         }
+      }
+      if(chosen.get('procesos_negocio')&&(!Array.isArray(propuesta.procesos)||!propuesta.procesos.length||propuesta.procesos.length>20||propuesta.procesos.some(p=>!p||p.estado_decision!=='confirmado'))){
+        errores.push('Procesos de negocio requiere entre 1 y 20 definiciones explícitamente confirmadas en "procesos".');
       }
     }
     if (errores.length) return { propuesta: null, errores, advertencias };
@@ -124,7 +144,12 @@ class ModuleService {
       const omitted = OPTIONAL.filter((item) => !chosen.has(item.id)).map((item) => item.id);
       if (omitted.length) advertencias.push(`Sin elegir, se usa el valor recomendado para: ${omitted.join(', ')}.`);
     }
-    return { propuesta: { ...propuesta, modo, modulos }, errores, advertencias };
+    let cobertura;
+    // En entrega parcial el reconocimiento de pendientes está marcado por defecto; solo se omite si el usuario lo desmarca.
+    const rawCoverage = propuesta.cobertura || {};
+    try { cobertura = new GenerationCoverageService().validar({ ...rawCoverage, aceptar_pendientes: rawCoverage.aceptar_pendientes ?? true }); }
+    catch (error) { return { propuesta: null, errores: [error.message], advertencias }; }
+    return { propuesta: { ...propuesta, modo, modulos, cobertura }, errores, advertencias };
   }
 
   /**
@@ -141,4 +166,5 @@ class ModuleService {
 }
 
 ModuleService.MODES = MODES;
+ModuleService.capacidades = () => new GenerationCapabilityService().catalogo();
 module.exports = ModuleService;

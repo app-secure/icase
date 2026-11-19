@@ -15,8 +15,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class ErrorHandler {
     private static ResponseEntity<Map<String, Object>> respond(int status, String message, Object details) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("message", message);
-        if (details != null) body.put("details", details);
+        body.put("message", status >= 500 ? "Error interno del servidor" : message);
+        if (status < 500 && details != null) body.put("details", details);
         return ResponseEntity.status(status).body(body);
     }
 

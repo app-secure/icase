@@ -82,11 +82,31 @@ public class RecordStore {
         return table.columns().stream().filter(item -> item.column().equals(name)).findFirst().orElse(null);
     }
 
+    private boolean hasOwner(Model.Table table) {
+        return columnOf(table, "owner_id") != null;
+    }
+
+    private void applyOwner(List<String> conditions, List<Object> args, Model.Table table, String ownerScope) {
+        if (ownerScope != null && hasOwner(table)) {
+            conditions.add(quote("owner_id") + " = ?");
+            args.add(Long.valueOf(ownerScope));
+        }
+    }
+
     public List<Map<String, Object>> list(String operation) {
+        return list(operation, null);
+    }
+
+    public List<Map<String, Object>> list(String operation, String ownerScope) {
         Model.Table table = model.tableFor(operation);
-        String sql = "SELECT * FROM " + quote(table.name()) + (table.generic() ? " WHERE capability = ?" : "") + " ORDER BY id";
+        List<String> conditions = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+        if (table.generic()) { conditions.add("capability = ?"); args.add(operation); }
+        applyOwner(conditions, args, table, ownerScope);
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        String sql = "SELECT * FROM " + quote(table.name()) + where + " ORDER BY id";
         try {
-            List<Map<String, Object>> rows = table.generic() ? jdbc.queryForList(sql, operation) : jdbc.queryForList(sql);
+            List<Map<String, Object>> rows = args.isEmpty() ? jdbc.queryForList(sql) : jdbc.queryForList(sql, args.toArray());
             List<Map<String, Object>> records = new ArrayList<>();
             for (Map<String, Object> row : rows) records.add(Support.toRecord(table, operation, row));
             return records;
@@ -96,9 +116,13 @@ public class RecordStore {
     }
 
     public Object list(String operation, Integer pageParam, Integer limitParam, String search, Map<String, String> params) {
+        return list(operation, pageParam, limitParam, search, params, null);
+    }
+
+    public Object list(String operation, Integer pageParam, Integer limitParam, String search, Map<String, String> params, String ownerScope) {
         boolean hasPaging = pageParam != null || limitParam != null || (search != null && !search.isBlank()) || (params != null && "true".equals(params.get("envelope")));
         if (!hasPaging && (params == null || params.isEmpty())) {
-            return list(operation);
+            return list(operation, ownerScope);
         }
 
         Model.Table table = model.tableFor(operation);
@@ -113,6 +137,7 @@ public class RecordStore {
             conditions.add("capability = ?");
             args.add(operation);
         }
+        applyOwner(conditions, args, table, ownerScope);
 
         if (params != null) {
             for (Model.Column column : table.columns()) {
@@ -172,11 +197,16 @@ public class RecordStore {
     }
 
     public Map<String, Object> create(String operation, JsonNode body) {
+        return create(operation, body, null);
+    }
+
+    public Map<String, Object> create(String operation, JsonNode body, String ownerScope) {
         Model.Table table = model.tableFor(operation);
         Support.Split split = Support.split(table, rules.prepare(table.name(), body));
         rules.check(table.name(), "create", Support.viewOf(table, split.values(), split.extra()), null);
         Map<String, Object> values = new LinkedHashMap<>(split.values());
         if (table.generic()) values.put("capability", operation);
+        if (ownerScope != null && hasOwner(table)) values.put("owner_id", Long.valueOf(ownerScope));
         List<String> columns = new ArrayList<>(values.keySet());
         List<String> marks = new ArrayList<>();
         List<Object> args = new ArrayList<>();
@@ -209,8 +239,12 @@ public class RecordStore {
     }
 
     public Map<String, Object> update(String operation, String id, JsonNode body) {
+        return update(operation, id, body, null);
+    }
+
+    public Map<String, Object> update(String operation, String id, JsonNode body, String ownerScope) {
         Model.Table table = model.tableFor(operation);
-        Map<String, Object> current = row(table, operation, id);
+        Map<String, Object> current = row(table, operation, id, ownerScope);
         if (current == null) return null;
         Map<String, Object> previous = Support.dataOf(Support.toRecord(table, operation, current));
         Support.Split split = Support.split(table, body);
@@ -234,8 +268,12 @@ public class RecordStore {
                 sql += " AND capability = ?";
                 args.add(operation);
             }
+            if (ownerScope != null && hasOwner(table)) {
+                sql += " AND " + quote("owner_id") + " = ?";
+                args.add(Long.valueOf(ownerScope));
+            }
             jdbc.update(sql, args.toArray());
-            return Support.toRecord(table, operation, row(table, operation, id));
+            return Support.toRecord(table, operation, row(table, operation, id, ownerScope));
         } catch (java.io.IOException error) {
             throw new IllegalStateException(error);
         } catch (DataAccessException error) {
@@ -244,22 +282,37 @@ public class RecordStore {
     }
 
     public boolean remove(String operation, String id) {
+        return remove(operation, id, null);
+    }
+
+    public boolean remove(String operation, String id, String ownerScope) {
         Model.Table table = model.tableFor(operation);
         if (!Support.ID.matcher(id).matches()) return false;
         try {
-            String sql = "DELETE FROM " + quote(table.name()) + " WHERE id = ?" + (table.generic() ? " AND capability = ?" : "");
-            int deleted = table.generic() ? jdbc.update(sql, Long.valueOf(id), operation) : jdbc.update(sql, Long.valueOf(id));
-            return deleted > 0;
+            List<Object> args = new ArrayList<>();
+            args.add(Long.valueOf(id));
+            String sql = "DELETE FROM " + quote(table.name()) + " WHERE id = ?";
+            if (table.generic()) { sql += " AND capability = ?"; args.add(operation); }
+            if (ownerScope != null && hasOwner(table)) { sql += " AND " + quote("owner_id") + " = ?"; args.add(Long.valueOf(ownerScope)); }
+            return jdbc.update(sql, args.toArray()) > 0;
         } catch (DataAccessException error) {
             throw translate(error);
         }
     }
 
     private Map<String, Object> row(Model.Table table, String operation, String id) {
+        return row(table, operation, id, null);
+    }
+
+    private Map<String, Object> row(Model.Table table, String operation, String id, String ownerScope) {
         if (!Support.ID.matcher(id).matches()) return null;
-        String sql = "SELECT * FROM " + quote(table.name()) + " WHERE id = ?" + (table.generic() ? " AND capability = ?" : "");
+        List<Object> args = new ArrayList<>();
+        args.add(Long.valueOf(id));
+        String sql = "SELECT * FROM " + quote(table.name()) + " WHERE id = ?";
+        if (table.generic()) { sql += " AND capability = ?"; args.add(operation); }
+        if (ownerScope != null && hasOwner(table)) { sql += " AND " + quote("owner_id") + " = ?"; args.add(Long.valueOf(ownerScope)); }
         try {
-            List<Map<String, Object>> rows = table.generic() ? jdbc.queryForList(sql, Long.valueOf(id), operation) : jdbc.queryForList(sql, Long.valueOf(id));
+            List<Map<String, Object>> rows = jdbc.queryForList(sql, args.toArray());
             return rows.isEmpty() ? null : rows.get(0);
         } catch (DataAccessException error) {
             throw translate(error);

@@ -9,6 +9,10 @@ describe('generación del pipeline CI/CD', () => {
     const workflow = result.archivos.find((item) => item.ruta === '.github/workflows/ci-cd.yml').contenido;
     expect(workflow).toContain('npm run test:e2e');
     expect(workflow).toContain('docker compose');
+    expect(workflow).toContain('HTTP_RATE_MAX: 3000');
+    expect(workflow).toContain('AUTH_RATE_MAX: 300');
+    expect(workflow.match(/runs-on: ubuntu-24\.04/g)).toHaveLength(3);
+    expect(workflow).not.toContain('ubuntu-latest');
     expect(workflow).not.toContain('npm ci');
     expect(workflow).not.toMatch(/deploy-production|kubectl apply/);
     expect(result.dependencias).toEqual([{ tipo: 'pruebas', version: 2 }, { tipo: 'infraestructura', version: 3 }]);
