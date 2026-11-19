@@ -223,8 +223,9 @@ describe('GenericFrontendGenerator: pantallas con mockup', () => {
     expect(app).toContain('const standalone = ["/reservas"];');
     expect(app).toContain('standalone.includes(location.pathname)');
     if (auth) {
-      expect(app).toContain('!standalone.includes(location.pathname) && modules.map');
-      expect(app).toMatch(/user\.administrador && \(\s*<Link\s+to="\/usuarios"/);
+      expect(app).toContain('!standalone.includes(location.pathname) && (');
+      expect(app).toContain('className="app-nav"');
+      expect(app).toMatch(/user\.administrador && \(\s*<div>[\s\S]*<Link to="\/usuarios"/);
     }
   });
 
@@ -253,6 +254,6 @@ describe('GenericFrontendGenerator: pantallas con mockup', () => {
     const page = file(generate(), 'frontend/src/pages/plano.jsx');
     expect(page).not.toContain('.css');
     expect(page).toContain('className="mockup-content mockup-plano"');
-    expect(page).toContain('Gestión de Datos (API)');
+    expect(page).toContain('<OperationScreen');
   });
 });

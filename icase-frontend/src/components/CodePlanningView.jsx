@@ -832,6 +832,29 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
     }
   };
 
+  // Arreglo rápido: los controles sin enlace de una vista diseñada se aceptan como «solo interfaz» sin volver a la etapa de mockups.
+  // Se anota en el manifiesto (quedan registrados en `aceptados_ui`) y se vuelve a verificar. Regenerar el frontend lo restablece.
+  const unlinkedScreens = (result?.errores || []).map((item) => /^La vista diseñada de «(.+)» tiene \d+ controles? sin enlace/.exec(item)?.[1]).filter(Boolean);
+  const acceptAsUi = async () => {
+    setLoading(true); setError('');
+    try {
+      const path = 'frontend/icase.manifest.json';
+      const manifest = JSON.parse(artifact.archivos?.find((file) => file.ruta === path)?.contenido || '{}');
+      manifest.pantallas = (manifest.pantallas || []).map((screen) => {
+        const links = screen.enlaces;
+        if (!links || !unlinkedScreens.includes(screen.name || screen.nombre || screen.id)) return screen;
+        return { ...screen, enlaces: { ...links, ui: (links.ui || 0) + (links.sin_enlace_total ?? (links.sin_enlace || []).length), aceptados_ui: [...(links.aceptados_ui || []), ...(links.sin_enlace || [])], sin_enlace: [], sin_enlace_total: 0 } };
+      });
+      const updated = await updateGeneratedArtifactFileApi(projectId, artifact.id, path, JSON.stringify(manifest, null, 2));
+      onArtifactChange(updated);
+      setResult(null);
+      const data = await startArtifactVerificationJobApi(projectId, artifact.id);
+      setJob(data.trabajo);
+      return;
+    } catch (failure) { setError(failure.message); }
+    setLoading(false);
+  };
+
   const saveFile = async () => {
     setLoading(true); setError('');
     try {
@@ -892,6 +915,10 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
               : <span className="text-[11px] text-slate-500">{item.corregible_aqui ? 'El artefacto ya está revisado.' : 'Pertenece a otro artefacto: corrígelo allí.'}</span>}
           </li>)}
         </ul>
+      </div>}
+      {unlinkedScreens.length > 0 && ['en_revision', 'aprobado'].includes(artifact.estado) && <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/60 p-2" aria-label="Arreglo rápido de controles sin enlace">
+        <p className="text-violet-900">Hay controles sin enlace en {unlinkedScreens.map((name) => `«${name}»`).join(', ')}. Si son solo de interfaz, no hace falta volver a los mockups.</p>
+        <button type="button" disabled={loading} onClick={acceptAsUi} className="mt-1 rounded bg-violet-700 px-3 py-1.5 font-semibold text-white disabled:opacity-50">Marcar como solo interfaz y volver a verificar</button>
       </div>}
       {result.errores?.length > 0 && <details className="mt-2" open={!result.diagnostico?.ubicados?.length}><summary className="cursor-pointer text-red-700">Salida completa del error</summary><ul className="mt-1 list-disc space-y-1 pl-4 text-red-700">{result.errores.map((item) => <li key={item}>{item}</li>)}</ul></details>}
       {result.advertencias?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">{result.advertencias.map((item) => <li key={item}>{item}</li>)}</ul>}

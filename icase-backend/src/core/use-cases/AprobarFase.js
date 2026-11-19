@@ -193,7 +193,7 @@ class AprobarFase {
       }
       nuevoEstado = 'mockups_pendientes';
     } else if (fase === 'mockups') {
-      const estadosValidos = new Set(['diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado']);
+      const estadosValidos = new Set(['diagramas_aprobados', 'mockups_pendientes', 'mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (proyecto.estado_fase && !estadosValidos.has(proyecto.estado_fase)) {
         throw new Error('Los diagramas deben estar aprobados antes de aprobar los mockups.');
       }
@@ -233,7 +233,8 @@ class AprobarFase {
           throw new Error(`No se pueden aprobar los mockups por inconsistencias de trazabilidad: ${trazabilidad.errores.join(' ')}`);
         }
       }
-      nuevoEstado = 'mockups_aprobados';
+      // Si el proyecto ya avanzó a codificación y se vuelve a aprobar un mockup corregido, el proyecto no retrocede de etapa.
+      nuevoEstado = proyecto.estado_fase === 'finalizado' ? 'finalizado' : 'mockups_aprobados';
     } else if (fase === 'finalizar') {
       const estadosValidos = new Set(['mockups_aprobados', 'diseno_aprobado', 'finalizado']);
       if (proyecto.estado_fase && !estadosValidos.has(proyecto.estado_fase)) {

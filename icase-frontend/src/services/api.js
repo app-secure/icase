@@ -613,6 +613,15 @@ export async function updateMockupApi(projectId, nombrePantalla, previewCode) {
   }
 }
 
+export async function markMockupControlsUiApi(projectId, nombrePantalla, controles = null, modo = 'ui') {
+  const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}/marcar-ui`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ controles, modo })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudieron marcar los controles.');
+  return data;
+}
+
 export async function deleteMockupApi(projectId, nombrePantalla) {
   try {
     const res = await apiFetch(`${API_URL}/mockups/proyecto/${projectId}/${encodeURIComponent(nombrePantalla)}`, {

@@ -100,7 +100,7 @@ class GenericFrontendGenerator {
         { ruta: 'frontend/src/LoginScreen.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('LoginScreen.jsx'), { REGISTRO: JSON.stringify(openRoles) }) },
         { ruta: 'frontend/src/UsersScreen.jsx', lenguaje: 'javascript', contenido: template('UsersScreen.jsx') }
       ] : []),
-      { ruta: 'frontend/src/styles.css', lenguaje: 'css', contenido: `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:${colors.texto || '#0f172a'};background:#f1f5f9;--primary:${colors.primario || '#4f46e5'};--primary-hover:#4338ca}*{box-sizing:border-box}.mockup-screen{width:100%;max-width:none;margin:0;padding:0}body{margin:0;background:#f1f5f9;color:#0f172a;line-height:1.5}.app-shell{min-height:100vh;display:flex;flex-direction:column}.nav{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:.75rem 1.75rem;background:white;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.04)}.nav-brand{font-size:1.15rem;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:.5rem;text-decoration:none}.nav-links{display:flex;align-items:center;gap:.5rem;overflow-x:auto;padding:.25rem 0}.nav-link{text-decoration:none;color:#475569;font-size:.875rem;font-weight:500;padding:.45rem .85rem;border-radius:6px;transition:all .15s;white-space:nowrap}.nav-link:hover{background:#f1f5f9;color:#0f172a}.nav-link.active{background:#ede9fe;color:#4f46e5;font-weight:600}.nav-user{display:flex;align-items:center;gap:1rem;font-size:.875rem;color:#475569}.user-badge{background:#f1f5f9;padding:.35rem .75rem;border-radius:9999px;font-weight:500;border:1px solid #e2e8f0}.screen{max-width:1200px;width:100%;margin:1.5rem auto;padding:0 1.5rem}.screen h1{font-size:1.65rem;font-weight:700;color:#0f172a;margin:0 0 1rem 0;letter-spacing:-.02em}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:1.5rem;margin:1.25rem 0;box-shadow:0 1px 3px rgba(0,0,0,.03)}.card h2{font-size:1.15rem;font-weight:600;margin:0 0 1rem 0;color:#1e293b}.field{width:100%;min-height:2.65rem;padding:.6rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;outline:none;transition:border-color .15s}.field:focus{border-color:var(--primary);background:white}.button{border:0;border-radius:8px;padding:.55rem 1.15rem;font-size:.875rem;font-weight:500;cursor:pointer;background:var(--primary);color:white;transition:opacity .15s,transform .05s;display:inline-flex;align-items:center;gap:.5rem}.button:hover{opacity:.92}.button:active{transform:scale(.98)}.button:disabled{opacity:.5;cursor:not-allowed}.danger{background:#ef4444!important}.danger:hover{background:#dc2626!important}.tabs{display:flex;gap:.5rem;margin-bottom:1rem}.tabs button{background:#e2e8f0;color:#334155}.tabs button.active{background:var(--primary);color:white}.record{white-space:pre-wrap;background:#f8fafc;padding:1rem;border-radius:8px;border:1px solid #e2e8f0}.error{color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}.success{color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}${typedForms ? TYPED_FORMS_CSS : ''}` },
+      { ruta: 'frontend/src/styles.css', lenguaje: 'css', contenido: `:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:${colors.texto || '#0f172a'};background:#f1f5f9;--primary:${colors.primario || '#4f46e5'};--primary-hover:#4338ca}*{box-sizing:border-box}.mockup-screen{width:100%;max-width:none;margin:0;padding:0}body{margin:0;background:#f1f5f9;color:#0f172a;line-height:1.5}.app-shell{min-height:100vh;display:flex;flex-direction:column}.app-layout{display:flex;flex:1;min-height:0}.app-nav{width:230px;flex-shrink:0;padding:12px;border-right:1px solid #e2e8f0;background:#fff;overflow:auto}.app-nav a{display:block;padding:10px;border-radius:8px;overflow-wrap:anywhere;color:inherit;text-decoration:none;font-size:.9rem}.app-nav a:hover{background:#f1f5f9}.app-nav a[aria-current]{background:var(--primary);color:#fff}.app-nav-group{margin:12px 0 4px;padding:0 10px;font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b}.app-main{flex:1;min-width:0;overflow:auto}@media (max-width:800px){.app-layout{flex-direction:column}.app-nav{width:100%;max-height:200px;border-right:0;border-bottom:1px solid #e2e8f0}}.nav{display:flex;align-items:center;justify-content:space-between;gap:1.5rem;padding:.75rem 1.75rem;background:white;border-bottom:1px solid #e2e8f0;box-shadow:0 1px 3px rgba(0,0,0,.04)}.nav-brand{font-size:1.15rem;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:.5rem;text-decoration:none}.nav-links{display:flex;align-items:center;gap:.5rem;overflow-x:auto;padding:.25rem 0}.nav-link{text-decoration:none;color:#475569;font-size:.875rem;font-weight:500;padding:.45rem .85rem;border-radius:6px;transition:all .15s;white-space:nowrap}.nav-link:hover{background:#f1f5f9;color:#0f172a}.nav-link.active{background:#ede9fe;color:#4f46e5;font-weight:600}.nav-user{display:flex;align-items:center;gap:1rem;font-size:.875rem;color:#475569}.user-badge{background:#f1f5f9;padding:.35rem .75rem;border-radius:9999px;font-weight:500;border:1px solid #e2e8f0}.screen{max-width:1200px;width:100%;margin:1.5rem auto;padding:0 1.5rem}.screen h1{font-size:1.65rem;font-weight:700;color:#0f172a;margin:0 0 1rem 0;letter-spacing:-.02em}.card{background:white;border:1px solid #e2e8f0;border-radius:12px;padding:1.5rem;margin:1.25rem 0;box-shadow:0 1px 3px rgba(0,0,0,.03)}.card h2{font-size:1.15rem;font-weight:600;margin:0 0 1rem 0;color:#1e293b}.field{width:100%;min-height:2.65rem;padding:.6rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;outline:none;transition:border-color .15s}.field:focus{border-color:var(--primary);background:white}.button{border:0;border-radius:8px;padding:.55rem 1.15rem;font-size:.875rem;font-weight:500;cursor:pointer;background:var(--primary);color:white;transition:opacity .15s,transform .05s;display:inline-flex;align-items:center;gap:.5rem}.button:hover{opacity:.92}.button:active{transform:scale(.98)}.button:disabled{opacity:.5;cursor:not-allowed}.danger{background:#ef4444!important}.danger:hover{background:#dc2626!important}.tabs{display:flex;gap:.5rem;margin-bottom:1rem}.tabs button{background:#e2e8f0;color:#334155}.tabs button.active{background:var(--primary);color:white}.record{white-space:pre-wrap;background:#f8fafc;padding:1rem;border-radius:8px;border:1px solid #e2e8f0}.error{color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}.success{color:#059669;background:#ecfdf5;border:1px solid #a7f3d0;padding:.75rem 1rem;border-radius:8px;font-size:.875rem}${typedForms ? TYPED_FORMS_CSS : ''}` },
       { ruta: 'frontend/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ project: proyecto.nombre, mode: 'generic_contract_v1', modulos: { formularios_tipados: typedForms }, plataformas_solicitadas: platforms, auth: { habilitada: auth, registro: openRoles }, identidad: identity, pantallas: views }, null, 2) }
     ];
     const imports = [];
@@ -129,6 +129,10 @@ class GenericFrontendGenerator {
       // El mockup aprobado es la interfaz de la pantalla; la especificación aporta las operaciones con las que sus botones guardan y consultan.
       // Solo si el mockup no se puede convertir a la interfaz, la pantalla se construye únicamente con los componentes de la especificación.
       const specFound = specPage ? this._specBlocks(view, spec) : null;
+      // Operaciones cuyo listado real muestra esta pantalla: el resto se ofrece en «Registros» (ver App).
+      view.lista = specFound
+        ? specFound.blocks.filter((block) => ['tabla', 'tarjetas'].includes(block.tipo)).map((block) => specFound.actions[block.operacion]).filter((item) => item?.type === 'consulta').flatMap((item) => [item.permiso || item.capability, item.capability])
+        : (screen?.mockup?.preview_code ? [] : view.operations);
       const mockupHtml = screen?.mockup?.preview_code;
       const mockupProbe = specPage && mockupHtml ? HtmlToJsxTransformer.analyze(mockupHtml, { operaciones: new Set(views.flatMap((item) => item.operations)), routes: routeSet, referencias: referencias || {} }) : null;
       if (specPage && !mockupProbe?.jsx) {
@@ -171,7 +175,7 @@ class GenericFrontendGenerator {
       files.push({
         ruta: `frontend/src/pages/${view.id}.jsx`,
         lenguaje: 'javascript',
-        contenido: `import React, { ${specFound ? 'useEffect, useRef, ' : ''}useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${usesLink ? "import { Link } from 'react-router-dom';\n" : ''}${usesReferences ? "import ReferenceOptions from '../ReferenceOptions';\n" : ''}${css.trim() ? `import './${view.id}.css';\n` : ''}${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}${specFound && !wired ? "import { useSession } from '../session';\n" : ''}${specFound ? `import { SpecBlock } from '../SpecComponents';\nconst specActions = ${JSON.stringify(specFound.actions)};\nconst specBlocks = ${JSON.stringify(specFound.blocks)};\nconst specMap = ${JSON.stringify(specActionMap)};\nimport { bindLiveTables, bindLines } from '../liveTables';\n` : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${specFound ? "  const mockupRef = useRef(null);\n  const [version, setVersion] = useState(0);\n  const { api: liveApi, can: liveCan } = useSession();\n  useEffect(() => { if (!showCrud && mockupRef.current) bindLines({ root: mockupRef.current, specMap, api: liveApi }); bindLiveTables({ root: mockupRef.current, blocks: specBlocks, actions: specActions, api: liveApi, can: liveCan, onAction: " + (wired ? 'handleAction' : 'undefined') + ", onShowOperations: () => setShowCrud(true) }); }, [showCrud, version, liveApi]);\n" : ''}${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: " + (specFound ? "(next) => { setResult(next); if (next && next.estado === 'ok' && !next.registros) setVersion((n) => n + 1); }" : 'setResult') + (specFound ? ', acciones: specMap' : '') + (Object.keys(usersMap).length ? `, identidad: ${JSON.stringify(usersMap)}` : '') + " });\n" : ''}  return (\n    <main ${jsxBody ? "className={showCrud ? 'page-container screen' : 'mockup-screen'}" : 'className="page-container screen"'} data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>${specFound ? '⚙️ Operaciones' : '⚙️ Gestión de Datos (API)'}</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div ${specFound ? 'ref={mockupRef} ' : ''}className="mockup-content mockup-${view.id}${bodyClass ? ` ${bodyClass}` : ''}"${bodyStyle ? ` style={${JSON.stringify(bodyStyle)}}` : ''}>${wired ? '<MockupResult result={result} selected={selected} onSelect={setSelected} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        ${specFound ? '<div className="spec-page">{specBlocks.map((block, index) => <SpecBlock key={index} block={block} actions={specActions} />)}</div>' : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
+        contenido: `import React, { ${specFound ? 'useEffect, useRef, ' : ''}useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${usesLink ? "import { Link } from 'react-router-dom';\n" : ''}${usesReferences ? "import ReferenceOptions from '../ReferenceOptions';\n" : ''}${css.trim() ? `import './${view.id}.css';\n` : ''}${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}${specFound && !wired ? "import { useSession } from '../session';\n" : ''}${specFound ? `import { SpecBlock } from '../SpecComponents';\nconst specActions = ${JSON.stringify(specFound.actions)};\nconst specBlocks = ${JSON.stringify(specFound.blocks)};\nconst specMap = ${JSON.stringify(specActionMap)};\nimport { bindLiveTables, bindLines, filterLive } from '../liveTables';\n` : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${specFound ? "  const mockupRef = useRef(null);\n  const [version, setVersion] = useState(0);\n  const { api: liveApi, can: liveCan } = useSession();\n  useEffect(() => { if (!showCrud && mockupRef.current) bindLines({ root: mockupRef.current, specMap, api: liveApi }); bindLiveTables({ root: mockupRef.current, blocks: specBlocks, actions: specActions, api: liveApi, can: liveCan, onAction: " + (wired ? 'handleAction' : 'undefined') + ", onShowOperations: () => setShowCrud(true) }); }, [showCrud, version, liveApi]);\n" : ''}${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: " + (specFound ? "(next) => { setResult(next); if (next && next.estado === 'ok' && !next.registros) setVersion((n) => n + 1); }" : 'setResult') + (specFound ? ', acciones: specMap, filtrar: (fields) => filterLive(mockupRef.current, fields)' : '') + (Object.keys(usersMap).length ? `, identidad: ${JSON.stringify(usersMap)}` : '') + " });\n" : ''}  return (\n    <main ${jsxBody ? "className={showCrud ? 'page-container screen' : 'mockup-screen'}" : 'className="page-container screen"'} data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)'${analysis.hasShell ? '' : ", padding: '20px'"} }}>\n          <div ${specFound ? 'ref={mockupRef} ' : ''}className="mockup-content mockup-${view.id}${bodyClass ? ` ${bodyClass}` : ''}"${bodyStyle ? ` style={${JSON.stringify(bodyStyle)}}` : ''}>${wired ? `<MockupResult result={result} selected={selected} onSelect={setSelected} onClose={() => setResult(null)} selectable={${/data-accion="RF-\d+\.(editar|eliminar)"/i.test(mockupCode || '')}} />` : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        <>\n        <div style={{ padding: '0.75rem 1.5rem' }}><button type="button" className="button secondary" onClick={() => setShowCrud(false)}>← Volver a la pantalla</button></div>\n        ${specFound ? '<div className="spec-page">{specBlocks.map((block, index) => <SpecBlock key={index} block={block} actions={specActions} />)}</div>' : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n        </>\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
       });
       if (screen?.mockup?.preview_code) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: screen.mockup.preview_code });
     }
@@ -209,7 +213,8 @@ class GenericFrontendGenerator {
     }
     // Consola de datos del administrador: una entrada por operación con su editor genérico (y los módulos de adjuntos, reportes y cambios).
     const reqName = new Map((requerimientos || []).map((req) => [slug(req.identificador), req.nombre]));
-    const consoleOps = auth ? [...allowedOperations].filter((key) => !loginIds.has(String(key).toUpperCase())).map((key) => ({ key, name: `${String(key).toUpperCase()} · ${reqName.get(key) || key}` })) : [];
+    const consoleOps = auth ? [...allowedOperations].filter((key) => !loginIds.has(String(key).toUpperCase())).map((key) => ({ key, name: `${String(key).toUpperCase()} · ${reqName.get(key) || key}`, label: reqName.get(key) || String(key).toUpperCase() })) : [];
+    if (consoleOps.length) files.push({ ruta: 'frontend/src/RegistryScreen.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('RegistryScreen.jsx'), { OPERACIONES: JSON.stringify(consoleOps.map(({ key, label }) => ({ key, label }))) }) });
     if (consoleOps.length) files.push({ ruta: 'frontend/src/DataConsole.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('DataConsole.jsx'), { OPERACIONES: JSON.stringify(consoleOps) }) });
     const first = views[0]?.route || '/';
     files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone, consoleOps) : this._app(proyecto, views, imports, routes, first, standalone) });
@@ -269,7 +274,7 @@ class GenericFrontendGenerator {
     const map = {};
     const add = (action) => {
       const key = `${String(action.permiso || action.permission || action.capability).toLowerCase()}.${verb[action.type]}`; // el botón del mockup dice «RF-06.editar»: el requisito, no el almacén
-      if (verb[action.type] && !map[key]) map[key] = { name: action.name, method: action.method, path: action.path, byId: Boolean(action.byId), inputs: action.inputs || [], ...(action.lineas ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad } } : {}), booleanos: (action.inputs || []).filter((name) => action.fields?.[name]?.type === 'boolean') };
+      if (verb[action.type] && !map[key]) map[key] = { name: action.name, method: action.method, path: action.path, byId: Boolean(action.byId), inputs: action.inputs || [], ...(action.lineas ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad } } : {}), booleanos: (action.inputs || []).filter((name) => action.fields?.[name]?.type === 'boolean'), ...((action.filters || []).some((filter) => filter.origen === 'parametro') ? { parametros: action.filters.filter((filter) => filter.origen === 'parametro').map((filter) => String(filter.valor)) } : {}) };
     };
     Object.values(screenActions || {}).forEach(add);
     (spec?.acciones || []).forEach(add);
@@ -378,10 +383,11 @@ import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useSession } from './session';
 import LoginScreen from './LoginScreen';
 import UsersScreen from './UsersScreen';
-${consoleOps.length ? "import DataConsole from './DataConsole';" : ''}
+${consoleOps.length ? "import DataConsole from './DataConsole';\nimport RegistryScreen from './RegistryScreen';" : ''}
 ${imports.join('\n')}
 
-const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: view.name, operations: view.operations, roles: view.roles, modulo: view.modulo || 'General' })))};
+const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: view.name, operations: view.operations, roles: view.roles, modulo: view.modulo || 'General', lista: view.lista || [] })))};
+const registryOperations = ${JSON.stringify(consoleOps.map(({ key, label }) => ({ key, label })))};
 const normalizarRol = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const puedeAbrirPantalla = (view, user, can) => {
   const roles = view.roles || [];
@@ -393,7 +399,6 @@ export default function App() {
   const { user, loading, can, logout } = useSession();
   const location = useLocation();
   const standalone = ${JSON.stringify(standalone)};
-  const [openModule, setOpenModule] = useState(null);
 
   if (loading) return <main className="screen"><p role="status">Cargando…</p></main>;
   if (!user) return <LoginScreen />;
@@ -403,141 +408,62 @@ export default function App() {
     .filter((view) => puedeAbrirPantalla(view, user, can));
 
   const modules = Array.from(new Set(visible.map((v) => v.modulo || 'General')));
-  const home = visible[0]?.route || (user.administrador ? '/usuarios' : '/sin-acceso');
+  // Lo que el rol puede consultar y ninguna de sus pantallas lista (la tabla de registros que el árbol de navegación no trajo).
+  const listed = new Set(visible.flatMap((v) => v.lista || []));
+  const registries = user.administrador ? [] : registryOperations.filter((op) => can(op.key, 'GET') && !listed.has(op.key));
+  const home = visible[0]?.route || (registries[0] ? '/registros/' + registries[0].key : (user.administrador ? '/usuarios' : '/sin-acceso'));
+
+  // El menú nombra la pantalla como el diseño: sin el «Pantalla de» con que el árbol de navegación la titula.
+  const navName = (name) => { const clean = String(name || '').replace(/^pantalla\\s+(?:de\\s+la\\s+|del?\\s+)?/i, ''); return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : name; };
+  const linkProps = (path) => ({ 'aria-current': location.pathname === path || (path !== '/' && location.pathname.startsWith(path + '/')) ? 'page' : undefined });
 
   return (
-    <div className="app-shell" style={{ background: '#f8fafc', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <header className="nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1.75rem', background: '#0f172a', color: 'white', borderBottom: '1px solid #1e293b' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <Link to={home} className="nav-brand" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'white', textDecoration: 'none', fontWeight: '700', fontSize: '1.1rem' }}>
-            <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', background: '#38bdf8' }}></span>
-            ${this._escape(proyecto.nombre)}
-          </Link>
-
-          <nav style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            {!standalone.includes(location.pathname) && modules.map((mod) => {
-              const screensInMod = visible.filter((v) => (v.modulo || 'General') === mod);
-              const isActive = screensInMod.some((v) => v.route === location.pathname);
-              return (
-                <div key={mod} style={{ position: 'relative' }}>
-                  <button
-                    type="button"
-                    onClick={() => setOpenModule(openModule === mod ? null : mod)}
-                    style={{
-                      padding: '0.4rem 0.85rem',
-                      borderRadius: '6px',
-                      fontSize: '0.85rem',
-                      fontWeight: isActive ? '600' : '500',
-                      background: isActive ? '#1e293b' : 'transparent',
-                      color: isActive ? '#38bdf8' : '#cbd5e1',
-                      border: '1px solid ' + (isActive ? '#334155' : 'transparent'),
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem'
-                    }}
-                  >
-                    <span>{mod}</span>
-                    <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>▾</span>
-                  </button>
-                  {openModule === mod && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '100%',
-                        left: 0,
-                        marginTop: '0.35rem',
-                        background: 'white',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: '8px',
-                        boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
-                        zIndex: 50,
-                        minWidth: '220px',
-                        padding: '0.35rem'
-                      }}
-                    >
-                      {screensInMod.map((s) => (
-                        <Link
-                          key={s.route}
-                          to={s.route}
-                          onClick={() => setOpenModule(null)}
-                          style={{
-                            display: 'block',
-                            padding: '0.5rem 0.85rem',
-                            fontSize: '0.82rem',
-                            color: location.pathname === s.route ? '#0b57d0' : '#334155',
-                            fontWeight: location.pathname === s.route ? '600' : '400',
-                            textDecoration: 'none',
-                            borderRadius: '4px',
-                            background: location.pathname === s.route ? '#eff6ff' : 'transparent'
-                          }}
-                        >
-                          {s.name}
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {user.administrador && (
-              <Link
-                to="/usuarios"
-                style={{
-                  padding: '0.4rem 0.85rem',
-                  borderRadius: '6px',
-                  fontSize: '0.85rem',
-                  fontWeight: location.pathname === '/usuarios' ? '600' : '500',
-                  color: location.pathname === '/usuarios' ? '#38bdf8' : '#cbd5e1',
-                  textDecoration: 'none'
-                }}
-              >
-                Usuarios
-              </Link>
-            )}
-            ${consoleOps.length ? `{user.administrador && (
-              <Link
-                to="/datos"
-                style={{
-                  padding: '0.4rem 0.85rem',
-                  borderRadius: '6px',
-                  fontSize: '0.85rem',
-                  fontWeight: location.pathname.startsWith('/datos') ? '600' : '500',
-                  color: location.pathname.startsWith('/datos') ? '#38bdf8' : '#cbd5e1',
-                  textDecoration: 'none'
-                }}
-              >
-                Datos
-              </Link>
-            )}` : ''}
-          </nav>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <span style={{ fontSize: '0.85rem', color: '#94a3b8', background: '#1e293b', padding: '0.3rem 0.75rem', borderRadius: '9999px', border: '1px solid #334155' }}>
-            {user.nombre || user.email} · <strong style={{ color: '#f1f5f9' }}>{user.nombre_rol}</strong>
-          </span>
-          <button
-            type="button"
-            className="button secondary"
-            onClick={logout}
-            style={{ padding: '0.35rem 0.75rem', fontSize: '0.82rem', background: '#334155', color: 'white', border: 'none' }}
-          >
-            Cerrar sesión
-          </button>
+    <div className="app-shell" style={{ background: '#f8fafc', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <header className="nav" style={{ flexShrink: 0 }}>
+        <Link to={home} className="nav-brand">${this._escape(proyecto.nombre)}</Link>
+        <div className="nav-user">
+          <span className="user-badge">{user.nombre || user.email} · <strong>{user.nombre_rol}</strong></span>
+          <button type="button" className="button secondary" onClick={logout} style={{ padding: '0.35rem 0.75rem', fontSize: '0.82rem', background: '#e2e8f0', color: '#0f172a' }}>Cerrar sesión</button>
         </div>
       </header>
 
-      <main style={{ flex: 1 }}>
+      <div className="app-layout">
+        {!standalone.includes(location.pathname) && (
+          <nav className="app-nav" aria-label="Pantallas de la aplicación">
+            {modules.map((mod) => (
+              <div key={mod}>
+                {modules.length > 1 && <p className="app-nav-group">{mod}</p>}
+                {visible.filter((v) => (v.modulo || 'General') === mod).map((s) => <Link key={s.route} to={s.route} {...linkProps(s.route)}>{navName(s.name)}</Link>)}
+              </div>
+            ))}
+            {registries.length > 0 && (
+              <div>
+                <p className="app-nav-group">Registros</p>
+                {registries.map((op) => <Link key={op.key} to={'/registros/' + op.key} {...linkProps('/registros/' + op.key)}>{op.label}</Link>)}
+              </div>
+            )}
+            {user.administrador && (
+              <div>
+                <p className="app-nav-group">Administración</p>
+                <Link to="/usuarios" {...linkProps('/usuarios')}>Usuarios</Link>
+                ${consoleOps.length ? "<Link to=\"/datos\" {...linkProps('/datos')}>Datos</Link>" : ''}
+              </div>
+            )}
+          </nav>
+        )}
+
+        <main className="app-main">
         <Routes>
           ${views.map((view, index) => `<Route path=${JSON.stringify(view.route)} element={visible.some((item) => item.route === ${JSON.stringify(view.route)}) ? <${component(view.id)}/> : <Navigate to={home} replace />}/>`).join('\n          ')}
           {user.administrador && <Route path="/usuarios" element={<UsersScreen />} />}
-          ${consoleOps.length ? `{user.administrador && <Route path="/datos" element={<DataConsole />} />}
+          ${consoleOps.length ? `<Route path="/registros/:key" element={<RegistryScreen />} />
+          {user.administrador && <Route path="/datos" element={<DataConsole />} />}
           {user.administrador && <Route path="/datos/:key" element={<DataConsole />} />}` : ''}
           <Route path="/sin-acceso" element={<section className="screen" role="status"><h1>Sin pantallas disponibles</h1><p>Tu rol no tiene acceso a ninguna pantalla de esta aplicación. Solicita los permisos necesarios al administrador.</p></section>} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Routes>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

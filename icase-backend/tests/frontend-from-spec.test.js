@@ -69,7 +69,7 @@ describe('frontend generado desde la especificación', () => {
     expect(page).toContain('/api/actions/listar-mesas-asignadas');
     expect(page).toContain('/api/actions/ocupar-mesa/:id');
     expect(page).toContain('acciones: specMap'); // el botón «Actualizar» (RF-04.consultar) usa la operación de la especificación
-    expect(page).toContain('⚙️ Operaciones'); // la vista alterna usa los componentes de la especificación
+    expect(page).toContain('spec-page'); // la vista alterna usa los componentes de la especificación
     expect(page).not.toContain('Gestión de Datos (API)');
     expect(() => require('esbuild').transformSync(page, { loader: 'jsx' })).not.toThrow();
     expect(file('frontend/src/mockupActions.js')).toContain('acciones');
@@ -117,7 +117,7 @@ describe('frontend generado desde la especificación', () => {
 
   test('sin especificación la pantalla sigue saliendo del mockup', async () => {
     const { file } = await generar({ conSpec: false });
-    expect(file('frontend/src/pages/mesas-asignadas.jsx')).toContain('Gestión de Datos (API)');
+    expect(file('frontend/src/pages/mesas-asignadas.jsx')).toContain('<OperationScreen');
     expect(file('frontend/src/SpecComponents.jsx')).toBeUndefined();
   });
 });

@@ -104,7 +104,7 @@ export function fillFields(container, data) {
  * `editar` y `eliminar` actúan sobre el registro seleccionado (`selected`, elegido en la tabla de `consultar`),
  * o, si no hay selección, sobre un `data-id` declarado a mano. El id de un mockup generado es de ejemplo y no se usa.
  */
-export async function runAction({ event, operation, verb, api, can, onResult, confirmar, selected, onSelect, identidad, acciones }) {
+export async function runAction({ event, operation, verb, api, can, onResult, confirmar, selected, onSelect, identidad, acciones, filtrar }) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   const control = event && event.currentTarget;
@@ -131,12 +131,22 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
     }
     if (verb === 'consultar') {
       const fields = control ? collectFields(control) : {};
+      const given = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== '' && value !== false && !/^(todos?|todas?)$/i.test(String(value).trim())));
+      // Si la operación recibe parámetros (el código QR que se escanea), el valor escrito viaja como parámetro de la consulta.
+      const declared = (named && named.parametros) || [];
+      const query = {};
+      for (const name of declared) if (given[name] !== undefined) query[name] = given[name];
+      if (!Object.keys(query).length && declared.length === 1 && Object.keys(given).length === 1) query[declared[0]] = Object.values(given)[0];
+      const searched = Object.keys(query).length > 0;
+      // Un buscador o filtro de una lista que ya está en pantalla la filtra ahí mismo; no muestra otro listado.
+      if (!searched && filtrar && filtrar(given)) return onResult(null);
       const params = new URLSearchParams({ limit: '20' });
       const term = fields.search !== undefined ? fields.search : fields.buscar;
       if (term !== undefined && String(term).trim()) params.set('search', String(term).trim());
-      const response = await api(named ? named.path : `${base}?${params.toString()}`);
+      const response = await api(named ? named.path + (searched ? `?${new URLSearchParams(query).toString()}` : '') : `${base}?${params.toString()}`);
       const registros = Array.isArray(response) ? response : (response && response.data) || [];
-      return onResult({ estado: 'ok', mensaje: `${registros.length} ${registros.length === 1 ? 'registro' : 'registros'}`, registros, operacion: operation });
+      if (searched && !registros.length) return onResult({ estado: 'aviso', mensaje: 'No se encontró ningún registro con ese valor.' });
+      return onResult({ estado: 'ok', mensaje: searched ? 'Encontrado' : `${registros.length} ${registros.length === 1 ? 'registro' : 'registros'}`, registros, operacion: operation });
     }
     if (verb === 'crear') {
       const body = only(control ? read(control) : {});

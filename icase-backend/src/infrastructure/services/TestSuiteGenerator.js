@@ -144,8 +144,8 @@ for (const item of cases) {
     }
     await page.goto(item.route);
     await expect(page.locator('[data-screen="' + item.id + '"]')).toBeVisible();
-    // Con interfaz diseñada, las operaciones de la especificación están en la vista «Operaciones».
-    const operaciones = page.getByRole('button', { name: /Operaciones/ });
+    // Con interfaz diseñada, las operaciones de la especificación están en la vista de gestión (si la pantalla no pudo llenar sus listas con datos reales).
+    const operaciones = page.getByRole('button', { name: /Operaciones|datos reales/i });
     if (await operaciones.count()) await operaciones.first().click();
     await expect(page.locator('[data-screen="' + item.id + '"] .error')).toHaveCount(0);
     if (rows && item.single) {

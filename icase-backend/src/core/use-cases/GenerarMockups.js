@@ -859,6 +859,40 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     return { mockups, antes: diseno.mockups, trazabilidad, manifiesto: pantallasArbol };
   }
 
+  /**
+   * Arreglo rápido de «sin enlace: …»: los botones de la pantalla que no ejecutan ninguna operación se marcan como solo interfaz
+   * (data-accion="ui"), se revalida la pantalla y se guarda. No usa IA y no cambia nada más del diseño.
+   */
+  async marcarSinEnlace(proyectoId, slug, { controles = null, modo = 'ui' } = {}) {
+    const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
+    if (!proyecto) throw new Error(`Proyecto ${proyectoId} no encontrado.`);
+    const diseno = await this.disenoRepository.obtenerPorProyecto(proyectoId);
+    const actual = (diseno?.mockups || []).find((item) => item.nombre_pantalla === slug);
+    if (!actual) throw new Error('La pantalla no tiene mockup guardado.');
+    const requerimientos = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+    const diagramas = await this.diagramaRepository.listarPorProyecto(proyectoId);
+    const validator = new (require('../../infrastructure/services/MockupBindingValidator'))();
+    const contratoEnlaces = this.bindingService.contrato({ proyecto, requerimientos, diagramas });
+    const resuelto = modo === 'enlazar'
+      ? validator.enlazarSinEnlace(actual.preview_code, { rfs: actual.rf_trazabilidad, requerimientos, contrato: contratoEnlaces })
+      : validator.marcarSinEnlace(actual.preview_code, { controles });
+    const resultado = { html: resuelto.html, marcados: resuelto.enlazados || resuelto.marcados, pendientes: resuelto.pendientes || [] };
+    if (!resultado.marcados.length) return { mockup: actual, marcados: [], pendientes: resultado.pendientes };
+    const pantallasArbol = this.traceabilityService.buildManifest(
+      this._enriquecerPlataformas(this._pantallasDelProyecto(diagramas).pantallas, requerimientos), requerimientos);
+    const contexto = {
+      sistemaDiseno: this._normalizarSistemaDiseno(diseno.sistema_diseno), requerimientos,
+      contratoEnlaces,
+      manifiestoPorSlug: new Map(pantallasArbol.map((pantalla) => [pantalla.slug, pantalla]))
+    };
+    const mockup = this._normalizarMockup({ ...actual, preview_code: resultado.html }, contexto);
+    const mockups = diseno.mockups.map((item) => (item.nombre_pantalla === slug ? mockup : item));
+    await this.disenoRepository.guardarOActualizar(proyectoId, {
+      mockups, trazabilidad_mockups: this.traceabilityService.validate({ manifest: pantallasArbol, mockups, requirements: requerimientos })
+    });
+    return { mockup, mockups, marcados: resultado.marcados, pendientes: resultado.pendientes };
+  }
+
   async obtenerCatalogo(proyectoId) {
     const diagramas = typeof this.diagramaRepository.listarPorProyecto === 'function'
       ? await this.diagramaRepository.listarPorProyecto(proyectoId)

@@ -54,3 +54,31 @@ describe('consola de datos del administrador', () => {
     expect(() => transformSync(app, { loader: 'jsx' })).not.toThrow();
   });
 });
+
+describe('pantallas de registros por rol', () => {
+  const files = new GenericFrontendGenerator().generate({
+    proyecto: { nombre: 'Restaurante' },
+    screens: [{ nombre: 'Registro de cobros', slug: 'registro-cobros', plataforma: 'web', roles: ['Cajero'], rf_trazabilidad: ['RF-16'], mockup: { preview_code: '<main><h1>Cobros</h1><form><input name="importe"><button data-accion="RF-16.crear">Registrar</button></form></main>' } }],
+    requerimientos: [{ aprobado: true, tipo: 'RF', identificador: 'RF-16', nombre: 'Cobros' }],
+    decisiones: {
+      stack_tecnologico: { plataformas: ['web'] },
+      control_acceso: { autenticacion: { metodo: 'jwt' }, roles: [{ id: 'cajero', nombre: 'Cajero', incluir: true }] }
+    }
+  });
+  const app = files.find((file) => file.ruta === 'frontend/src/App.jsx').contenido;
+
+  test('lo que el rol puede consultar y ninguna de sus pantallas lista se ofrece como tabla de registros', () => {
+    expect(app).toContain('const registryOperations = [{"key":"rf-16","label":"Cobros"}]');
+    expect(app).toContain('"lista":[]'); // la pantalla de cobros es un formulario: no lista nada
+    expect(app).toContain('<Route path="/registros/:key" element={<RegistryScreen />} />');
+    expect(app).toContain('user.administrador ? [] : registryOperations.filter((op) => can(op.key, \'GET\') && !listed.has(op.key))');
+    expect(() => transformSync(app, { loader: 'jsx' })).not.toThrow();
+  });
+
+  test('la pantalla de registros exige poder consultar la operación y usa el editor con alta, modificación y baja según el rol', () => {
+    const screen = files.find((file) => file.ruta === 'frontend/src/RegistryScreen.jsx').contenido;
+    expect(screen).toContain('"key":"rf-16"');
+    expect(screen).toContain("!can(current.key, 'GET')");
+    expect(() => transformSync(screen, { loader: 'jsx' })).not.toThrow();
+  });
+});

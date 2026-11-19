@@ -61,7 +61,7 @@ describe('GenericFrontendGenerator: páginas con enlaces', () => {
     expect(pageCode).toContain("import MockupResult from '../MockupResult'");
     expect(pageCode).toContain('const { api, can } = useSession()');
     expect(pageCode).toContain('handleAction(event, "rf-03", "crear")');
-    expect(pageCode).toContain('<MockupResult result={result} selected={selected} onSelect={setSelected} />');
+    expect(pageCode).toContain('<MockupResult result={result} selected={selected} onSelect={setSelected}');
     expect(pageCode).toContain('const [selected, setSelected] = useState(null);');
     expect(pageCode).toContain('selected, onSelect: setSelected');
     expect(() => transformSync(pageCode, { loader: 'jsx' })).not.toThrow();
@@ -83,9 +83,10 @@ describe('GenericFrontendGenerator: páginas con enlaces', () => {
     expect(file(files, 'frontend/src/MockupResult.jsx')).toBeUndefined();
   });
 
-  test('comportamiento previo: el panel Gestión de Datos y el interruptor de vista se conservan', () => {
+  test('la vista de gestión de datos sigue disponible y permite volver a la pantalla, sin barra de vistas permanente', () => {
     const pageCode = file(generate(linked), 'frontend/src/pages/reservas.jsx').contenido;
-    expect(pageCode).toContain('Gestión de Datos (API)');
+    expect(pageCode).toContain('← Volver a la pantalla');
+    expect(pageCode).not.toContain('Interfaz Diseñada');
     expect(pageCode).toContain('<OperationScreen');
   });
 

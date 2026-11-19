@@ -277,6 +277,16 @@ class MockupController {
     }
   }
 
+  async marcarSinEnlace(req, res) {
+    try {
+      const { proyectoId, nombrePantalla } = req.params;
+      const controles = Array.isArray(req.body?.controles) ? req.body.controles.map(String) : null;
+      res.json(await this.generarMockupsUseCase.marcarSinEnlace(proyectoId, decodeURIComponent(nombrePantalla), { controles, modo: req.body?.modo === 'enlazar' ? 'enlazar' : 'ui' }));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+
   async eliminar(req, res) {
     try {
       const { proyectoId, nombrePantalla } = req.params;

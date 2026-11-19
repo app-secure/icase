@@ -79,6 +79,70 @@ class MockupBindingValidator {
     return { enlaces, advertencias };
   }
 
+  /**
+   * Marca como «solo interfaz» (data-accion="ui") los botones sin enlace, sin IA ni tocar nada más del HTML.
+   * Con `controles` solo se marcan los que tienen esa etiqueta. Devuelve el HTML nuevo y las etiquetas marcadas.
+   */
+  marcarSinEnlace(html, { controles = null } = {}) {
+    if (!html || typeof html !== 'string') return { html, marcados: [] };
+    const document = parse(html, { sourceCodeLocationInfo: true });
+    const root = descendants(document, (node) => node.tagName === 'main')[0]
+      || descendants(document, (node) => node.tagName === 'body')[0] || document;
+    const wanted = controles ? new Set(controles.map((item) => String(item).replace(/\s+/g, ' ').trim().toLowerCase())) : null;
+    const nodes = descendants(root, (item) => isButton(item) && !attr(item, 'data-accion').trim())
+      .filter((node) => node.sourceCodeLocation?.startTag && (!wanted || wanted.has(label(node).toLowerCase())));
+    let result = html;
+    for (const node of nodes.sort((a, b) => b.sourceCodeLocation.startTag.startOffset - a.sourceCodeLocation.startTag.startOffset)) {
+      const at = node.sourceCodeLocation.startTag.startOffset + 1 + node.tagName.length;
+      result = `${result.slice(0, at)} data-accion="ui"${result.slice(at)}`;
+    }
+    return { html: result, marcados: nodes.map(label).reverse() };
+  }
+
+  /**
+   * Enlaza los botones sin enlace a la operación que les corresponde, sin IA: el verbo sale del texto del botón y el requisito, de
+   * los que trata la pantalla (`rfs`), eligiendo aquel cuyos campos coinciden más con los controles de su formulario.
+   * Si no hay una elección clara el botón se deja como estaba. Devuelve el HTML, lo enlazado y lo que quedó sin resolver.
+   */
+  enlazarSinEnlace(html, { rfs = [], requerimientos = [], contrato = null, identidad = null } = {}) {
+    if (!html || typeof html !== 'string') return { html, enlazados: [], pendientes: [] };
+    const document = parse(html, { sourceCodeLocationInfo: true });
+    const root = descendants(document, (node) => node.tagName === 'main')[0]
+      || descendants(document, (node) => node.tagName === 'body')[0] || document;
+    const approved = new Set(requerimientos.filter((item) => item.identificador && item.tipo !== 'RNF' && item.aprobado !== false).map((item) => String(item.identificador).toUpperCase()));
+    const operations = new Map((contrato?.operations || []).map((operation) => [String(operation.id).toUpperCase(), operation]));
+    const login = new Set([...(identidad?.login || []), ...(contrato?.identity?.login || [])].map((id) => String(id).toUpperCase()));
+    const candidates = [...new Set((rfs || []).map((id) => String(id).trim().toUpperCase()))].filter((id) => approved.has(id) && !login.has(id));
+    const verbOf = (text) => {
+      const plain = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (/elimin|borr|quitar|cancel/.test(plain)) return 'eliminar';
+      if (/edit|actualiz|modific|reasign|cambiar/.test(plain)) return 'editar';
+      if (/busc|consult|filtr|\bver\b|listar|validar/.test(plain)) return 'consultar';
+      return 'crear';
+    };
+    const edits = [];
+    const enlazados = [];
+    const pendientes = [];
+    for (const node of descendants(root, (item) => isButton(item) && !attr(item, 'data-accion').trim())) {
+      const control = label(node);
+      const verb = verbOf(control);
+      const names = this._fields(node);
+      const usable = candidates.filter((rf) => { const methods = operations.get(rf)?.methods; return !methods || methods.includes(VERBS[verb]); });
+      const score = (rf) => {
+        const properties = Object.keys(operations.get(rf)?.schema?.properties || {});
+        return names.filter((name) => properties.includes(name)).length;
+      };
+      const ranked = usable.map((rf) => ({ rf, points: score(rf) })).sort((a, b) => b.points - a.points);
+      const pick = usable.length === 1 ? ranked[0] : ranked[0] && ranked[0].points > 0 && (!ranked[1] || ranked[0].points > ranked[1].points) ? ranked[0] : null;
+      if (!pick || !node.sourceCodeLocation?.startTag) { pendientes.push(control); continue; }
+      edits.push({ at: node.sourceCodeLocation.startTag.startOffset + 1 + node.tagName.length, text: ` data-accion="${pick.rf}.${verb}"` });
+      enlazados.push(`${control} → ${pick.rf}.${verb}`);
+    }
+    let result = html;
+    for (const edit of edits.sort((a, b) => b.at - a.at)) result = `${result.slice(0, edit.at)}${edit.text}${result.slice(edit.at)}`;
+    return { html: result, enlazados, pendientes };
+  }
+
   _controlLabel(node) {
     if (node.tagName !== 'form') return label(node);
     const explicit = attr(node, 'aria-label') || attr(node, 'title');

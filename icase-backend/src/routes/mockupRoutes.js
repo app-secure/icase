@@ -15,6 +15,7 @@ function buildMockupRoutes(mockupController, access) {
   router.get('/proyecto/:proyectoId', (req, res) => mockupController.listar(req, res));
   router.post('/proyecto/:proyectoId/sugerir-paleta', (req, res) => mockupController.sugerirSistemaDiseno(req, res));
   router.put('/proyecto/:proyectoId/sistema-diseno', (req, res) => mockupController.actualizarSistemaDiseno(req, res));
+  router.post('/proyecto/:proyectoId/:nombrePantalla/marcar-ui', (req, res) => mockupController.marcarSinEnlace(req, res));
   router.put('/proyecto/:proyectoId/:nombrePantalla', (req, res) => mockupController.actualizar(req, res));
   router.delete('/proyecto/:proyectoId/:nombrePantalla', (req, res) => mockupController.eliminar(req, res));
 

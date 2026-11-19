@@ -5,7 +5,7 @@ import {
   RotateCcw, Smartphone, Tablet, Trash2, WandSparkles
 } from "lucide-react";
 import {
-  deleteMockupApi, fetchLatestMockupJobApi, fetchMockupJobApi, fetchMockupsApi,
+  deleteMockupApi, fetchLatestMockupJobApi, fetchMockupJobApi, fetchMockupsApi, markMockupControlsUiApi,
   startMockupJobApi, suggestMockupDesignSystemApi, updateMockupDesignSystemApi
 } from "../services/api";
 import { DEFAULT_DESIGN_SYSTEM, prepareMockupHtml } from "../utils/mockupHtml";
@@ -51,6 +51,7 @@ export default function MockupsView({
   const [suggestingPalette, setSuggestingPalette] = useState(false);
   const [cleaningOrphans, setCleaningOrphans] = useState(false);
   const [traceability, setTraceability] = useState(null);
+  const [markingUi, setMarkingUi] = useState(false);
   const handledJobRef = useRef(null);
   const savedProgressRef = useRef('');
   const initializedSelection = useRef(false);
@@ -219,6 +220,20 @@ export default function MockupsView({
     if (next.has(slug)) next.delete(slug); else next.add(slug);
     return next;
   });
+  const markUiOnly = async (mockup, modo = 'ui') => {
+    setMarkingUi(true);
+    try {
+      const result = await markMockupControlsUiApi(projectId, mockup.nombre_pantalla, null, modo);
+      if (result.mockups) onUpdateMockup?.(result.mockups);
+      const name = mockup.nombre_visible || mockup.nombre_pantalla;
+      if (!result.marcados.length) notify({ type: "warning", message: `No había una operación clara para ${(result.pendientes || []).join(", ") || "esos controles"} en "${name}". Márcalos como solo interfaz o pídelo por chat.` });
+      else notify({ type: "success", message: modo === 'enlazar' ? `Enlazado en "${name}": ${result.marcados.join("; ")}.${result.pendientes?.length ? ` Sin resolver: ${result.pendientes.join(", ")}.` : ""}` : `Se marcaron ${result.marcados.length} control(es) como solo interfaz en "${name}".` });
+    } catch (error) {
+      notify({ type: "error", message: error.message });
+    }
+    setMarkingUi(false);
+  };
+
   const startGeneration = async (ids, label, soloReparar = false) => {
     if (!projectId || busy || (!ids.length && !soloReparar)) return;
     try {
@@ -317,6 +332,11 @@ export default function MockupsView({
             <details open key={currentEntry?.slug} className={`border-b px-3 py-2 text-xs ${quality(currentMockup) === "invalido" ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
               <summary className="cursor-pointer select-none font-semibold">{quality(currentMockup) === "invalido" ? "Problemas que impiden validar esta pantalla" : "Aspectos que conviene revisar"}</summary>
               {validationIssues(currentMockup).map((message, index) => <p key={index} className="mt-1 pl-5">• {message}</p>)}
+              {validationIssues(currentMockup).some(message => /^sin enlace: /.test(message)) && <div className="mt-2 pl-5">
+                <button type="button" disabled={markingUi || busy} onClick={() => markUiOnly(currentMockup, 'enlazar')} title="Enlaza cada botón con la operación de su pantalla según su texto y los campos de su formulario. No usa IA." className="mr-2 rounded-lg border border-violet-600 bg-violet-600 px-2.5 py-1 font-semibold text-white disabled:opacity-50">{markingUi ? 'Aplicando…' : 'Enlazar con la operación de la pantalla'}</button>
+                <button type="button" disabled={markingUi || busy} onClick={() => markUiOnly(currentMockup)} title="Marca como solo interfaz (data-accion=&quot;ui&quot;) los botones que no ejecutan ninguna operación. No usa IA y no cambia nada más." className="rounded-lg border border-violet-300 bg-white px-2.5 py-1 font-semibold text-violet-700 disabled:opacity-50">{markingUi ? 'Aplicando…' : 'Marcar controles sin enlace como solo interfaz'}</button>
+                <span className="ml-2 text-[11px] opacity-80">«Enlazar» hace que guarde datos; «solo interfaz» lo deja sin acción.</span>
+              </div>}
             </details>
           )}
           <div className="relative flex min-w-0 flex-1 items-start justify-center overflow-auto p-3">
