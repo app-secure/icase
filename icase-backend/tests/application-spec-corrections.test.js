@@ -81,7 +81,17 @@ describe('correcciones de la especificación propuesta', () => {
   test('el estado inicial y los totales no se piden en pantalla, aunque la operación los acepte', () => {
     const { especificacion } = depurar({ operaciones: [crearPedido], pantallas: [{ id: 'pedido', componentes: [{ tipo: 'formulario', operacion: 'registrarPedido', campos: ['estado', 'total', 'mesa'] }] }] });
     expect(especificacion.pantallas[0].componentes[0].campos).toEqual(['mesa']);
-    expect(especificacion.operaciones.find((item) => item.nombre === 'registrarPedido').entradas).toEqual(expect.arrayContaining(['estado', 'total']));
+    const operacion = especificacion.operaciones.find((item) => item.nombre === 'registrarPedido');
+    expect(operacion.entradas).toContain('total');
+    // El estado inicial lo fija el servidor (el primero del dominio); sin él las reglas que exigen el estado rechazarían el alta.
+    expect(operacion.autoEntradas).toEqual(expect.arrayContaining([{ campo: 'estado', valor: 'inicial', opciones: ['PENDIENTE', 'SERVIDO'] }]));
+  });
+
+  test('un código que genera el sistema (el QR de una reserva) lo crea el servidor', () => {
+    const { especificacion } = depurar({ operaciones: [{ nombre: 'crearReserva', rf: 'RF-05', tipo: 'crear', entidad: 'Reserva', actores: ['Cliente'], entradas: ['fechaHoraLlegadaPrevista', 'codigoQr', 'mesa'] }] });
+    const operacion = especificacion.operaciones.find((item) => item.nombre === 'crearReserva');
+    expect(operacion.autoEntradas).toEqual([{ campo: 'codigoQr', valor: 'generado' }]);
+    expect(operacion.entradas).toEqual(['fechaHoraLlegadaPrevista', 'mesa']);
   });
 
   test('la marca de tiempo del propio registro la pone el servidor', () => {
@@ -263,6 +273,18 @@ describe('ejecución de una operación de alta', () => {
     await run(store, definicion, { body: { mesa: 'm1', usuario_id: 'falso', fechaHora: '2000' }, user: { id: 'u-7' } });
     expect(guardado[0].usuario_id).toBe('u-7');
     expect(guardado[0].fechaHora).not.toBe('2000');
+    expect(guardado[0].mesa).toBe('m1');
+  });
+
+  test('el servidor pone el estado inicial y genera el código', async () => {
+    const guardado = [];
+    const def = { name: 'crearReserva', type: 'crear', method: 'POST', byId: false, capability: 'rf-02', inputs: ['mesa'],
+      autoInputs: [{ campo: 'estado', valor: 'inicial', opciones: ['PENDIENTE', 'CONFIRMADA'] }, { campo: 'codigoQr', valor: 'generado' }] };
+    const { run } = cargar([def]);
+    const store = { create: async (capability, values) => { guardado.push(values); return { id: '1', data: values }; } };
+    await run(store, def, { body: { mesa: 'm1', estado: 'CONFIRMADA', codigoQr: 'falso' }, user: { id: 'u-1' } });
+    expect(guardado[0].estado).toBe('PENDIENTE');
+    expect(guardado[0].codigoQr).toMatch(/^[0-9A-F]{10}$/);
     expect(guardado[0].mesa).toBe('m1');
   });
 

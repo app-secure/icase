@@ -161,7 +161,7 @@ class ApplicationSpecService {
    * Revalida una especificación ya guardada (editada o aprobada) sin derivar nada nuevo. Conserva el origen y la decisión
    * de cada operación; devuelve `errores` si alguna dejó de ser válida (el dominio o los RF cambiaron).
    */
-  validar(guardada, { modelo, rf, pantallas = [] }) {
+  validar(guardada, { modelo, rf, pantallas = [], cablear = true }) {
     const entidades = new Map(modelo.entities.map((entity) => [entity.name, entity]));
     const rfIds = new Set(rf.map((item) => String(item.identificador).toUpperCase()));
     const errores = [];
@@ -178,7 +178,8 @@ class ApplicationSpecService {
     // Los botones y componentes de una operación rechazada no pueden quedar en las pantallas.
     const vigentes = new Map(operaciones.filter((op) => op.estado_decision !== 'rechazado').map((op) => [op.nombre, op]));
     const vistas = this._pantallas(guardada?.pantallas, { porNombre: vigentes, entidades, pantallas, advertencias: avisos });
-    this._cablearEdicion(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, pantallas, avisos);
+    // Sin el árbol de pantallas (al generar) no se conocen los roles: no se cablea nada nuevo, solo se normaliza.
+    if (cablear) this._cablearEdicion(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, pantallas, avisos);
     return { operaciones, pantallas: vistas, errores, avisos };
   }
 
@@ -232,7 +233,7 @@ class ApplicationSpecService {
       filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
       descripcion: text(candidata.descripcion).slice(0, 300), estado_decision: 'pendiente',
       ...(list(candidata.sesionEntradas).length ? { sesionEntradas: list(candidata.sesionEntradas).filter((item) => existe(item?.campo) && item.valor === 'usuario.id').map((item) => ({ campo: item.campo, valor: item.valor })) } : {}),
-      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor })) } : {})
+      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}) })) } : {})
     };
     return { operacion: this._completarDelSistema(operacion, entidad) };
   }
@@ -332,9 +333,25 @@ class ApplicationSpecService {
     for (const campo of operacion.entradas) {
       const objetivo = String(propiedades[campo]?.['x-references'] || '');
       if (/^usuarios?$/i.test(objetivo) && entidad.key !== 'usuario' && !sesion.some((item) => item.campo === campo)) sesion.push({ campo, valor: 'usuario.id' });
-      else if (MARCA_DE_REGISTRO.test(compacto(campo)) && ['string'].includes(propiedades[campo]?.type) && !auto.some((item) => item.campo === campo)) {
+      else if (auto.some((item) => item.campo === campo)) continue;
+      else if (MARCA_DE_REGISTRO.test(compacto(campo)) && ['string'].includes(propiedades[campo]?.type)) {
         auto.push({ campo, valor: propiedades[campo]?.format === 'date' ? 'hoy' : 'ahora' });
+      } else if (systemManaged(campo, propiedades[campo]) === 'empieza en su estado inicial' && propiedades[campo]?.enum?.length) {
+        // El estado inicial lo fija el servidor (el primero del dominio): sin él, las reglas que exigen el estado rechazarían el alta.
+        auto.push({ campo, valor: 'inicial', opciones: propiedades[campo].enum });
+      } else if (systemManaged(campo, propiedades[campo]) === 'lo genera el sistema' && propiedades[campo]?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) {
+        // Códigos que genera el sistema (el QR de una reserva): el servidor los crea; la persona no los inventa.
+        auto.push({ campo, valor: 'generado' });
       }
+    }
+    // Lo que el servidor debe aportar aunque la propuesta no lo liste (la IA suele omitir el estado y el código del QR): sin eso la
+    // reserva nacería sin estado ni código. Solo estado inicial, códigos generados y la fecha del propio registro.
+    for (const [campo, definicion] of Object.entries(propiedades)) {
+      if (campo === 'id' || definicion?.readOnly || operacion.entradas.includes(campo) || [...sesion, ...auto].some((item) => item.campo === campo)) continue;
+      const razon = systemManaged(campo, definicion);
+      if (razon === 'empieza en su estado inicial' && definicion?.enum?.length) auto.push({ campo, valor: 'inicial', opciones: definicion.enum });
+      else if (razon === 'lo genera el sistema' && definicion?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) auto.push({ campo, valor: 'generado' });
+      else if (MARCA_DE_REGISTRO.test(compacto(campo)) && definicion?.type === 'string') auto.push({ campo, valor: definicion?.format === 'date' ? 'hoy' : 'ahora' });
     }
     const completados = new Set([...sesion, ...auto].map((item) => item.campo));
     // «Quién lo registra» solo se omite cuando se puede resolver (la cuenta de la sesión). Una referencia al propio actor

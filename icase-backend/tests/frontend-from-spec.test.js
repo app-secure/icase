@@ -41,7 +41,7 @@ const pantallas = [
 
 const mockupHtml = '<body><main><h1>Mesas</h1><p>Mesa 01 Libre Carlos Pérez</p><button data-accion="RF-04.consultar">Actualizar</button></main></body>';
 
-const generar = async ({ conSpec = true } = {}) => {
+const generar = async ({ conSpec = true, acceso = null, roles = null } = {}) => {
   const decision = { version: 1, operaciones, pantallas };
   const especificacion = ApplicationSpecService.confirmada(decision);
   const contrato = new ApplicationContractBuilder().build({
@@ -49,27 +49,39 @@ const generar = async ({ conSpec = true } = {}) => {
   });
   const acciones = contrato.operations.flatMap((operation) => operation.actions || []);
   const diseno = {
-    manifiesto_navegacion: [{ pantalla_id: 'mesas-asignadas', slug: 'mesas-asignadas', nombre: 'Mesas asignadas', ruta: '/mesas', rf_trazabilidad: ['RF-04'] }],
+    manifiesto_navegacion: [{ pantalla_id: 'mesas-asignadas', slug: 'mesas-asignadas', nombre: 'Mesas asignadas', ruta: '/mesas', rf_trazabilidad: ['RF-04'], ...(roles ? { roles } : {}) }],
     mockups: [{ pantalla_id: 'mesas-asignadas', nombre_pantalla: 'mesas-asignadas', nombre_visible: 'Mesas asignadas', rf_trazabilidad: ['RF-04'], preview_code: mockupHtml }],
     sistema_diseno: {}
   };
   const { archivos } = await new FrontendScaffoldGenerator().generar({
     proyecto: { nombre: 'Demo' }, versionesOrigen: {},
-    insumos: { decisiones: { stack_tecnologico: { plataformas: ['web'] } }, diseno, requerimientos: rf, ...(conSpec ? { especificacion, acciones } : {}) }
+    insumos: { decisiones: { stack_tecnologico: { plataformas: ['web'] }, ...(acceso ? { control_acceso: acceso } : {}) }, diseno, requerimientos: rf, ...(conSpec ? { especificacion, acciones } : {}) }
   });
   return { archivos, file: (ruta) => archivos.find((item) => item.ruta === ruta)?.contenido, acciones };
 };
 
 describe('frontend generado desde la especificación', () => {
-  test('la pantalla con componentes aprobados usa operaciones con nombre, no el HTML del mockup', async () => {
+  test('el mockup aprobado es la interfaz y sus botones llaman a las operaciones con nombre', async () => {
     const { file } = await generar();
     const page = file('frontend/src/pages/mesas-asignadas.jsx');
+    expect(page).toContain('Carlos Pérez'); // se muestra el diseño aprobado
     expect(page).toContain("import { SpecBlock } from '../SpecComponents'");
     expect(page).toContain('/api/actions/listar-mesas-asignadas');
     expect(page).toContain('/api/actions/ocupar-mesa/:id');
-    expect(page).not.toContain('Carlos Pérez');
+    expect(page).toContain('acciones: specMap'); // el botón «Actualizar» (RF-04.consultar) usa la operación de la especificación
+    expect(page).toContain('⚙️ Operaciones'); // la vista alterna usa los componentes de la especificación
     expect(page).not.toContain('Gestión de Datos (API)');
-    expect(file('frontend/mockups-reference/mesas-asignadas.html')).toContain('Carlos Pérez'); // la referencia visual se conserva
+    expect(() => require('esbuild').transformSync(page, { loader: 'jsx' })).not.toThrow();
+    expect(file('frontend/src/mockupActions.js')).toContain('acciones');
+    expect(file('frontend/mockups-reference/mesas-asignadas.html')).toContain('Carlos Pérez');
+  });
+
+  test('el rol que escribe el mockup se lleva al id del rol de la matriz de accesos y el administrador no tiene pase libre', async () => {
+    const acceso = { autenticacion: { metodo: 'jwt' }, roles: [{ id: 'cocinero', nombre: 'Cocinero', incluir: true }, { id: 'mesero', nombre: 'Mesero', incluir: true }] };
+    const { file } = await generar({ acceso, roles: ['Personal de Cocina'] });
+    const app = file('frontend/src/App.jsx');
+    expect(app).toContain('"roles":["cocinero"]');
+    expect(app).not.toContain('user.administrador || !roles.length');
   });
 
   test('los botones hacia operaciones no confirmadas no llegan a la pantalla', async () => {

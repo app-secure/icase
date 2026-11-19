@@ -6,6 +6,7 @@ const enabled=__EXTENSIONS__;
 test('interfaces de adjuntos y reportes generadas',async({page})=>{
   const session=await makeApi(base,null)('/api/auth/login','POST',{email:process.env.ADMIN_EMAIL,password:process.env.ADMIN_PASSWORD});expect(session.status).toBe(200);
   const api=makeApi(base,session.data.token);const contract=(await api('/api/contract')).data;const operation=contract.operations.find(op=>screens.some(screen=>screen.operations.includes(op.key)));
+  test.skip(!operation,'Ninguna pantalla con editor de registros usa una operación del contrato.');
   const screen=screens.find(screen=>screen.operations.includes(operation.key));const cleanups=[];
   try{
     await createValidRecord(api,contract.operations,operation,cleanups,0);

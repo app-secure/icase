@@ -186,3 +186,32 @@ describe('mockup-actions: ejecución', () => {
     expect(api).not.toHaveBeenCalled();
   });
 });
+
+describe('mockup-actions: operaciones de la especificación', () => {
+  const acciones = { 'rf-03.crear': { name: 'registrarSala', method: 'POST', path: '/api/actions/registrar-sala', byId: false, inputs: ['sala'] }, 'rf-03.consultar': { name: 'listarSalas', method: 'GET', path: '/api/actions/listar-salas', byId: false, inputs: [] } };
+  const form = '<form><input name="sala" value="A"><input name="extra" value="x"><button id="b" type="submit">Enviar</button></form>';
+  const runWith = async (button, verb, api) => {
+    const results = [];
+    await runtime.runAction({ event: { preventDefault: jest.fn(), currentTarget: button }, operation: 'rf-03', verb, api, can: () => true, acciones, onResult: (result) => results.push(result) });
+    return results;
+  };
+
+  test('crear llama a la operación con nombre y solo envía sus campos de entrada', async () => {
+    const api = jest.fn().mockResolvedValue({});
+    await runWith(page(form).getElementById('b'), 'crear', api);
+    expect(api).toHaveBeenCalledWith('/api/actions/registrar-sala', { method: 'POST', body: JSON.stringify({ sala: 'A' }) });
+  });
+
+  test('consultar usa la consulta de la especificación', async () => {
+    const api = jest.fn().mockResolvedValue([{ id: 1 }]);
+    const results = await runWith(page(form).getElementById('b'), 'consultar', api);
+    expect(api).toHaveBeenCalledWith('/api/actions/listar-salas');
+    expect(results[0].registros).toHaveLength(1);
+  });
+
+  test('sin operación de la especificación para el verbo, cae al CRUD genérico', async () => {
+    const api = jest.fn().mockResolvedValue({});
+    await runWith(page(form).getElementById('b'), 'eliminar', api); // sin selección: solo avisa
+    expect(api).not.toHaveBeenCalled();
+  });
+});

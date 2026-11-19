@@ -73,7 +73,7 @@ export function fillFields(container, data) {
  * `editar` y `eliminar` actúan sobre el registro seleccionado (`selected`, elegido en la tabla de `consultar`),
  * o, si no hay selección, sobre un `data-id` declarado a mano. El id de un mockup generado es de ejemplo y no se usa.
  */
-export async function runAction({ event, operation, verb, api, can, onResult, confirmar, selected, onSelect, identidad }) {
+export async function runAction({ event, operation, verb, api, can, onResult, confirmar, selected, onSelect, identidad, acciones }) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
   const control = event && event.currentTarget;
@@ -88,6 +88,9 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
   // Las cuentas de usuario viven en /api/users (con la contraseña protegida), no en una tabla de datos.
   const accounts = identidad && identidad[operation] === 'usuarios';
   const base = accounts ? '/api/users' : `/api/operations/${encodeURIComponent(operation)}`;
+  // Si la especificación aprobada define la operación de este botón, se llama a ella (con sus reglas y campos propios), no al CRUD genérico.
+  const named = acciones && acciones[`${String(operation).toLowerCase()}.${verb}`];
+  const only = (fields) => (named && named.inputs.length ? Object.fromEntries(Object.entries(fields).filter(([key]) => named.inputs.includes(key))) : fields);
   const read = (target) => (accounts ? accountFields(collectFields(target, { requireForm: true })) : collectFields(target, { requireForm: true }));
   const ask = confirmar || ((message) => (typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true));
   try {
@@ -99,20 +102,20 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
       const params = new URLSearchParams({ limit: '20' });
       const term = fields.search !== undefined ? fields.search : fields.buscar;
       if (term !== undefined && String(term).trim()) params.set('search', String(term).trim());
-      const response = await api(`${base}?${params.toString()}`);
+      const response = await api(named ? named.path : `${base}?${params.toString()}`);
       const registros = Array.isArray(response) ? response : (response && response.data) || [];
       return onResult({ estado: 'ok', mensaje: `${registros.length} ${registros.length === 1 ? 'registro' : 'registros'}`, registros, operacion: operation });
     }
     if (verb === 'crear') {
-      await api(base, { method, body: JSON.stringify(control ? read(control) : {}) });
+      await api(named ? named.path : base, { method: named ? named.method : method, body: JSON.stringify(only(control ? read(control) : {})) });
       return onResult({ estado: 'ok', mensaje: 'Registro creado' });
     }
     const chosen = selected && selected.operation === operation && selected.id ? selected : null;
     const id = chosen ? String(chosen.id) : (control ? recordId(control) : '');
     if (!id) return onResult({ estado: 'aviso', mensaje: 'Selecciona primero un registro: usa Consultar y luego Seleccionar en la tabla.' });
-    const target = `${base}/${encodeURIComponent(id)}`;
+    const target = named ? named.path.replace(':id', encodeURIComponent(id)) : `${base}/${encodeURIComponent(id)}`;
     if (verb === 'editar') {
-      await api(target, { method, body: JSON.stringify(read(control)) });
+      await api(target, { method: named ? named.method : method, body: JSON.stringify(only(read(control))) });
       return onResult({ estado: 'ok', mensaje: 'Registro actualizado' });
     }
     if (!ask(`¿Eliminar el registro ${(chosen && chosen.etiqueta) || id}?`)) return undefined;

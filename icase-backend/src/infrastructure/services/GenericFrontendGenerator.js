@@ -22,6 +22,23 @@ const isAuthScreen = (screen) => /inicio.*sesion|login|autentic/i.test(screen?.s
 const PlatformPolicy = require('../../core/services/PlatformPolicy');
 const platformOf = (screen) => PlatformPolicy.of(screen);
 
+/**
+ * Los roles que el mockup escribe en texto libre («Personal de Cocina») se llevan al id del rol de la matriz de accesos («cocinero»):
+ * es el que trae la sesión, y una sola fuente evita pantallas que nadie puede abrir.
+ */
+const resolveRoles = (names, catalog) => {
+  const stem = (word) => word.slice(0, 4);
+  const words = (value) => slug(value).split('-').filter((word) => word.length >= 4 && !['personal', 'usuario', 'cliente-final'].includes(word));
+  const resolved = (names || []).map((name) => {
+    const key = slug(name);
+    const exact = catalog.find((role) => role.id === key || slug(role.nombre) === key);
+    if (exact) return exact.id;
+    const near = catalog.find((role) => words(name).some((word) => [...words(role.id), ...words(role.nombre)].some((other) => stem(other) === stem(word))));
+    return near ? near.id : key;
+  });
+  return [...new Set(resolved)];
+};
+
 // Estilos del módulo de formularios por campo y diseño moderno tipo Dashboard.
 const TYPED_FORMS_CSS = '.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}.form-row{display:flex;flex-direction:column;gap:.35rem}.input{width:100%;padding:.65rem .85rem;font:inherit;font-size:.9rem;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;transition:border-color .15s,box-shadow .15s;outline:none}.input:focus{border-color:var(--primary);background:white;box-shadow:0 0 0 3px rgba(99,102,241,.15)}.input[aria-invalid="true"]{border-color:#ef4444;background:#fef2f2}.field-error{color:#dc2626;font-size:.8rem;font-weight:500}.secondary{background:#f1f5f9!important;color:#334155!important;border:1px solid #cbd5e1!important}.secondary:hover{background:#e2e8f0!important}.table-wrap{overflow-x:auto;border-radius:10px;border:1px solid #e2e8f0;margin-top:.75rem}.records{width:100%;border-collapse:collapse;font-size:.875rem}.records th{background:#f8fafc;color:#475569;font-weight:600;text-transform:uppercase;font-size:.75rem;letter-spacing:.05em;padding:.75rem 1rem;border-bottom:1px solid #e2e8f0}.records td{padding:.85rem 1rem;border-bottom:1px solid #f1f5f9;color:#1e293b;vertical-align:middle}.records tr:last-child td{border-bottom:none}.records tr:hover{background:#f8fafc}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}';
 
@@ -42,6 +59,8 @@ class GenericFrontendGenerator {
         (isAuthScreen(screens[index]) && view.requirements.every((id) => loginIds.has(String(id).toUpperCase())))
         || (view.platform === 'web' && (view.route === '/usuarios' || view.id === 'usuarios'))
       )));
+    const roleCatalog = [{ id: 'administrador', nombre: 'Administrador' }, ...((acceso?.roles || []).filter((role) => role.incluir !== false).map((role) => ({ id: slug(role.id), nombre: role.nombre || role.id })))];
+    if (auth) for (const view of allViews) view.roles = resolveRoles(view.roles, roleCatalog);
     const views = allViews.filter((view) => view.platform === 'web');
     const explicitMobile = screens.some((screen) => platformOf(screen) === 'móvil');
     const mobileViews = allViews.filter((view) => view.platform === 'móvil' || (!explicitMobile && !view.platformDeclared));
@@ -103,16 +122,23 @@ class GenericFrontendGenerator {
       const screen = screens.find((item) => this._view(item, screens, requerimientos).id === view.id);
       // Una pantalla con componentes aprobados en la especificación se construye con ellos, no con el HTML del mockup.
       const specPage = this._specPage(view, name, spec);
-      if (specPage) {
+      // El mockup aprobado es la interfaz de la pantalla; la especificación aporta las operaciones con las que sus botones guardan y consultan.
+      // Solo si el mockup no se puede convertir a la interfaz, la pantalla se construye únicamente con los componentes de la especificación.
+      const specFound = specPage ? this._specBlocks(view, spec) : null;
+      const mockupHtml = screen?.mockup?.preview_code;
+      const mockupProbe = specPage && mockupHtml ? HtmlToJsxTransformer.analyze(mockupHtml, { operaciones: new Set(views.flatMap((item) => item.operations)), routes: routeSet, referencias: referencias || {} }) : null;
+      if (specPage && !mockupProbe?.jsx) {
         files.push({ ruta: `frontend/src/pages/${view.id}.jsx`, lenguaje: 'javascript', contenido: specPage.contenido });
-        if (screen?.mockup?.preview_code) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: screen.mockup.preview_code });
+        if (mockupHtml) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: mockupHtml });
         specSummaries.set(view.id, specPage.resumen);
         continue;
       }
+      if (specPage) specSummaries.set(view.id, { ...specPage.resumen, interfaz: 'mockup' });
       const reference = this._plainText(screen?.mockup?.preview_code || '').slice(0, 600);
       const mockupCode = screen?.mockup?.preview_code;
       const analysis = mockupCode ? HtmlToJsxTransformer.analyze(mockupCode, { operaciones: allowedOperations, routes: routeSet, referencias: referencias || {} }) : null;
       const jsxBody = analysis ? analysis.jsx : '';
+      const specActionMap = specFound ? this._specActionMap(specFound.actions, spec) : null;
       const wired = jsxBody.includes('handleAction(');
       anyWired = anyWired || wired;
       const usesLink = jsxBody.includes('<Link ');
@@ -141,7 +167,7 @@ class GenericFrontendGenerator {
       files.push({
         ruta: `frontend/src/pages/${view.id}.jsx`,
         lenguaje: 'javascript',
-        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${usesLink ? "import { Link } from 'react-router-dom';\n" : ''}${usesReferences ? "import ReferenceOptions from '../ReferenceOptions';\n" : ''}${css.trim() ? `import './${view.id}.css';\n` : ''}${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: setResult" + (Object.keys(usersMap).length ? `, identidad: ${JSON.stringify(usersMap)}` : '') + " });\n" : ''}  return (\n    <main ${jsxBody ? "className={showCrud ? 'page-container screen' : 'mockup-screen'}" : 'className="page-container screen"'} data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>⚙️ Gestión de Datos (API)</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content mockup-${view.id}${bodyClass ? ` ${bodyClass}` : ''}"${bodyStyle ? ` style={${JSON.stringify(bodyStyle)}}` : ''}>${wired ? '<MockupResult result={result} selected={selected} onSelect={setSelected} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        <OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
+        contenido: `import React, { useState } from 'react';\nimport OperationScreen from '../OperationScreen';\n${usesLink ? "import { Link } from 'react-router-dom';\n" : ''}${usesReferences ? "import ReferenceOptions from '../ReferenceOptions';\n" : ''}${css.trim() ? `import './${view.id}.css';\n` : ''}${wired ? "import { useSession } from '../session';\nimport { runAction } from '../mockupActions';\nimport MockupResult from '../MockupResult';\n" : ''}${specFound ? `import { SpecBlock } from '../SpecComponents';\nconst specActions = ${JSON.stringify(specFound.actions)};\nconst specBlocks = ${JSON.stringify(specFound.blocks)};\nconst specMap = ${JSON.stringify(specActionMap)};\n` : ''}const referenceText=${JSON.stringify(reference)};\nexport default function ${name}(){\n  const [showCrud, setShowCrud] = useState(false);\n${wired ? "  const [result, setResult] = useState(null);\n  const [selected, setSelected] = useState(null);\n  const { api, can } = useSession();\n  const handleAction = (event, operation, verb) => runAction({ event, operation, verb, api, can, selected, onSelect: setSelected, onResult: setResult" + (specFound ? ', acciones: specMap' : '') + (Object.keys(usersMap).length ? `, identidad: ${JSON.stringify(usersMap)}` : '') + " });\n" : ''}  return (\n    <main ${jsxBody ? "className={showCrud ? 'page-container screen' : 'mockup-screen'}" : 'className="page-container screen"'} data-screen=${JSON.stringify(view.id)}>\n      ${jsxBody ? `<div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0.75rem 1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', gap: '0.75rem', alignItems: 'center' }}>\n        <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Vista:</span>\n        <button type="button" className={'button' + (!showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(false)}>✨ Interfaz Diseñada</button>\n        <button type="button" className={'button' + (showCrud ? '' : ' secondary')} style={{ padding: '0.35rem 0.85rem', fontSize: '0.82rem' }} onClick={() => setShowCrud(true)}>${specFound ? '⚙️ Operaciones' : '⚙️ Gestión de Datos (API)'}</button>\n      </div>` : ''}\n      ${jsxBody ? `{!showCrud ? (\n        <div className="mockup-view-wrapper" style={{ minHeight: 'calc(100vh - 120px)' }}>\n          <div className="mockup-content mockup-${view.id}${bodyClass ? ` ${bodyClass}` : ''}"${bodyStyle ? ` style={${JSON.stringify(bodyStyle)}}` : ''}>${wired ? '<MockupResult result={result} selected={selected} onSelect={setSelected} />' : ''}${jsxBody}</div>\n        </div>\n      ) : (\n        ${specFound ? '<div className="spec-page">{specBlocks.map((block, index) => <SpecBlock key={index} block={block} actions={specActions} />)}</div>' : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n      )}` : `<OperationScreen title=${JSON.stringify(view.name)} capabilities={${JSON.stringify(view.operations)}} referenceText={referenceText} asChild />`}\n    </main>\n  );\n}\n`
       });
       if (screen?.mockup?.preview_code) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: screen.mockup.preview_code });
     }
@@ -226,6 +252,19 @@ class GenericFrontendGenerator {
       return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output }];
     }));
     return { blocks, actions, used };
+  }
+
+  /** `rf-15.crear` → la operación de la especificación que guarda: un botón del mockup llama a la operación con nombre y no a un CRUD genérico. */
+  _specActionMap(screenActions, spec) {
+    const verb = { consulta: 'consultar', crear: 'crear', actualizar: 'editar', transicion: 'editar', eliminar: 'eliminar' };
+    const map = {};
+    const add = (action) => {
+      const key = `${String(action.capability).toLowerCase()}.${verb[action.type]}`;
+      if (verb[action.type] && !map[key]) map[key] = { name: action.name, method: action.method, path: action.path, byId: Boolean(action.byId), inputs: action.inputs || [] };
+    };
+    Object.values(screenActions || {}).forEach(add);
+    (spec?.acciones || []).forEach(add);
+    return map;
   }
 
   _specPage(view, name, spec) {

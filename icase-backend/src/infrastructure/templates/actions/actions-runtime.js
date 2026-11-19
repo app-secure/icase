@@ -2,6 +2,8 @@
 // Operaciones de negocio con nombre generadas desde la especificación aprobada de la aplicación.
 // Se apoyan en el almacén de datos (list/create/update/remove/getRecord): no tocan la base de datos directamente.
 
+const crypto = require('node:crypto');
+
 const definitions = __DEFINITIONS__;
 
 class ActionError extends Error {
@@ -14,6 +16,35 @@ class ActionError extends Error {
 const slugOf = (name) => String(name).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 const flat = (record) => (record ? { id: record.id, ...record.data } : record);
 const pick = (source, fields) => Object.fromEntries(fields.filter((field) => Object.prototype.hasOwnProperty.call(source, field)).map((field) => [field, source[field]]));
+
+const LABEL_KEYS = ['nombre', 'name', 'titulo', 'numero', 'codigo', 'descripcion', 'email', 'correo'];
+/** Texto con el que se reconoce un registro: su nombre, número o código; nunca su identificador. */
+const labelOf = (row) => {
+  for (const key of LABEL_KEYS) if (row[key] !== undefined && row[key] !== null && String(row[key]).trim()) return String(row[key]);
+  const first = Object.entries(row).find(([key, value]) => key !== 'id' && !key.endsWith('_id') && typeof value === 'string' && value.trim());
+  return first ? first[1] : null;
+};
+
+/** Añade `<campo>__etiqueta` a las filas con una referencia: así la pantalla muestra «Mesa 3» y no un identificador. */
+async function withLabels(store, def, rows) {
+  const refs = Object.entries(def.refs || {}).filter(([campo]) => !def.output?.length || def.output.includes(campo));
+  if (!refs.length || !rows.length) return rows;
+  const names = {};
+  for (const [campo, capability] of refs) {
+    try {
+      const listed = await store.list(capability, {}, null);
+      names[campo] = new Map((Array.isArray(listed) ? listed : listed?.data || []).map(flat).map((row) => [String(row.id), labelOf(row)]));
+    } catch { names[campo] = new Map(); }
+  }
+  return rows.map((row) => {
+    const extra = {};
+    for (const [campo] of refs) {
+      const label = row[campo] === undefined || row[campo] === null ? null : names[campo].get(String(row[campo]));
+      if (label) extra[`${campo}__etiqueta`] = label;
+    }
+    return { ...row, ...extra };
+  });
+}
 
 /** Operación que atiende un método y una ruta (con o sin identificador); null si no existe. */
 function find(slug, method, hasId) {
@@ -63,6 +94,14 @@ async function resolveFilters(store, def, ctx) {
   return resolved;
 }
 
+/** Valor que el servidor pone en un campo que la persona no escribe: la fecha del registro, el estado inicial o un código generado. */
+function autoValue(input) {
+  if (input.valor === 'hoy') return new Date().toISOString().slice(0, 10);
+  if (input.valor === 'inicial') return (input.opciones || [])[0] ?? null;
+  if (input.valor === 'generado') return crypto.randomBytes(5).toString('hex').toUpperCase();
+  return new Date().toISOString();
+}
+
 async function run(store, def, ctx = {}) {
   const body = ctx.body && typeof ctx.body === 'object' && !Array.isArray(ctx.body) ? ctx.body : {};
   switch (def.type) {
@@ -74,14 +113,14 @@ async function run(store, def, ctx = {}) {
       const list = (Array.isArray(rows) ? rows : rows?.data || []).map(flat);
       const rest = filters.filter((filter) => filter.operador !== '==');
       const kept = rest.length ? list.filter((row) => rest.every((filter) => row[filter.campo] !== undefined && compare(row[filter.campo], filter.operador, filter.value))) : list;
-      return def.output?.length ? kept.map((row) => ({ id: row.id, ...pick(row, def.output) })) : kept;
+      return withLabels(store, def, def.output?.length ? kept.map((row) => ({ id: row.id, ...pick(row, def.output) })) : kept);
     }
     case 'crear': {
       const values = pick(body, def.inputs || []);
       if (!Object.keys(values).length && (def.inputs || []).length) throw new ActionError(400, `Envía al menos uno de: ${(def.inputs || []).join(', ')}.`);
       // Lo que completa el servidor no se toma de la petición: quien crea es la sesión y la marca de tiempo es la del registro.
       for (const input of def.sessionInputs || []) values[input.campo] = await sessionValue(store, ctx.user, input);
-      for (const input of def.autoInputs || []) values[input.campo] = input.valor === 'hoy' ? new Date().toISOString().slice(0, 10) : new Date().toISOString();
+      for (const input of def.autoInputs || []) values[input.campo] = autoValue(input);
       return flat(await store.create(def.capability, values, ctx.scope || null));
     }
     case 'actualizar': {

@@ -11,6 +11,7 @@ const pathOf = (action, id, query) => {
   const params = new URLSearchParams(Object.entries(query || {}).filter(([, value]) => value !== undefined && value !== ''));
   return params.toString() ? `${base}?${params}` : base;
 };
+const cell = (row, name) => (row[`${name}__etiqueta`] !== undefined ? row[`${name}__etiqueta`] : row[name]);
 const shown = (value) => (value === null || value === undefined ? '' : typeof value === 'boolean' ? (value ? 'Sí' : 'No') : typeof value === 'object' ? JSON.stringify(value) : String(value));
 
 /** Parámetros que la persona puede escribir para filtrar la consulta. */
@@ -128,14 +129,14 @@ function ActionList({ block, actions, allowed }) {
   if (!loading && !rows.length) return <section>{toolbar}<p className="empty" role="status">No hay registros para mostrar.</p></section>;
   if (block.tipo === 'tarjetas') {
     return <section>{toolbar}<div className="cards">{rows.map((row) => <article key={row.id} className="card" data-id={row.id}>
-      <dl>{fields.map((name) => <div key={name}><dt>{humanize(name)}</dt><dd>{shown(row[name])}</dd></div>)}</dl>
+      <dl>{fields.map((name) => <div key={name}><dt>{humanize(name)}</dt><dd>{shown(cell(row, name))}</dd></div>)}</dl>
       <RowButtons row={row} buttons={buttons} actions={actions} allowed={allowed} afterRun={reload} />
     </article>)}</div></section>;
   }
   return <section>{toolbar}<div className="table-wrap"><table className="table">
     <thead><tr>{fields.map((name) => <th key={name}>{humanize(name)}</th>)}<th /></tr></thead>
     <tbody>{rows.map((row) => <tr key={row.id} data-id={row.id}>
-      {fields.map((name) => <td key={name}>{shown(row[name])}</td>)}
+      {fields.map((name) => <td key={name}>{shown(cell(row, name))}</td>)}
       <td><RowButtons row={row} buttons={buttons} actions={actions} allowed={allowed} afterRun={reload} /></td>
     </tr>)}</tbody>
   </table></div></section>;
@@ -148,7 +149,7 @@ function ActionDetail({ block, actions }) {
   const row = rows[0];
   if (error) return <p role="alert" className="error">{error}</p>;
   if (!row) return <p className="empty" role="status">No hay datos para mostrar.</p>;
-  return <dl className="detail">{fields.map((name) => <div key={name}><dt>{humanize(name)}</dt><dd>{shown(row[name])}</dd></div>)}</dl>;
+  return <dl className="detail">{fields.map((name) => <div key={name}><dt>{humanize(name)}</dt><dd>{shown(cell(row, name))}</dd></div>)}</dl>;
 }
 
 function ActionKpi({ block, actions }) {

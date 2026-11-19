@@ -387,7 +387,11 @@ ${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/opera
     if (!this._hasActions(contract)) return [];
     const definitions = contract.operations.flatMap((operation) => (operation.actions || []).map((action) => ({
       name: action.name, type: action.type, method: action.method, byId: action.byId, capability: action.capability, entity: action.entity,
-      filters: action.filters, inputs: action.inputs, output: action.output, ...(action.transition ? { transition: action.transition } : {})
+      filters: action.filters, inputs: action.inputs, output: action.output, ...(action.transition ? { transition: action.transition } : {}),
+      // Campos que apuntan a otro registro: la consulta devuelve también su nombre legible (`<campo>__etiqueta`).
+      ...(action.type === 'consulta' && Object.values(action.fields || {}).some((meta) => meta?.referencia) ? { refs: Object.fromEntries(Object.entries(action.fields).filter(([, meta]) => meta?.referencia).map(([campo, meta]) => [campo, meta.referencia])) } : {}),
+      // Lo que completa el servidor al crear (la cuenta de la sesión, la fecha, el estado inicial, un código generado).
+      ...(action.sessionInputs?.length ? { sessionInputs: action.sessionInputs } : {}), ...(action.autoInputs?.length ? { autoInputs: action.autoInputs } : {})
     })));
     const source = fs.readFileSync(path.join(__dirname, '..', 'templates', 'actions', 'actions-runtime.js'), 'utf8');
     return [{ ruta: 'backend/src/actions/actions.js', lenguaje: 'javascript', contenido: renderTemplate(source, { DEFINITIONS: JSON.stringify(definitions, null, 2) }) }];
@@ -484,7 +488,7 @@ ${this._hasActions(contract) ? this._expressActionRoutes() : ''}app.use((error,_
 
   _env(database, policy = { habilitada: false }, runtime = 'node') {
     const url = database === 'postgres' ? 'postgresql://app:change-me@localhost:5432/app' : database === 'mysql' ? 'mysql://app:change-me@localhost:3306/app' : 'mongodb://localhost:27017/app';
-    const auth = policy.habilitada ? `# Defínelos antes de producción: con ${runtime === 'spring' ? 'APP_ENV' : 'NODE_ENV'}=production se rechaza un JWT_SECRET débil.\nJWT_SECRET=change-me\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=ChangeMe-123\n` : '';
+    const auth = policy.habilitada ? `# Defínelos antes de producción: con ${runtime === 'spring' ? 'APP_ENV' : 'NODE_ENV'}=production se rechaza un JWT_SECRET débil.\nJWT_SECRET=change-me\nADMIN_EMAIL=admin@example.com\nADMIN_PASSWORD=ChangeMe-123\n# Una cuenta de ejemplo por rol (<rol>@ejemplo.test) fuera de producción; SEED_DEMO_USERS=false las desactiva.\nDEMO_PASSWORD=Demo-2026-icase\n` : '';
     const http = '# Orígenes permitidos en producción (separados por coma, sin barra final).\nCORS_ORIGINS=http://localhost:8080,http://localhost:5173\nHTTP_RATE_WINDOW_MS=60000\nHTTP_RATE_MAX=300\nAUTH_RATE_MAX=20\n' + (runtime === 'node' ? '# Ajustar solo si hay un proxy de confianza delante.\nTRUST_PROXY_HOPS=\n' : 'APP_ENV=development\n');
     return `PORT=3000\nDATABASE_URL=${url}\nDB_NAME=app\n${http}${auth}`;
   }

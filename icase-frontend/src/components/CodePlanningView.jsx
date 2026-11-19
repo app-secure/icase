@@ -846,6 +846,8 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
     setLoading(false);
   };
 
+  // Infraestructura y pipeline no se ejecutan en Docker: se revisan y se aprueban directamente.
+  const estructural = ['infraestructura', 'pipeline_ci_cd'].includes(artifact.tipo);
   const partes = artifact.tipo === 'codigo_frontend'
     ? [['web', 'frontend/'], ['móvil', 'mobile/']].filter(([, dir]) => artifact.archivos?.some(f => f.ruta.startsWith(dir))).map(([p]) => p) : [''];
   return <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-xs">
@@ -853,13 +855,13 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
       onClick={() => downloadCodeArtifactApi(projectId, artifact.id, p).catch(e => setError(e.message))}>Descargar ZIP {p}</button>)}
     {artifact.modulos && <details><summary>Módulos de esta versión</summary>
       <p>Incluidos: {artifact.modulos.incluidos.join(', ') || 'ninguno'}</p><p>Fuera: {artifact.modulos.excluidos.join(', ') || 'ninguno'}</p></details>}
-    <div className="flex items-center justify-between gap-3">
+    {!estructural && <div className="flex items-center justify-between gap-3">
       <span className="font-semibold text-slate-700">Verificación aislada (Docker): {result?.estado || (job?.estado === 'procesando' ? 'en ejecución…' : 'pendiente')}</span>
       <button type="button" disabled={loading} onClick={verify} className="flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50/50 px-3 py-1.5 font-semibold text-violet-700 hover:bg-violet-100/60 disabled:opacity-50 transition cursor-pointer">
         {loading ? <Loader2 size={13} className="animate-spin" /> : null}
         {loading ? (job?.mensaje || 'Verificando en contenedor…') : 'Verificar artefacto'}
       </button>
-    </div>
+    </div>}
 
     {loading && job && (
       <div className="mt-2.5 rounded-lg border border-violet-200 bg-violet-50/60 p-2 text-[11px] text-violet-900">

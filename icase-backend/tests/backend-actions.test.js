@@ -150,3 +150,25 @@ describe('operaciones de negocio en el backend generado', () => {
     expect(advertencias.join(' ')).toMatch(/Spring/);
   });
 });
+
+describe('etiquetas de referencias en las consultas', () => {
+  const load = (definitions) => {
+    const source = fs.readFileSync(path.join(__dirname, '../src/infrastructure/templates/actions/actions-runtime.js'), 'utf8').replace('__DEFINITIONS__', JSON.stringify(definitions));
+    const module = { exports: {} };
+    new Function('module', 'exports', 'require', source)(module, module.exports, require);
+    return module.exports;
+  };
+  const def = { name: 'listarPedidos', type: 'consulta', method: 'GET', byId: false, capability: 'rf-15', filters: [], inputs: [], output: ['total', 'mesa_id'], refs: { mesa_id: 'rf-04' } };
+
+  test('añade el nombre legible del registro referido, no solo su identificador', async () => {
+    const { run } = load([def]);
+    const store = { list: async (capability) => (capability === 'rf-04' ? [{ id: 7, data: { numero: 'Mesa 3', zona: 'Terraza' } }] : [{ id: 1, data: { total: 20, mesa_id: 7, secreto: 'x' } }]) };
+    expect(await run(store, def)).toEqual([{ id: 1, total: 20, mesa_id: 7, mesa_id__etiqueta: 'Mesa 3' }]);
+  });
+
+  test('si la referencia no se puede leer, devuelve la fila sin etiqueta', async () => {
+    const { run } = load([def]);
+    const store = { list: async (capability) => { if (capability === 'rf-04') throw new Error('sin acceso'); return [{ id: 1, data: { total: 20, mesa_id: 7 } }]; } };
+    expect(await run(store, def)).toEqual([{ id: 1, total: 20, mesa_id: 7 }]);
+  });
+});

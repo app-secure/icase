@@ -10,6 +10,8 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     const backendRf = new Set(backend.trazabilidad_rf || []);
     const frontendRf = new Set(frontend.trazabilidad_rf || []);
     const routes = this._frontendRoutes(frontend);
+    // Cada pantalla se abre con una cuenta de su rol: el administrador no ve las pantallas de los demás roles.
+    this._rolesByRoute = Object.fromEntries(this._allFrontendScreens(frontend).filter((screen) => (screen.roles || []).length).map((screen) => [screen.route || screen.ruta, screen.roles[0]]));
     const contract = this._backendContract(backend);
     const mobileOnly = frontend.archivos?.some(f => f.ruta === 'mobile/package.json') && !frontend.archivos.some(f => f.ruta === 'frontend/package.json');
     const auth = mobileOnly ? contract.auth || {} : this._frontendAuth(frontend);
@@ -127,6 +129,9 @@ for (const item of cases) {
     }
     await page.goto(item.route);
     await expect(page.locator('[data-screen="' + item.id + '"]')).toBeVisible();
+    // Con interfaz diseñada, las operaciones de la especificación están en la vista «Operaciones».
+    const operaciones = page.getByRole('button', { name: /Operaciones/ });
+    if (await operaciones.count()) await operaciones.first().click();
     await expect(page.locator('[data-screen="' + item.id + '"] .error')).toHaveCount(0);
     if (rows && item.single) {
       if (rows.length) await expect(page.locator('[data-screen="' + item.id + '"] [data-id]')).toHaveCount(rows.length);
@@ -148,8 +153,29 @@ test.beforeAll(async () => {
   expect(response.ok, 'No se pudo iniciar sesión con ADMIN_EMAIL y ADMIN_PASSWORD').toBeTruthy();
   token = (await response.json()).token;
 });
+const rolesByRoute = ${JSON.stringify(this._rolesByRoute || {})};
+const roleTokens = {};
+// Cuenta de prueba de un rol: la crea el administrador (si ya existe, la reutiliza) y devuelve su sesión.
+async function tokenFor(role) {
+  if (!role || role === 'administrador') return token;
+  if (roleTokens[role]) return roleTokens[role];
+  const email = 'e2e-' + role + '@example.test';
+  const password = 'Prueba-E2E-2026';
+  await fetch(apiBase + '/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ email, nombre: 'Prueba ' + role, password, rol: role }) });
+  const login = await fetch(apiBase + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+  expect(login.ok, 'No se pudo iniciar sesión con la cuenta de prueba del rol ' + role).toBeTruthy();
+  roleTokens[role] = (await login.json()).token;
+  return roleTokens[role];
+}
 test.beforeEach(async ({ page }) => {
   await page.addInitScript((value) => window.localStorage.setItem('icase_token', value), token);
+  const open = page.goto.bind(page);
+  page.goto = async (url, options) => {
+    const route = String(url).replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
+    const value = await tokenFor(rolesByRoute[route]);
+    await page.addInitScript((session) => window.localStorage.setItem('icase_token', session), value);
+    return open(url, options);
+  };
 });
 `;
   }
@@ -603,7 +629,9 @@ for (const item of cases.filter((entry) => entry.verb === 'consultar')) {
       firstRoute = screen.route || screen.ruta || firstRoute;
     }
     const targetScreen = screens.find(screen => (screen.route || screen.ruta) === firstRoute);
-    const operation = operations.find(op => op.key === targetScreen?.operations?.[0]);
+    const operation = (targetScreen?.operations || []).map((key) => operations.find(op => op.key === key)).find(Boolean);
+    // Sin una pantalla con editor de registros conectada a una operación del contrato (las pantallas de la especificación se prueban en spec-screens), no hay nada que ejercitar aquí.
+    if (!targetScreen || !operation) return "import { test } from '@playwright/test';\ntest.skip('ninguna pantalla con editor de registros usa una operación del contrato', () => {});\n";
     return `import { test, expect } from '@playwright/test';
 ${this._e2eSession(auth)}
 ${samplePayload.runtimeSource()}

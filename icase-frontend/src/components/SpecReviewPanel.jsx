@@ -24,7 +24,7 @@ function describeOperation(op) {
   switch (op.tipo) {
     case 'consulta': return `Devuelve ${op.entidad}${where}${op.salida?.length ? ` (campos: ${op.salida.join(', ')})` : ' (todos los campos)'}.`;
     case 'crear': {
-      const system = [...(op.sesionEntradas || []).map((item) => `${item.campo} (la cuenta de la sesión)`), ...(op.autoEntradas || []).map((item) => `${item.campo} (la fecha del registro)`)];
+      const system = [...(op.sesionEntradas || []).map((item) => `${item.campo} (la cuenta de la sesión)`), ...(op.autoEntradas || []).map((item) => `${item.campo} (${{ inicial: 'el estado inicial', generado: 'un código que genera el sistema' }[item.valor] || 'la fecha del registro'})`)];
       return `Registra un ${op.entidad} con ${(op.entradas || []).join(', ') || 'sus campos'}.${system.length ? ` El sistema completa: ${system.join(', ')}.` : ''}`;
     }
     case 'actualizar': return `Modifica ${(op.entradas || []).join(', ') || 'campos'} de un ${op.entidad}${where}.`;

@@ -507,8 +507,11 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
     const rows = Array.isArray(listed.data) ? listed.data : listed.data.data;
     if (!rows.some((row) => String(row.id) === String(mine.id))) fail('el listado omitió el registro propio');
     if (rows.some((row) => String(row.id) === String(theirs.id))) fail('el listado expuso un registro ajeno');
-    status(await first.api(operation.collectionPath + '/' + theirs.id, 'PATCH', { verification: 'ajeno' }), 404, 'modificar ajeno');
-    status(await first.api(operation.collectionPath + '/' + theirs.id, 'DELETE'), 404, 'borrar ajeno');
+    // Un registro ajeno no existe para quien solo ve lo suyo (404). Si el rol ni siquiera puede usar ese método, la política lo
+    // rechaza antes (403): el permiso se comprueba primero, y ese es el comportamiento correcto, no un fallo de aislamiento.
+    const allowed = permissionMethods(limited[1]);
+    status(await first.api(operation.collectionPath + '/' + theirs.id, 'PATCH', { verification: 'ajeno' }), allowed.includes('PATCH') ? 404 : 403, 'modificar ajeno');
+    status(await first.api(operation.collectionPath + '/' + theirs.id, 'DELETE'), allowed.includes('DELETE') ? 404 : 403, 'borrar ajeno');
     const forged = await first.api(operation.collectionPath, 'POST', { ...(await createValidRecord(first.api, operations, operation, cleanups, 2)).body, owner_id: second.userId, __owner: second.userId });
     if (forged.status === 201) {
       cleanups.unshift(() => first.api(operation.collectionPath + '/' + forged.data.id, 'DELETE'));
@@ -523,8 +526,10 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
       if (data.some((row) => String(row.id) === String(theirs.id))) fail('el filtro de consulta reveló registros ajenos');
     }
     for (const candidate of operations) {
+      // Sin la entidad de la operación no se sabe qué campos la referencian: comparar «nada» con «nada» daba falsos candidatos (`id`).
+      if (!operation.entity) break;
       const keyOf = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      const reference = Object.entries(candidate.schema?.properties || {}).find(([, schema]) => schema && keyOf(schema['x-references']) === String(operation.entity || ''));
+      const reference = Object.entries(candidate.schema?.properties || {}).find(([, schema]) => schema && schema['x-references'] && keyOf(schema['x-references']) === String(operation.entity));
       if (!reference) continue;
       const candidateEntry = (config.auth?.operaciones || {})[candidate.key]?.[role];
       if (permissionScope(candidateEntry) !== 'propios') continue;
@@ -532,7 +537,7 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
       if (!permissionMethods(candidateEntry).includes('POST') || (candidate.methods && !candidate.methods.includes('POST'))) continue;
       const payload = await createValidRecord(first.api, operations, candidate, cleanups, 0);
       const conflict = await first.api(candidate.collectionPath, 'POST', { ...payload.body, [reference[0]]: theirs.id });
-      if (conflict.status !== 409) fail('referencia cruzada respondió ' + conflict.status);
+      if (conflict.status !== 409) fail('referencia cruzada en ' + candidate.id + '.' + reference[0] + ' (rol ' + role + ') respondió ' + conflict.status + ': ' + JSON.stringify(conflict.data).slice(0, 300));
     }
     for (const association of config.associations || []) {
       const ends = association.operations || [];
@@ -577,6 +582,18 @@ async function exerciseAction(api, operations, action) {
   if (!target) fail('no tiene operación de almacén (' + action.capability + ')');
   const pick = (source, names) => Object.fromEntries((names || []).filter((name) => source[name] !== undefined).map((name) => [name, source[name]]));
   const cleanups = [];
+  // Una entrada que es una relación opcional (la persona asignada a una mesa) no viene en el registro de ejemplo: se crea el
+  // registro relacionado y se usa su id, como lo haría quien elige uno en la lista.
+  const bodyFor = async (seed) => {
+    const body = pick(seed.body, action.inputs);
+    for (const name of action.inputs || []) {
+      if (body[name] !== undefined) continue;
+      const reference = target.schema?.properties?.[name]?.['x-references'];
+      const parent = reference ? operations.find((item) => item.schema && item.schema.title === reference) : null;
+      if (parent) body[name] = (await createValidRecord(api, operations, parent, cleanups, 1)).id;
+    }
+    return body;
+  };
   const itemPath = (id) => target.itemPath.replace(':id', id);
   const route = (id) => action.path.replace(':id', id);
   try {
@@ -594,15 +611,21 @@ async function exerciseAction(api, operations, action) {
     } else if (action.type === 'crear') {
       const seed = await createValidRecord(api, operations, target, cleanups, 0);
       await api(itemPath(seed.id), 'DELETE');
-      const body = pick(seed.body, action.inputs);
+      const body = await bodyFor(seed);
+      // Si el servidor pone la fecha del registro («ahora»), las demás fechas del ejemplo deben ser anteriores: un cierre no es
+      // anterior a su apertura. Los datos de ejemplo usan 2030, que en un alta real sería una apertura en el futuro.
+      if ((action.autoInputs || []).some((item) => ['ahora', 'hoy'].includes(item.valor))) {
+        for (const [name, value] of Object.entries(body)) if (typeof value === 'string' && /^2030-/.test(value)) body[name] = value.replace(/^2030/, '2020');
+      }
       const response = expectStatus(await api(action.path, 'POST', body), 201, 'crear');
       if (!response.data.id) fail('la creación no devolvió id');
       cleanups.unshift(() => api(itemPath(response.data.id), 'DELETE'));
     } else if (action.type === 'actualizar') {
       const seed = await createValidRecord(api, operations, target, cleanups, 0);
-      const response = expectStatus(await api(route(seed.id), 'PATCH', pick(seed.body, action.inputs)), 200, 'actualizar');
+      const body = await bodyFor(seed);
+      const response = expectStatus(await api(route(seed.id), 'PATCH', body), 200, 'actualizar');
       if (String(response.data.id) !== String(seed.id)) fail('devolvió otro registro');
-      expectStatus(await api(route('no-existe-0'), 'PATCH', pick(seed.body, action.inputs)), 404, 'actualizar un registro inexistente');
+      expectStatus(await api(route('no-existe-0'), 'PATCH', body), 404, 'actualizar un registro inexistente');
     } else if (action.type === 'eliminar') {
       const seed = await createValidRecord(api, operations, target, cleanups, 0);
       expectStatus(await api(route(seed.id), 'DELETE'), 200, 'eliminar');

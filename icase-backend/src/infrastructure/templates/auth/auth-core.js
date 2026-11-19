@@ -106,11 +106,28 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
       return;
     }
     const credentials = validateCredentials({ email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD });
-    if (await store.findUserByEmail(credentials.email)) return;
-    try {
-      await store.createUser({ email: credentials.email, nombre: 'Administrador', rol: ADMIN, activo: true, password_hash: await hashPassword(credentials.password) });
-    } catch (error) {
-      if (!(error instanceof HttpError && error.status === 409)) throw error; // otra instancia lo creó primero
+    if (!(await store.findUserByEmail(credentials.email))) {
+      try {
+        await store.createUser({ email: credentials.email, nombre: 'Administrador', rol: ADMIN, activo: true, password_hash: await hashPassword(credentials.password) });
+      } catch (error) {
+        if (!(error instanceof HttpError && error.status === 409)) throw error; // otra instancia lo creó primero
+      }
+    }
+    await seedDemoUsers();
+  }
+
+  /** Una cuenta de ejemplo por rol (<rol>@ejemplo.test) para probar la aplicación; nunca en producción. */
+  async function seedDemoUsers() {
+    if (env.NODE_ENV === 'production' || env.SEED_DEMO_USERS === 'false') return;
+    const password = env.DEMO_PASSWORD || 'Demo-2026-icase';
+    for (const [id, role] of Object.entries(roles())) {
+      const email = id + '@ejemplo.test';
+      if (await store.findUserByEmail(email)) continue;
+      try {
+        await store.createUser({ email, nombre: role.nombre || id, rol: id, activo: true, password_hash: await hashPassword(password) });
+      } catch (error) {
+        if (!(error instanceof HttpError && error.status === 409)) throw error;
+      }
     }
   }
 
