@@ -23,7 +23,7 @@ class MockupIaService {
     this.failureThreshold = Number(process.env.MOCKUP_CIRCUIT_FAILURES || 2);
     this.cooldownMs = Number(process.env.MOCKUP_CIRCUIT_COOLDOWN_MS || 300000);
     // Esperas (ms) entre reintentos del mismo modelo cuando responde «alta demanda».
-    this.esperasAltaDemanda = (process.env.MOCKUP_HIGH_DEMAND_WAITS_MS || '4000,10000').split(',').map(Number).filter((value) => value > 0);
+    this.esperasAltaDemanda = (process.env.MOCKUP_HIGH_DEMAND_WAITS_MS || '4000,10000,20000').split(',').map(Number).filter((value) => value > 0);
   }
 
   leerPrompt(archivo) {
@@ -168,7 +168,8 @@ class MockupIaService {
     if (status === 404 || /no longer available|does not exist|not found|unavailable for free|model identifier is invalid|on-demand throughput isn.t supported/.test(mensaje)) {
       return { tipo: 'modelo_no_disponible', reintentable: false };
     }
-    if (status === 503 || /high demand|spikes in demand|temporarily unavailable|overloaded/.test(mensaje)) {
+    // Bedrock responde 429 «Too many requests» cuando varias pantallas piden a la vez: es momentáneo, se espera y se reintenta el mismo modelo.
+    if (status === 503 || /high demand|spikes in demand|temporarily unavailable|overloaded|too many requests|please wait before trying again|throttl/.test(mensaje)) {
       return { tipo: 'alta_demanda', reintentable: true, reintentarEnMs: 3000 };
     }
     if (status === 429 || /quota|rate limit|resource exhausted/.test(mensaje)) {

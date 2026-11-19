@@ -167,6 +167,25 @@ class GenerarMockups {
     const totalPantallas = lotes.reduce((total, lote) => total + lote.length, 0);
     if (onProgress) await onProgress({ progreso: 5, mensaje: 'Contexto y árbol de navegación preparados' });
 
+    let completados = 0;
+    const concurrencia = Math.max(1, Math.min(8, Number(process.env.MOCKUP_CONCURRENCY) || GenerarMockups.CONCURRENCIA));
+    const esAjusteDeChatGlobal = Boolean(String(insumoAdicional || '').trim());
+    // Los guardados parciales se hacen de uno en uno y se unifican: si varios terminan a la vez basta un guardado con todo lo hecho hasta entonces.
+    let colaGuardado = Promise.resolve();
+    let guardadoEncolado = false;
+    const guardarParcial = (indice) => {
+      if (guardadoEncolado) return colaGuardado;
+      guardadoEncolado = true;
+      colaGuardado = colaGuardado.then(async () => {
+        guardadoEncolado = false;
+        try {
+          await consolidar({ parcial: true });
+          if (onProgress) await onProgress({ progreso: Math.max(10, Math.round((completados / lotes.length) * 85)), mensaje: `${completados} de ${lotes.length} pantallas guardadas` });
+        } catch (error) { advertencias.push(`No se pudo guardar el avance parcial tras el lote ${indice + 1}: ${error.message}`); }
+      });
+      return colaGuardado;
+    };
+
     if (lotes.length === 0) {
       const resultadoIa = await this.mockupIaService.generarMockups({
         contextoProyecto,
@@ -178,7 +197,7 @@ class GenerarMockups {
       mockupsGenerados.push(...(resultadoIa?.mockups || []));
       if (onProgress) await onProgress({ progreso: 85, mensaje: 'Respuesta de IA recibida' });
     } else {
-      for (let i = 0; i < lotes.length; i++) {
+      const procesarLote = async (i) => {
         const lote = lotes[i];
         const desde = i * tamanoLote + 1;
         const hasta = desde + lote.length - 1;
@@ -270,8 +289,9 @@ class GenerarMockups {
             const acceptance = this.repairService.accepts(target.mockup, candidate, requerimientos, target.criterios);
             if (!acceptance.valido) {
               advertencias.push(`${lote[0]}: reparación no aplicada. ${acceptance.motivo}`);
-              if (onProgress) await onProgress({ progreso: Math.round(((i + 1) / lotes.length) * 85), mensaje: 'Reparación revisada; original conservado' });
-              continue;
+              completados += 1;
+              if (onProgress) await onProgress({ progreso: Math.round((completados / lotes.length) * 85), mensaje: 'Reparación revisada; original conservado' });
+              return;
             }
           }
 
@@ -332,7 +352,7 @@ class GenerarMockups {
             ajustes.push({ nombre_pantalla: lote[0], ...ajuste });
             if (!ajuste.aplicado) {
               advertencias.push(...(resultadoIa?.advertencias || []), `${lote[0]}: ajuste no aplicado. ${ajuste.motivo} Se conserva la pantalla anterior.`);
-              continue;
+              return;
             }
             resultadoIa.mockups = [{ ...mockupPrevio, ...resultadoIa.mockups[0] }];
           }
@@ -350,10 +370,11 @@ class GenerarMockups {
           advertencias.push(...(resultadoIa?.advertencias || []));
           mockupsGenerados.push(...(resultadoIa?.mockups || []));
 
+          completados += 1;
           if (onProgress) {
             await onProgress({
-              progreso: Math.max(10, Math.round(((i + 1) / lotes.length) * 85)),
-              mensaje: `Lote ${i + 1} de ${lotes.length} procesado`
+              progreso: Math.max(10, Math.round((completados / lotes.length) * 85)),
+              mensaje: `${completados} de ${lotes.length} pantallas procesadas`
             });
           }
 
@@ -361,14 +382,18 @@ class GenerarMockups {
             advertencias.push(`Lote ${i + 1}/${lotes.length}: la IA devolvió ${(resultadoIa?.mockups || []).length} de ${lote.length} pantallas`);
           }
         } catch (error) {
+          completados += 1;
           advertencias.push(`Lote ${i + 1}/${lotes.length} falló: ${error.message}`);
           if (mockupPrevio?.preview_code) ajustes.push({ nombre_pantalla: lote[0], aplicado: false, motivo: error.message });
         }
         if (!soloReparar && !esEdicionExistente && mockupsGenerados.length) {
-          try { await consolidar({ parcial: true }); if (onProgress) await onProgress({ progreso: Math.max(10, Math.round(((i + 1) / lotes.length) * 85)), mensaje: `Lote ${i + 1} de ${lotes.length} guardado` }); } catch (error) { advertencias.push(`No se pudo guardar el avance parcial tras el lote ${i + 1}: ${error.message}`); }
+          await guardarParcial(i);
         }
-      }
+      };
+      // Pantallas en paralelo (MOCKUP_CONCURRENCY, por defecto 3): una edición o reparación va de una en una.
+      await this._ejecutarConConcurrencia(lotes.length, soloReparar || esEdicionExistente || esAjusteDeChatGlobal ? 1 : concurrencia, procesarLote);
     }
+    await colaGuardado;
 
     const { mockupsFinales, mockupsSanitizados, auditoriaTrazabilidad } = await consolidar();
 
@@ -399,6 +424,19 @@ class GenerarMockups {
     const codigoArbol = arbolNav.codigo_plantuml || mermaidUtil || '';
     const pantallas = this._extraerPantallasDelArbol(codigoArbol);
     return { arbolNav, codigoArbol, pantallas };
+  }
+
+  /** Ejecuta `tarea(i)` para i en [0, total) con como máximo `limite` a la vez; las tareas no lanzan (cada una atiende sus errores). */
+  async _ejecutarConConcurrencia(total, limite, tarea) {
+    let siguiente = 0;
+    const trabajador = async () => {
+      while (siguiente < total) {
+        const indice = siguiente;
+        siguiente += 1;
+        await tarea(indice);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(limite, total) }, trabajador));
   }
 
   _dividirEnLotes(lista, tamanoLote = GenerarMockups.TAMANO_LOTE) {
@@ -1087,6 +1125,7 @@ ${String(mockupPrevio?.preview_code || '')}`;
 }
 
 GenerarMockups.TAMANO_LOTE = 1;
+GenerarMockups.CONCURRENCIA = 3;
 GenerarMockups.MAX_RF_CONTEXTO = 20;
 GenerarMockups.MAX_RNF_CONTEXTO = 8;
 

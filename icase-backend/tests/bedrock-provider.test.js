@@ -93,7 +93,7 @@ describe('Bedrock como proveedor de mockups', () => {
     const instancia = servicio(jest.fn(async () => respuesta('{"x":', 'max_tokens')));
     expect((await instancia._intentarProveedor('bedrock', 'p', 10)).advertencias).toEqual(['bedrock:us.modelo-a: salida_truncada']);
     const error = (status, message) => Object.assign(new Error('x'), { response: { status, data: { message } } });
-    expect(instancia._clasificarError(error(429, 'Too many requests, please wait')).tipo).toBe('cuota');
+    expect(instancia._clasificarError(error(429, 'Too many requests, please wait')).tipo).toBe('alta_demanda');
     expect(instancia._clasificarError(error(503, 'Service unavailable')).tipo).toBe('alta_demanda');
     expect(instancia._clasificarError(error(400, 'The provided model identifier is invalid.')).tipo).toBe('modelo_no_disponible');
     expect(instancia._clasificarError(error(403, 'You don\'t have access to the model')).tipo).toBe('autenticacion');

@@ -79,3 +79,13 @@ describe('clasificación por contenido, no solo por nombre', () => {
     expect(MockupComplexity.of({ slug: 'inicio-de-sesion-web' })).toBe('simple');
   });
 });
+
+describe('límite de peticiones de Bedrock al generar en paralelo', () => {
+  test('«Too many requests» es una espera breve y se reintenta; una cuota agotada sigue abriendo el cortacircuitos', () => {
+    const service = new MockupIaService();
+    const error = (status, message) => ({ response: { status, data: { message } } });
+    expect(service._clasificarError(error(429, 'Too many requests, please wait before trying again.')).tipo).toBe('alta_demanda');
+    expect(service._clasificarError(error(429, 'Rate limit exceeded: quota exhausted')).tipo).toBe('cuota');
+    expect(service.esperasAltaDemanda).toEqual([4000, 10000, 20000]);
+  });
+});
