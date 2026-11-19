@@ -10,6 +10,7 @@ import {
 } from "../services/api";
 import { DEFAULT_DESIGN_SYSTEM, prepareMockupHtml } from "../utils/mockupHtml";
 import DiagramProgressIndicator from "./DiagramProgressModal";
+import { htmlZip, mockupFilename, downloadMockupBlob } from '../utils/mockupDownload';
 
 const formatName = (value = "") => value.replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 const SANITIZATION_NOTICES = /script peligroso|script no autorizado|manejadores inline|enlaces javascript|etiqueta potencialmente insegura|referencia a archivo local/i;
@@ -51,6 +52,7 @@ export default function MockupsView({
   const [cleaningOrphans, setCleaningOrphans] = useState(false);
   const [traceability, setTraceability] = useState(null);
   const handledJobRef = useRef(null);
+  const savedProgressRef = useRef('');
   const initializedSelection = useRef(false);
 
   const notify = (payload) => {
@@ -87,6 +89,11 @@ export default function MockupsView({
     setActiveJob(job);
     if (["encolado", "procesando"].includes(job.estado)) {
       setIsModalDismissed(false);
+      // Cada lote se guarda al terminar: las pantallas ya hechas aparecen sin esperar al final del trabajo.
+      if (/guardado$/.test(job.mensaje || '') && savedProgressRef.current !== `${job.id}:${job.mensaje}`) {
+        savedProgressRef.current = `${job.id}:${job.mensaje}`;
+        loadCatalog().catch(() => {});
+      }
     }
     if (job.estado === "completado" && handledJobRef.current !== job.id) {
       handledJobRef.current = job.id;
@@ -101,8 +108,12 @@ export default function MockupsView({
         });
       }
       loadCatalog().catch(() => {});
-    } else if (job.estado === "fallido" && !isInitialLoad) {
+    } else if (job.estado === "fallido" && !isInitialLoad && handledJobRef.current !== job.id) {
+      handledJobRef.current = job.id;
+      // Lo que se alcanzó a guardar antes del fallo se muestra, y el error queda visible hasta que se cierre.
+      setIsModalDismissed(false);
       notify({ type: "error", message: job.error || "La generación falló." });
+      loadCatalog().catch(() => {});
     }
   };
 
@@ -140,6 +151,13 @@ export default function MockupsView({
   }, [visibleScreens]);
   const currentEntry = screens.find(p => p.slug === activeId) || screens[0];
   const currentMockup = currentEntry ? mockupMap.get(currentEntry.slug) : null;
+  const downloadableMockups = mockups.filter(m => typeof m.preview_code === 'string' && m.preview_code.trim());
+  const downloadHtml = () => downloadMockupBlob(new Blob([prepareMockupHtml(currentMockup.preview_code, designSystem)], { type: 'text/html;charset=utf-8' }), mockupFilename(currentMockup.nombre_pantalla));
+  // En el ZIP cada enlace entre pantallas apunta al archivo de su destino, así se puede navegar el prototipo sin la aplicación.
+  const downloadAllHtml = () => {
+    const links = Object.fromEntries(downloadableMockups.map((m, i) => [m.nombre_pantalla, mockupFilename(m.nombre_pantalla, i + 1)]));
+    downloadMockupBlob(htmlZip(downloadableMockups.map((m, i) => ({ name: mockupFilename(m.nombre_pantalla, i + 1), html: prepareMockupHtml(m.preview_code, designSystem, { links }) }))), 'mockups-html.zip');
+  };
   const currentPosition = currentEntry ? screens.findIndex(p => p.slug === currentEntry.slug) : -1;
   const busy = ["encolado", "procesando"].includes(activeJob?.estado);
   const orphanMockups = useMemo(() => {
@@ -177,6 +195,17 @@ export default function MockupsView({
       loadCatalog().catch(() => {});
     }
   }, [isFixing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Los enlaces del mockup (pestañas, «volver», botones entre pantallas) piden mostrar otra pantalla.
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.data?.type !== 'icase-navigate' || typeof event.data.slug !== 'string') return;
+      const entry = screens.find((item) => item.slug === event.data.slug);
+      if (entry) selectScreen(entry);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  });
 
   const selectScreen = (entry) => {
     setActiveId(entry.slug);
@@ -262,6 +291,8 @@ export default function MockupsView({
           {[['all', 'Todas'], ['web', 'Web'], ['tablet', 'Tablet'], ['mobile', 'Móvil']].map(([id, label]) => <button key={id} onClick={() => setFilter(id)} className={`rounded-md px-2.5 py-1 text-xs ${filter === id ? "bg-white font-semibold text-slate-900 shadow-sm" : "text-slate-500"}`}>{label}</button>)}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button type="button" disabled={!currentMockup?.preview_code?.trim()} onClick={downloadHtml} className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs text-violet-700 disabled:cursor-default disabled:opacity-40"><Download size={13} />HTML actual</button>
+          <button type="button" disabled={!downloadableMockups.length} onClick={downloadAllHtml} title="Descarga todos los mockups generados, sin limitarse al filtro o selección" className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs text-violet-700 disabled:cursor-default disabled:opacity-40"><Download size={13} />Todos HTML ({downloadableMockups.length})</button>
           <button onClick={() => setShowCatalog(value => !value)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${showCatalog ? 'border-[#CFC0F1] bg-[#F2EDFF] text-[#6D28D9]' : 'border-slate-200 text-slate-600'}`}><ListTree size={13} />Pantallas</button>
           <button onClick={() => setShowDetails(value => !value)} className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs ${showDetails ? 'border-[#CFC0F1] bg-[#F2EDFF] text-[#6D28D9]' : 'border-slate-200 text-slate-600'}`}><InfoIcon size={13} />Detalles</button>
           <button onClick={() => setSelectedIds(new Set(screens.filter(p => !mockupMap.has(p.slug) || quality(mockupMap.get(p.slug)) === 'invalido').map(p => p.slug)))} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600">Solo faltantes o inválidas</button>
@@ -317,7 +348,7 @@ export default function MockupsView({
       <DiagramProgressIndicator
         job={activeJob}
         diagramLabel="mockups"
-        isOpen={Boolean(busy && !isModalDismissed)}
+        isOpen={Boolean((busy || (activeJob?.estado === "fallido" && handledJobRef.current === activeJob.id)) && !isModalDismissed)}
         title="Generando wireframes y mockups"
         statusMessage={activeJob?.mensaje || ""}
         progress={activeJob?.progreso || 0}

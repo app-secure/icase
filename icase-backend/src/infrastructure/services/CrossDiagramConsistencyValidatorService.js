@@ -4,7 +4,10 @@ const IGNORED = new Set([
   'aplicacion', 'componente', 'contenedor', 'del', 'el', 'la', 'las', 'los', 'modulo',
   'servicio', 'sistema', 'vista', 'web', 'usecase', 'controller', 'dto', 'repository',
   'crear', 'consultar', 'gestionar', 'procesar', 'registrar', 'validar', 'actualizar', 'ver',
-  'permitir', 'controlar', 'administrar'
+  'permitir', 'controlar', 'administrar',
+  // Palabras que no distinguen un elemento de otro: conectores y términos genéricos de interfaz o de acción.
+  'de', 'en', 'por', 'para', 'con', 'sin', 'al', 'un', 'una', 'que', 'se', 'mediante', 'desde', 'sobre',
+  'pantalla', 'formulario', 'visualizar', 'mostrar', 'revisar', 'solicitar', 'realizar', 'seleccionar', 'obtener'
 ]);
 
 const SYNONYMS = new Map([
@@ -34,13 +37,24 @@ function tokens(value) {
     .filter((token) => token.length >= 2 && !IGNORED.has(token)))];
 }
 
+/**
+ * Dos palabras se consideran la misma si son iguales o si una es el comienzo de la otra con poca diferencia
+ * («paquete» y «paquetes», «compra» y «comprar», «comanda» y «comandas»): así los plurales, las conjugaciones y los
+ * sustantivos derivados de un verbo no cuentan como elementos distintos.
+ */
+function sameWord(left, right) {
+  if (left === right) return true;
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+  return short.length >= 4 && long.startsWith(short) && long.length - short.length <= 3;
+}
+
 function matches(source, candidates) {
   const expected = tokens(source);
   if (!expected.length) return true;
   return candidates.some((candidate) => {
     const actual = tokens(candidate);
     if (!actual.length) return false;
-    const common = expected.filter((token) => actual.includes(token)).length;
+    const common = expected.filter((token) => actual.some((other) => sameWord(token, other))).length;
     return common / Math.min(expected.length, actual.length) >= 0.5;
   });
 }

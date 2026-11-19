@@ -85,8 +85,27 @@ function getAuthHeaders(extraHeaders = {}) {
  * revocada o dejó de ser válida: se avisa a la aplicación para volver a la pantalla de acceso.
  * El inicio de sesión y el registro devuelven 401/409 por motivos propios y quedan fuera.
  */
+// Mientras el backend arranca o se reinicia, el proxy de desarrollo responde 500 sin JSON (o 502/503/504) y las conexiones
+// fallan. Las lecturas (GET) son idempotentes: se reintentan unos segundos en lugar de mostrar un error que desaparece al recargar.
+const GET_RETRY_DELAYS_MS = [500, 1000, 2000, 3000];
+const isTransientResponse = (res) => [502, 503, 504].includes(res.status)
+  || (res.status === 500 && !/json/i.test(res.headers.get('content-type') || ''));
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function apiFetch(url, options) {
-  const res = await fetch(url, options);
+  const retries = String(options?.method || 'GET').toUpperCase() === 'GET' ? GET_RETRY_DELAYS_MS : [];
+  let res;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      res = await fetch(url, options);
+    } catch (error) {
+      if (error?.name === 'AbortError' || attempt >= retries.length) throw error;
+      await wait(retries[attempt]);
+      continue;
+    }
+    if (!isTransientResponse(res) || attempt >= retries.length) break;
+    await wait(retries[attempt]);
+  }
   if (res.status === 401 && getAuthToken() && !/\/auth\/(login|registro)$/.test(String(url))) {
     window.dispatchEvent(new Event('icase:session-expired'));
   }
@@ -633,7 +652,7 @@ export async function fetchCodePlanApi(projectId) {
     headers: getAuthHeaders()
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || 'No se pudo cargar el plan de codificación.');
+  if (!res.ok) throw new Error(data.error || (res.status >= 500 ? 'El servidor no respondió (puede estar reiniciándose). Vuelve a intentarlo en unos segundos.' : 'No se pudo cargar el plan de codificación.'));
   return data;
 }
 

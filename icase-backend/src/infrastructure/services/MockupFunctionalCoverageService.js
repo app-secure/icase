@@ -21,6 +21,14 @@ function descendants(node, predicate) {
   if (blockedTags.has(node.tagName) || hidden(node)) return [];
   return [...(predicate(node) ? [node] : []), ...(node.childNodes || []).flatMap(child => descendants(child, predicate))];
 }
+// «La posibilidad de eliminar ventas queda pendiente de definición» no pide un botón Eliminar: lo deja fuera.
+const DEFERRED = /\b(?:pendiente de definicion|queda pendiente|por definir|a definir|sin definir|no esta definid[oa]|fuera del? alcance|no aplica|no se (?:permite|incluye|realiza|ofrece)|no debe|no podra|no puede)\b/;
+function sentenceAt(normalized, index) {
+  const start = Math.max(normalized.lastIndexOf('.', index), normalized.lastIndexOf(';', index)) + 1;
+  const ends = ['.', ';'].map((mark) => normalized.indexOf(mark, index)).filter((position) => position >= 0);
+  return normalized.slice(start, ends.length ? Math.min(...ends) : normalized.length);
+}
+
 function listClauses(source, label) {
   const results = [];
   for (const match of source.matchAll(new RegExp('\\b' + label + '(?:\\s+obligatorios?)?\\s*:\\s*([^.;\\n]+)', 'gi'))) {
@@ -51,7 +59,7 @@ class MockupFunctionalCoverageService {
       ...listClauses(source, 'campos?').map(value => ({ tipo: 'campo', valores: [value], confianza: 'explicita' })),
       ...listClauses(source, 'estados?').map(value => ({ tipo: 'estado', valores: [value], confianza: 'explicita' })),
       ...actions.filter(action => [...normalized.matchAll(new RegExp('\\b' + action + '\\b', 'g'))]
-        .some(match => !/\b(no|sin|evitar|impedir|prohibir)\b[^.;]{0,45}$/.test(normalized.slice(0, match.index))))
+        .some(match => !/\b(no|sin|evitar|impedir|prohibir)\b[^.;]{0,45}$/.test(normalized.slice(0, match.index)) && !DEFERRED.test(sentenceAt(normalized, match.index))))
         .map(value => ({ tipo: 'accion', valores: [value], confianza: 'explicita' })),
       ...choices.values()
     ];

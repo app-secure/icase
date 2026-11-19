@@ -1,5 +1,7 @@
 const { parse, serialize } = require('parse5');
 const PlatformPolicy = require('../../core/services/PlatformPolicy');
+const Compatibility = require('../../core/services/RequirementScreenCompatibility');
+const { systemManaged } = require('./MockupFieldPolicy');
 const escape = value => String(value || '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const plain = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 function find(node, tag) {
@@ -26,7 +28,7 @@ function eachNode(node, visit, parent = null) {
  * etiqueta se aplasta y se superpone. Se saca el contenido del círculo y queda a su lado.
  */
 function repairIndicators(root) {
-  const small = /(?:^|\s)(?:w|h|size)-(?:[1-6]|\[(?:[0-9]|1[0-9]|2[0-4])px\])(?:\s|$)/;
+  const small = /(?:^|\s)(?:w|h|size)-(?:[1-6](?:\.5)?|\[(?:[0-9]|1[0-9]|2[0-4])px\])(?:\s|$)/;
   eachNode(root, (node, parent) => {
     if (!parent || !node.tagName || !/(?:^|\s)rounded-full(?:\s|$)/.test(attrOf(node, 'class')) || !small.test(attrOf(node, 'class'))) return;
     if (!textOf(node)) return;
@@ -59,17 +61,155 @@ function scrubAccess(root, { brand = '', screen = {} } = {}) {
   });
 }
 
+/**
+ * Los modelos pequeños escriben colores arbitrarios sin corchetes («focus:ring-0b57d0»): Tailwind los ignora y el campo
+ * queda sin estilo. Se normalizan a «focus:ring-[#0b57d0]».
+ */
+const COLOR_UTILITY = /^((?:[a-z0-9-]+:)*(?:ring|border|bg|text|fill|stroke|outline|from|to|via|divide|accent|caret|decoration|shadow)(?:-[trblxy])?)-([0-9a-fA-F]{6})$/;
+function repairClasses(root) {
+  eachNode(root, (node) => {
+    const attribute = (node.attrs || []).find((item) => item.name === 'class');
+    if (!attribute) return;
+    attribute.value = attribute.value.split(/\s+/).map((name) => {
+      const match = COLOR_UTILITY.exec(name);
+      return match && /[a-fA-F]/.test(match[2]) ? `${match[1]}-[#${match[2]}]` : name;
+    }).join(' ');
+  });
+}
+
+/**
+ * Los campos ocultos con valores de ejemplo («cliente_id=cli-204», «estado=pendiente», «total=0») no los captura nadie:
+ * los completa el sistema (sesión, estado inicial, totales, fechas, identificadores generados). Si se dejan, el frontend
+ * generado los enviaría al backend con datos inventados. Solo se quitan los de gestión del sistema.
+ */
+function dropSystemHiddenFields(root) {
+  eachNode(root, (node, parent) => {
+    if (!parent || node.tagName !== 'input' || attrOf(node, 'type').toLowerCase() !== 'hidden') return;
+    // Un oculto vacío no aporta nada; uno con valor se conserva solo si no es un dato que gestiona el sistema.
+    if (!attrOf(node, 'value') || systemManaged(attrOf(node, 'name'), { type: 'string' })) parent.childNodes = parent.childNodes.filter((child) => child !== node);
+  });
+}
+
+/** El acceso lo resuelve la sesión de la aplicación, no un registro de datos: sus controles son solo de interfaz. */
+function uiOnlyActions(root) {
+  eachNode(root, (node) => {
+    const action = (node.attrs || []).find((item) => item.name === 'data-accion');
+    if (action && /^RF-\d+\./i.test(action.value)) action.value = 'ui';
+  });
+}
+
+/** Un control con la clase `hidden` nunca se ve en un mockup estático: es relleno del modelo (p. ej. un `select` oculto con «menu-01»). */
+function dropInvisibleControls(root) {
+  eachNode(root, (node, parent) => {
+    if (!parent || !['select', 'input', 'textarea'].includes(node.tagName) || !attrOf(node, 'name')) return;
+    if (attrOf(node, 'type').toLowerCase() === 'hidden') return;
+    if (attrOf(node, 'class').split(/\s+/).includes('hidden')) parent.childNodes = parent.childNodes.filter((child) => child !== node);
+  });
+}
+
+/** `type="date"` solo acepta 2026-11-18 (y datetime-local 2026-11-18T13:30): con «18/11/2026» el campo se ve vacío. */
+function normalizeDates(root) {
+  eachNode(root, (node) => {
+    if (node.tagName !== 'input') return;
+    const type = attrOf(node, 'type').toLowerCase();
+    const value = (node.attrs || []).find((item) => item.name === 'value');
+    if (!value || !['date', 'datetime-local'].includes(type)) return;
+    const local = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}:\d{2}))?$/.exec(value.value.trim());
+    if (!local) return;
+    const iso = `${local[3]}-${local[2].padStart(2, '0')}-${local[1].padStart(2, '0')}`;
+    value.value = type === 'date' ? iso : `${iso}T${(local[4] || '00:00').padStart(5, '0')}`;
+  });
+}
+
+/**
+ * Texto que la persona no debe ver: las etiquetas de requisito que el modelo copia del contexto («Al día [RF-11]») y los
+ * puntos suspensivos finales en botones («Guardar…»), que copia de un ejemplo.
+ */
+function cleanVisibleText(root) {
+  eachNode(root, (node) => {
+    if (node.nodeName === '#text' && /\[(?:RF|RNF)-\d+/.test(node.value || '')) {
+      node.value = node.value.replace(/\s*\[(?:RF|RNF)-\d+(?:\s*,\s*(?:RF|RNF)-\d+)*\]/g, '');
+    }
+    if (node.tagName === 'button') {
+      const texts = [];
+      eachNode(node, (inner) => { if (inner.nodeName === '#text' && inner.value.trim()) texts.push(inner); });
+      const last = texts[texts.length - 1];
+      if (last) last.value = last.value.replace(/\s*(?:…|\.{3})(\s*)$/, '$1');
+    }
+  });
+}
+
+/** Solo los elementos de formulario llevan `name`; en un <span> o <div> no significa nada y confunde la lectura del formulario. */
+const NAMEABLE = new Set(['input', 'select', 'textarea', 'button', 'form', 'fieldset', 'output', 'a', 'img', 'iframe', 'object', 'map', 'meta', 'param', 'slot', 'details']);
+function dropNameOnNonFields(root) {
+  eachNode(root, (node) => {
+    if (!node.tagName || NAMEABLE.has(node.tagName) || !(node.attrs || []).some((item) => item.name === 'name')) return;
+    node.attrs = node.attrs.filter((item) => item.name !== 'name');
+  });
+}
+
+/**
+ * Una columna «Mesero Asignado ID» con valores como «usr-101» enseña a la persona un identificador interno. Se quita la
+ * columna entera (cabecera y celdas) siempre que la tabla conserve al menos tres columnas.
+ */
+const ID_HEADER = /(?:^|\s)ids?$|_id$/i;
+function dropIdColumns(root) {
+  eachNode(root, (table) => {
+    if (table.tagName !== 'table') return;
+    const rows = [];
+    eachNode(table, (node) => { if (node.tagName === 'tr') rows.push(node); });
+    const cells = (row) => (row.childNodes || []).filter((child) => ['th', 'td'].includes(child.tagName));
+    const header = rows.find((row) => cells(row).some((cell) => cell.tagName === 'th'));
+    if (!header) return;
+    const headers = cells(header);
+    if (headers.length < 4) return;
+    const drop = headers.map((cell, index) => (ID_HEADER.test(textOf(cell)) ? index : -1)).filter((index) => index >= 0);
+    if (!drop.length || headers.length - drop.length < 3) return;
+    for (const row of rows) {
+      const own = cells(row);
+      if (own.length !== headers.length) continue;
+      const removed = new Set(drop.map((index) => own[index]));
+      row.childNodes = row.childNodes.filter((child) => !removed.has(child));
+    }
+  });
+}
+
+/** Un dato que no se edita no debe verse como un campo: «Hora creación: <input readonly>» pasa a ser texto. */
+function showReadonlyAsText(root) {
+  eachNode(root, (node, parent) => {
+    if (!parent || node.tagName !== 'input' || !(node.attrs || []).some((item) => item.name === 'readonly')) return;
+    const type = attrOf(node, 'type') || 'text';
+    if (!['text', 'number', 'date', 'datetime-local', 'time'].includes(type) || !['p', 'span', 'li', 'td', 'strong', 'small'].includes(parent.tagName)) return;
+    const index = parent.childNodes.indexOf(node);
+    const classes = attrOf(node, 'class').split(/\s+/).filter((name) => /^(?:font-|text-)/.test(name) && !/^text-(?:left|center|right)$/.test(name)).join(' ');
+    parent.childNodes[index] = { nodeName: 'span', tagName: 'span', attrs: classes ? [{ name: 'class', value: classes }] : [], namespaceURI: node.namespaceURI, childNodes: [{ nodeName: '#text', value: attrOf(node, 'value') }], parentNode: parent };
+  });
+}
+
+/** El título repite el tipo de pantalla («Pantalla de mesas asignadas»): se deja solo el nombre. */
+function cleanTitle(root) {
+  const heading = find(root, 'h1');
+  if (!heading || (heading.childNodes || []).some((child) => child.tagName)) return;
+  const text = textOf(heading);
+  if (/^(?:vista|pantalla|formulario|listado)\b/i.test(text)) heading.childNodes = [{ nodeName: '#text', value: cleanLabel(text), parentNode: heading }];
+}
+
 // Pantallas de segundo nivel: se llega a ellas desde otra y no son un destino de la barra inferior.
 const SECONDARY = /\b(?:detalle|formulario|confirmacion|confirmar|editar|edicion|nuevo|nueva|crear|registro de)\b/;
 const isPrimary = (item) => !SECONDARY.test(plain(item.nombre));
 
-/** Etiqueta corta para una pestaña: sin «Vista de» / «Formulario de» y limitada en longitud. */
+/** Nombre de la pantalla sin el prefijo de tipo: «Pantalla de mesas asignadas» → «Mesas asignadas»; «Pantalla KDS de comandas» → «KDS de comandas». */
+function cleanLabel(name) {
+  const text = String(name || '').replace(/^(?:vista|pantalla|formulario|listado)\s+(?:del?\s+(?:la\s+|el\s+|los\s+|las\s+)?)?/i, '').trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Etiqueta corta para una pestaña. La barra la muestra en hasta dos líneas, así que no se corta con «…» a mitad de palabra. */
 function shortLabel(name) {
-  const text = String(name || '').replace(/^(?:vista|pantalla|formulario|listado)\s+de\s+(?:la\s+|el\s+|los\s+|las\s+)?/i, '').trim();
-  let label = text.charAt(0).toUpperCase() + text.slice(1);
+  let label = cleanLabel(name);
   // «Menú Digital con Precios y Disponibilidad» → «Menú Digital»: se corta en la primera conjunción si es larga.
-  if (label.length > 16) label = label.split(/\s+(?:con|y|para|por)\s+/i)[0] || label;
-  return label.length > 22 ? `${label.slice(0, 21).trim()}…` : label;
+  if (label.length > 24) label = label.split(/\s+(?:con|y|para|por)\s+/i)[0] || label;
+  return label;
 }
 
 /**
@@ -101,14 +241,14 @@ const STYLE = `
   .icase-mobile{max-width:430px;margin:0 auto;border-inline:1px solid #e2e8f0;background:var(--icase-bg,#f8fafc)}.icase-mobile .icase-content{padding:16px}
   .icase-mobile .icase-content .grid{grid-template-columns:minmax(0,1fr)!important}.icase-mobile .icase-content [class*="col-span"]{grid-column:auto!important}
   .icase-tabbar{display:flex;flex-shrink:0;align-items:stretch;border-top:1px solid #e2e8f0;background:var(--icase-surface,#fff)}
-  .icase-tabbar a,.icase-tabbar summary{flex:1;min-width:0;padding:10px 4px;text-align:center;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;list-style:none}
+  .icase-tabbar a,.icase-tabbar summary{flex:1;min-width:0;padding:8px 4px;text-align:center;font-size:11px;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere;cursor:pointer;list-style:none}
   .icase-tabbar a[aria-current]{color:var(--icase-primary,#0b57d0);font-weight:600;box-shadow:inset 0 2px 0 var(--icase-primary,#0b57d0)}
   .icase-tabbar details{flex:1;position:relative}.icase-tabbar details[open]>div{position:absolute;bottom:100%;right:0;min-width:180px;background:var(--icase-surface,#fff);border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12)}
   .icase-tabbar details>div a{display:block;text-align:left;padding:10px 12px;font-size:13px;white-space:normal}
   .icase-back{font-size:22px;line-height:1;text-decoration:none;padding:2px 10px 2px 0;color:var(--icase-primary,#0b57d0)}
 `;
 
-const link = (item, current) => `<a href="#${escape(item.slug)}" data-accion="ui" ${item.slug === current ? 'aria-current="page"' : ''}>${escape(item.nombre)}</a>`;
+const link = (item, current) => `<a href="#${escape(item.slug)}" data-accion="ui" ${item.slug === current ? 'aria-current="page"' : ''}>${escape(cleanLabel(item.nombre))}</a>`;
 
 /**
  * Hasta cinco pestañas: solo los destinos de primer nivel del flujo. El resto de pantallas se alcanza desde botones
@@ -128,7 +268,20 @@ function backTarget(items, current) {
   return before[before.length - 1] || items.find(isPrimary) || null;
 }
 
+/**
+ * Dos pantallas comparten menú si tienen la misma estructura (shell) y, cuando se conocen los roles, algún rol en común.
+ * Varios módulos web (mesero, caja, administración) caen en una misma estructura; sin el rol se mezclaban en un solo menú.
+ */
+function sameNavigation(left = {}, right = {}) {
+  if (left.shell !== right.shell) return false;
+  const leftRoles = Compatibility.rolesOf(left);
+  const rightRoles = Compatibility.rolesOf(right);
+  return !leftRoles.length || !rightRoles.length || leftRoles.some((role) => rightRoles.includes(role));
+}
+
+exports.sameNavigation = sameNavigation;
 exports.kindOf = kindOf;
+exports.cleanLabel = cleanLabel;
 exports.SHELL_VERSION = SHELL_VERSION;
 
 exports.compose = function(html, { screen = {}, manifest = [], identity = {}, name = '' } = {}) {
@@ -138,13 +291,22 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   const content = main || find(document, 'body');
   strip(content);
   repairIndicators(content);
+  repairClasses(content);
+  dropInvisibleControls(content);
+  normalizeDates(content);
+  cleanVisibleText(content);
+  dropNameOnNonFields(content);
+  dropIdColumns(content);
+  dropSystemHiddenFields(content);
+  showReadonlyAsText(content);
+  cleanTitle(content);
   const kind = kindOf(screen);
-  if (kind === 'auth') scrubAccess(content, { brand: identity.nombre_aplicacion || name, screen });
+  if (kind === 'auth') { scrubAccess(content, { brand: identity.nombre_aplicacion || name, screen }); uiOnlyActions(content); }
   const fragment = serialize(content);
   const styles = [];
   function collect(node) { if (node.tagName === 'style' && !(node.attrs || []).some(attr => attr.name === 'data-icase-shell')) styles.push(serialize(node)); (node.childNodes || []).forEach(collect); }
   collect(document);
-  const siblings = manifest.filter(item => item.shell === screen.shell && kindOf(item) !== 'auth');
+  const siblings = manifest.filter(item => sameNavigation(item, screen) && kindOf(item) !== 'auth');
   const brand = escape(identity.nombre_aplicacion || name);
   const logo = identity.logo ? `<img src="${escape(identity.logo)}" alt="" width="32" height="32">` : '';
   // En móvil, las pantallas de segundo nivel traen un botón «volver» al destino anterior del flujo.

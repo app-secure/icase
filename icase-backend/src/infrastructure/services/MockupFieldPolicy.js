@@ -11,7 +11,7 @@ const STATE = /^(?:estado|status)$/;
 // Identificadores y códigos que se generan.
 const GENERATED = /(?:qr|token|hash|uuid|guid|folio|correlativo|secuencia)$/;
 // Marcas de tiempo del propio registro.
-const TIMESTAMP = /^(?:fecha|fechahora|hora)(?:de)?(?:adquisicion|compra|creacion|registro|alta|cierre|apertura|emision|liberacion|actualizacion|modificacion|confirmacion|pago)$/;
+const TIMESTAMP = /^(?:fecha|fechahora|hora|ultima)(?:de)?(?:adquisicion|compra|creacion|registro|alta|cierre|apertura|emision|liberacion|actualizacion|modificacion|confirmacion|pago)$/;
 const VALIDITY = /^(?:inicio|fin)vigencia$/;
 // Cantidades derivadas de otras: totales, diferencias, esperados y contadores de uso.
 const DERIVED = /^(?:total(?:es)?\w*|subtotal\w*|diferencia\w*|\w*esperado|usos(?:totales|restantes|disponibles)|saldo\w*|puntosacumulados)$/;

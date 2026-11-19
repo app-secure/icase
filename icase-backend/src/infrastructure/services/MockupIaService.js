@@ -1,4 +1,5 @@
 const axios = require('axios');
+const BedrockClient = require('./BedrockClient');
 const fs = require('fs');
 const path = require('path');
 const AiModelConfig = require('./AiModelConfig');
@@ -14,8 +15,10 @@ class MockupIaService {
     this.models = {
       gemini: AiModelConfig.mockups.gemini(),
       groq: AiModelConfig.mockups.groq(),
-      openrouter: AiModelConfig.mockups.openrouter()
+      openrouter: AiModelConfig.mockups.openrouter(),
+      bedrock: AiModelConfig.mockups.bedrock()
     };
+    this.bedrock = new BedrockClient();
     this.circuitos = new Map();
     this.failureThreshold = Number(process.env.MOCKUP_CIRCUIT_FAILURES || 2);
     this.cooldownMs = Number(process.env.MOCKUP_CIRCUIT_COOLDOWN_MS || 300000);
@@ -160,9 +163,9 @@ class MockupIaService {
   _clasificarError(error) {
     if (error.code === 'MOCKUP_OUTPUT_TRUNCATED') return { tipo: 'salida_truncada', reintentable: true };
     const status = error.response?.status;
-    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    const mensaje = String(BedrockClient.messageOf(error)).toLowerCase();
     if (status === 401 || status === 403) return { tipo: 'autenticacion', reintentable: false };
-    if (status === 404 || /no longer available|does not exist|not found|unavailable for free/.test(mensaje)) {
+    if (status === 404 || /no longer available|does not exist|not found|unavailable for free|model identifier is invalid|on-demand throughput isn.t supported/.test(mensaje)) {
       return { tipo: 'modelo_no_disponible', reintentable: false };
     }
     if (status === 503 || /high demand|spikes in demand|temporarily unavailable|overloaded/.test(mensaje)) {
@@ -186,7 +189,9 @@ class MockupIaService {
       ? Boolean(this.geminiApiKey)
       : proveedor === 'groq'
         ? Boolean(this.groqApiKey)
-        : Boolean(this.openrouterApiKey);
+        : proveedor === 'bedrock'
+          ? this.bedrock.configured
+          : Boolean(this.openrouterApiKey);
     if (!tieneCredencial) {
       return { texto: null, modelo: null, advertencias: [`${proveedor}: proveedor omitido porque no tiene credencial configurada`] };
     }
@@ -224,7 +229,7 @@ class MockupIaService {
       } catch (error) {
         const clasificacion = this._clasificarError(error);
         this._registrarFallo(clave, clasificacion);
-        const mensaje = error.response?.data?.error?.message || error.message;
+        const mensaje = BedrockClient.messageOf(error);
         console.warn(`[MockupIaService] ${clave} falló (${clasificacion.tipo}):`, mensaje);
         advertencias.push(`${clave}: ${clasificacion.tipo}`);
         if (clasificacion.tipo === 'autenticacion') break;
@@ -244,6 +249,18 @@ class MockupIaService {
       const candidate = res.data?.candidates?.[0];
       if (candidate?.finishReason === 'MAX_TOKENS') throw Object.assign(new Error('Respuesta de mockup truncada por límite de salida; no se acepta como HTML completo.'), { code: 'MOCKUP_OUTPUT_TRUNCATED' });
       return candidate?.content?.parts?.filter(part => !part.thought).map(part => part.text || '').join('') || null;
+    }
+
+    if (proveedor === 'bedrock') {
+      // Inferencia directa (Converse): un modelo Claude admite respuestas largas, así que el HTML de una pantalla no se trunca.
+      const maxTokens = Number(modoEdicion ? (process.env.BEDROCK_MOCKUP_EDIT_MAX_OUTPUT_TOKENS || 24000) : (process.env.BEDROCK_MOCKUP_MAX_OUTPUT_TOKENS || 16000));
+      const respuesta = await this.bedrock.converse({
+        modelId: modelo, prompt, maxTokens, temperature: 0.3,
+        system: 'Responde exclusivamente con un objeto JSON válido, sin texto adicional ni bloques de código.',
+        timeout: Number(process.env.BEDROCK_TIMEOUT_MS || 180000)
+      });
+      if (respuesta.truncated) throw Object.assign(new Error('Respuesta de mockup truncada por límite de salida; no se acepta como HTML completo.'), { code: 'MOCKUP_OUTPUT_TRUNCATED' });
+      return respuesta.text || null;
     }
 
     const apiKey = proveedor === 'groq' ? this.groqApiKey : this.openrouterApiKey;

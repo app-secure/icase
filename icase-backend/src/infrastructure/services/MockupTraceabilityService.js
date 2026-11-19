@@ -93,6 +93,10 @@ function screenText(screen) {
 function hasSemanticEvidence(requirement, screen) {
   // Compartir palabras no basta: quien ejecuta el requisito debe poder estar en la pantalla y la plataforma debe coincidir.
   if (!Compatibility.compatible(requirement, screen)) return false;
+  // Un control que ejecuta el requisito (enlace válido a una operación real) es evidencia, aunque la pantalla no repita sus
+  // palabras: «Comandas pendientes» con el botón «Marcar lista» enlazado a RF-06 implementa RF-06.
+  const id = String(requirement?.identificador || requirement?.id || '').toUpperCase();
+  if (id && (screen?.enlaces || []).some((link) => link?.estado === 'valido' && String(link.rf || '').toUpperCase() === id)) return true;
   // Un requisito de autenticación queda evidenciado por un formulario con contraseña, aunque el texto no diga «sesión».
   if (screen?.preview_code && tokens(requirement?.nombre).includes('autenticacion') && /<input\b[^>]*type\s*=\s*["']?password/i.test(String(screen.preview_code))) return true;
   const titleExpected = tokens(requirement?.nombre);

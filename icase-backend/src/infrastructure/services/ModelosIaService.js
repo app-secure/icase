@@ -3,6 +3,7 @@ const path = require('path');
 const PlantUMLSynthesizer = require('./PlantUMLSynthesizer');
 const ClasesDisenoValidatorService = require('./ClasesDisenoValidatorService');
 const AiModelConfig = require('./AiModelConfig');
+const BedrockClient = require('./BedrockClient');
 const RequirementSemanticsService = require('./RequirementSemanticsService');
 const RequirementCoverageService = require('./RequirementCoverageService');
 const { unwrapEvidence, inspectEvidence } = require('./SourceEvidence');
@@ -118,13 +119,15 @@ class ModelosIaService {
     this.deepseekApiKey = process.env.DEEPSEEK_API_KEY || '';
     this.openrouterApiKey = process.env.OPENROUTER_API_KEY || '';
     this.openaiApiKey = process.env.OPENAI_API_KEY || '';
+    this.bedrock = new BedrockClient({ transport: { post: (...args) => this.requestBudget.post(...args) } });
     this.provider = (process.env.AI_PROVIDER || 'groq').toLowerCase();
     this.promptsDir = path.join(__dirname, '../prompts');
     this.models = {
       gemini: AiModelConfig.analysis.gemini(),
       groq: AiModelConfig.analysis.groq(),
       openrouter: AiModelConfig.analysis.openrouter(),
-      openai: AiModelConfig.analysis.openai()
+      openai: AiModelConfig.analysis.openai(),
+      bedrock: AiModelConfig.analysis.bedrock()
     };
     this.providerOrder = AiModelConfig.analysis.providerOrder();
     this.modelosDeshabilitados = new Set();
@@ -396,6 +399,8 @@ class ModelosIaService {
       respuestaData = await this.generarConOpenRouter(promptCompleto, specificModel, { allowFallback: false });
     } else if (requestedProvider === 'openai') {
       respuestaData = await this.generarConOpenAI(promptCompleto, specificModel, { allowFallback: false });
+    } else if (requestedProvider === 'bedrock') {
+      respuestaData = await this.generarConBedrock(promptCompleto, specificModel, { allowFallback: false });
     } else {
       const orden = this.providerOrder;
       for (const proveedor of orden) {
@@ -495,7 +500,8 @@ class ModelosIaService {
 
   async _ejecutarProveedor(proveedor, prompt, specificModel) {
     const key = { gemini: 'geminiApiKey', groq: 'groqApiKey', deepseek: 'deepseekApiKey', openai: 'openaiApiKey', openrouter: 'openrouterApiKey' }[proveedor];
-    if (key && !this[key]) this.requestBudget.reportProviderFailure(proveedor, 'sin_credencial');
+    if ((key && !this[key]) || (proveedor === 'bedrock' && !this.bedrock.configured)) this.requestBudget.reportProviderFailure(proveedor, 'sin_credencial');
+    if (proveedor === 'bedrock') return this.generarConBedrock(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'gemini') return this.generarConGemini(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'groq') return this.generarConGroq(prompt, specificModel, { allowFallback: true });
     if (proveedor === 'deepseek') return this.generarConDeepSeek(prompt, specificModel, { allowFallback: true });
@@ -805,16 +811,49 @@ class ModelosIaService {
     return null;
   }
 
+  async generarConBedrock(prompt, specificModel = null, options = { allowFallback: true }) {
+    if (!this.bedrock.configured) {
+      if (!options.allowFallback) throw new Error('BEDROCK_API_KEY no está configurada en el servidor backend.');
+      return null;
+    }
+    const modelos = AiModelConfig.modelosConPreferencia(specificModel, this.models.bedrock);
+    if (!modelos.length) {
+      if (!options.allowFallback) throw new Error('Define BEDROCK_MODELS (o BEDROCK_ANALYSIS_MODELS) con el identificador del modelo de tu consola de Bedrock.');
+      return null;
+    }
+    for (const modelName of modelos) {
+      if (!this._modeloDisponible(`bedrock:${modelName}`)) continue;
+      try {
+        console.log(`[ModelosIaService] Procesando con Amazon Bedrock (${modelName})...`);
+        const respuesta = await this.bedrock.converse({
+          modelId: modelName, prompt, temperature: 0.2,
+          maxTokens: Number(process.env.BEDROCK_ANALYSIS_MAX_OUTPUT_TOKENS || 16000),
+          system: 'Eres un orquestador experto en ingeniería de software y arquitectura. Responde exclusivamente con un objeto JSON válido según la plantilla solicitada, sin texto adicional ni bloques de código.',
+          timeout: Number(process.env.BEDROCK_TIMEOUT_MS || 180000)
+        });
+        if (respuesta.truncated) throw Object.assign(new Error('Respuesta de Bedrock truncada por el límite de salida.'), { code: 'INVALID_AI_JSON' });
+        if (respuesta.text) return this.limpiarYParsearJson(respuesta.text);
+      } catch (error) {
+        const mensaje = BedrockClient.messageOf(error);
+        console.warn(`[ModelosIaService] Bedrock (${modelName}) falló:`, mensaje);
+        this._registrarErrorModelo(`bedrock:${modelName}`, error);
+        if (!options.allowFallback && modelName === modelos.at(-1)) throw new Error(`El proveedor Bedrock no pudo completar la solicitud: ${mensaje}`);
+      }
+    }
+    if (!options.allowFallback) throw new Error('El proveedor Bedrock no devolvió una respuesta válida.');
+    return null;
+  }
+
   _esModeloNoDisponible(error) {
     const status = error.response?.status;
-    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
-    return status === 404 || /no longer available|does not exist|not found|unavailable for free/.test(mensaje);
+    const mensaje = String(BedrockClient.messageOf(error)).toLowerCase();
+    return status === 404 || /no longer available|does not exist|not found|unavailable for free|model identifier is invalid|on-demand throughput isn.t supported/.test(mensaje);
   }
 
   _clasificarError(error) {
     if (this._esModeloNoDisponible(error)) return 'modelo_no_disponible';
     const status = error.response?.status;
-    const mensaje = String(error.response?.data?.error?.message || error.message || '').toLowerCase();
+    const mensaje = String(BedrockClient.messageOf(error)).toLowerCase();
     if (status === 402 || /insufficient balance|saldo insuficiente/.test(mensaje)) return 'sin_saldo';
     if (/high demand|experiencing high|overloaded/.test(mensaje) || status === 503) return 'saturacion';
     if (status === 401 || status === 403) return 'autenticacion';

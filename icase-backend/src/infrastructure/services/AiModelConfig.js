@@ -8,9 +8,9 @@ function listaEnv(nombre, fallback = '') {
 function modelosConPreferencia(modeloSolicitado, modelosConfigurados) {
   return [...new Set([modeloSolicitado, ...modelosConfigurados].filter(Boolean))];
 }
-function providerOrder() {
-  const values = listaEnv('AI_PROVIDER_ORDER', 'openrouter,gemini,groq');
-  const known = new Set(['openrouter', 'gemini', 'groq', 'ollama', 'openai', 'deepseek']);
+function providerOrder(variable = 'AI_PROVIDER_ORDER') {
+  const values = listaEnv(variable, process.env.AI_PROVIDER_ORDER || 'openrouter,gemini,groq');
+  const known = new Set(['openrouter', 'gemini', 'groq', 'ollama', 'openai', 'deepseek', 'bedrock']);
   if (!values.length || values.some(value => !known.has(value))) throw new Error('AI_PROVIDER_ORDER contiene proveedores inválidos o está vacío.');
   return [...new Set(values)];
 }
@@ -36,6 +36,8 @@ module.exports = {
     groq: () => listaEnv('GROQ_ANALYSIS_MODELS', 'openai/gpt-oss-120b'),
     openrouter: () => openrouterModels('OPENROUTER_ANALYSIS_MODELS'),
     openai: () => listaEnv('OPENAI_ANALYSIS_MODELS', 'gpt-5-mini'),
+    // Sin valor por defecto: el identificador del modelo (o perfil de inferencia) lo da la consola de Bedrock de cada cuenta.
+    bedrock: () => listaEnv('BEDROCK_ANALYSIS_MODELS', process.env.BEDROCK_MODELS || ''),
     providerOrder
   },
   ingestion: {
@@ -46,6 +48,8 @@ module.exports = {
     gemini: () => listaEnv('GEMINI_MOCKUP_MODELS', 'gemini-3.5-flash-lite,gemini-3.8-flash'),
     groq: () => listaEnv('GROQ_MOCKUP_MODELS', 'openai/gpt-oss-120b'),
     openrouter: () => openrouterModels('OPENROUTER_MOCKUP_MODELS'),
-    providerOrder
+    bedrock: () => listaEnv('BEDROCK_MOCKUP_MODELS', process.env.BEDROCK_MODELS || ''),
+    // Los mockups pueden tener su propio orden (MOCKUP_PROVIDER_ORDER); sin él se usa el general.
+    providerOrder: () => providerOrder('MOCKUP_PROVIDER_ORDER')
   }
 };

@@ -1,3 +1,4 @@
+const { systemManaged } = require('./MockupFieldPolicy');
 const MockupBindingValidator = require('./MockupBindingValidator');
 const DomainModelExtractor = require('./DomainModelExtractor');
 const ApplicationContractBuilder = require('./ApplicationContractBuilder');
@@ -33,8 +34,13 @@ class MockupBindingService {
         const operation = operations.get(String(item.identificador).toUpperCase());
         if (operation?.identity === 'login') return `- [${item.identificador}] autenticación: no la enlaces; los controles de acceso llevan data-accion="ui" (la aplicación genera el acceso real)`;
         const properties = operation?.schema?.properties || {};
-        const campos = Object.entries(properties).filter(([, definition]) => !definition?.readOnly).map(([name]) => name);
-        return `- [${item.identificador}] campos: ${campos.length ? campos.join(', ') : 'sin campos definidos (usa nombres claros en camelCase)'}`;
+        const todos = Object.entries(properties).filter(([, definition]) => !definition?.readOnly);
+        // Lo que completa el sistema (sesión, estado inicial, totales, fechas de registro, códigos generados) no se pide en el formulario.
+        const captura = todos.filter(([name, definition]) => !systemManaged(name, definition)).map(([name]) => name);
+        const sistema = todos.filter(([name, definition]) => systemManaged(name, definition)).map(([name]) => name);
+        if (!todos.length) return `- [${item.identificador}] campos: sin campos definidos (usa nombres claros en camelCase)`;
+        return `- [${item.identificador}] campos que captura la persona: ${captura.length ? captura.join(', ') : 'ninguno'}`
+          + (sistema.length ? `; los completa el sistema, NO los pongas en la pantalla (ni como campo ni como oculto): ${sistema.join(', ')}` : '');
       })
       .join('\n');
   }

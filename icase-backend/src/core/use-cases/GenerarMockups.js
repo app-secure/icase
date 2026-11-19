@@ -1,3 +1,4 @@
+const MockupActionRepair = require('../../infrastructure/services/MockupActionRepair');
 const MockupValidatorService = require('../../infrastructure/services/MockupValidatorService');
 const MockupTraceabilityService = require('../../infrastructure/services/MockupTraceabilityService');
 const MockupRepairService = require('../../infrastructure/services/MockupRepairService');
@@ -27,6 +28,7 @@ class GenerarMockups {
     this.bindingService = new MockupBindingService();
     this.chatCorrectionService = new MockupChatCorrectionService();
     this.formRepairService = new MockupFormRepairService();
+    this.actionRepair = new MockupActionRepair();
     this.repairService = new MockupRepairService({ validator: this.validator, traceability: this.traceabilityService });
   }
 
@@ -102,6 +104,61 @@ class GenerarMockups {
       && lotes.some(lote => disenoExistente?.mockups?.some(m => lote.includes(m.nombre_pantalla)));
     let proveedorUsado = null;
 
+    // Valida, une con lo existente y guarda lo generado hasta ahora. Se ejecuta tras cada lote (guardado parcial) y al final:
+    // así una caída del servidor o un fallo en un lote posterior no pierde las pantallas que ya estaban hechas.
+    const consolidar = async ({ parcial = false } = {}) => {
+    const unicosPorNombre = new Map();
+    for (const mockup of mockupsGenerados) {
+      unicosPorNombre.set(mockup.nombre_pantalla, mockup);
+    }
+
+    const manifiestoPorSlug = new Map(pantallasArbol.map(p => [p.slug, p]));
+    const contextoNormalizacion = { sistemaDiseno, requerimientos, contratoEnlaces, manifiestoPorSlug };
+    const mockupsSanitizados = [...unicosPorNombre.values()].map(mockup => this._normalizarMockup(mockup, contextoNormalizacion));
+    const mockupsExistentes = disenoExistente?.mockups || [];
+
+    const mockupsCombinados = this._mergeMockups(mockupsExistentes, mockupsSanitizados, pantallas);
+    const slugsArbol = new Set(pantallasArbol.flatMap(p => [p.slug, p.pantalla_id]).filter(Boolean));
+    const huerfanosRetirados = [];
+    const mockupsFinales = !soloReparar && !esEdicionExistente && slugsArbol.size
+      ? mockupsCombinados.filter(m => {
+        const pertenece = [m.nombre_pantalla, m.pantalla_id].some(id => slugsArbol.has(id));
+        if (!pertenece) huerfanosRetirados.push(m.nombre_visible || m.nombre_pantalla);
+        return pertenece;
+      })
+      : mockupsCombinados;
+    if (huerfanosRetirados.length) {
+      if (!parcial) advertencias.push(`Se retiraron ${huerfanosRetirados.length} mockup(s) fuera del árbol aprobado: ${huerfanosRetirados.join(', ')}.`);
+    }
+    if (soloReparar || esEdicionExistente) {
+      const orden = new Map(mockupsExistentes.map((mockup, index) => [mockup.nombre_pantalla, index]));
+      mockupsFinales.sort((a, b) => orden.get(a.nombre_pantalla) - orden.get(b.nombre_pantalla));
+    }
+    const auditoriaTrazabilidad = this.traceabilityService.validate({
+      manifest: pantallasArbol,
+      mockups: mockupsFinales,
+      requirements: requerimientos
+    });
+    if (!parcial) advertencias.push(...auditoriaTrazabilidad.advertencias);
+
+    const datosDiseno = {
+      mockups: mockupsFinales,
+      manifiesto_navegacion: pantallasArbol,
+      trazabilidad_mockups: auditoriaTrazabilidad,
+      sistema_diseno: sistemaDiseno,
+      ...((soloReparar || esEdicionExistente) && mockupsSanitizados.length ? { aprobado: false } : {})
+    };
+    if ((!soloReparar && !esEdicionExistente) || mockupsSanitizados.length || huerfanosRetirados.length) {
+      if ((soloReparar || esEdicionExistente) && typeof this.disenoRepository.guardarSiNoCambio === 'function') {
+        const saved = await this.disenoRepository.guardarSiNoCambio(proyectoId, datosDiseno, disenoExistente.updatedAt);
+        if (!saved) throw new Error('El diseño cambió durante la reparación. Se descartaron las propuestas para no sobrescribir cambios recientes.');
+      } else await this.disenoRepository.guardarOActualizar(proyectoId, datosDiseno);
+      if ((soloReparar || esEdicionExistente) && typeof this.proyectoRepository.actualizarEstadoFase === 'function') await this.proyectoRepository.actualizarEstadoFase(proyectoId, 'mockups_pendientes');
+    }
+    if (!parcial && onProgress) await onProgress({ progreso: 95, mensaje: mockupsSanitizados.length ? 'Mockups validados y almacenados' : 'Sin cambios aplicados; se conserva el diseño anterior' });
+      return { mockupsFinales, mockupsSanitizados, auditoriaTrazabilidad };
+    };
+
     const totalPantallas = lotes.reduce((total, lote) => total + lote.length, 0);
     if (onProgress) await onProgress({ progreso: 5, mensaje: 'Contexto y árbol de navegación preparados' });
 
@@ -123,7 +180,7 @@ class GenerarMockups {
         const pantallasDelLote = pantallasArbol.filter(p => lote.includes(p.slug));
         const pantallaObjetivo = pantallasDelLote[0];
         const navegacionShell = pantallaObjetivo
-          ? pantallasArbol.filter(p => p.shell === pantallaObjetivo.shell).map(p => p.nombre).join(' | ')
+          ? pantallasArbol.filter(p => MockupVisualComposer.sameNavigation(p, pantallaObjetivo)).map(p => p.nombre).join(' | ')
           : '';
         const target = soloReparar ? repairPlan.find(item => item.mockup.nombre_pantalla === lote[0]) : null;
         const preserved = target ? this.traceabilityService.functionalCoverage.evidence(target.mockup) : null;
@@ -159,11 +216,14 @@ class GenerarMockups {
             pantallasDelLote.length > 0 ? pantallasDelLote : pantallasArbol,
             sistemaDiseno,
             contratoEnlaces
-          ) + (pantallaObjetivo ? `\n\nCONTRATO INMUTABLE DEL SHELL ${pantallaObjetivo.shell}:\nPlataforma: ${pantallaObjetivo.plataforma}. Roles: ${pantallaObjetivo.roles.join(', ')}. Opciones de navegación exactas y en este orden: ${navegacionShell}. Usa el nombre del proyecto como logo textual y el estado exacto "Sistema en línea".` : '');
+          ) + (pantallaObjetivo ? `\n\nCONTRATO INMUTABLE DEL SHELL ${pantallaObjetivo.shell}:\nPlataforma: ${pantallaObjetivo.plataforma}. Roles: ${pantallaObjetivo.roles.join(', ')}. Opciones de navegación exactas y en este orden: ${navegacionShell}. Usa el nombre del proyecto como logo textual. No añadas indicadores de «Sistema en línea» ni de conexión: no son contenido de la pantalla.` : '');
 
         if (!(esAjusteChat && mockupPrevio?.preview_code)) {
+          contextoLote += `\nFECHA DE REFERENCIA (úsala solo para inventar fechas de ejemplo coherentes; NO la escribas como texto en la pantalla): ${new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}.`;
           contextoLote += '\nCRITERIOS DE INTERFAZ: Aplica los RNF aprobados pertinentes al rol y plataforma. Usa botones claros, estados textuales y una acción principal identificable; agrupa acciones secundarias. No inventes métricas ni cantidades máximas de acciones. No inventes monedas o medios de pago. Usa selectores de registros relacionados en lugar de IDs internos editables. No añadas marcos de dispositivo ni márgenes externos. Usa variables CSS --icase-primary, --icase-bg, --icase-text y --icase-surface para colores temáticos.';
           contextoLote += '\nRNF DE INTERFAZ APLICABLES:\n' + MockupVisualComposer.interfaceContext(requerimientos, pantallaObjetivo);
+          const criteriosVisibles = this._criteriosVisibles(pantallaObjetivo, requerimientos);
+          if (criteriosVisibles) contextoLote += '\nACCIONES QUE LA PANTALLA DEBE MOSTRAR (las exigen sus requisitos; cada una como botón o control con ese texto):\n' + criteriosVisibles;
           contextoLote += '\nLa herramienta añade la estructura común. Genera únicamente el contenido de main dentro del documento de transporte. No incluyas header, nav, aside, footer ni dimensiones de dispositivo. Conserva campos, acciones y referencias aprobadas.';
         }
         try {
@@ -288,109 +348,13 @@ class GenerarMockups {
           advertencias.push(`Lote ${i + 1}/${lotes.length} falló: ${error.message}`);
           if (mockupPrevio?.preview_code) ajustes.push({ nombre_pantalla: lote[0], aplicado: false, motivo: error.message });
         }
+        if (!soloReparar && !esEdicionExistente && mockupsGenerados.length) {
+          try { await consolidar({ parcial: true }); if (onProgress) await onProgress({ progreso: Math.max(10, Math.round(((i + 1) / lotes.length) * 85)), mensaje: `Lote ${i + 1} de ${lotes.length} guardado` }); } catch (error) { advertencias.push(`No se pudo guardar el avance parcial tras el lote ${i + 1}: ${error.message}`); }
+        }
       }
     }
 
-    const unicosPorNombre = new Map();
-    for (const mockup of mockupsGenerados) {
-      unicosPorNombre.set(mockup.nombre_pantalla, mockup);
-    }
-
-    const manifiestoPorSlug = new Map(pantallasArbol.map(p => [p.slug, p]));
-    const mockupsSanitizados = [...unicosPorNombre.values()].map(mockup => {
-      const sanitizado = this.validator.sanitizar(mockup.preview_code);
-      const htmlConSistemaDiseno = this.validator.aplicarSistemaDiseno(sanitizado.html, sistemaDiseno);
-      const validacion = this.validator.validar(htmlConSistemaDiseno);
-      const enlazado = this.bindingService.evaluar({ html: htmlConSistemaDiseno, requerimientos, contrato: contratoEnlaces });
-      const pantalla = manifiestoPorSlug.get(mockup.nombre_pantalla);
-      const rfTrazabilidad = this.traceabilityService.enrichMockup(mockup, pantalla, requerimientos);
-      const erroresTrazabilidad = pantalla
-        ? []
-        : [`El mockup ${mockup.nombre_pantalla} no pertenece al árbol de navegación aprobado.`];
-      const advertenciasTrazabilidad = rfTrazabilidad.length
-        ? []
-        : ['No se pudo asociar esta pantalla con un requisito funcional aprobado.'];
-      const descartadas = (mockup.rf_trazabilidad || []).filter(id => !rfTrazabilidad.includes(String(id).trim().toUpperCase()));
-      if (descartadas.length) {
-        const detalle = descartadas.map((id) => {
-          const requisito = (requerimientos || []).find((item) => String(item.identificador).toUpperCase() === String(id).trim().toUpperCase() && item.aprobado !== false);
-          return requisito ? `${id} (${this.traceabilityService.explicarDescarte(requisito, { ...(pantalla || {}), ...mockup })})` : `${id} (no es un requisito aprobado)`;
-        });
-        advertenciasTrazabilidad.push(`Se quitaron referencias a requisitos que no corresponden a esta pantalla: ${detalle.join('; ')}.`);
-      }
-      const erroresValidacion = [...validacion.errores, ...erroresTrazabilidad];
-      // Los elementos que el sanitizador ya eliminó son ajustes informativos,
-      // no problemas que sigan presentes en el mockup final.
-      const ajustesSanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...sanitizado.advertencias])];
-      // Un botón que ejecuta un requisito de otro actor o de otra plataforma no pertenece a esta pantalla.
-      const controlesAjenos = (enlazado.enlaces || []).filter((enlace) => enlace.estado === 'valido').map((enlace) => {
-        const requisito = (requerimientos || []).find((item) => String(item.identificador).toUpperCase() === String(enlace.rf).toUpperCase());
-        const veredicto = requisito ? Compatibility.check(requisito, { ...(pantalla || {}), ...mockup }) : { compatible: true };
-        return veredicto.compatible ? null : `el control "${enlace.control}" ejecuta ${enlace.rf}, que no corresponde a esta pantalla (${veredicto.motivo}); quítalo o muévelo a su pantalla`;
-      }).filter(Boolean);
-      const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias, ...controlesAjenos, ...new MockupLayoutLinter().mensajes(htmlConSistemaDiseno, { screen: pantalla || {} })])];
-      return {
-        ...mockup,
-        pantalla_id: pantalla?.pantalla_id || mockup.nombre_pantalla,
-        nombre_visible: pantalla?.nombre || mockup.nombre_pantalla,
-        flujo: pantalla?.flujo || 'General',
-        modulo: pantalla?.modulo || 'General',
-        ruta: pantalla?.ruta || '',
-        plataforma: pantalla?.plataforma || 'web',
-        roles: pantalla?.roles || ['Usuario'],
-        shell: pantalla?.shell || 'web-general',
-        rf_trazabilidad: rfTrazabilidad,
-        enlaces: enlazado.enlaces,
-        preview_code: htmlConSistemaDiseno,
-        ajustes_sanitizacion: ajustesSanitizacion,
-        advertencias_validacion: advertenciasValidacion,
-        errores_validacion: erroresValidacion,
-        estado_calidad: erroresValidacion.length ? 'invalido' : (advertenciasValidacion.length ? 'advertencia' : 'valido'),
-        estado: 'generado',
-        version: 1
-      };
-    });
-    const mockupsExistentes = disenoExistente?.mockups || [];
-
-    const mockupsCombinados = this._mergeMockups(mockupsExistentes, mockupsSanitizados, pantallas);
-    const slugsArbol = new Set(pantallasArbol.flatMap(p => [p.slug, p.pantalla_id]).filter(Boolean));
-    const huerfanosRetirados = [];
-    const mockupsFinales = !soloReparar && !esEdicionExistente && slugsArbol.size
-      ? mockupsCombinados.filter(m => {
-        const pertenece = [m.nombre_pantalla, m.pantalla_id].some(id => slugsArbol.has(id));
-        if (!pertenece) huerfanosRetirados.push(m.nombre_visible || m.nombre_pantalla);
-        return pertenece;
-      })
-      : mockupsCombinados;
-    if (huerfanosRetirados.length) {
-      advertencias.push(`Se retiraron ${huerfanosRetirados.length} mockup(s) fuera del árbol aprobado: ${huerfanosRetirados.join(', ')}.`);
-    }
-    if (soloReparar || esEdicionExistente) {
-      const orden = new Map(mockupsExistentes.map((mockup, index) => [mockup.nombre_pantalla, index]));
-      mockupsFinales.sort((a, b) => orden.get(a.nombre_pantalla) - orden.get(b.nombre_pantalla));
-    }
-    const auditoriaTrazabilidad = this.traceabilityService.validate({
-      manifest: pantallasArbol,
-      mockups: mockupsFinales,
-      requirements: requerimientos
-    });
-    advertencias.push(...auditoriaTrazabilidad.advertencias);
-
-    const datosDiseno = {
-      mockups: mockupsFinales,
-      manifiesto_navegacion: pantallasArbol,
-      trazabilidad_mockups: auditoriaTrazabilidad,
-      sistema_diseno: sistemaDiseno,
-      ...((soloReparar || esEdicionExistente) && mockupsSanitizados.length ? { aprobado: false } : {})
-    };
-    if ((!soloReparar && !esEdicionExistente) || mockupsSanitizados.length || huerfanosRetirados.length) {
-      if ((soloReparar || esEdicionExistente) && typeof this.disenoRepository.guardarSiNoCambio === 'function') {
-        const saved = await this.disenoRepository.guardarSiNoCambio(proyectoId, datosDiseno, disenoExistente.updatedAt);
-        if (!saved) throw new Error('El diseño cambió durante la reparación. Se descartaron las propuestas para no sobrescribir cambios recientes.');
-      } else await this.disenoRepository.guardarOActualizar(proyectoId, datosDiseno);
-      if ((soloReparar || esEdicionExistente) && typeof this.proyectoRepository.actualizarEstadoFase === 'function') await this.proyectoRepository.actualizarEstadoFase(proyectoId, 'mockups_pendientes');
-    }
-    if (onProgress) await onProgress({ progreso: 95, mensaje: mockupsSanitizados.length ? 'Mockups validados y almacenados' : 'Sin cambios aplicados; se conserva el diseño anterior' });
+    const { mockupsFinales, mockupsSanitizados, auditoriaTrazabilidad } = await consolidar();
 
     return {
       mockups: mockupsFinales,
@@ -405,7 +369,12 @@ class GenerarMockups {
   }
 
   _pantallasDelProyecto(diagramas) {
-    const arbolNav = (diagramas || []).find(d => d.tipo === 'arbol_navegacion' || d.tipo === 'navegacion' || d.tipo === 'wbs');
+    // Pueden existir varias versiones del árbol (las anteriores quedan «desactualizado»): manda la aprobada y, entre
+    // varias, la más reciente. Tomar el primero por antigüedad dejaba el catálogo anclado a un árbol ya reemplazado.
+    const marca = (d) => new Date(d.updatedAt || d.createdAt || 0).getTime();
+    const arbolNav = (diagramas || [])
+      .filter(d => d.tipo === 'arbol_navegacion' || d.tipo === 'navegacion' || d.tipo === 'wbs')
+      .sort((a, b) => (Number(b.aprobado === true) - Number(a.aprobado === true)) || ((b.version || 0) - (a.version || 0)) || (marca(b) - marca(a)))[0];
     if (!arbolNav) return { arbolNav: null, codigoArbol: '', pantallas: [] };
 
     const mermaid = arbolNav.codigo_mermaid;
@@ -729,7 +698,8 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
   _inferirShell(ruta) {
     const plataforma = this._inferirPlataforma(ruta);
     const texto = this._textoRuta(ruta);
-    if (/acceso|sesion|contrasena|registro|autentic|login/.test(texto)) return `auth-${plataforma}`;
+    // «Registro de pedido» no es un acceso: solo lo son el inicio de sesión, la contraseña y el alta de cuenta o usuario.
+    if (/acceso|sesion|contrasena|autentic|login|registro de (?:usuario|cuenta|cliente)|registrarse|crear cuenta/.test(texto)) return `auth-${plataforma}`;
     if (/cocina|kds/.test(texto)) return 'kds-web';
     if (/admin|configuracion|usuarios|roles|reportes/.test(texto)) return 'admin-web';
     if (plataforma === 'mobile') return 'cliente-mobile';
@@ -787,6 +757,106 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
         error: colores.error || '#dc2626'
       }
     };
+  }
+
+  /**
+   * Valida y completa un mockup: sanea el HTML, aplica el sistema de diseño, conecta acciones sin requisito, evalúa los
+   * enlaces y la trazabilidad y calcula su estado de calidad. Lo usan la generación y la recomposición de mockups guardados.
+   */
+  /** Acciones que los requisitos de la pantalla nombran de forma explícita («escanear»): sin un control con ese texto la cobertura falla. */
+  _criteriosVisibles(pantalla, requerimientos) {
+    const ids = new Set((pantalla?.rf_trazabilidad || []).map((id) => String(id).trim().toUpperCase()));
+    return (requerimientos || [])
+      .filter((item) => ids.has(String(item.identificador).toUpperCase()) && item.aprobado !== false)
+      .flatMap((item) => this.traceabilityService.functionalCoverage.expectations(item)
+        .filter((criterio) => criterio.tipo === 'accion')
+        .map((criterio) => `- Un botón o control con el texto «${criterio.valores[0].charAt(0).toUpperCase()}${criterio.valores[0].slice(1)}» (${item.identificador})`))
+      .join('\n');
+  }
+
+  _normalizarMockup(mockup, { sistemaDiseno, requerimientos, contratoEnlaces, manifiestoPorSlug }) {
+    const sanitizado = this.validator.sanitizar(mockup.preview_code);
+    const accionesReparadas = this.actionRepair.reparar(this.validator.aplicarSistemaDiseno(sanitizado.html, sistemaDiseno), { rfs: mockup.rf_trazabilidad, requerimientos });
+    const htmlConSistemaDiseno = accionesReparadas.html;
+    const validacion = this.validator.validar(htmlConSistemaDiseno);
+    const enlazado = this.bindingService.evaluar({ html: htmlConSistemaDiseno, requerimientos, contrato: contratoEnlaces });
+    const pantalla = manifiestoPorSlug.get(mockup.nombre_pantalla);
+    const rfTrazabilidad = this.traceabilityService.enrichMockup({ ...mockup, enlaces: enlazado.enlaces }, pantalla, requerimientos);
+    const erroresTrazabilidad = pantalla
+      ? []
+      : [`El mockup ${mockup.nombre_pantalla} no pertenece al árbol de navegación aprobado.`];
+    const advertenciasTrazabilidad = rfTrazabilidad.length
+      ? []
+      : ['No se pudo asociar esta pantalla con un requisito funcional aprobado.'];
+    const descartadas = (mockup.rf_trazabilidad || []).filter(id => !rfTrazabilidad.includes(String(id).trim().toUpperCase()));
+    if (descartadas.length) {
+      const detalle = descartadas.map((id) => {
+        const requisito = (requerimientos || []).find((item) => String(item.identificador).toUpperCase() === String(id).trim().toUpperCase() && item.aprobado !== false);
+        return requisito ? `${id} (${this.traceabilityService.explicarDescarte(requisito, { ...(pantalla || {}), ...mockup })})` : `${id} (no es un requisito aprobado)`;
+      });
+      advertenciasTrazabilidad.push(`Se quitaron referencias a requisitos que no corresponden a esta pantalla: ${detalle.join('; ')}.`);
+    }
+    const erroresValidacion = [...validacion.errores, ...erroresTrazabilidad];
+    // Los elementos que el sanitizador ya eliminó son ajustes informativos,
+    // no problemas que sigan presentes en el mockup final.
+    const ajustesSanitizacion = [...new Set([...(mockup.ajustes_sanitizacion || []), ...sanitizado.advertencias, ...accionesReparadas.reparadas.map((cambio) => `Acción conectada: ${cambio}`)])];
+    // Un botón que ejecuta un requisito de otro actor o de otra plataforma no pertenece a esta pantalla.
+    const controlesAjenos = (enlazado.enlaces || []).filter((enlace) => enlace.estado === 'valido').map((enlace) => {
+      const requisito = (requerimientos || []).find((item) => String(item.identificador).toUpperCase() === String(enlace.rf).toUpperCase());
+      const veredicto = requisito ? Compatibility.check(requisito, { ...(pantalla || {}), ...mockup }) : { compatible: true };
+      return veredicto.compatible ? null : `el control "${enlace.control}" ejecuta ${enlace.rf}, que no corresponde a esta pantalla (${veredicto.motivo}); quítalo o muévelo a su pantalla`;
+    }).filter(Boolean);
+    const advertenciasValidacion = [...new Set([...validacion.advertencias, ...advertenciasTrazabilidad, ...enlazado.advertencias, ...controlesAjenos, ...new MockupLayoutLinter().mensajes(htmlConSistemaDiseno, { screen: pantalla || {} })])];
+    return {
+      ...mockup,
+      pantalla_id: pantalla?.pantalla_id || mockup.nombre_pantalla,
+      nombre_visible: pantalla?.nombre || mockup.nombre_pantalla,
+      flujo: pantalla?.flujo || 'General',
+      modulo: pantalla?.modulo || 'General',
+      ruta: pantalla?.ruta || '',
+      plataforma: pantalla?.plataforma || 'web',
+      roles: pantalla?.roles || ['Usuario'],
+      shell: pantalla?.shell || 'web-general',
+      rf_trazabilidad: rfTrazabilidad,
+      enlaces: enlazado.enlaces,
+      preview_code: htmlConSistemaDiseno,
+      ajustes_sanitizacion: ajustesSanitizacion,
+      advertencias_validacion: advertenciasValidacion,
+      errores_validacion: erroresValidacion,
+      estado_calidad: erroresValidacion.length ? 'invalido' : (advertenciasValidacion.length ? 'advertencia' : 'valido'),
+      estado: mockup.estado || 'generado',
+      version: mockup.version || 1
+    };
+  }
+
+  /**
+   * Vuelve a aplicar, sin IA, la estructura común (menú por rol, título, etiquetas) y las validaciones a los mockups ya
+   * guardados. Con `guardar: false` solo calcula y devuelve el resultado.
+   */
+  async recomponerExistentes(proyectoId, { guardar = false } = {}) {
+    const proyecto = await this.proyectoRepository.obtenerPorId(proyectoId);
+    if (!proyecto) throw new Error(`Proyecto ${proyectoId} no encontrado.`);
+    const requerimientos = await this.requerimientoRepository.listarPorProyecto(proyectoId);
+    const diagramas = await this.diagramaRepository.listarPorProyecto(proyectoId);
+    const diseno = await this.disenoRepository.obtenerPorProyecto(proyectoId);
+    if (!diseno?.mockups?.length) throw new Error('El proyecto no tiene mockups guardados.');
+    const pantallasArbol = this.traceabilityService.buildManifest(
+      this._enriquecerPlataformas(this._pantallasDelProyecto(diagramas).pantallas, requerimientos), requerimientos);
+    const sistemaDiseno = this._normalizarSistemaDiseno(diseno.sistema_diseno);
+    const contexto = {
+      sistemaDiseno, requerimientos, contratoEnlaces: this.bindingService.contrato({ proyecto, requerimientos, diagramas }),
+      manifiestoPorSlug: new Map(pantallasArbol.map((pantalla) => [pantalla.slug, pantalla]))
+    };
+    const mockups = diseno.mockups.map((mockup) => {
+      const pantalla = contexto.manifiestoPorSlug.get(mockup.nombre_pantalla);
+      const preview_code = MockupVisualComposer.compose(mockup.preview_code, { screen: pantalla, manifest: pantallasArbol, identity: sistemaDiseno, name: proyecto.nombre }) || mockup.preview_code;
+      return this._normalizarMockup({ ...mockup, preview_code }, contexto);
+    });
+    const trazabilidad = this.traceabilityService.validate({ manifest: pantallasArbol, mockups, requirements: requerimientos });
+    if (guardar) {
+      await this.disenoRepository.guardarOActualizar(proyectoId, { mockups, manifiesto_navegacion: pantallasArbol, trazabilidad_mockups: trazabilidad, sistema_diseno: sistemaDiseno });
+    }
+    return { mockups, antes: diseno.mockups, trazabilidad, manifiesto: pantallasArbol };
   }
 
   async obtenerCatalogo(proyectoId) {

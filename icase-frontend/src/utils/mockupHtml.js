@@ -9,7 +9,11 @@ export const DEFAULT_DESIGN_SYSTEM = {
   }
 };
 
-export const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM) => {
+/**
+ * `links` (opcional) asigna a cada pantalla el nombre de su archivo: en un HTML descargado, los enlaces entre pantallas
+ * apuntan a los archivos hermanos y navegan de verdad. Sin él (vista previa), el clic avisa a la aplicación, que muestra la pantalla.
+ */
+export const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM, { links = null } = {}) => {
   if (!rawHtml) return "";
   if (/data-icase-shell-version="[12]"/.test(rawHtml) && typeof DOMParser !== 'undefined') {
     const doc = new DOMParser().parseFromString(rawHtml, 'text/html');
@@ -29,6 +33,7 @@ export const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM)
     .replace(/<meta\b[^>]*http-equiv=["']?refresh["']?[^>]*>/gi, "")
     .replace(/\s(href|action)\s*=\s*(["'])(.*?)\2/gi, (_m, attr, quote, value) => {
       if (attr.toLowerCase() === "href" && /^https:\/\/fonts\.(googleapis|gstatic)\.com/i.test(value)) return ` ${attr}=${quote}${value}${quote}`;
+      if (attr.toLowerCase() === "href" && links && value.startsWith("#") && links[value.slice(1)]) return ` href=${quote}${links[value.slice(1)]}${quote}`;
       return ` data-icase-${attr}=${quote}${value}${quote} ${attr}=${quote}#${quote}`;
     });
 
@@ -54,6 +59,7 @@ export const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM)
     .text-red-600,.text-red-700{color:var(--icase-error)!important}
   </style>`;
   html = html.includes("</head>") ? html.replace(/<\/head>/i, `${paletteStyles}</head>`) : `${paletteStyles}${html}`;
-  const guard = `<script id="icase-preview-guard">document.addEventListener('click',function(e){var t=e.target.closest('a,button');if(t){e.preventDefault();}} ,true);document.addEventListener('submit',function(e){e.preventDefault();},true);</script>`;
+  // Los enlaces entre pantallas avisan a la aplicación (vista previa) o navegan (archivos descargados); el resto de controles no hace nada.
+  const guard = `<script id="icase-preview-guard">document.addEventListener('click',function(e){var a=e.target.closest('a[data-icase-href]');if(a){e.preventDefault();var h=a.getAttribute('data-icase-href')||'';if(h.charAt(0)==='#'&&window.parent!==window){window.parent.postMessage({type:'icase-navigate',slug:h.slice(1)},'*');}return;}var t=e.target.closest('button,a[href="#"]');if(t){e.preventDefault();}},true);document.addEventListener('submit',function(e){e.preventDefault();},true);</script>`;
   return html.includes("</body>") ? html.replace(/<\/body>/i, `${guard}</body>`) : `${html}${guard}`;
 };
