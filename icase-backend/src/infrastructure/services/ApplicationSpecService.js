@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const DomainModelExtractor = require('./DomainModelExtractor');
+const Compatibility = require('../../core/services/RequirementScreenCompatibility');
 const ApplicationContractBuilder = require('./ApplicationContractBuilder');
 const { systemManaged } = require('./MockupFieldPolicy');
 
@@ -12,9 +13,18 @@ const VALORES_SESION = ['usuario.id', 'usuario.email', 'usuario.rol'];
 const COMPONENTES = ['tabla', 'tarjetas', 'formulario', 'detalle', 'kpi'];
 const MAX_OPERACIONES = 120;
 // Motivos (de MockupFieldPolicy) por los que un dato no se pide en un formulario de alta.
-const NO_SE_PIDE = new Set(['empieza en su estado inicial', 'se calcula', 'lo genera el sistema', 'lo registra el sistema', 'solo lectura']);
-const REGISTRO_SISTEMA = 'lo registra el sistema';
+const NO_SE_PIDE = new Set(['empieza en su estado inicial', 'se calcula', 'lo genera el sistema', 'solo lectura']);
+// Solo la marca de tiempo del propio registro la pone el servidor. Una vigencia («finVigencia») o una apertura dependen
+// del negocio (¿7 días?): no son «ahora», así que se piden o se calculan con una regla, nunca se rellenan con la fecha de hoy.
+const MARCA_DE_REGISTRO = /^(?:fecha|fechahora|hora)(?:de)?(?:adquisicion|compra|creacion|registro|alta|emision|cierre|pago|confirmacion|canje)$/;
+// Cantidades que elige la persona aunque el nombre parezca «derivado» (el tamaño del paquete).
+const LA_ELIGE_LA_PERSONA = /^usostotales$/;
+const compacto = (campo) => strip(campo).replace(/[^a-z0-9]/g, '');
 const VALIDAR = /\b(?:valid\w*|verific\w*|comprob\w*)\b/;
+// Un requisito de gestión («registrar o actualizar», «gestión de…») pide poder listar, crear y editar.
+const GESTION = /\bgesti\w*\b|\b(?:registr\w*|cre\w*|agreg\w*)\b[^.]{0,80}\b(?:actualiz\w*|modific\w*|edit\w*)\b|\b(?:actualiz\w*|modific\w*|edit\w*)\b[^.]{0,80}\b(?:registr\w*|cre\w*|agreg\w*)\b/;
+// Datos que nunca se devuelven ni se editan en una lista (la contraseña de una cuenta se cambia por su propio camino).
+const SENSIBLE = /password|hash|secret|token|clave/i;
 
 const strip = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 // Conserva las mayúsculas internas (listarMesas) y normaliza separadores y tildes.
@@ -134,8 +144,12 @@ class ApplicationSpecService {
       }
     }
 
+    const gestion = this._completarGestion(operaciones, { rf, entidades, nombres, advertencias });
+    for (const { listar, actualizar } of gestion) operaciones.push(listar, actualizar);
     const porNombre = new Map(operaciones.map((operacion) => [operacion.nombre, operacion]));
     const vistas = this._pantallas(propuesta?.pantallas, { porNombre, entidades, pantallas, advertencias });
+    for (const triple of gestion) this._reorganizarGestion(vistas, triple, advertencias);
+    this._cablearEdicion(operaciones, vistas, pantallas, advertencias);
     operaciones.forEach((operacion, index) => { operacion.id = `OP-${String(index + 1).padStart(2, '0')}`; });
     const sinPantalla = operaciones.filter((operacion) => !vistas.some((vista) => vista.componentes.some((c) => c.operacion === operacion.nombre || c.acciones.some((a) => a.operacion === operacion.nombre))));
     if (vistas.length && sinPantalla.length) advertencias.push(`Operaciones sin ninguna pantalla que las use: ${sinPantalla.map((operacion) => operacion.nombre).join(', ')}.`);
@@ -164,6 +178,7 @@ class ApplicationSpecService {
     // Los botones y componentes de una operación rechazada no pueden quedar en las pantallas.
     const vigentes = new Map(operaciones.filter((op) => op.estado_decision !== 'rechazado').map((op) => [op.nombre, op]));
     const vistas = this._pantallas(guardada?.pantallas, { porNombre: vigentes, entidades, pantallas, advertencias: avisos });
+    this._cablearEdicion(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, pantallas, avisos);
     return { operaciones, pantallas: vistas, errores, avisos };
   }
 
@@ -223,6 +238,88 @@ class ApplicationSpecService {
   }
 
   /**
+   * Un requisito de gestión que solo trae «crear» no deja corregir un registro: se le añaden, derivadas y pendientes de
+   * revisión, la consulta que lista los registros y la actualización que edita uno. La contraseña no se lista ni se edita aquí.
+   */
+  _completarGestion(operaciones, { rf, entidades, nombres, advertencias }) {
+    const resultado = [];
+    for (const crear of operaciones.filter((operacion) => operacion.tipo === 'crear')) {
+      const requisito = rf.find((item) => String(item.identificador).toUpperCase() === crear.rf);
+      if (!requisito || !GESTION.test(strip(`${requisito.nombre} ${requisito.descripcion}`))) continue;
+      if (operaciones.some((operacion) => operacion.rf === crear.rf && operacion.tipo !== 'crear')) continue;
+      const entidad = entidades.get(crear.entidad);
+      const editables = crear.entradas.filter((campo) => !SENSIBLE.test(campo));
+      if (!entidad || !editables.length) continue;
+      const unico = (base) => { let nombre = base; for (let n = 2; nombres.has(nombre); n += 1) nombre = `${base}${n}`; nombres.add(nombre); return nombre; };
+      const visibles = Object.keys(entidad.schema.properties).filter((campo) => campo !== 'id' && !SENSIBLE.test(campo));
+      const base = { rf: crear.rf, entidad: crear.entidad, entidadClave: crear.entidadClave, actores: crear.actores, estado_decision: 'pendiente', origen: 'derivado' };
+      const listar = { ...base, nombre: unico(`listar${crear.entidad}`), tipo: 'consulta', filtros: [], entradas: [], salida: visibles, descripcion: `Lista los registros de ${crear.entidad} para revisarlos y editarlos.` };
+      const actualizar = { ...base, nombre: unico(`actualizar${crear.entidad}`), tipo: 'actualizar', filtros: [], entradas: editables, salida: [], descripcion: `Modifica un registro de ${crear.entidad}.` };
+      advertencias.push(`${crear.rf}: el requisito es de gestión y solo traía crear; se añadieron «${listar.nombre}» y «${actualizar.nombre}» para poder listar y editar. Revísalas.`);
+      resultado.push({ crear, listar, actualizar });
+    }
+    return resultado;
+  }
+
+  /**
+   * Una actualización que ninguna pantalla usa no se puede ejecutar: se añade como botón «Editar» por fila a la lista de la
+   * misma entidad, prefiriendo la pantalla del mismo requisito y de un rol que pueda ejecutarla. Sin lista que la acoja, queda
+   * como estaba (la revisión ya avisa de que no tiene pantalla).
+   */
+  _cablearEdicion(operaciones, vistas, pantallas, advertencias) {
+    const operacionDe = new Map(operaciones.map((op) => [op.nombre, op]));
+    const pantallaPorId = new Map(list(pantallas).map((screen) => [this._screenId(screen), screen]));
+    // Un «Editar» que quedó en una pantalla cuyo rol no puede ejecutarlo (cableado antes de conocer los roles) se retira.
+    for (const vista of vistas) {
+      const roles = Compatibility.rolesOf(pantallaPorId.get(vista.id));
+      if (!roles.length) continue;
+      for (const componente of vista.componentes) {
+        componente.acciones = componente.acciones.filter((accion) => {
+          const op = operacionDe.get(accion.operacion);
+          const actores = (op?.actores || []).map(Compatibility.canonicalRole);
+          const ajena = accion.etiqueta === 'Editar' && op?.tipo === 'actualizar' && actores.length && !roles.some((rol) => actores.includes(rol));
+          if (ajena) advertencias.push(`Pantalla ${vista.id}: se retiró «Editar» (${op.nombre}): lo ejecuta ${actores.join(' / ')} y la pantalla es de ${roles.join(' / ')}.`);
+          return !ajena;
+        });
+      }
+    }
+    const usadas = new Set(vistas.flatMap((vista) => vista.componentes.flatMap((c) => [c.operacion, ...c.acciones.map((a) => a.operacion)])));
+    const porNombre = new Map(operaciones.map((op) => [op.nombre, op]));
+    const pantallaDe = new Map(list(pantallas).map((screen) => [this._screenId(screen), screen]));
+    for (const edicion of operaciones.filter((op) => op.tipo === 'actualizar' && !usadas.has(op.nombre))) {
+      const actores = (edicion.actores || []).map(Compatibility.canonicalRole);
+      const candidatos = vistas.flatMap((vista) => vista.componentes
+        .filter((c) => ['tabla', 'tarjetas'].includes(c.tipo))
+        .map((componente) => ({ vista, componente, lista: porNombre.get(componente.operacion) }))
+        .filter((x) => x.lista?.tipo === 'consulta' && x.lista.entidad === edicion.entidad))
+        .map((x) => {
+          const roles = Compatibility.rolesOf(pantallaDe.get(x.vista.id));
+          const puede = !roles.length || !actores.length || roles.some((rol) => actores.includes(rol));
+          return { ...x, puede, puntos: (x.lista.rf === edicion.rf ? 2 : 0) + (puede ? 1 : 0) };
+        })
+        .filter((x) => x.puede)
+        .sort((a, b) => b.puntos - a.puntos);
+      const elegido = candidatos[0];
+      if (!elegido) continue;
+      elegido.componente.acciones.push({ etiqueta: 'Editar', operacion: edicion.nombre });
+      advertencias.push(`Pantalla ${elegido.vista.id}: se añadió «Editar» (${edicion.nombre}) a la lista de ${edicion.entidad}, porque ninguna pantalla la usaba.`);
+    }
+  }
+
+  /** La pantalla de un requisito de gestión pasa de un formulario de alta a una lista con «Nuevo» y «Editar» por fila. */
+  _reorganizarGestion(vistas, { crear, listar, actualizar }, advertencias) {
+    for (const vista of vistas) {
+      const indice = vista.componentes.findIndex((componente) => componente.operacion === crear.nombre && componente.tipo === 'formulario');
+      if (indice < 0) continue;
+      vista.componentes[indice] = {
+        tipo: 'tabla', operacion: listar.nombre, campos: listar.salida,
+        acciones: [{ etiqueta: `Nuevo ${crear.entidad.toLowerCase()}`, operacion: crear.nombre }, { etiqueta: 'Editar', operacion: actualizar.nombre }]
+      };
+      advertencias.push(`Pantalla ${vista.id}: ahora lista los registros de ${crear.entidad}, con «Nuevo» y «Editar».`);
+    }
+  }
+
+  /**
    * Lo que no debe preguntarse a la persona al crear un registro: quién lo crea (la cuenta de la sesión, cuando el campo
    * apunta a la entidad de cuentas) y la marca de tiempo del propio registro. El servidor los completa y no se pueden
    * falsificar desde la petición. Idempotente: se puede aplicar a una operación ya guardada.
@@ -235,14 +332,22 @@ class ApplicationSpecService {
     for (const campo of operacion.entradas) {
       const objetivo = String(propiedades[campo]?.['x-references'] || '');
       if (/^usuarios?$/i.test(objetivo) && entidad.key !== 'usuario' && !sesion.some((item) => item.campo === campo)) sesion.push({ campo, valor: 'usuario.id' });
-      else if (systemManaged(campo, propiedades[campo]) === REGISTRO_SISTEMA && ['string'].includes(propiedades[campo]?.type) && !auto.some((item) => item.campo === campo)) {
+      else if (MARCA_DE_REGISTRO.test(compacto(campo)) && ['string'].includes(propiedades[campo]?.type) && !auto.some((item) => item.campo === campo)) {
         auto.push({ campo, valor: propiedades[campo]?.format === 'date' ? 'hoy' : 'ahora' });
       }
     }
     const completados = new Set([...sesion, ...auto].map((item) => item.campo));
+    // «Quién lo registra» solo se omite cuando se puede resolver (la cuenta de la sesión). Una referencia al propio actor
+    // que no se puede resolver (cliente_id de un cliente) se conserva: sin ella el registro quedaría sin dueño.
+    const actores = operacion.actores.map(strip);
+    const conservadas = Object.entries(propiedades)
+      .filter(([campo, definicion]) => definicion?.['x-references'] && !completados.has(campo) && !operacion.entradas.includes(campo)
+        && !/^usuarios?$/i.test(String(definicion['x-references'])) && String(definicion['x-references']) !== entidad.name
+        && actores.some((actor) => actor.includes(strip(campo).replace(/_?id$/, ''))))
+      .map(([campo]) => campo);
     return {
       ...operacion,
-      entradas: operacion.entradas.filter((campo) => !completados.has(campo)),
+      entradas: [...operacion.entradas.filter((campo) => !completados.has(campo)), ...conservadas],
       ...(sesion.length ? { sesionEntradas: sesion } : {}), ...(auto.length ? { autoEntradas: auto } : {})
     };
   }
@@ -253,6 +358,7 @@ class ApplicationSpecService {
     if ([...list(operacion.sesionEntradas), ...list(operacion.autoEntradas)].some((item) => item.campo === campo)) return false;
     // La contraseña de una cuenta sí la escribe la persona: «hash» aquí es el nombre técnico del dato, no algo generado.
     if (entidad.key === 'usuario' && /^password/i.test(campo)) return true;
+    if (LA_ELIGE_LA_PERSONA.test(compacto(campo))) return true;
     return !NO_SE_PIDE.has(systemManaged(campo, entidad.schema.properties[campo]));
   }
 
@@ -314,7 +420,13 @@ class ApplicationSpecService {
         if (!COMPONENTES.includes(text(componente?.tipo)) || !operacion) { advertencias.push(`Pantalla ${id}: se descartó un componente (${componente?.tipo}/${componente?.operacion}) con tipo u operación inválidos.`); continue; }
         const props = entidades.get(operacion.entidad).schema.properties;
         const entidadOp = entidades.get(operacion.entidad);
-        const campos = list(componente.campos).map(text).filter((campo) => Object.prototype.hasOwnProperty.call(props, campo) && this._seMuestra(operacion, campo, entidadOp));
+        const propuestos = list(componente.campos).map(text).filter((campo) => Object.prototype.hasOwnProperty.call(props, campo));
+        let campos = propuestos.filter((campo) => this._seMuestra(operacion, campo, entidadOp));
+        // Un formulario sin ningún campo no sirve: si todo era «del sistema», se conserva lo que la persona pueda rellenar.
+        if (!campos.length && propuestos.length && operacion.tipo === 'crear') {
+          campos = propuestos.filter((campo) => ![...list(operacion.sesionEntradas), ...list(operacion.autoEntradas)].some((item) => item.campo === campo));
+          if (campos.length) advertencias.push(`Pantalla ${id}: todos los campos de «${operacion.nombre}» parecían del sistema; se conservan para que el formulario no quede vacío. Revísalos.`);
+        }
         let tipoComponente = text(componente.tipo);
         if (tipoComponente === 'formulario' && operacion.tipo === 'consulta') {
           tipoComponente = 'tarjetas';

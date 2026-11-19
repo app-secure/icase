@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Box, Loader2, Monitor, RefreshCw, Smartphone } from 'lucide-react';
 import { fetchGenerationPreviewApi } from '../services/api';
+import ScreenWireframe from './ScreenWireframe';
 
 const ORIGIN = {
   especificacion: { label: 'Desde la especificación', style: 'bg-emerald-100 text-emerald-700' },
@@ -17,6 +18,7 @@ function Stat({ label, value, warn }) {
 }
 
 function ScreenCard({ screen }) {
+  const [view, setView] = useState('esquema');
   const origin = ORIGIN[screen.origen] || ORIGIN.crud;
   const Icon = screen.plataforma === 'móvil' ? Smartphone : Monitor;
   return <article className="rounded-xl border border-slate-200 bg-white p-4">
@@ -29,7 +31,14 @@ function ScreenCard({ screen }) {
       {screen.generada === false && <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700">No se generará: su plataforma no está en el alcance</span>}
     </div>
 
-    {screen.origen === 'especificacion' && <ul className="mt-3 space-y-2">
+    {screen.origen === 'especificacion' && <div className="mt-3 flex gap-1 text-xs" role="tablist" aria-label="Vista de la pantalla">
+      {[['esquema', 'Cómo se verá'], ['detalle', 'Detalle técnico']].map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setView(key)}
+        className={`rounded-lg border px-3 py-1 font-semibold ${view === key ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500 hover:text-slate-800'}`}>{label}</button>)}
+    </div>}
+
+    {screen.origen === 'especificacion' && view === 'esquema' && <div className="mt-3"><ScreenWireframe screen={screen} /></div>}
+
+    {screen.origen === 'especificacion' && view === 'detalle' && <ul className="mt-3 space-y-2">
       {screen.componentes.map((component, index) => <li key={index} className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs">
         <p className="font-semibold text-slate-800">{COMPONENT[component.tipo] || component.tipo} <span className="font-mono font-normal text-slate-500">{component.endpoint}</span></p>
         {component.campos.length > 0 && <p className="mt-1 text-slate-600">Campos: {component.campos.join(', ')}</p>}
@@ -41,6 +50,7 @@ function ScreenCard({ screen }) {
 
     {screen.origen === 'mockup' && <div className="mt-3 text-xs text-slate-600">
       <p>{screen.enlaces.length} control(es) enlazado(s) a una operación del backend.</p>
+      {screen.nota && <p className="mt-1 text-slate-500">{screen.nota}</p>}
       {screen.controles_sin_operacion.length > 0 && <p className="mt-1 text-amber-700"><AlertTriangle size={12} className="mr-1 inline" />Sin operación (no harán nada): {screen.controles_sin_operacion.slice(0, 8).join(', ')}{screen.controles_sin_operacion.length > 8 ? '…' : ''}</p>}
     </div>}
 

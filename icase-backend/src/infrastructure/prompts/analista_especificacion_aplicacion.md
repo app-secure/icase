@@ -57,5 +57,5 @@ Responde solo con JSON válido, sin texto adicional:
 
 - Validar, verificar o comprobar un dato («validar una reserva con su código QR») es una `consulta` con un filtro `parametro` por ese campo, o una `transicion` del estado. Nunca una `actualizar` del campo que identifica al registro (el código QR, el token, el correo).
 - Una `consulta` devuelve en `salida` todos los atributos que la pantalla necesita mostrar, no uno solo. Si la persona necesita ver datos de otra entidad relacionada, di en la descripción qué entidad es.
-- Una operación `crear` no pide lo que completa el sistema: quién la registra (`usuario_id` de la sesión), el estado inicial, los totales calculados, ni la fecha de registro. Pide solo lo que la persona decide.
+- Una operación `crear` no pide lo que completa el sistema: la cuenta de quien la registra (`usuario_id`), el estado inicial, los totales calculados ni la fecha de registro. Sí incluye en `entradas` los demás campos que apuntan a otra entidad (`cliente_id`, `mesa_id`, `reserva_id`, `recompensa_id`) y los datos que la persona elige (cantidades, fechas de vigencia, importes).
 - Si el requisito dice «registrar o actualizar», define las dos operaciones (`crear` y `actualizar`), cada una con su pantalla o botón.

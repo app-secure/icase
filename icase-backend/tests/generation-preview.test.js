@@ -51,7 +51,8 @@ describe('vista previa de la generación', () => {
     const pantalla = vista.pantallas.find((item) => item.id === 'mesas-asignadas');
     expect(pantalla.origen).toBe('especificacion');
     expect(pantalla.componentes[0]).toMatchObject({ tipo: 'tarjetas', endpoint: 'GET /api/actions/listar-mesas-asignadas', campos: ['numero', 'estado'] });
-    expect(pantalla.componentes[0].botones).toEqual([{ etiqueta: 'Ocupar', operacion: 'ocuparMesa', endpoint: 'POST /api/actions/ocupar-mesa/:id' }]);
+    expect(pantalla.componentes[0].campos_meta.estado).toBeDefined();
+    expect(pantalla.componentes[0].botones).toEqual([{ etiqueta: 'Ocupar', operacion: 'ocuparMesa', tipo: 'transicion', por_fila: true, endpoint: 'POST /api/actions/ocupar-mesa/:id' }]);
   });
 
   test('una pantalla de mockup informa sus controles sin operación', () => {

@@ -32,16 +32,27 @@ class GenerationPreviewService {
       const fromSpec = specScreens.get(id);
       const components = (fromSpec?.componentes || []).filter((component) => actions.has(component.operacion));
       if (components.length) {
-        return { ...base, origen: 'especificacion', componentes: components.map((component) => ({
-          tipo: component.tipo, operacion: component.operacion, endpoint: `${actions.get(component.operacion).method} ${actions.get(component.operacion).path}`,
-          campos: component.campos || [], botones: (component.acciones || []).filter((action) => actions.has(action.operacion)).map((action) => ({ etiqueta: action.etiqueta, operacion: action.operacion, endpoint: `${actions.get(action.operacion).method} ${actions.get(action.operacion).path}` }))
-        })), controles_sin_operacion: [] };
+        return { ...base, origen: 'especificacion', componentes: components.map((component) => {
+          const action = actions.get(component.operacion);
+          return {
+            tipo: component.tipo, operacion: component.operacion, endpoint: `${action.method} ${action.path}`, entidad: action.entity,
+            campos: component.campos || [],
+            // Tipo de cada campo (texto, número, fecha, lista de opciones, relación): con esto se dibuja el esquema de la pantalla.
+            campos_meta: Object.fromEntries((component.campos || []).filter((name) => action.fields?.[name]).map((name) => [name, action.fields[name]])),
+            filtros: (action.filters || []).filter((filter) => filter.origen === 'parametro').map((filter) => String(filter.valor)),
+            botones: (component.acciones || []).filter((item) => actions.has(item.operacion)).map((item) => ({
+              etiqueta: item.etiqueta, operacion: item.operacion, tipo: actions.get(item.operacion).type, por_fila: Boolean(actions.get(item.operacion).byId),
+              endpoint: `${actions.get(item.operacion).method} ${actions.get(item.operacion).path}`
+            }))
+          };
+        }), controles_sin_operacion: [] };
       }
       if (mockup?.preview_code) {
         const check = validator.validar({ html: mockup.preview_code, requerimientos: rf, contrato: contract });
         const wired = check.enlaces.filter((item) => item.estado === 'valido');
-        const dead = check.advertencias.filter((item) => item.startsWith('sin enlace: ')).map((item) => item.slice('sin enlace: '.length));
-        return { ...base, origen: 'mockup', componentes: [], enlaces: wired.slice(0, 20).map((item) => ({ control: item.control, operacion: String(item.rf).toLowerCase(), verbo: item.verbo })), controles_sin_operacion: dead };
+        const acceso = /^auth/i.test(String(screen.shell || ''));
+        const dead = acceso ? [] : check.advertencias.filter((item) => item.startsWith('sin enlace: ')).map((item) => item.slice('sin enlace: '.length));
+        return { ...base, origen: 'mockup', ...(acceso ? { nota: 'El inicio de sesión lo resuelve la autenticación de la aplicación (JWT): no necesita una operación propia.' } : {}), componentes: [], enlaces: wired.slice(0, 20).map((item) => ({ control: item.control, operacion: String(item.rf).toLowerCase(), verbo: item.verbo })), controles_sin_operacion: dead };
       }
       return { ...base, origen: 'crud', componentes: [], controles_sin_operacion: [] };
     });

@@ -32,6 +32,19 @@ class SesionCaja {
   +String fechaCierre
   +float fondoInicial
 }
+class Cliente {
+  +String id
+  +String nombre
+}
+class PaquetePrepagado {
+  +String id
+  +int usosTotales
+  +int usosRestantes
+  +String fechaAdquisicion
+  +String inicioVigencia
+  +String finVigencia
+}
+Cliente "1" --> "0..*" PaquetePrepagado
 Usuario "1" --> "0..*" Pedido
 Usuario "1" --> "0..*" SesionCaja
 @enduml`;
@@ -42,11 +55,12 @@ const rf = [
   { aprobado: true, tipo: 'RF', identificador: 'RF-06', nombre: 'Visualización de comandas en KDS', descripcion: 'La cocina ve las comandas.', actores: ['Cocinero'] },
   { aprobado: true, tipo: 'RF', identificador: 'RF-14', nombre: 'Gestión de usuarios', descripcion: 'El administrador registra usuarios.', actores: ['Administrador'] },
   { aprobado: true, tipo: 'RF', identificador: 'RF-15', nombre: 'Registro de pedidos', descripcion: 'El mesero registra pedidos.', actores: ['Mesero'] },
+  { aprobado: true, tipo: 'RF', identificador: 'RF-03', nombre: 'Compra de paquetes semanales', descripcion: 'El cliente compra paquetes.', actores: ['Cliente'] },
   { aprobado: true, tipo: 'RF', identificador: 'RF-08', nombre: 'Cierre de sesión de caja', descripcion: 'El cajero cierra la caja.', actores: ['Cajero'] }
 ];
 const pantallas = [
   { pantalla_id: 'validacion-qr', nombre: 'Validación QR' }, { pantalla_id: 'pedido', nombre: 'Pedido' },
-  { pantalla_id: 'usuarios', nombre: 'Usuarios' }, { pantalla_id: 'kds', nombre: 'KDS' }
+  { pantalla_id: 'usuarios', nombre: 'Usuarios' }, { pantalla_id: 'kds', nombre: 'KDS' }, { pantalla_id: 'paquetes', nombre: 'Paquetes' }
 ];
 const modelo = new DomainModelExtractor().fromDiagrams([dominio]);
 const depurar = (propuesta) => new ApplicationSpecService({}).depurar(propuesta, { modelo, rf, pantallas });
@@ -77,12 +91,35 @@ describe('correcciones de la especificación propuesta', () => {
     expect(operacion.entradas).toEqual(['fondoInicial']);
   });
 
-  test('en la gestión de usuarios la contraseña y el rol sí los escribe la persona', () => {
-    const { especificacion } = depurar({
+  test('en la gestión de usuarios la contraseña y el rol sí los escribe la persona al crear', () => {
+    const { especificacion } = depurar({ operaciones: [{ nombre: 'gestionarUsuario', rf: 'RF-14', tipo: 'crear', entidad: 'Usuario', actores: ['Administrador'], entradas: ['correo', 'passwordHash', 'rol'] }] });
+    expect(especificacion.operaciones.find((item) => item.nombre === 'gestionarUsuario').entradas).toEqual(['correo', 'passwordHash', 'rol']);
+  });
+
+  test('un requisito de gestión que solo traía crear recibe listar y editar, sin exponer ni editar la contraseña', () => {
+    const { especificacion, advertencias } = depurar({
       operaciones: [{ nombre: 'gestionarUsuario', rf: 'RF-14', tipo: 'crear', entidad: 'Usuario', actores: ['Administrador'], entradas: ['correo', 'passwordHash', 'rol'] }],
-      pantallas: [{ id: 'usuarios', componentes: [{ tipo: 'formulario', operacion: 'gestionarUsuario', campos: ['correo', 'passwordHash', 'rol'] }] }]
+      pantallas: [{ id: 'usuarios', componentes: [{ tipo: 'formulario', operacion: 'gestionarUsuario', campos: ['correo', 'passwordHash', 'rol'], acciones: [{ etiqueta: 'Guardar usuario', operacion: 'gestionarUsuario' }] }] }]
     });
-    expect(especificacion.pantallas[0].componentes[0].campos).toEqual(['correo', 'passwordHash', 'rol']);
+    const listar = especificacion.operaciones.find((item) => item.nombre === 'listarUsuario');
+    const actualizar = especificacion.operaciones.find((item) => item.nombre === 'actualizarUsuario');
+    expect(listar).toMatchObject({ tipo: 'consulta', rf: 'RF-14', origen: 'derivado', estado_decision: 'pendiente' });
+    expect(listar.salida).toEqual(['correo', 'rol']);
+    expect(actualizar).toMatchObject({ tipo: 'actualizar', entradas: ['correo', 'rol'], origen: 'derivado', estado_decision: 'pendiente' });
+    const componente = especificacion.pantallas[0].componentes[0];
+    expect(componente).toMatchObject({ tipo: 'tabla', operacion: 'listarUsuario', campos: ['correo', 'rol'] });
+    expect(componente.acciones).toEqual([{ etiqueta: 'Nuevo usuario', operacion: 'gestionarUsuario' }, { etiqueta: 'Editar', operacion: 'actualizarUsuario' }]);
+    expect(advertencias.join(' ')).toContain('solo traía crear');
+  });
+
+  test('no añade nada si el requisito no es de gestión o si la IA ya propuso editar', () => {
+    const sinGestion = depurar({ operaciones: [crearPedido] }).especificacion;
+    expect(sinGestion.operaciones.map((item) => item.nombre)).toEqual(expect.not.arrayContaining(['listarPedido', 'actualizarPedido']));
+    const completa = depurar({ operaciones: [
+      { nombre: 'gestionarUsuario', rf: 'RF-14', tipo: 'crear', entidad: 'Usuario', actores: ['Administrador'], entradas: ['correo', 'rol'] },
+      { nombre: 'editarUsuario', rf: 'RF-14', tipo: 'actualizar', entidad: 'Usuario', actores: ['Administrador'], entradas: ['rol'] }
+    ] }).especificacion;
+    expect(completa.operaciones.filter((item) => item.rf === 'RF-14')).toHaveLength(2);
   });
 
   test('validar un QR no modifica el código: se convierte en una consulta por ese campo y su pantalla en tarjetas', () => {
@@ -108,6 +145,105 @@ describe('correcciones de la especificación propuesta', () => {
     const revisada = new ApplicationSpecService({}).validar(especificacion, { modelo, rf, pantallas });
     expect(revisada.errores).toEqual([]);
     expect(revisada.operaciones[0].sesionEntradas).toEqual([{ campo: 'usuario_id', valor: 'usuario.id' }]);
+  });
+});
+
+describe('compra de un paquete: lo que decide la persona y lo que no', () => {
+  const compra = { nombre: 'comprarPaquete', rf: 'RF-03', tipo: 'crear', entidad: 'PaquetePrepagado', actores: ['Cliente'], entradas: ['usosTotales', 'usosRestantes', 'fechaAdquisicion', 'inicioVigencia', 'finVigencia'] };
+  const pantalla = { id: 'paquetes', componentes: [{ tipo: 'formulario', operacion: 'comprarPaquete', campos: ['usosTotales', 'usosRestantes', 'fechaAdquisicion', 'inicioVigencia', 'finVigencia'] }] };
+
+  test('el tamaño del paquete y la vigencia se piden; solo la fecha de adquisición la pone el servidor', () => {
+    const { especificacion } = depurar({ operaciones: [compra], pantallas: [pantalla] });
+    const operacion = especificacion.operaciones.find((item) => item.nombre === 'comprarPaquete');
+    expect(operacion.autoEntradas).toEqual([{ campo: 'fechaAdquisicion', valor: 'ahora' }]);
+    expect(operacion.entradas).toEqual(expect.arrayContaining(['usosTotales', 'inicioVigencia', 'finVigencia']));
+    expect(especificacion.pantallas[0].componentes[0].campos).toEqual(['usosTotales', 'inicioVigencia', 'finVigencia']);
+  });
+
+  test('el cliente de una compra no se pierde si la IA lo omitió', () => {
+    const { especificacion } = depurar({ operaciones: [{ ...compra, entradas: ['usosTotales'] }] });
+    expect(especificacion.operaciones.find((item) => item.nombre === 'comprarPaquete').entradas).toEqual(['usosTotales', 'cliente_id']);
+  });
+
+  test('un formulario nunca queda vacío por haber ocultado todo', () => {
+    const { especificacion, advertencias } = depurar({
+      operaciones: [{ ...compra, entradas: ['usosRestantes'] }],
+      pantallas: [{ id: 'paquetes', componentes: [{ tipo: 'formulario', operacion: 'comprarPaquete', campos: ['usosRestantes'] }] }]
+    });
+    expect(especificacion.pantallas[0].componentes[0].campos).toEqual(['usosRestantes']);
+    expect(advertencias.join(' ')).toContain('no quede vacío');
+  });
+});
+
+describe('edición que ninguna pantalla usaba', () => {
+  const ia = {
+    operaciones: [
+      { nombre: 'listarUsuarios', rf: 'RF-14', tipo: 'consulta', entidad: 'Usuario', actores: ['Administrador'], salida: ['correo', 'rol'] },
+      { nombre: 'crearUsuario', rf: 'RF-14', tipo: 'crear', entidad: 'Usuario', actores: ['Administrador'], entradas: ['correo', 'passwordHash', 'rol'] },
+      { nombre: 'actualizarUsuario', rf: 'RF-14', tipo: 'actualizar', entidad: 'Usuario', actores: ['Administrador'], entradas: ['correo', 'rol'] }
+    ],
+    pantallas: [{ id: 'usuarios', componentes: [
+      { tipo: 'tabla', operacion: 'listarUsuarios', campos: ['correo', 'rol'] },
+      { tipo: 'formulario', operacion: 'crearUsuario', campos: ['correo', 'passwordHash', 'rol'], acciones: [{ etiqueta: 'Crear usuario', operacion: 'crearUsuario' }] }
+    ] }]
+  };
+
+  test('la actualización propuesta por la IA se añade como «Editar» a la lista de la misma entidad', () => {
+    const { especificacion, advertencias } = depurar(ia);
+    const tabla = especificacion.pantallas[0].componentes[0];
+    expect(tabla.acciones).toEqual([{ etiqueta: 'Editar', operacion: 'actualizarUsuario' }]);
+    expect(advertencias.join(' ')).toContain('se añadió «Editar»');
+  });
+
+  test('al guardar la propuesta ya revisada se cablea igual, sin volver a llamar a la IA', () => {
+    const { especificacion } = depurar(ia);
+    const sinEditar = { ...especificacion, pantallas: especificacion.pantallas.map((p) => ({ ...p, componentes: p.componentes.map((c) => ({ ...c, acciones: c.acciones.filter((a) => a.etiqueta !== 'Editar') })) })) };
+    const revisada = new ApplicationSpecService({}).validar(sinEditar, { modelo, rf, pantallas });
+    expect(revisada.pantallas[0].componentes[0].acciones).toEqual([{ etiqueta: 'Editar', operacion: 'actualizarUsuario' }]);
+  });
+
+  test('no se añade a una lista que pertenece a un rol que no puede ejecutarla', () => {
+    const conRoles = [{ pantalla_id: 'pedido', nombre: 'Pedido', roles: ['Mesero'] }];
+    const { especificacion } = new ApplicationSpecService({}).depurar({
+      operaciones: [
+        { nombre: 'listarPedidos', rf: 'RF-15', tipo: 'consulta', entidad: 'Pedido', actores: ['Mesero'], salida: ['fechaHora'] },
+        { nombre: 'marcarPedido', rf: 'RF-06', tipo: 'actualizar', entidad: 'Pedido', actores: ['Cocinero'], entradas: ['estado'] }
+      ],
+      pantallas: [{ id: 'pedido', componentes: [{ tipo: 'tabla', operacion: 'listarPedidos', campos: ['fechaHora'] }] }]
+    }, { modelo, rf, pantallas: conRoles });
+    expect(especificacion.pantallas[0].componentes[0].acciones).toEqual([]);
+  });
+
+  test('un «Editar» que quedó en la pantalla de otro rol se retira y se vuelve a ubicar en la del rol correcto', () => {
+    const operaciones = [
+      { nombre: 'listarPedidos', rf: 'RF-15', tipo: 'consulta', entidad: 'Pedido', actores: ['Mesero'], salida: ['fechaHora'] },
+      { nombre: 'marcarPedido', rf: 'RF-06', tipo: 'actualizar', entidad: 'Pedido', actores: ['Cocinero'], entradas: ['estado'] }
+    ];
+    const conRoles = [{ pantalla_id: 'pedidos-mesero', nombre: 'A', roles: ['Mesero'] }, { pantalla_id: 'pedidos-cocina', nombre: 'B', roles: ['Personal de Cocina'] }];
+    const guardada = { operaciones: operaciones.map((op) => ({ ...op, estado_decision: 'confirmado' })), pantallas: [
+      { id: 'pedidos-mesero', componentes: [{ tipo: 'tabla', operacion: 'listarPedidos', campos: ['fechaHora'], acciones: [{ etiqueta: 'Editar', operacion: 'marcarPedido' }] }] },
+      { id: 'pedidos-cocina', componentes: [{ tipo: 'tabla', operacion: 'listarPedidos', campos: ['fechaHora'], acciones: [] }] }
+    ] };
+    const revisada = new ApplicationSpecService({}).validar(guardada, { modelo, rf, pantallas: conRoles });
+    const acciones = (id) => revisada.pantallas.find((p) => p.id === id).componentes[0].acciones;
+    expect(acciones('pedidos-mesero')).toEqual([]);
+    expect(acciones('pedidos-cocina')).toEqual([{ etiqueta: 'Editar', operacion: 'marcarPedido' }]);
+    expect(revisada.avisos.join(' ')).toContain('se retiró «Editar»');
+  });
+
+  test('la fecha del canje la pone el servidor', () => {
+    const plantuml = `@startuml
+class Canje {
+  +String id
+  +String fechaCanje
+  +int puntos
+}
+@enduml`;
+    const dominioCanje = new DomainModelExtractor().fromDiagrams([{ ...dominio, codigo_plantuml: plantuml }]);
+    const reqs = [{ aprobado: true, tipo: 'RF', identificador: 'RF-18', nombre: 'Canje de puntos', descripcion: 'x', actores: ['Cliente'] }];
+    const { especificacion } = new ApplicationSpecService({}).depurar({ operaciones: [{ nombre: 'canjear', rf: 'RF-18', tipo: 'crear', entidad: 'Canje', actores: ['Cliente'], entradas: ['fechaCanje', 'puntos'] }] }, { modelo: dominioCanje, rf: reqs, pantallas: [] });
+    expect(especificacion.operaciones[0].autoEntradas).toEqual([{ campo: 'fechaCanje', valor: 'ahora' }]);
+    expect(especificacion.operaciones[0].entradas).toEqual(['puntos']);
   });
 });
 

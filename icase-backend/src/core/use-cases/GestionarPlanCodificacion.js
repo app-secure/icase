@@ -428,7 +428,10 @@ class GestionarPlanCodificacion {
     const modelo = this.domainExtractor.fromDiagrams(diagramas);
     if (!modelo) throw new Error('No hay un diagrama de clases de dominio aprobado y vigente.');
     const rf = requerimientos.filter((item) => item.aprobado === true && String(item.tipo).toUpperCase() === 'RF');
-    const resultado = this.specService.validar({ operaciones, pantallas: propuesta.pantallas }, { modelo, rf });
+    // El árbol de navegación aporta los roles de cada pantalla: sin él, «Editar» podía cablearse a la pantalla de otro rol.
+    const diseno = this.disenoRepository ? await this.disenoRepository.obtenerPorProyecto(proyectoId) : null;
+    const pantallas = Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
+    const resultado = this.specService.validar({ operaciones, pantallas: propuesta.pantallas }, { modelo, rf, pantallas });
     if (resultado.errores.length) throw new Error(`Especificación inválida: ${resultado.errores.join(' ')}`);
     return { ...propuesta, operaciones: resultado.operaciones, pantallas: resultado.pantallas };
   }
