@@ -48,3 +48,34 @@ describe('reparto de modelos por complejidad', () => {
     expect(await run(env, {})).toEqual(['general']);
   });
 });
+
+describe('clasificación por contenido, no solo por nombre', () => {
+  const rf = (identificador, descripcion, extra = {}) => ({ identificador, nombre: descripcion.split('.')[0], descripcion, criterios_aceptacion: [], actores: ['Cajero'], ...extra });
+
+  test('un nombre engañoso se corrige con lo que piden los requisitos', () => {
+    const tablero = MockupComplexity.explicar({ nombre: 'Pantalla rara', rfs: ['RF-09'], requisitos: [rf('RF-09', 'El administrador consulta un listado de ventas con filtros por fecha y totales por medio de pago.')] });
+    expect(tablero.complejidad).toBe('densa');
+    expect(tablero.motivos.join(' ')).toMatch(/vistas de datos/);
+    const bienvenida = MockupComplexity.explicar({ nombre: 'Panel de bienvenida', rfs: ['RF-01'], requisitos: [rf('RF-01', 'El usuario ve un saludo.')] });
+    expect(bienvenida.puntos).toBe(2); // el nombre sugiere tablero y nada más lo confirma: sigue siendo un caso límite
+  });
+
+  test('un formulario de un solo requisito con muchos campos o criterios sube de nivel solo si hay más señales', () => {
+    const operaciones = [{ id: 'RF-08', schema: { properties: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`campo${i}`, {}])) } }];
+    const corto = MockupComplexity.explicar({ slug: 'formulario-de-cierre-de-caja', rfs: ['RF-08'], requisitos: [rf('RF-08', 'El cajero registra el cierre.')], operaciones });
+    expect(corto.complejidad).toBe('simple');
+    const largo = MockupComplexity.explicar({ slug: 'formulario-de-cierre-de-caja', rfs: ['RF-08'], requisitos: [rf('RF-08', 'El cajero registra el cierre con un resumen de totales por medio de pago.', { criterios_aceptacion: ['a', 'b', 'c', 'd'], actores: ['Cajero', 'Administrador'] })], operaciones });
+    expect(largo.complejidad).toBe('densa');
+  });
+
+  test('las líneas de detalle de un pedido hacen densa una pantalla de nombre simple', () => {
+    const resultado = MockupComplexity.explicar({ slug: 'detalle-de-pedido', rfs: ['RF-15'], requisitos: [rf('RF-15', 'El mesero registra un pedido con varios platos y su cantidad en cada línea de detalle.')] });
+    expect(resultado.complejidad).toBe('densa');
+    expect(resultado.motivos.join(' ')).toMatch(/líneas de detalle/);
+  });
+
+  test('sin requisitos ni contrato, funciona como antes (solo por nombre)', () => {
+    expect(MockupComplexity.of({ slug: 'cobros' })).toBe('densa');
+    expect(MockupComplexity.of({ slug: 'inicio-de-sesion-web' })).toBe('simple');
+  });
+});
