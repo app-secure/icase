@@ -30,12 +30,14 @@ class BedrockClient {
   }
 
   /** Respuesta completa de un modelo: `{ text, stopReason, truncated, usage }`. */
-  async converse({ modelId, prompt, system = '', maxTokens = 8000, temperature = 0.3, timeout = 90000 }) {
+  /** `temperature: null` la omite (hay modelos que no la admiten); `extra` viaja como additionalModelRequestFields (por ejemplo el nivel de razonamiento). */
+  async converse({ modelId, prompt, system = '', maxTokens = 8000, temperature = 0.3, timeout = 90000, extra = null }) {
     if (!this.apiKey) throw Object.assign(new Error('BEDROCK_API_KEY no configurada'), { response: { status: 401 } });
     if (!modelId) throw new Error('Falta el identificador del modelo de Bedrock (BEDROCK_*_MODELS).');
     const body = {
       messages: [{ role: 'user', content: [{ text: prompt }] }],
-      inferenceConfig: { maxTokens, temperature },
+      inferenceConfig: { maxTokens, ...(temperature === null ? {} : { temperature }) },
+      ...(extra ? { additionalModelRequestFields: extra } : {}),
       ...(system ? { system: [{ text: system }] } : {})
     };
     const response = await this.transport.post(this.url(modelId), body, {
