@@ -93,3 +93,36 @@ describe('«Ver» en una fila', () => {
     expect(root.querySelector('[data-icase-detail]')).toBeNull();
   });
 });
+
+describe('paginación del diseño con el total real', () => {
+  const page = `<main><div><table><thead><tr><th>Número</th></tr></thead><tbody>
+<tr><td>Mesa 01</td></tr><tr><td>Mesa 02</td></tr></tbody></table>
+<div><p>Mostrando 2 de 18 mesas</p><div><button type="button">Anterior</button><button type="button" class="bg-blue-600 text-white">1</button><button type="button" class="border">2</button><button type="button" class="border">3</button><button type="button">Siguiente</button></div></div></div></main>`;
+  const data = Array.from({ length: 5 }, (_, index) => ({ id: index + 1, numero: `Mesa ${index + 1}` }));
+  const bind = async () => {
+    const document = new JSDOM(page).window.document;
+    const root = document.querySelector('main');
+    await live.bindLiveTables({ root, blocks: [{ tipo: 'tabla', operacion: 'l', campos: ['numero'], acciones: [] }], actions: { l: { type: 'consulta', capability: 'rf-04', entity: 'mesa', path: '/x', output: ['numero'] } }, api: jest.fn().mockResolvedValue(data), can: () => true });
+    return { root, info: () => root.querySelector('p').textContent, labels: () => [...root.querySelectorAll('button')].map((button) => button.textContent), rows: () => [...root.querySelectorAll('tbody tr')].map((row) => row.textContent.trim()) };
+  };
+
+  test('el texto y los botones de página reflejan el total real y paginan con el tamaño del diseño', async () => {
+    const view = await bind();
+    expect(view.info()).toBe('Mostrando 2 de 5 mesas');
+    expect(view.labels()).toEqual(['Anterior', '1', '2', '3', 'Siguiente']);
+    expect(view.rows()).toEqual(['Mesa 1', 'Mesa 2']);
+    [...view.root.querySelectorAll('button')].find((button) => button.textContent === '3').click();
+    expect(view.rows()).toEqual(['Mesa 5']);
+    expect(view.info()).toBe('Mostrando 1 de 5 mesas');
+    [...view.root.querySelectorAll('button')].find((button) => button.textContent === 'Anterior').click();
+    expect(view.rows()).toEqual(['Mesa 3', 'Mesa 4']);
+  });
+
+  test('al filtrar vuelve a la primera página, recalcula el total y oculta los botones si cabe en una', async () => {
+    const view = await bind();
+    live.filterLive(view.root, { numero: 'Mesa 4' });
+    expect(view.rows()).toEqual(['Mesa 4']);
+    expect(view.info()).toBe('Mostrando 1 de 1 mesas');
+    expect(view.root.querySelector('button').parentElement.style.display).toBe('none');
+  });
+});

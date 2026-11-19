@@ -86,3 +86,20 @@ describe('controles de acceso y grupos de botones', () => {
     expect(html).toContain('<button>Guardar</button>');
   });
 });
+
+describe('estructura común del mockup', () => {
+  const MockupVisualComposer = require('../src/infrastructure/services/MockupVisualComposer');
+  const compose = (main, screen = { nombre: 'Pantalla de usuarios', slug: 'usuarios', plataforma: 'web' }) => MockupVisualComposer.compose(`<html><head></head><body><main>${main}</main></body></html>`, { screen, manifest: [screen], identity: {}, name: 'App' });
+
+  test('una pantalla que empieza directamente por la tarjeta recibe su título, sin el prefijo «Pantalla de»', () => {
+    const html = compose('<div class="card"><table><tr><td>x</td></tr></table></div>');
+    expect(html).toMatch(/<main[^>]*><h1[^>]*>Usuarios<\/h1><div class="card"/);
+  });
+
+  test('si ya tiene título no se añade otro, y las tablas no se fuerzan a display:block', () => {
+    const html = compose('<h1>Mis usuarios</h1><div><table class="w-full"></table></div>');
+    expect(html.match(/<h1/g)).toHaveLength(1);
+    expect(html).not.toContain('.icase-content table{display:block');
+    expect(html).toContain(':has(>table){overflow-x:auto}');
+  });
+});

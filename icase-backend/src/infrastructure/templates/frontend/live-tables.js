@@ -152,9 +152,58 @@ export function filterLive(root, given = {}) {
       const texts = field ? [display(row, field), String(row[field] ?? '')] : Object.keys(row).filter((item) => item !== 'id' && !item.endsWith('__etiqueta')).map((item) => display(row, item));
       return texts.some((text) => plain(text).includes(term));
     }));
-    list.render(rows);
+    list.render(rows, true);
   }
   return true;
+}
+
+/**
+ * Pie de paginación del diseño junto a la tabla: el texto «Mostrando 5 de 18 usuarios» y los botones Anterior / 1 / 2 / Siguiente.
+ * Devuelve null si el diseño no trae uno. `size` es el número de filas de ejemplo del diseño (lo que cabe en una página).
+ */
+function findPager(table, size) {
+  let scope = table.parentElement;
+  for (let depth = 0; scope && depth < 4; depth += 1, scope = scope.parentElement) {
+    const info = Array.from(scope.querySelectorAll('p, span, div')).find((element) => !element.children.length && !table.contains(element) && /mostrando\s+\d+(?:\s*[-–]\s*\d+)?\s+de\s+\d+/i.test(element.textContent));
+    if (!info) continue;
+    const buttons = Array.from(scope.querySelectorAll('button')).filter((button) => !table.contains(button));
+    const prev = buttons.find((button) => plain(button.textContent) === 'anterior');
+    const next = buttons.find((button) => plain(button.textContent) === 'siguiente');
+    const numbers = buttons.filter((button) => /^\d+$/.test(button.textContent.trim()));
+    const active = numbers.find((button) => /text-white/.test(button.className)) || numbers[0];
+    const inactive = numbers.find((button) => button !== active) || active;
+    const bar = (next || prev || active)?.parentElement || null;
+    const template = info.textContent;
+    const document = table.ownerDocument;
+    return {
+      size: Math.max(1, size),
+      update({ total, shown, page, pages, go }) {
+        info.textContent = template.replace(/(mostrando\s+)\d+(?:\s*[-–]\s*\d+)?(\s+de\s+)\d+/i, `$1${shown}$2${total}`);
+        if (!bar) return;
+        bar.style.display = pages > 1 ? '' : 'none';
+        numbers.forEach((button) => button.remove());
+        numbers.length = 0;
+        if (active) {
+          for (let number = 1; number <= pages; number += 1) {
+            const button = (number === page ? active : inactive).cloneNode(true);
+            button.textContent = String(number);
+            button.disabled = false;
+            button.onclick = (event) => { event.preventDefault(); go(number); };
+            numbers.push(button);
+            bar.insertBefore(button, next && next.parentElement === bar ? next : null);
+          }
+        }
+        for (const [button, target, blocked] of [[prev, page - 1, page <= 1], [next, page + 1, page >= pages]]) {
+          if (!button) continue;
+          button.disabled = blocked;
+          button.classList.toggle('opacity-40', blocked);
+          button.onclick = (event) => { event.preventDefault(); if (!blocked) go(target); };
+        }
+        void document;
+      }
+    };
+  }
+  return null;
 }
 
 const labelOf = (row) => { for (const key of ['nombre', 'name', 'titulo', 'numero', 'codigo', 'descripcion']) if (row[key] !== undefined && row[key] !== null && String(row[key]).trim()) return String(row[key]); return `#${row.id}`; };
@@ -247,7 +296,18 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
       if (sampleCell?.querySelector('form, button, a, input, select')) return null; // columna de acciones
       return matchField(header, fields, action.entity, types);
     });
-    const render = (list) => {
+    // «Mostrando 5 de 18 usuarios» y los botones de página del diseño pasan a reflejar los registros reales.
+    const pager = findPager(table, samples.length);
+    const state = { page: 1 };
+    let current = rows;
+    const render = (all, reset = false) => {
+      current = all;
+      if (reset) state.page = 1;
+      const size = pager ? pager.size : all.length || 1;
+      const pages = Math.max(1, Math.ceil(all.length / size));
+      state.page = Math.min(Math.max(1, state.page), pages);
+      const list = pager ? all.slice((state.page - 1) * size, state.page * size) : all;
+      if (pager) pager.update({ total: all.length, shown: list.length, page: state.page, pages, go: (page) => { state.page = page; render(current); } });
       body.replaceChildren();
       if (!list.length) {
         const empty = body.ownerDocument.createElement('tr');

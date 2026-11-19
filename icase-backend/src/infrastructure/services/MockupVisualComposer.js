@@ -194,6 +194,16 @@ function cleanTitle(root) {
   if (/^(?:vista|pantalla|formulario|listado)\b/i.test(text)) heading.childNodes = [{ nodeName: '#text', value: cleanLabel(text), parentNode: heading }];
 }
 
+/** Una pantalla sin título (el modelo empezó directamente por la tarjeta) recibe el suyo, con el nombre de la pantalla. */
+function ensureTitle(root, screen) {
+  if (find(root, 'h1')) return;
+  const name = cleanLabel(screen.nombre || screen.nombre_visible || String(screen.slug || screen.nombre_pantalla || '').replace(/-/g, ' '));
+  if (!name) return;
+  const heading = { nodeName: 'h1', tagName: 'h1', attrs: [{ name: 'class', value: 'text-2xl font-bold mb-6 text-[#0f172a]' }], namespaceURI: root.namespaceURI, childNodes: [], parentNode: root };
+  heading.childNodes.push({ nodeName: '#text', value: name, parentNode: heading });
+  root.childNodes = [heading, ...(root.childNodes || [])];
+}
+
 // Pantallas de segundo nivel: se llega a ellas desde otra y no son un destino de la barra inferior.
 const SECONDARY = /\b(?:detalle|formulario|confirmacion|confirmar|editar|edicion|nuevo|nueva|crear|registro de)\b/;
 const isPrimary = (item) => !SECONDARY.test(plain(item.nombre));
@@ -233,7 +243,7 @@ const STYLE = `
   .icase-layout{display:flex;flex:1;min-height:0}.icase-nav{width:230px;flex-shrink:0;padding:12px;border-right:1px solid #e2e8f0;background:var(--icase-surface,#fff);overflow:auto}.icase-nav a{display:block;padding:10px;border-radius:8px;overflow-wrap:anywhere}.icase-nav a[aria-current]{background:var(--icase-primary,#0b57d0);color:white}
   .icase-content{padding:20px;flex:1;min-width:0;overflow:auto;overscroll-behavior:contain}.icase-content>main{width:auto!important;height:auto!important;min-height:0!important}
   .icase-menu{padding:8px 16px;border-bottom:1px solid #e2e8f0;background:var(--icase-surface,#fff)}.icase-menu summary{cursor:pointer}.icase-menu .icase-nav{width:100%;max-height:240px;border:0}
-  .icase-content input,.icase-content select,.icase-content textarea{max-width:100%}.icase-content table{display:block;max-width:100%;overflow:auto}
+  .icase-content input,.icase-content select,.icase-content textarea{max-width:100%}.icase-content table{max-width:100%}.icase-content :is(div,section,article):has(>table){overflow-x:auto}
   .icase-content img,.icase-content svg,.icase-content video,.icase-content canvas{max-width:100%;height:auto}
   .icase-content form{max-width:100%}.icase-content .h-screen,.icase-content .min-h-screen{height:auto!important;min-height:0!important}.icase-content .w-screen{width:100%!important}
   .icase-content .fixed{position:sticky!important}
@@ -301,6 +311,7 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   showReadonlyAsText(content);
   cleanTitle(content);
   const kind = kindOf(screen);
+  if (kind !== 'auth') ensureTitle(content, screen);
   if (kind === 'auth') { scrubAccess(content, { brand: identity.nombre_aplicacion || name, screen }); uiOnlyActions(content); }
   const fragment = serialize(content);
   const styles = [];
