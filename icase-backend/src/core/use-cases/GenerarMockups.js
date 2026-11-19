@@ -11,6 +11,7 @@ const MockupChatCorrectionService = require('../../infrastructure/services/Mocku
 const MockupContentRepair = require('../../infrastructure/services/MockupContentRepair');
 const MockupContentLint = require('../../infrastructure/services/MockupContentLint');
 const MockupComplexity = require('../services/MockupComplexity');
+const MockupScreenRole = require('../services/MockupScreenRole');
 const MockupFormRepairService = require('../../infrastructure/services/MockupFormRepairService');
 
 class GenerarMockups {
@@ -83,6 +84,7 @@ class GenerarMockups {
       this._enriquecerPlataformas(pantallasDerivadas, requerimientos),
       requerimientos
     );
+    this._pantallasArbolActual = pantallasArbol; // el papel de cada pantalla (formulario, listado…) se decide mirando también a sus hermanas
     const disenoExistente = await this.disenoRepository.obtenerPorProyecto(proyectoId);
     const sistemaDiseno = this._normalizarSistemaDiseno(disenoExistente?.sistema_diseno);
     const contratoEnlaces = this.bindingService.contrato({ proyecto, requerimientos, diagramas });
@@ -289,7 +291,7 @@ class GenerarMockups {
           const validacionInicial = this.validator.validar(htmlInicial);
           const nombreIncorrecto = primerResultado && primerResultado.nombre_pantalla !== lote[0];
           // Un script (que se elimina) o una pantalla de carga/casi vacía no sirve como maqueta: se pide de nuevo con el motivo exacto.
-          const defectosContenido = primerResultado && !esAjusteChat && !soloReparar ? new MockupContentLint().revisar(htmlInicial, primerResultado.ajustes_sanitizacion) : [];
+          const defectosContenido = primerResultado && !esAjusteChat && !soloReparar ? new MockupContentLint().revisar(htmlInicial, primerResultado.ajustes_sanitizacion, { papel: MockupScreenRole.of(pantallaObjetivo || {}, pantallasArbol) }) : [];
           if (!soloReparar && !esAjusteChat && (!primerResultado || !validacionInicial.valido || nombreIncorrecto || defectosContenido.length)) {
             const motivos = nombreIncorrecto
               ? `nombre_pantalla debe ser exactamente "${lote[0]}"`
@@ -508,7 +510,9 @@ ${seccionesDiagramas}`;
         const trazabilidad = p.rf_trazabilidad?.length
           ? ` | RF asociados que debe evidenciar: ${p.rf_trazabilidad.join(', ')}`
           : ' | RF asociados: ninguno inferido; no inventes identificadores';
-        return `${i + 1}. ${p.nombre} | tipo: ${p.tipo} | flujo: ${p.flujo} | módulo: ${p.modulo} | plataforma: ${p.plataforma} | roles: ${p.roles.join(', ')} | shell: ${p.shell} | ruta: ${p.ruta}${componentes}${trazabilidad} | slug sugerido: ${p.slug}`;
+        const papel = MockupScreenRole.of(p, this._pantallasArbolActual || pantallas);
+        const hermano = papel.formularioHermano ? ` | su formulario de alta o edición es la pantalla «${papel.formularioHermano}»: NO dibujes aquí sus campos; deja un botón «Nuevo» con data-accion="ui"` : '';
+        return `${i + 1}. ${p.nombre} | tipo: ${papel.tipo}${hermano} | flujo: ${p.flujo} | módulo: ${p.modulo} | plataforma: ${p.plataforma} | roles: ${p.roles.join(', ')} | shell: ${p.shell} | ruta: ${p.ruta}${componentes}${trazabilidad} | slug sugerido: ${p.slug}`;
       })
       .join('\n');
 
@@ -526,7 +530,8 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
 - Todas las pantallas con el mismo shell deben repetir exactamente logo/nombre, navegación, colores, usuario y texto de estado. No agregues opciones diferentes entre pantallas hermanas.
 - Los campos, tablas y filtros de cada pantalla se toman del Diagrama de Clases y de los Requerimientos Funcionales asociados a esa pantalla concreta.
 - Si una pantalla indica "componentes que DEBEN aparecer dentro de esta misma pantalla", esos elementos (botones, campos, indicadores, teclados, etc.) son PARTE de esa pantalla: dibújalos dentro del mismo mockup, nunca como pantallas aparte.
-- Si una pantalla es un listado, la tabla debe mostrar las entidades del módulo. Si es un formulario, los inputs deben ser los atributos de la entidad. Si es un detalle, debe resumir la entidad con sus estados.`;
+- Si una pantalla es un listado, la tabla debe mostrar las entidades del módulo. Si es un formulario, los inputs deben ser los atributos de la entidad. Si es un detalle, debe resumir la entidad con sus estados.
+- Cada pantalla hace UNA cosa según su tipo. tipo form: solo el formulario con sus botones de guardar y cancelar; PROHIBIDO añadir tablas, listados o historiales (van en su pantalla de listado). tipo list: buscador o filtros y la tabla; el alta o edición va en su pantalla de formulario, no aquí. tipo detail: resumen de un registro de solo lectura, con sus acciones.`;
   }
 
   _limpiarNombreNodo(texto) {
