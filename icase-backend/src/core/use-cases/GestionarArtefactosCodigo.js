@@ -259,7 +259,7 @@ class GestionarArtefactosCodigo {
     const acciones = (contratoOperaciones?.operations || []).flatMap((operation) => operation.actions || []);
     const identidad = contratoOperaciones?.identity || null;
     const referencias = contratoOperaciones?.references || null;
-    const input = { contrato_generacion: 'frontend-v35-lf', identidad, referencias, analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
+    const input = { contrato_generacion: 'frontend-v36-lf', identidad, referencias, analisis: require('../services/RequirementAnalysisContext').contextOf(proyecto.auditoria_requisitos), requerimientos: requisitosAprobados.map(({ identificador, tipo, titulo, nombre, descripcion }) => ({ identificador, tipo, titulo, nombre, descripcion })), decisiones, manifiesto: diseno.manifiesto_navegacion || [], mockups: diseno.mockups || [], sistema_diseno: diseno.sistema_diseno || {} };
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'codigo_frontend');
     const seleccion = decisiones.stack_tecnologico?.plataformas ?? decisiones.alcance_plataforma?.plataformas ?? ['web'];

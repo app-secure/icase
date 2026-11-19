@@ -243,7 +243,7 @@ const STYLE = `
   .icase-layout{display:flex;flex:1;min-height:0}.icase-nav{width:230px;flex-shrink:0;padding:12px;border-right:1px solid #e2e8f0;background:var(--icase-surface,#fff);overflow:auto}.icase-nav a{display:block;padding:10px;border-radius:8px;overflow-wrap:anywhere}.icase-nav a[aria-current]{background:var(--icase-primary,#0b57d0);color:white}
   .icase-content{padding:20px;flex:1;min-width:0;overflow:auto;overscroll-behavior:contain}.icase-content>main{width:auto!important;height:auto!important;min-height:0!important}
   .icase-menu{padding:8px 16px;border-bottom:1px solid #e2e8f0;background:var(--icase-surface,#fff)}.icase-menu summary{cursor:pointer}.icase-menu .icase-nav{width:100%;max-height:240px;border:0}
-  .icase-content input,.icase-content select,.icase-content textarea{max-width:100%}.icase-content table{max-width:100%}.icase-content :is(div,section,article):has(>table){overflow-x:auto}
+  .icase-content input,.icase-content select,.icase-content textarea{max-width:100%}.icase-content table{max-width:100%}.icase-content :is(div,section,article):has(>table){overflow-x:auto}.icase-content>[class*="max-w-"]:not([class*="mx-auto"]){margin-left:auto;margin-right:auto}.icase-content .grid:has(>:only-child){grid-template-columns:minmax(0,1fr)!important}.icase-content .grid:has(>:only-child)>*{grid-column:auto!important}
   .icase-content img,.icase-content svg,.icase-content video,.icase-content canvas{max-width:100%;height:auto}
   .icase-content form{max-width:100%}.icase-content .h-screen,.icase-content .min-h-screen{height:auto!important;min-height:0!important}.icase-content .w-screen{width:100%!important}
   .icase-content .fixed{position:sticky!important}

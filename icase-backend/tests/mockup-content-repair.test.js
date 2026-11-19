@@ -103,3 +103,16 @@ describe('estructura común del mockup', () => {
     expect(html).toContain(':has(>table){overflow-x:auto}');
   });
 });
+
+describe('alineación del contenido en la estructura común y en la app', () => {
+  test('un contenedor angosto sin mx-auto se centra, y una rejilla con un solo hijo ocupa todo el ancho', () => {
+    const MockupVisualComposer = require('../src/infrastructure/services/MockupVisualComposer');
+    const html = MockupVisualComposer.compose('<html><head></head><body><main><div class="max-w-2xl p-8"><h1>X</h1></div></main></body></html>', { screen: { nombre: 'Edición', slug: 'edicion', plataforma: 'web' }, manifest: [], identity: {}, name: 'App' });
+    expect(html).toContain('.icase-content>[class*="max-w-"]:not([class*="mx-auto"]){margin-left:auto;margin-right:auto}');
+    expect(html).toContain('.icase-content .grid:has(>:only-child){grid-template-columns:minmax(0,1fr)!important}');
+    const GenericFrontendGenerator = require('../src/infrastructure/services/GenericFrontendGenerator');
+    const files = new GenericFrontendGenerator().generate({ proyecto: { nombre: 'App' }, screens: [{ nombre: 'Edición', slug: 'edicion', plataforma: 'web', roles: [], rf_trazabilidad: ['RF-01'] }], decisiones: { stack_tecnologico: { plataformas: ['web'] } } });
+    const css = files.find((file) => file.ruta === 'frontend/src/styles.css').contenido;
+    expect(css).toContain('.mockup-content>[class*="max-w-"]:not([class*="mx-auto"])');
+  });
+});
