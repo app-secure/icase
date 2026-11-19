@@ -48,6 +48,47 @@ async function withLabels(store, def, rows) {
   });
 }
 
+/** Datos del registro relacionado en cada fila (el pedido de una comanda): sus campos, nombres de referencias, platos, y sin lo ya despachado. */
+async function relate(store, def, rows) {
+  if (!def.relacionadas?.length || !rows.length) return rows;
+  const all = async (capability) => { const listed = await store.list(capability, {}, null); return (Array.isArray(listed) ? listed : listed?.data || []).map(flat); };
+  let result = rows;
+  for (const rel of def.relacionadas) {
+    const related = new Map();
+    for (const record of await all(rel.capability)) if (!related.has(String(record[rel.via]))) related.set(String(record[rel.via]), record);
+    const names = {};
+    for (const [campo, capability] of Object.entries(rel.referencias || {})) {
+      try { names[campo] = new Map((await all(capability)).map((record) => [String(record.id), labelOf(record)])); } catch { names[campo] = new Map(); }
+    }
+    let items = null;
+    if (rel.items) {
+      try {
+        const labels = new Map((await all(rel.items.destinoCapability)).map((record) => [String(record.id), labelOf(record)]));
+        items = new Map();
+        for (const line of await all(rel.items.capability)) {
+          const key = String(line[rel.items.fk]);
+          items.set(key, [...(items.get(key) || []), `${line[rel.items.cantidad]}× ${labels.get(String(line[rel.items.referencia])) || '?'}`]);
+        }
+      } catch { items = null; }
+    }
+    result = result
+      .filter((row) => { const record = related.get(String(row.id)); return !(record && rel.estado && (rel.excluir || []).includes(record[rel.estado])); })
+      .map((row) => {
+        const record = related.get(String(row.id));
+        if (!record) return row;
+        const extra = {};
+        for (const campo of rel.campos) {
+          extra[`${rel.clave}_${campo}`] = record[campo];
+          const label = names[campo]?.get(String(record[campo]));
+          if (label) extra[`${rel.clave}_${campo}__etiqueta`] = label;
+        }
+        if (items) extra[`${rel.clave}_items`] = (items.get(String(record.id)) || []).join(', ');
+        return { ...row, ...extra };
+      });
+  }
+  return result;
+}
+
 /** Operación que atiende un método y una ruta (con o sin identificador); null si no existe. */
 function find(slug, method, hasId) {
   const direct = definitions.find((item) => slugOf(item.name) === slug && item.method === method && Boolean(item.byId) === Boolean(hasId));
@@ -142,7 +183,9 @@ async function run(store, def, ctx = {}) {
       const list = (Array.isArray(rows) ? rows : rows?.data || []).map(flat);
       const rest = filters.filter((filter) => filter.operador !== '==');
       const kept = rest.length ? list.filter((row) => rest.every((filter) => row[filter.campo] !== undefined && compare(row[filter.campo], filter.operador, filter.value))) : list;
-      return withLabels(store, def, def.output?.length ? kept.map((row) => ({ id: row.id, ...pick(row, def.output) })) : kept);
+      const related = await relate(store, def, kept);
+      const labelsOf = (row) => Object.fromEntries(Object.entries(row).filter(([key]) => key.endsWith('__etiqueta') && (def.output || []).includes(key.slice(0, -'__etiqueta'.length))));
+      return withLabels(store, def, def.output?.length ? related.map((row) => ({ id: row.id, ...pick(row, def.output), ...labelsOf(row) })) : related);
     }
     case 'crear': {
       const values = pick(body, def.inputs || []);
@@ -175,12 +218,20 @@ async function run(store, def, ctx = {}) {
       return { deleted: true, id: ctx.id };
     }
     case 'transicion': {
-      const current = await store.getRecord(def.capability, ctx.id, ctx.scope || null);
+      // «Marcar lista» una comanda: el estado es del pedido que la referencia; el identificador de la ruta es el de la comanda.
+      let targetId = ctx.id;
+      if (def.sobre) {
+        const found = await store.list(def.capability, { [def.sobre.via]: ctx.id }, ctx.scope || null);
+        const rows = (Array.isArray(found) ? found : found?.data || []).map(flat);
+        if (!rows.length) throw new ActionError(404, 'Registro inexistente');
+        targetId = rows[0].id;
+      }
+      const current = await store.getRecord(def.capability, targetId, ctx.scope || null);
       if (!current) throw new ActionError(404, 'Registro inexistente');
       const { campo, de = [], a } = def.transition;
       const actual = current.data?.[campo];
       if (de.length && !de.includes(actual)) throw new ActionError(409, `No se puede pasar de «${actual ?? 'sin valor'}» a «${a}»: el estado debe ser ${de.join(' o ')}.`);
-      return flat(await store.update(def.capability, ctx.id, { [campo]: a }, ctx.scope || null));
+      return flat(await store.update(def.capability, targetId, { [campo]: a }, ctx.scope || null));
     }
     default:
       throw new ActionError(500, 'Tipo de operación no soportado.');

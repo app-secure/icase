@@ -42,8 +42,8 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...(functional && this._specScreensE2eTest({ screens: this._allFrontendScreens(frontend), contract, auth }) ? [{ ruta: 'tests/e2e/spec-screens.spec.js', lenguaje: 'javascript', contenido: this._specScreensE2eTest({ screens: this._allFrontendScreens(frontend), contract, auth }) }] : []),
       ...(designedUi ? [{ ruta: 'tests/e2e/designed-ui.spec.js', lenguaje: 'javascript', contenido: designedUi }] : []),
       ...(auth.habilitada ? [{ ruta: 'tests/e2e/auth.spec.js', lenguaje: 'javascript', contenido: this._authE2eTest(routes) }] : []),
-      ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._adminScreens(frontend)))}] : []),
-      ...(contract.eventos_cambios?.experimental ? [{ ruta: 'tests/e2e/change-events.spec.js', lenguaje: 'javascript', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/frontend/change-events.e2e.template'), 'utf8').replace('__SCREENS__', JSON.stringify(this._adminScreens(frontend))).replace('__SAMPLES__', () => samplePayload.runtimeSource()) }] : []),
+      ...(contract.extensions?.enabled?.length ? [{ruta:'tests/e2e/extensions.spec.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.e2e.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled)).replace('__SCREENS__',JSON.stringify(this._adminScreens(frontend, contract, auth)))}] : []),
+      ...(contract.eventos_cambios?.experimental ? [{ ruta: 'tests/e2e/change-events.spec.js', lenguaje: 'javascript', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/frontend/change-events.e2e.template'), 'utf8').replace('__SCREENS__', JSON.stringify(this._adminScreens(frontend, contract, auth))).replace('__SAMPLES__', () => samplePayload.runtimeSource()) }] : []),
       { ruta: 'tests/playwright.config.js', lenguaje: 'javascript', contenido: "import { defineConfig } from '@playwright/test';\n// Tiempos holgados: la verificación corre en contenedores que comparten CPU con la compilación y otras ejecuciones.\nexport default defineConfig({ testDir: './e2e', workers: 1, timeout: 120000, expect: { timeout: 15000 }, retries: 1, use: { baseURL: process.env.BASE_WEB_URL || 'http://localhost:5173', actionTimeout: 30000, navigationTimeout: 60000, trace: 'retain-on-failure' } });\n" },
       { ruta: 'tests/README.md', lenguaje: 'markdown', contenido: this._readme(backend.version, frontend.version) }
     ];
@@ -100,10 +100,15 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
 
   /**
    * Pantallas que el administrador puede abrir y con registros suyos: las pruebas de módulos (adjuntos, reportes, cambios en vivo) crean
-   * los registros con la sesión del administrador, y una pantalla de otro rol («propios») no los mostraría.
+   * los registros con la sesión del administrador, y una pantalla de otro rol («propios») no los mostraría. Con sesión, además, está su
+   * consola de datos (`/datos/<operación>`), que muestra el editor genérico de cada operación.
    */
-  _adminScreens(frontend) {
-    return this._frontendScreens(frontend).filter((screen) => !(screen.roles || []).length || (screen.roles || []).includes('administrador'));
+  _adminScreens(frontend, contract = {}, auth = {}) {
+    const own = this._frontendScreens(frontend).filter((screen) => !(screen.roles || []).length || (screen.roles || []).includes('administrador'));
+    if (!auth.habilitada) return own;
+    const hasConsole = frontend.archivos?.some((file) => file.ruta === 'frontend/src/DataConsole.jsx');
+    const consoleScreens = hasConsole ? (contract.operations || []).filter((operation) => operation.entity && !operation.identity).map((operation) => ({ id: 'datos-' + operation.key, name: operation.name, route: '/datos/' + operation.key, operations: [operation.key], roles: ['administrador'] })) : [];
+    return [...own, ...consoleScreens];
   }
 
   _allFrontendScreens(frontend) {

@@ -47,7 +47,7 @@ test('rechaza seleccionar móvil cuando no existe ninguna pantalla móvil aproba
 
 test('las rutas web toman en cuenta los roles de las pantallas', () => {
   const app = generate().find((file) => file.ruta === 'frontend/src/App.jsx').contenido;
-  expect(app).toContain('"roles":["Administrador"]');
+  expect(app).toContain('"roles":["administrador"]');
   expect(app).toContain('puedeAbrirPantalla');
   expect(app).toContain('Navigate to={home}');
   expect(app).toContain("'/sin-acceso'");

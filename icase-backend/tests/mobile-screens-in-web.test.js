@@ -31,3 +31,26 @@ describe('pantallas móviles en una aplicación solo web', () => {
     expect(files.some((file) => file.ruta.startsWith('mobile/'))).toBe(false);
   });
 });
+
+describe('consola de datos del administrador', () => {
+  const generar = () => new GenericFrontendGenerator().generate({
+    proyecto: { nombre: 'Restaurante' },
+    screens: [{ nombre: 'Inventario interno', slug: 'inventario-interno', plataforma: 'web', roles: ['Administrador'], rf_trazabilidad: ['RF-02'] }],
+    requerimientos: [{ aprobado: true, tipo: 'RF', identificador: 'RF-02', nombre: 'Inventario' }],
+    decisiones: {
+      stack_tecnologico: { plataformas: ['web'] },
+      control_acceso: { autenticacion: { metodo: 'jwt' }, roles: [{ id: 'administrador', nombre: 'Administrador', incluir: true }] }
+    }
+  });
+
+  test('con sesión, el administrador tiene /datos con el editor genérico de cada operación', () => {
+    const files = generar();
+    const consola = files.find((file) => file.ruta === 'frontend/src/DataConsole.jsx');
+    expect(consola.contenido).toContain('"key":"rf-02"');
+    expect(() => transformSync(consola.contenido, { loader: 'jsx' })).not.toThrow();
+    const app = files.find((file) => file.ruta === 'frontend/src/App.jsx').contenido;
+    expect(app).toContain('path="/datos/:key"');
+    expect(app).toContain("import DataConsole from './DataConsole'");
+    expect(() => transformSync(app, { loader: 'jsx' })).not.toThrow();
+  });
+});

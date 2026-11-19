@@ -125,7 +125,7 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
   const read = (target) => (accounts ? accountFields(collectFields(target, { requireForm: true })) : collectFields(target, { requireForm: true }));
   const ask = confirmar || ((message) => (typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true));
   try {
-    const porBoton = verb === 'editar' && named && named.booleanos && named.booleanos.length === 1; // «Marcar agotado»: el texto del botón es la orden
+    const porBoton = verb === 'editar' && named && ((named.booleanos && named.booleanos.length === 1) || named.inputs.length === 0); // «Marcar agotado»: el texto del botón es la orden
     if (['crear', 'editar'].includes(verb) && !porBoton && (!control || !formOf(control))) {
       return onResult({ estado: 'aviso', mensaje: 'Esta acción necesita un formulario asociado antes de guardar.' });
     }

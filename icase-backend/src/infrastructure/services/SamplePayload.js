@@ -649,10 +649,18 @@ async function exerciseAction(api, operations, action) {
     } else if (action.type === 'transicion') {
       const { campo, de = [], a } = action.transition;
       const seed = await createValidRecord(api, operations, target, cleanups, 0);
+      // La transición sobre el registro relacionado (marcar lista una comanda) se invoca con el id del registro de origen.
+      let routeId = seed.id;
+      if (action.sobre) {
+        const source = operations.find((item) => item.entity === action.sobre.entidadClave);
+        if (!source) fail('no tiene operación para ' + action.sobre.entidad);
+        routeId = (await createValidRecord(api, operations, source, cleanups, 0)).id;
+        expectStatus(await api(itemPath(seed.id), 'PATCH', { [action.sobre.via]: routeId }), 200, 'vincular el registro relacionado');
+      }
       if (de.length) expectStatus(await api(itemPath(seed.id), 'PATCH', { [campo]: de[0] }), 200, 'preparar el estado de origen');
-      const response = expectStatus(await api(route(seed.id), 'POST', {}), 200, 'cambiar de estado');
+      const response = expectStatus(await api(route(routeId), 'POST', {}), 200, 'cambiar de estado');
       if (response.data[campo] !== a) fail('el estado quedó en ' + response.data[campo] + ' (se esperaba ' + a + ')');
-      if (de.length && !de.includes(a)) expectStatus(await api(route(seed.id), 'POST', {}), 409, 'repetir una transición no permitida');
+      if (de.length && !de.includes(a)) expectStatus(await api(route(routeId), 'POST', {}), 409, 'repetir una transición no permitida');
     } else fail('tipo de operación desconocido: ' + action.type);
   } finally {
     for (const cleanup of cleanups) await Promise.resolve(cleanup()).catch(() => {});

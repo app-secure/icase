@@ -229,7 +229,7 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
     try { const data = await api(action.path); rows = Array.isArray(data) ? data : []; } catch { continue; }
     if (!grids[index].isConnected) return;
     const fields = [...new Set([...(leftover[index].campos || []), ...(action.output || [])])].filter((name) => name !== 'id');
-    fillCards(grids[index], rows, fields.length ? fields : Object.keys(rows[0] || {}).filter((key) => key !== 'id' && !key.endsWith('__etiqueta')), onAction);
+    fillCards(grids[index], rows, fields.length ? fields : Object.keys(rows[0] || {}).filter((key) => key !== 'id' && !key.endsWith('__etiqueta')), onAction, action.relacionadas || []);
     bound += 1;
   }
   notifySamples(root, lists.length - bound, onShowOperations);
@@ -268,7 +268,15 @@ function cardValue(row, name) {
  * Sustituye las tarjetas de ejemplo por los registros reales conservando el aspecto de la tarjeta (sus clases) y sus botones: el contenido
  * es el título del registro y sus campos como «Etiqueta: valor». Los textos de ejemplo no se reutilizan: no se sabe a qué campo corresponden.
  */
-function fillCards(container, rows, fields, onAction) {
+function fillCards(container, rows, fields, onAction, related = []) {
+  // «pedido_mesa_id» → «Mesa»; «pedido_items» → «Platos»: el prefijo es el del registro relacionado.
+  const label = (name) => {
+    for (const rel of related) {
+      if (name === `${rel.clave}_items`) return 'Platos';
+      if (name.startsWith(`${rel.clave}_`)) return humanize(name.slice(rel.clave.length + 1));
+    }
+    return humanize(name);
+  };
   const document = container.ownerDocument;
   if (!container.__samples) container.__samples = Array.from(container.children).map((child) => child.cloneNode(true));
   const template = container.__samples[0];
@@ -296,7 +304,7 @@ function fillCards(container, rows, fields, onAction) {
       for (const name of body) {
         const term = document.createElement('dt');
         term.style.color = '#64748b';
-        term.textContent = humanize(name);
+        term.textContent = label(name);
         const detail = document.createElement('dd');
         detail.style.margin = '0';
         detail.textContent = cardValue(row, name);

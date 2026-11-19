@@ -207,8 +207,12 @@ class GenericFrontendGenerator {
       const index = files.find((file) => file.ruta === 'frontend/index.html');
       index.contenido = index.contenido.replace('<script src="https://cdn.tailwindcss.com"></script>', (cdn) => `${cdn}<script>tailwind.config = ${tailwind};</script>`);
     }
+    // Consola de datos del administrador: una entrada por operación con su editor genérico (y los módulos de adjuntos, reportes y cambios).
+    const reqName = new Map((requerimientos || []).map((req) => [slug(req.identificador), req.nombre]));
+    const consoleOps = auth ? [...allowedOperations].filter((key) => !loginIds.has(String(key).toUpperCase())).map((key) => ({ key, name: `${String(key).toUpperCase()} · ${reqName.get(key) || key}` })) : [];
+    if (consoleOps.length) files.push({ ruta: 'frontend/src/DataConsole.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('DataConsole.jsx'), { OPERACIONES: JSON.stringify(consoleOps) }) });
     const first = views[0]?.route || '/';
-    files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone) : this._app(proyecto, views, imports, routes, first, standalone) });
+    files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone, consoleOps) : this._app(proyecto, views, imports, routes, first, standalone) });
     if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth, mobileViews, spec));
     if(new ModuleService().activos(decisiones.modulos).includes('procesos_negocio')){
       if(!auth)throw new Error('La bandeja de procesos requiere JWT');
@@ -254,7 +258,7 @@ class GenericFrontendGenerator {
     const used = new Set(blocks.flatMap((block) => [block.operacion, ...block.acciones.map((action) => action.operacion)]));
     const actions = Object.fromEntries([...used].map((operation) => {
       const action = byName.get(operation);
-      return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, ...(action.permission && action.permission !== action.capability ? { permiso: action.permission } : {}), entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output, ...(action.lineas?.capability ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad, destino: action.lineas.destino, precio: action.lineas.precio?.desde || null } } : {}) }];
+      return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, ...(action.permission && action.permission !== action.capability ? { permiso: action.permission } : {}), entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output, ...(action.relacionadas?.length ? { relacionadas: action.relacionadas.map((rel) => ({ clave: rel.clave, items: Boolean(rel.items) })) } : {}), ...(action.lineas?.capability ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad, destino: action.lineas.destino, precio: action.lineas.precio?.desde || null } } : {}) }];
     }));
     return { blocks, actions, used };
   }
@@ -264,7 +268,7 @@ class GenericFrontendGenerator {
     const verb = { consulta: 'consultar', crear: 'crear', actualizar: 'editar', transicion: 'editar', eliminar: 'eliminar' };
     const map = {};
     const add = (action) => {
-      const key = `${String(action.capability).toLowerCase()}.${verb[action.type]}`;
+      const key = `${String(action.permiso || action.permission || action.capability).toLowerCase()}.${verb[action.type]}`; // el botón del mockup dice «RF-06.editar»: el requisito, no el almacén
       if (verb[action.type] && !map[key]) map[key] = { name: action.name, method: action.method, path: action.path, byId: Boolean(action.byId), inputs: action.inputs || [], ...(action.lineas ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad } } : {}), booleanos: (action.inputs || []).filter((name) => action.fields?.[name]?.type === 'boolean') };
     };
     Object.values(screenActions || {}).forEach(add);
@@ -368,12 +372,13 @@ class GenericFrontendGenerator {
   }
 
   /** Con autenticación: solo ve el menú de lo que su rol puede consultar y siempre puede cerrar sesión. */
-  _appWithAuth(proyecto, views, imports, routes, standalone = []) {
+  _appWithAuth(proyecto, views, imports, routes, standalone = [], consoleOps = []) {
     return `import React, { useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useSession } from './session';
 import LoginScreen from './LoginScreen';
 import UsersScreen from './UsersScreen';
+${consoleOps.length ? "import DataConsole from './DataConsole';" : ''}
 ${imports.join('\n')}
 
 const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: view.name, operations: view.operations, roles: view.roles, modulo: view.modulo || 'General' })))};
@@ -490,6 +495,21 @@ export default function App() {
                 Usuarios
               </Link>
             )}
+            ${consoleOps.length ? `{user.administrador && (
+              <Link
+                to="/datos"
+                style={{
+                  padding: '0.4rem 0.85rem',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  fontWeight: location.pathname.startsWith('/datos') ? '600' : '500',
+                  color: location.pathname.startsWith('/datos') ? '#38bdf8' : '#cbd5e1',
+                  textDecoration: 'none'
+                }}
+              >
+                Datos
+              </Link>
+            )}` : ''}
           </nav>
         </div>
 
@@ -512,6 +532,8 @@ export default function App() {
         <Routes>
           ${views.map((view, index) => `<Route path=${JSON.stringify(view.route)} element={visible.some((item) => item.route === ${JSON.stringify(view.route)}) ? <${component(view.id)}/> : <Navigate to={home} replace />}/>`).join('\n          ')}
           {user.administrador && <Route path="/usuarios" element={<UsersScreen />} />}
+          ${consoleOps.length ? `{user.administrador && <Route path="/datos" element={<DataConsole />} />}
+          {user.administrador && <Route path="/datos/:key" element={<DataConsole />} />}` : ''}
           <Route path="/sin-acceso" element={<section className="screen" role="status"><h1>Sin pantallas disponibles</h1><p>Tu rol no tiene acceso a ninguna pantalla de esta aplicación. Solicita los permisos necesarios al administrador.</p></section>} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Routes>

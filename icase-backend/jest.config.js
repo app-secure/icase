@@ -1,4 +1,4 @@
 module.exports = {
-  modulePathIgnorePatterns: ['<rootDir>/verification-results/'],
-  testPathIgnorePatterns: ['/node_modules/', '/verification-results/']
+  modulePathIgnorePatterns: ['<rootDir>/verification-results/', '<rootDir>/.icase-runs/'],
+  testPathIgnorePatterns: ['/node_modules/', '/verification-results/', '/.icase-runs/']
 };

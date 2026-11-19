@@ -1,5 +1,5 @@
 // Genera backend y frontend de un proyecto real SIN guardar nada: escribe los archivos en una carpeta.
-// Aplica en memoria lo que la planificación haría al guardar: normaliza la especificación con el árbol de pantallas y activa las móviles en web.
+// La especificación se normaliza al generar (como en la aplicación); aquí solo se activa en memoria la opción de móviles en web.
 require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,6 +16,12 @@ const readOnly = (cls, patch = {}) => new Proxy(new cls(), { get(target, key) {
   if (/^(crear|actualizar|guardar|reemplazar|eliminar|upsert|marcar)/.test(String(key))) return async (...args) => ({ id: 'dry', ...(typeof args[0] === 'object' ? args[0] : {}), ...(typeof args[1] === 'object' ? args[1] : {}) });
   return value.bind(target);
 } });
+
+// DRY_CONFIRM_DERIVED=1: como si la persona confirmara en la revisión las operaciones derivadas pendientes.
+if (process.env.DRY_CONFIRM_DERIVED) {
+  const original = ApplicationSpecService.prototype._completarRelacionadas;
+  ApplicationSpecService.prototype._completarRelacionadas = function (...args) { return original.apply(this, args).map((op) => ({ ...op, estado_decision: 'confirmado' })); };
+}
 
 (async () => {
   const [projectId, out] = process.argv.slice(2);
@@ -35,12 +41,6 @@ const readOnly = (cls, patch = {}) => new Proxy(new cls(), { get(target, key) {
       const plan = await target.obtenerPorProyecto(id);
       if (!plan) return plan;
       const etapas = plan.etapas.map((etapa) => {
-        if (etapa.etapa === 'especificacion_aplicacion' && etapa.propuesta?.operaciones) {
-          const resultado = service.validar({ operaciones: etapa.propuesta.operaciones, pantallas: etapa.propuesta.pantallas }, { modelo, rf, pantallas });
-          if (resultado.errores.length) console.error('spec inválida:', resultado.errores);
-          if (process.env.DRY_VERBOSE) console.log(resultado.avisos.join('\n'));
-          return { ...etapa, propuesta: { ...etapa.propuesta, operaciones: resultado.operaciones, pantallas: resultado.pantallas } };
-        }
         if (etapa.etapa === 'alcance_plataforma' && process.env.DRY_MOBILE_IN_WEB) return { ...etapa, propuesta: { ...etapa.propuesta, moviles_en_web: true } };
         return etapa;
       });

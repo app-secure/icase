@@ -161,7 +161,7 @@ class ApplicationSpecService {
    * Revalida una especificación ya guardada (editada o aprobada) sin derivar nada nuevo. Conserva el origen y la decisión
    * de cada operación; devuelve `errores` si alguna dejó de ser válida (el dominio o los RF cambiaron).
    */
-  validar(guardada, { modelo, rf, pantallas = [], cablear = true }) {
+  validar(guardada, { modelo, rf, pantallas = [], cablear = true, verbosPorRf = null }) {
     const entidades = new Map(modelo.entities.map((entity) => [entity.name, entity]));
     const rfIds = new Set(rf.map((item) => String(item.identificador).toUpperCase()));
     const errores = [];
@@ -182,6 +182,8 @@ class ApplicationSpecService {
     if (cablear) {
       const añadidas = this._cablearEdicion(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, pantallas, avisos);
       for (const operacion of añadidas) operaciones.push({ ...operacion, id: `OP-${String(operaciones.length + 1).padStart(2, '0')}` });
+      const relacionadas = this._completarRelacionadas(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, { entidades, verbosPorRf, avisos, nombres: new Set(operaciones.map((op) => op.nombre)) });
+      for (const operacion of relacionadas) operaciones.push({ ...operacion, id: `OP-${String(operaciones.length + 1).padStart(2, '0')}` });
     }
     return { operaciones, pantallas: vistas, errores, avisos };
   }
@@ -216,8 +218,12 @@ class ApplicationSpecService {
     };
     const entradas = subconjunto(candidata.entradas, 'las entradas');
     if (entradas.error) return { error: entradas.error };
-    const salida = subconjunto(candidata.salida, 'la salida');
+    const relacionadas = this._relacionadasDe(candidata.relacionadas, entidades);
+    const derivados = new Set(relacionadas.flatMap((rel) => [...rel.campos.map((campo) => `${rel.clave}_${campo}`), ...(rel.items ? [`${rel.clave}_items`] : [])]));
+    const salida = subconjunto(list(candidata.salida).filter((campo) => !derivados.has(text(campo))), 'la salida');
     if (salida.error) return { error: salida.error };
+    if (derivados.size) salida.valores = [...new Set([...list(candidata.salida).map(text).filter((campo) => derivados.has(campo)), ...salida.valores])];
+    const sobre = this._sobreDe(candidata.sobre, entidades, entidad);
     if (['crear', 'actualizar'].includes(tipo) && !entradas.valores.length) return { error: `una operación de tipo ${tipo} necesita entradas.` };
 
     let transicion = null;
@@ -234,11 +240,85 @@ class ApplicationSpecService {
       nombre, rf, tipo, entidad: entidad.name, entidadClave: entidad.key,
       actores: list(candidata.actores).map(text).filter(Boolean),
       filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
+      ...(relacionadas.length && tipo === 'consulta' ? { relacionadas } : {}), ...(sobre && tipo === 'transicion' ? { sobre } : {}),
       descripcion: text(candidata.descripcion).slice(0, 300), estado_decision: 'pendiente',
       ...(list(candidata.sesionEntradas).length ? { sesionEntradas: list(candidata.sesionEntradas).filter((item) => existe(item?.campo) && item.valor === 'usuario.id').map((item) => ({ campo: item.campo, valor: item.valor })) } : {}),
       ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado', 'cero', 'lineas'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}) })) } : {})
     };
     return { operacion: this._completarDelSistema(operacion, entidad, entidades) };
+  }
+
+  /** Datos del registro relacionado que acompañan a cada fila de una consulta (la mesa y los platos del pedido de una comanda). Se revalida contra el dominio. */
+  _relacionadasDe(candidatas, entidades) {
+    return list(candidatas).map((rel) => {
+      const entidad = entidades.get(text(rel?.entidad));
+      if (!entidad) return null;
+      const props = entidad.schema.properties;
+      if (!props[text(rel.via)]) return null;
+      const campos = list(rel.campos).map(text).filter((campo) => props[campo]);
+      if (!campos.length) return null;
+      const items = rel.items && entidades.get(text(rel.items.entidad)) ? { ...rel.items } : null;
+      return {
+        entidad: entidad.name, entidadClave: entidad.key, clave: entidad.key, via: text(rel.via), campos, estado: props[text(rel.estado)] ? text(rel.estado) : null,
+        excluir: list(rel.excluir).map(text).filter(Boolean), ...(items ? { items } : {})
+      };
+    }).filter(Boolean);
+  }
+
+  _sobreDe(candidata, entidades, destino) {
+    const entidad = candidata && entidades.get(text(candidata.entidad));
+    if (!entidad || !destino.schema.properties[text(candidata.via)]) return null;
+    return { entidad: entidad.name, entidadClave: entidad.key, via: text(candidata.via) };
+  }
+
+  /**
+   * Un requisito cuyo mockup tiene botones de «editar» (marcar lista una comanda) pero cuya entidad no tiene un estado propio no tiene nada
+   * que cambiar: el estado vive en la entidad que la referencia (el pedido de la comanda). Se enriquece la consulta con los datos de ese
+   * registro (mesa, estado, platos), se oculta lo ya servido y se propone, pendiente de revisión, la transición que el botón ejecuta.
+   */
+  _completarRelacionadas(operaciones, vistas, { entidades, verbosPorRf, avisos, nombres }) {
+    const añadidas = [];
+    if (!verbosPorRf) return añadidas;
+    for (const consulta of operaciones.filter((op) => op.tipo === 'consulta' && !op.relacionadas)) {
+      if (!list(verbosPorRf[String(consulta.rf).toUpperCase()]).includes('editar')) continue;
+      if (operaciones.some((op) => op.rf === consulta.rf && ['actualizar', 'transicion'].includes(op.tipo))) continue;
+      const base = entidades.get(consulta.entidad);
+      if (!base || Object.values(base.schema.properties).some((def) => def?.enum?.length >= 2 || def?.type === 'boolean')) continue;
+      const otra = [...entidades.values()].find((item) => item !== base && list(item.references).some((ref) => ref.entity === base.name) && item.schema.properties.estado?.enum?.length >= 2);
+      if (!otra) continue;
+      const via = list(otra.references).find((ref) => ref.entity === base.name).field;
+      const props = otra.schema.properties;
+      const estados = props.estado.enum;
+      const destino = estados.find((valor) => /SERV|LIST|TERMIN|ENTREG|COMPLET|FINAL/i.test(valor)) || [...estados].reverse().find((valor) => !/CANCEL/i.test(valor));
+      const campos = [
+        ...Object.keys(props).filter((campo) => props[campo]['x-references'] && props[campo]['x-references'] !== base.name && !/^(usuarios?|clientes?)$/i.test(props[campo]['x-references'])).sort((x, y) => (/mesa|silla/i.test(y) ? 1 : 0) - (/mesa|silla/i.test(x) ? 1 : 0)).slice(0, 2),
+        'estado',
+        ...Object.keys(props).filter((campo) => /^total$/i.test(campo) && ['number', 'integer'].includes(props[campo].type)).slice(0, 1)
+      ];
+      const items = this._lineasDe({ tipo: 'crear' }, otra, entidades);
+      const relacion = {
+        entidad: otra.name, entidadClave: otra.key, clave: otra.key, via, campos, estado: 'estado', excluir: estados.filter((valor) => valor === destino || /CANCEL/i.test(valor)),
+        ...(items ? { items: { entidad: items.entidad, entidadClave: items.entidadClave, fk: items.fk, referencia: items.referencia, destino: items.destino, destinoClave: items.destinoClave, cantidad: items.cantidad } } : {})
+      };
+      consulta.relacionadas = [relacion];
+      consulta.salida = [...new Set([...campos.map((campo) => `${otra.key}_${campo}`), ...(items ? [`${otra.key}_items`] : []), ...consulta.salida])];
+      let nombre = `marcar${otra.name}${destino.charAt(0)}${destino.slice(1).toLowerCase()}`;
+      for (let n = 2; nombres.has(nombre); n += 1) nombre = `marcar${otra.name}${destino.charAt(0)}${destino.slice(1).toLowerCase()}${n}`;
+      nombres.add(nombre);
+      const transicion = {
+        rf: consulta.rf, entidad: otra.name, entidadClave: otra.key, actores: consulta.actores, nombre, tipo: 'transicion', filtros: [], entradas: [], salida: [],
+        transicion: { campo: 'estado', de: estados.filter((valor) => valor !== destino && !/CANCEL/i.test(valor)), a: destino },
+        sobre: { entidad: base.name, entidadClave: base.key, via }, estado_decision: 'pendiente', origen: 'derivado',
+        descripcion: `Pasa el ${otra.name} de ${base.name} a ${destino} desde la lista de ${base.name}.`
+      };
+      añadidas.push(transicion);
+      const etiqueta = /LIST/i.test(destino) ? 'Marcar lista' : `Marcar ${destino.toLowerCase()}`;
+      for (const vista of vistas) for (const componente of vista.componentes) {
+        if (componente.operacion === consulta.nombre && ['tabla', 'tarjetas'].includes(componente.tipo) && !componente.acciones.some((accion) => accion.operacion === nombre)) componente.acciones.push({ etiqueta, operacion: nombre });
+      }
+      avisos.push(`${consulta.rf}: el mockup tiene botones de editar y ${base.name} no tiene estado; se propone «${nombre}» (pendiente de confirmar) sobre el ${otra.name} de cada ${base.name}, y la lista muestra sus datos.`);
+    }
+    return añadidas;
   }
 
   /**

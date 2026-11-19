@@ -37,6 +37,7 @@ class GenericBackendGenerator {
     this._ensureAssociationOperations(contract, rules);
     const policy = new AccessControlService().politica(access, contract.operations);
     this._syncSupportPermissions(contract, policy);
+    this._syncActionPermissions(contract, policy);
     this._limitScopes(contract, policy);
     contract.auth = policy;
     const resolved = StackCatalog.resolve(stack);
@@ -395,7 +396,10 @@ ${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/opera
       // Lo que completa el servidor al crear (la cuenta de la sesión, la fecha, el estado inicial, un código generado).
       ...(action.sessionInputs?.length ? { sessionInputs: action.sessionInputs } : {}), ...(action.autoInputs?.length ? { autoInputs: action.autoInputs } : {}),
       // Alta compuesta (pedido + líneas): el cuerpo trae `lineas` y el servidor guarda cada una y calcula el total.
-      ...(action.type === 'crear' && action.lineas?.capability ? { lineas: action.lineas } : {})
+      ...(action.type === 'crear' && action.lineas?.capability ? { lineas: action.lineas } : {}),
+      // Consulta con los datos del registro relacionado (comanda → pedido) y transición sobre ese registro.
+      ...(action.type === 'consulta' && action.relacionadas?.length ? { relacionadas: action.relacionadas } : {}),
+      ...(action.type === 'transicion' && action.sobre ? { sobre: action.sobre } : {})
     })));
     const source = fs.readFileSync(path.join(__dirname, '..', 'templates', 'actions', 'actions-runtime.js'), 'utf8');
     return [{ ruta: 'backend/src/actions/actions.js', lenguaje: 'javascript', contenido: renderTemplate(source, { DEFINITIONS: JSON.stringify(definitions, null, 2) }) }];
@@ -547,6 +551,35 @@ ${this._hasActions(contract) ? this._expressActionRoutes() : ''}app.use((error,_
       if (owned(entity)) continue;
       for (const [role, rule] of Object.entries(entry)) {
         if (rule?.alcance === 'propios') entry[role] = { ...rule, alcance: 'todos', metodos: (rule.metodos || []).filter((method) => method === 'GET') };
+      }
+    }
+  }
+
+  /**
+   * Lo que la especificación aprobada ejecuta, el rol que lo ejecuta debe poder hacerlo: si una operación confirmada necesita PATCH y la
+   * matriz de accesos solo le daba GET al rol (el cocinero que marca lista una comanda), se le concede ese método sobre ese requisito y
+   * se deja constancia. Los clientes no reciben concesiones automáticas.
+   */
+  _syncActionPermissions(contract, policy) {
+    if (!policy?.habilitada || !policy.operaciones) return;
+    const Compatibility = require('../../core/services/RequirementScreenCompatibility');
+    const needed = { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' };
+    const order = ['GET', 'POST', 'PATCH', 'DELETE'];
+    const roles = Object.entries(policy.roles || {});
+    for (const operation of contract.operations || []) {
+      for (const action of operation.actions || []) {
+        const key = action.permission || action.capability;
+        const method = needed[action.type];
+        if (!method || !policy.operaciones[key]) continue;
+        for (const actor of action.actors || []) {
+          const canonical = Compatibility.canonicalRole(actor);
+          const found = roles.find(([id, role]) => Compatibility.canonicalRole(id) === canonical || Compatibility.canonicalRole(role?.nombre) === canonical);
+          if (!found || found[0] === 'cliente') continue;
+          const entry = policy.operaciones[key][found[0]] || (policy.operaciones[key][found[0]] = { metodos: [], alcance: 'todos' });
+          if (entry.metodos.includes(method)) continue;
+          entry.metodos = order.filter((item) => item === method || entry.metodos.includes(item));
+          if (Array.isArray(contract.warnings)) contract.warnings.push(`Se concedió ${method} a «${found[0]}» en ${String(key).toUpperCase()}: la operación «${action.name}», confirmada en la especificación, lo necesita.`);
+        }
       }
     }
   }

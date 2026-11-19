@@ -57,3 +57,20 @@ describe('lista propia para la pantalla del rol que edita', () => {
     expect(sin.operaciones.map((op) => op.nombre)).toEqual(['listarMenuDigital', 'actualizarPlato']);
   });
 });
+
+describe('la especificación que se genera es la normalizada', () => {
+  const GestionarArtefactosCodigo = require('../src/core/use-cases/GestionarArtefactosCodigo');
+  const caso = new GestionarArtefactosCodigo({});
+
+  test('al generar se aplican las listas por rol sin volver a guardar la etapa', () => {
+    const decisiones = caso._especificacionVigente({ especificacion_aplicacion: guardada }, { requerimientos: rf, diagramas: [dominio], pantallas });
+    expect(decisiones.especificacion_aplicacion.operaciones.map((op) => op.nombre)).toContain('listarPlatoGestion');
+    expect(guardada.operaciones).toHaveLength(2); // lo guardado no se modifica
+  });
+
+  test('sin especificación o sin dominio vigente deja las decisiones como están', () => {
+    expect(caso._especificacionVigente({}, { requerimientos: rf, diagramas: [dominio], pantallas })).toEqual({});
+    const sinDominio = { especificacion_aplicacion: guardada };
+    expect(caso._especificacionVigente(sinDominio, { requerimientos: rf, diagramas: [], pantallas })).toBe(sinDominio);
+  });
+});

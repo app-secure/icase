@@ -1,0 +1,2 @@
+# Las plantillas que usa el generador se manipulan con anclas de varias líneas: deben ser LF en cualquier sistema.
+icase-backend/src/infrastructure/templates/** text eol=lf

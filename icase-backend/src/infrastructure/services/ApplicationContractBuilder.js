@@ -69,12 +69,14 @@ class ApplicationContractBuilder {
     // (sin permisos para nadie salvo el administrador; las escribe el servidor al crear el pedido).
     for (const operation of [...operations]) {
       for (const action of operation.actions || []) {
-        const hijo = action.lineas && entities.find((entity) => entity.key === action.lineas.entidadClave);
-        if (!hijo || operations.some((item) => item.entity === hijo.key)) continue;
+        const hijos = [action.lineas, ...(action.relacionadas || []).map((rel) => rel.items)].filter(Boolean).map((linea) => entities.find((entity) => entity.key === linea.entidadClave)).filter(Boolean);
+        const hijo = hijos.find((item) => !operations.some((other) => other.entity === item.key));
+        if (!hijo) continue;
+        const lineas = action.lineas?.entidadClave === hijo.key ? action.lineas : (action.relacionadas || []).map((rel) => rel.items).find((item) => item?.entidadClave === hijo.key);
         let key = `op-${slug(hijo.name)}`;
         for (let n = 2; operations.some((item) => item.key === key); n += 1) key = `op-${slug(hijo.name)}-${n}`;
         operations.push({
-          id: `OP-${slug(hijo.name).toUpperCase()}`, key, name: `Líneas de ${action.lineas.entidad}`, description: `Almacén de soporte de ${hijo.name}`, actors: [],
+          id: `OP-${slug(hijo.name).toUpperCase()}`, key, name: `Líneas de ${lineas.entidad}`, description: `Almacén de soporte de ${hijo.name}`, actors: [],
           collectionPath: `/api/operations/${key}`, itemPath: `/api/operations/${key}/:id`, methods: [...ALL_METHODS], entity: hijo.key, relatedEntities: [],
           rules: rules.filter((rule) => rule.entidad === hijo.name), schema: hijo.schema, support: true
         });
@@ -181,6 +183,8 @@ class ApplicationContractBuilder {
       ...(op.sesionEntradas?.length ? { sessionInputs: op.sesionEntradas } : {}),
       ...(op.autoEntradas?.length ? { autoInputs: op.autoEntradas } : {}),
       ...(op.lineas ? { lineas: op.lineas } : {}),
+      ...(op.relacionadas?.length ? { relacionadas: op.relacionadas } : {}),
+      ...(op.sobre ? { sobre: op.sobre } : {}),
       output: op.salida || [],
       ...(op.transicion ? { transition: op.transicion } : {}),
       description: op.descripcion || ''
@@ -221,7 +225,23 @@ class ApplicationContractBuilder {
       if (hijo && destino) lineas = { ...action.lineas, capability: hijo, destinoCapability: destino };
       else warnings.push(`«${action.name}»: no se pudo guardar las líneas (${action.lineas.entidad}); se crea sin ellas.`);
     }
-    return { ...action, capability, filters, fields, lineas };
+    // Datos del registro relacionado que acompañan a las filas: sus almacenes y el de cada referencia (para mostrar nombres y no ids).
+    let relacionadas;
+    if (action.relacionadas?.length) {
+      relacionadas = action.relacionadas.map((rel) => {
+        const store = operationOf.get(rel.entidadClave);
+        const related = entities.find((item) => item.key === rel.entidadClave);
+        if (!store || !related) return null;
+        const referencias = Object.fromEntries(rel.campos.map((campo) => {
+          const target = entities.find((item) => item.name === related.schema?.properties?.[campo]?.['x-references']);
+          return [campo, target ? operationOf.get(target.key) : null];
+        }).filter(([, target]) => target));
+        const items = rel.items && operationOf.get(rel.items.entidadClave) && operationOf.get(rel.items.destinoClave)
+          ? { ...rel.items, capability: operationOf.get(rel.items.entidadClave), destinoCapability: operationOf.get(rel.items.destinoClave) } : null;
+        return { ...rel, capability: store, referencias, items };
+      }).filter(Boolean);
+    }
+    return { ...action, capability, filters, fields, lineas, relacionadas };
   }
 
   /** GET más los métodos de los verbos válidos declarados, en orden canónico; sin verbos, CRUD completo. */
