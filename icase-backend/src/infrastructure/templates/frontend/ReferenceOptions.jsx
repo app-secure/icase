@@ -1,7 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useSession } from './session';
 
-const labelOf = (data, id) => Object.values(data || {}).find((value) => typeof value === 'string' && value.trim()) || String(id);
+const DATE = /^\d{4}-\d{2}-\d{2}/;
+const NAMES = ['nombre', 'name', 'titulo', 'numero', 'codigo', 'descripcion', 'email', 'correo'];
+/** Texto con el que se reconoce un registro: su nombre o número; si solo tiene fechas, «#id · fecha»; nunca una fecha ISO en bruto. */
+const labelOf = (data, id) => {
+  const source = data || {};
+  for (const key of NAMES) if (source[key] !== undefined && source[key] !== null && String(source[key]).trim()) return String(source[key]);
+  const text = Object.entries(source).find(([key, value]) => key !== 'id' && !key.endsWith('_id') && typeof value === 'string' && value.trim() && !DATE.test(value));
+  if (text) return text[1];
+  const dated = Object.values(source).find((value) => typeof value === 'string' && DATE.test(value));
+  return dated ? `#${id} · ${dated.slice(0, 10)}` : `#${id}`;
+};
 
 /**
  * Opciones de un select que referencia a otra entidad: los registros reales del backend (valor = id), no las del mockup.

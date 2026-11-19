@@ -317,6 +317,7 @@ function createApp({ repositories = {}, env = process.env } = {}) {
 
   return {
     app,
+    gestionarArtefactosCodigo,
     estandarRepo,
     fuenteRepo,
     recuperarImportaciones: () => projectTransfer.recover(),

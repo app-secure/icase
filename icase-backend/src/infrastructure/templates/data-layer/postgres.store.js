@@ -202,8 +202,32 @@ class RecordStore {
         'INSERT INTO icase_users (email, nombre, rol, activo, password_hash) VALUES ($1, $2, $3, $4, $5) RETURNING *',
         [user.email, user.nombre || '', user.rol, user.activo !== false, user.password_hash]
       );
-      return this._user(result.rows[0]);
+      const created = this._user(result.rows[0]);
+      await this._mirrorProfile(created);
+      return created;
     } catch (error) { throw translate(error); }
+  }
+
+  /** Perfil de la cuenta en la tabla de usuarios del dominio, con el mismo identificador: las referencias a Usuario apuntan a cuentas reales. */
+  async _mirrorProfile(user) {
+    const identity = model.identity;
+    if (!identity || !user) return;
+    const columns = [identity.email, ...(identity.rol ? [identity.rol] : []), ...(identity.nombre ? [identity.nombre] : [])];
+    const values = [user.email, ...(identity.rol ? [user.rol] : []), ...(identity.nombre ? [user.nombre || ''] : [])];
+    try {
+      await this.pool.query(
+        `INSERT INTO ${quote(identity.table)} (id, ${columns.map(quote).join(', ')}) VALUES ($1, ${columns.map((_, index) => `$${index + 2}`).join(', ')})
+         ON CONFLICT (id) DO UPDATE SET ${columns.map((column) => `${quote(column)} = EXCLUDED.${quote(column)}`).join(', ')}, updated_at = now()`,
+        [user.id, ...values]
+      );
+      await this.pool.query(`SELECT setval(pg_get_serial_sequence('${quote(identity.table)}', 'id'), (SELECT max(id) FROM ${quote(identity.table)}))`);
+    } catch (error) { console.warn('No se pudo sincronizar el perfil de la cuenta:', error.message); }
+  }
+
+  /** Cuentas creadas antes de que existiera el perfil: se sincronizan al arrancar. */
+  async syncProfiles() {
+    if (!model.identity) return;
+    for (const user of await this.listUsers()) await this._mirrorProfile(user);
   }
 
   async updateUser(id, patch) {
@@ -214,12 +238,19 @@ class RecordStore {
         `UPDATE icase_users SET ${fields.map((field, index) => `${field} = $${index + 1}`).join(', ')}, updated_at = now() WHERE id = $${fields.length + 1} RETURNING *`,
         [...fields.map((field) => patch[field]), id]
       );
-      return this._user(result.rows[0]);
+      const updated = this._user(result.rows[0]);
+      await this._mirrorProfile(updated);
+      return updated;
     } catch (error) { throw translate(error); }
   }
 
   async removeUser(id) {
     if (!/^\d{1,18}$/.test(String(id))) return false;
+    if (model.identity) {
+      // El perfil se retira primero: si hay registros que lo referencian (mesas, pedidos), la cuenta no se elimina.
+      try { await this.pool.query(`DELETE FROM ${quote(model.identity.table)} WHERE id = $1`, [id]); }
+      catch (error) { throw translate(error); }
+    }
     return (await this.pool.query('DELETE FROM icase_users WHERE id = $1', [id])).rowCount > 0;
   }
 

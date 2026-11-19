@@ -28,6 +28,7 @@ class BackendDataLayerGenerator {
    */
   build({ contract, database, policy = null, modules = null }) {
     const model = this._model(contract, database);
+    this._markIdentity(model, contract);
     this._applyOwnership(model, policy);
     const rules = this._rules(contract.rules || [], model);
     this._applyUniques(model, contract.rules || []);
@@ -45,6 +46,23 @@ class BackendDataLayerGenerator {
       ...(seedMigration ? [seedMigration] : [])
     ];
     return { model, rules, migration, migrations, files: this._files(model, rules, migrations, database) };
+  }
+
+  /**
+   * La entidad de cuentas del dominio (Usuario) y las cuentas reales de la aplicación son lo mismo: se marca la tabla y sus columnas
+   * para que el almacén cree y mantenga en ella el perfil de cada cuenta con el mismo identificador. Así una referencia a Usuario
+   * (el mesero de una mesa) apunta a una cuenta real y la sesión puede filtrar por ella.
+   */
+  _markIdentity(model, contract) {
+    const operation = (contract.operations || []).find((item) => item.identity === 'usuarios' && item.entity);
+    const entity = operation && (contract.entities || []).find((item) => item.key === operation.entity || item.name === operation.entity);
+    const found = entity && Object.entries(model.tables).find(([, table]) => table.entity === entity.name);
+    if (!found) return;
+    const columns = found[1].columns.filter((column) => !column.internal);
+    const pick = (pattern) => columns.find((column) => pattern.test(column.name) && column.type === 'string')?.column;
+    const email = pick(/^(correo|email|mail)/i);
+    if (!email) return;
+    model.identity = { table: found[0], email, rol: pick(/^rol$/i) || null, nombre: pick(/^(nombre|name)$/i) || null };
   }
 
   _model(contract, database) {
@@ -331,8 +349,12 @@ class BackendDataLayerGenerator {
             row[column.column] = `'contacto${i}@ejemplo.com'`;
           } else if (column.column.includes('tel') || column.name.includes('tel')) {
             row[column.column] = `'+5199988877${i}'`;
-          } else {
+          } else if (/^(nombre|name|titulo)$/i.test(column.name)) {
             row[column.column] = `'${table.entity} ${i}'`;
+          } else {
+            // «Categoría 1», «Zona 2»: el nombre del campo, no el de la entidad, que sonaba a dato equivocado.
+            const label = String(column.name).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
+            row[column.column] = `'${label.charAt(0).toUpperCase() + label.slice(1)} ${i}'`;
           }
           break;
         case 'integer':

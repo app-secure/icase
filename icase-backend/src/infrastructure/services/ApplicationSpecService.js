@@ -233,7 +233,7 @@ class ApplicationSpecService {
       filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
       descripcion: text(candidata.descripcion).slice(0, 300), estado_decision: 'pendiente',
       ...(list(candidata.sesionEntradas).length ? { sesionEntradas: list(candidata.sesionEntradas).filter((item) => existe(item?.campo) && item.valor === 'usuario.id').map((item) => ({ campo: item.campo, valor: item.valor })) } : {}),
-      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}) })) } : {})
+      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado', 'cero'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}) })) } : {})
     };
     return { operacion: this._completarDelSistema(operacion, entidad) };
   }
@@ -342,6 +342,9 @@ class ApplicationSpecService {
       } else if (systemManaged(campo, propiedades[campo]) === 'lo genera el sistema' && propiedades[campo]?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) {
         // Códigos que genera el sistema (el QR de una reserva): el servidor los crea; la persona no los inventa.
         auto.push({ campo, valor: 'generado' });
+      } else if (/^(sub)?total(es)?$/.test(compacto(campo)) && ['number', 'integer'].includes(propiedades[campo]?.type)) {
+        // Un total o subtotal no lo escribe la persona: nace en 0 y lo calcula el sistema (hoy no hay líneas que lo sumen, y la regla «obligatorio» lo exige).
+        auto.push({ campo, valor: 'cero' });
       }
     }
     // Lo que el servidor debe aportar aunque la propuesta no lo liste (la IA suele omitir el estado y el código del QR): sin eso la

@@ -82,7 +82,9 @@ describe('correcciones de la especificación propuesta', () => {
     const { especificacion } = depurar({ operaciones: [crearPedido], pantallas: [{ id: 'pedido', componentes: [{ tipo: 'formulario', operacion: 'registrarPedido', campos: ['estado', 'total', 'mesa'] }] }] });
     expect(especificacion.pantallas[0].componentes[0].campos).toEqual(['mesa']);
     const operacion = especificacion.operaciones.find((item) => item.nombre === 'registrarPedido');
-    expect(operacion.entradas).toContain('total');
+    // El total no lo escribe la persona: nace en 0 y lo calcula el sistema; la regla «obligatorio» no rechaza el alta.
+    expect(operacion.entradas).not.toContain('total');
+    expect(operacion.autoEntradas).toEqual(expect.arrayContaining([{ campo: 'total', valor: 'cero' }]));
     // El estado inicial lo fija el servidor (el primero del dominio); sin él las reglas que exigen el estado rechazarían el alta.
     expect(operacion.autoEntradas).toEqual(expect.arrayContaining([{ campo: 'estado', valor: 'inicial', opciones: ['PENDIENTE', 'SERVIDO'] }]));
   });

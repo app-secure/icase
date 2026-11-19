@@ -61,7 +61,10 @@ function actionHandler(node, context) {
   const tag = String(node.tagName || '').toLowerCase();
   if (['form', 'select', 'textarea'].includes(tag)) return '';
   if (tag === 'input' && !['button', 'submit', 'reset'].includes(String(typeAttr(node)).toLowerCase())) return '';
-  const declared = (node.attrs || []).find((attr) => attr.name === 'data-accion')?.value.trim() || '';
+  let declared = (node.attrs || []).find((attr) => attr.name === 'data-accion')?.value.trim() || '';
+  // El botón de envío de un formulario con `data-accion` (y sin otro propio) ejecuta la acción del formulario.
+  const submits = tag === 'button' ? !['button', 'reset'].includes(String(typeAttr(node)).toLowerCase()) : tag === 'input' && String(typeAttr(node)).toLowerCase() === 'submit';
+  if (!declared && submits && context.formAction) declared = context.formAction;
   const match = ACTION.exec(declared);
   const operation = match && match[1].toLowerCase();
   return match && context.operaciones.has(operation)
@@ -111,7 +114,8 @@ function nodeToJsx(node, context = null) {
     return `<select${kept.length ? ' ' + kept.join(' ') : ''}><ReferenceOptions operation=${JSON.stringify(refTarget)} /></select>`;
   }
 
-  const attrStr = (attrs.length ? ' ' + attrs.join(' ') : '') + actionHandler(node, context);
+  // Un formulario del mockup nunca navega con el envío nativo; sus botones (o la acción del formulario) lo atienden.
+  const attrStr = (attrs.length ? ' ' + attrs.join(' ') : '') + actionHandler(node, context) + (tag === 'form' ? ' onSubmit={(event) => event.preventDefault()}' : '');
   const isVoid = VOID_ELEMENTS.has(tag);
   if (isVoid) {
     return `<${outTag}${attrStr} />`;
@@ -120,7 +124,9 @@ function nodeToJsx(node, context = null) {
   // Un select cuyo name es una referencia a otra entidad (mesa_id) carga sus opciones reales del backend en lugar de las del mockup.
   const referenced = tag === 'select' ? context?.referencias?.[attrOf(node, 'name')] : null;
   if (referenced) return `<${outTag}${attrStr}><ReferenceOptions operation=${JSON.stringify(referenced)} /></${outTag}>`;
-  const children = (node.childNodes || []).map((child) => nodeToJsx(child, context)).join('');
+  const formAction = tag === 'form' ? (attrOf(node, 'data-accion') || '').trim() : '';
+  const childContext = tag === 'form' ? { ...context, formAction: ACTION.test(formAction) ? formAction : '' } : context;
+  const children = (node.childNodes || []).map((child) => nodeToJsx(child, childContext)).join('');
   return `<${outTag}${attrStr}>${children}</${outTag}>`;
 }
 

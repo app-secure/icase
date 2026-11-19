@@ -21,8 +21,10 @@ const LABEL_KEYS = ['nombre', 'name', 'titulo', 'numero', 'codigo', 'descripcion
 /** Texto con el que se reconoce un registro: su nombre, número o código; nunca su identificador. */
 const labelOf = (row) => {
   for (const key of LABEL_KEYS) if (row[key] !== undefined && row[key] !== null && String(row[key]).trim()) return String(row[key]);
-  const first = Object.entries(row).find(([key, value]) => key !== 'id' && !key.endsWith('_id') && typeof value === 'string' && value.trim());
-  return first ? first[1] : null;
+  const first = Object.entries(row).find(([key, value]) => key !== 'id' && !key.endsWith('_id') && typeof value === 'string' && value.trim() && !/^\d{4}-\d{2}-\d{2}/.test(value));
+  if (first) return first[1];
+  const dated = Object.entries(row).find(([key, value]) => key !== 'id' && typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value));
+  return dated ? `#${row.id} · ${String(dated[1]).slice(0, 10)}` : (row.id !== undefined ? `#${row.id}` : null);
 };
 
 /** Añade `<campo>__etiqueta` a las filas con una referencia: así la pantalla muestra «Mesa 3» y no un identificador. */
@@ -98,6 +100,7 @@ async function resolveFilters(store, def, ctx) {
 function autoValue(input) {
   if (input.valor === 'hoy') return new Date().toISOString().slice(0, 10);
   if (input.valor === 'inicial') return (input.opciones || [])[0] ?? null;
+  if (input.valor === 'cero') return 0;
   if (input.valor === 'generado') return crypto.randomBytes(5).toString('hex').toUpperCase();
   return new Date().toISOString();
 }

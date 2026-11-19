@@ -114,11 +114,13 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
       }
     }
     await seedDemoUsers();
+    if (typeof store.syncProfiles === 'function') await store.syncProfiles();
   }
 
   /** Una cuenta de ejemplo por rol (<rol>@ejemplo.test) para probar la aplicación; nunca en producción. */
   async function seedDemoUsers() {
-    if (env.NODE_ENV === 'production' || env.SEED_DEMO_USERS === 'false') return;
+    // Fuera de producción se crean por defecto; en producción solo si SEED_DEMO_USERS=true (por ejemplo, una demostración en Docker).
+    if (env.SEED_DEMO_USERS === 'false' || (env.NODE_ENV === 'production' && env.SEED_DEMO_USERS !== 'true')) return;
     const password = env.DEMO_PASSWORD || 'Demo-2026-icase';
     for (const [id, role] of Object.entries(roles())) {
       const email = id + '@ejemplo.test';
