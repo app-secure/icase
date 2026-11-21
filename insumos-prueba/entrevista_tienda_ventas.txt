@@ -1,0 +1,91 @@
+Reunión inicial — Sistema de ventas y facturación para una tienda
+
+Dueña:
+Tengo una tienda de abarrotes y hoy llevo las ventas en un cuaderno y las facturas en Word. Me equivoco con los precios, no sé cuánto stock me queda y al cierre del mes me cuesta saber qué vendí. Quiero un sistema sencillo para registrar ventas, emitir facturas y ver reportes.
+
+Analista:
+Entendido. Para confirmar lo ya decidido: será una aplicación web, usada desde computadora en el mostrador y en la oficina. No habrá aplicación móvil. ¿Quiénes la usarán?
+
+Dueña:
+Yo, como administradora, y dos vendedores que atienden en el mostrador. Nadie más.
+
+Analista:
+Entonces habrá dos roles: administrador y vendedor. ¿Qué hace cada uno?
+
+Dueña:
+El vendedor registra ventas, atiende clientes y emite facturas. Solo ve las ventas que él mismo registró. El administrador hace todo lo del vendedor y además gestiona productos, usuarios, anula ventas y revisa reportes. Un vendedor no debe poder cambiar precios ni anular ventas.
+
+Analista:
+Perfecto. Vamos con los productos. ¿Qué datos necesita de cada producto?
+
+Dueña:
+Código, nombre, categoría, precio de venta en soles y stock disponible. Quiero poder desactivar un producto sin borrarlo, para que ya no aparezca al vender pero se conserve en las ventas antiguas.
+
+Analista:
+Anotado: el administrador gestiona los productos (crear, editar, desactivar y consultar). El vendedor solo los consulta para vender. Ahora los clientes.
+
+Dueña:
+Del cliente guardo nombre o razón social, tipo y número de documento (DNI o RUC), correo y teléfono. Tanto el administrador como los vendedores pueden registrar y editar clientes, y buscarlos por nombre o documento.
+
+Analista:
+Ahora la venta. ¿Cómo es el proceso en el mostrador?
+
+Dueña:
+El vendedor elige un cliente, agrega varios productos con su cantidad, el sistema calcula el total y registra la venta. No se puede vender un producto sin stock suficiente ni un producto desactivado. Al registrar la venta, el stock de cada producto baja automáticamente. Una venta tiene fecha, vendedor, cliente, medio de pago (efectivo o transferencia) y una o más líneas de producto con su cantidad y precio unitario.
+
+Analista:
+¿La venta puede quedar sin factura?
+
+Dueña:
+Sí, a veces el cliente solo quiere una boleta simple, pero por ahora solo quiero emitir facturas. Después de registrar la venta, el vendedor pulsa «Emitir factura» y el sistema genera la factura con un número correlativo (F001-00001, F001-00002...), el detalle de los productos, el subtotal, el IGV del 18 % y el total. Una venta solo puede tener una factura.
+
+Analista:
+Entonces la factura se genera dentro del sistema, no es facturación electrónica ante la SUNAT. ¿Es correcto?
+
+Dueña:
+Correcto. Por ahora solo una factura interna que se pueda ver y consultar. La conexión con la SUNAT queda para más adelante.
+
+Analista:
+Anoto como fuera de alcance la facturación electrónica con la SUNAT, los pagos en línea, varias sucursales y la aplicación móvil. Sigamos: ¿y si se equivoca en una venta?
+
+Dueña:
+Solo la administradora puede anular una venta, indicando el motivo. Al anularla, el stock de los productos vuelve a subir y la factura queda marcada como anulada. Una venta anulada no se puede modificar.
+
+Analista:
+Sobre el stock: ¿quiere algún aviso?
+
+Dueña:
+Sí. Quiero ver una lista de los productos con stock bajo, es decir, con menos de 5 unidades, para saber qué reponer. Eso lo ve solo la administradora.
+
+Analista:
+Ahora los reportes. ¿Qué necesita?
+
+Dueña:
+Dos cosas. Primero, un reporte de ventas por rango de fechas, con el total vendido y el número de ventas. Segundo, los productos más vendidos en un rango de fechas, con la cantidad total vendida de cada uno. Ambos solo para la administradora.
+
+Analista:
+Recapitulo los requisitos funcionales: gestionar productos, gestionar clientes, registrar una venta con varios productos, consultar mis ventas, emitir factura, anular venta, ver productos con stock bajo, reporte de ventas por fechas, productos más vendidos y gestionar usuarios y roles. ¿Falta algo?
+
+Dueña:
+No, eso es todo por ahora.
+
+Analista:
+Pasamos a lo técnico. Proponemos Node.js con Express para el servidor, PostgreSQL como base de datos y React con Tailwind CSS para la interfaz web. La autenticación será con JWT y el acceso por roles. Las contraseñas se guardarán cifradas. No se usarán servicios externos ni otras tecnologías.
+
+Dueña:
+Me parece bien. Lo instalaremos en un solo servidor pequeño.
+
+Analista:
+Quedan los criterios no funcionales. La seguridad y la facilidad de uso son obligatorias: acceso con usuario y contraseña, permisos por rol, validación de los datos y pantallas claras, con pocos pasos para vender. En rendimiento, ¿qué tiempo es aceptable al registrar una venta?
+
+Dueña:
+Menos de dos segundos con hasta diez personas conectadas a la vez. Somos pocos.
+
+Analista:
+Queda registrado. En disponibilidad no se pedirá alta disponibilidad ni réplicas: un solo servidor. Sí necesitamos copias de seguridad de la base de datos, pero queda pendiente definir cada cuánto se harán y cuánto tiempo máximo puede tardar una recuperación.
+
+Dueña:
+Eso lo definimos después con la persona de sistemas.
+
+Analista:
+Resumen de los pendientes: frecuencia de las copias de seguridad, tiempo máximo de recuperación y, a futuro, la conexión con la SUNAT. No se asumirá nada de eso en esta versión.

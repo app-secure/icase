@@ -2,17 +2,11 @@ import React from 'react';
 import RequirementActorsPanel from './RequirementActorsPanel';
 import SourcesDrawer from './SourcesDrawer';
 import { isTechnologyStack } from './technologyStack';
-import { PanelLeft, PanelLeftClose, PanelRight, PanelRightClose } from 'lucide-react';
+import { PanelLeftClose, PanelRightClose } from 'lucide-react';
 
+/** Panel de requisitos aprobados. Se abre con el botón «Requisitos» de la barra de fases; ya no hay un botón flotante propio. */
 export function RequirementsReferencePanel({ open, onToggle, side = 'left', ...props }) {
-  const Icon = side === 'right' ? PanelRight : PanelLeft;
-  return open ? <SourcesDrawer open onClose={onToggle} side={side} id="approved-requirements-drawer" label="Requisitos aprobados" closeLabel="Ocultar requisitos aprobados"><ApprovedRequirementsSidebar {...props} side={side} embedded /></SourcesDrawer> : (
-    <div className={`fixed top-3 z-30 ${side === 'right' ? 'right-3 order-last' : 'left-3'}`}>
-      <button type="button" onClick={onToggle} aria-label="Mostrar requisitos aprobados" aria-expanded={false} aria-haspopup="dialog" aria-controls="approved-requirements-drawer" title="Mostrar requisitos aprobados" className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-[#262235] text-violet-200 shadow-lg focus-visible:outline-2 focus-visible:outline-violet-400">
-        <Icon size={18} />
-      </button>
-    </div>
-  );
+  return open ? <SourcesDrawer open onClose={onToggle} side={side} id="approved-requirements-drawer" label="Requisitos aprobados" closeLabel="Ocultar requisitos aprobados"><ApprovedRequirementsSidebar {...props} side={side} embedded /></SourcesDrawer> : null;
 }
 
 const textOf = value => typeof value === 'string' || typeof value === 'number' ? String(value) : '';

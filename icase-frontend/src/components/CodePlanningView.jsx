@@ -1,9 +1,7 @@
+import DeliveryStage from './DeliveryStage';
 import StepSidebar from './StepSidebar';
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  AlertCircle, AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Code2, Download, FolderTree, Layers3,
-  Loader2, LockKeyhole, Puzzle, RotateCcw, Save, Scale, Settings2, ShieldCheck, WandSparkles, X
-} from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronUp, Loader2, RotateCcw, Save, WandSparkles, X } from 'lucide-react';
 import {
   controlLocalRunApi, fetchCodePlanApi, fetchGeneratedArtifactsApi, generateBackendArtifactApi,
   downloadCodeArtifactApi, downloadDeliveryArtifactApi, generateDeliveryArtifactApi, generateFrontendArtifactApi,
@@ -13,14 +11,12 @@ import {
   reviewTestArtifactApi, suggestCodePhaseApi, verifyGeneratedArtifactApi, updateGeneratedArtifactFileApi,
   executeOneClickModeApi, startArtifactVerificationJobApi, fetchArtifactVerificationJobApi, fetchLatestArtifactVerificationJobApi
 } from '../services/api';
-import GenerationReport from './GenerationReport';
 import SpecReviewPanel from './SpecReviewPanel';
 import FunctionalGatePanel from './FunctionalGatePanel';
 import GenerationPreviewPanel from './GenerationPreviewPanel';
 import LocalRunPanel from './LocalRunPanel';
 import FolderExplorer from './FolderExplorer';
 import CodeSummary from './CodeSummary';
-import GeneratedSummary from './GeneratedSummary';
 import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
@@ -376,6 +372,27 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
       : `${item.titulo} (${String(item.estado || '').replace('_', ' ')})`
   }));
 
+  // Las seis piezas de la entrega, en el orden en que se generan y aprueban.
+  const deliveryPieces = [
+    { key: 'backend', title: 'Backend (API)', subtitle: 'Código propuesto desde las decisiones y los RF aprobados.', artifact: backendArtifact, setArtifact: setBackendArtifact,
+      blockedReason: '', generateButtons: [{ label: 'Generar backend', onClick: generateBackend }], onReview: reviewBackend },
+    { key: 'frontend', title: 'Frontend', subtitle: 'Aplicación React con las vistas de los mockups aprobados.', artifact: frontendArtifact, setArtifact: setFrontendArtifact,
+      blockedReason: '', generateButtons: plataformas.map((platform) => ({ label: `Generar ${platform}`, platform, onClick: () => generateFrontend(platform) })), onReview: reviewFrontend },
+    { key: 'tests', title: 'Pruebas', subtitle: 'Trazabilidad, integración del API y navegación E2E.', artifact: testArtifact, setArtifact: setTestArtifact,
+      blockedReason: testsEnabled ? '' : 'Primero aprueba el backend y el frontend.', generateButtons: [{ label: 'Generar pruebas', onClick: generateTests }], onReview: reviewTests,
+      extra: mockupFormWaiver(testArtifact?.verificacion) ? <label className="flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup. La compilación, el arranque y el CRUD ya pasaron.</label> : null },
+    { key: 'infrastructure', title: 'Infraestructura', subtitle: 'Docker, Compose, proxy y persistencia.', artifact: infrastructureArtifact, setArtifact: setInfrastructureArtifact,
+      blockedReason: infrastructureEnabled ? '' : 'Primero aprueba el backend y el frontend.', generateButtons: [{ label: 'Generar infraestructura', onClick: generateInfrastructure }], onReview: reviewInfrastructure },
+    { key: 'pipeline', title: 'Pipeline CI/CD', subtitle: 'Validación, pruebas y contenedores con GitHub Actions.', artifact: pipelineArtifact, setArtifact: setPipelineArtifact,
+      blockedReason: pipelineEnabled ? '' : 'Primero aprueba las pruebas y la infraestructura.', generateButtons: [{ label: 'Generar pipeline', onClick: generatePipeline }], onReview: reviewPipeline }
+  ];
+  const deliveryPiece = {
+    artifact: deliveryArtifact, blockedReason: deliveryEnabled ? '' : 'Primero aprueba el pipeline CI/CD.', onGenerate: generateDelivery, onReview: reviewDelivery, onDownload: downloadDelivery,
+    renderVerification: deliveryArtifact ? <ArtifactVerification key={deliveryArtifact.id} projectId={projectId} artifact={deliveryArtifact} onArtifactChange={setDeliveryArtifact} /> : null,
+    extra: <div className="space-y-2"><label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={autoRun} onChange={(event) => changeAutoRun(event.target.checked)} />Ejecutar el proyecto en Docker al aprobar</label>{mockupFormWaiver(deliveryArtifact?.verificacion) && <label className="flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup.</label>}</div>,
+    afterApproval: deliveryArtifact?.aprobado ? <div className="mt-4"><LocalRunPanel key={deliveryArtifact.id} projectId={projectId} onError={(message) => addToast({ type: 'error', message })} /></div> : null
+  };
+
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-white">
       <StepSidebar title="Codificación" ariaLabel="Pasos de la codificación" steps={codingSteps} currentKey={selected}
@@ -510,131 +527,10 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
               <GenerationPreviewPanel projectId={projectId} refreshKey={plan?.version} onError={(message) => addToast({ type: 'error', message })} />
             </div>
           ) : selected === 'generacion_entrega' ? (
-            /* PANEL EXCLUSIVO PARA GENERACIÓN Y ENTREGA DE ARTEFACTOS */
-            <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-xs">
-              <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold uppercase tracking-wider text-violet-600">
-                      Compuerta de generación activa
-                    </span>
-                    <span className={`inline-flex rounded-full border px-3 py-0.5 text-xs font-semibold ${deliveryArtifact?.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>
-                      {deliveryArtifact?.aprobado ? 'aprobada' : 'habilitada'}
-                    </span>
-                  </div>
-                  <h2 className="mt-1.5 text-2xl font-bold text-slate-900">Generación y entrega del sistema</h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Genera las partes seleccionadas. Cada versión tiene su propia descarga y verificación.
-                  </p>
-                </div>
-              </div>
-
-              <label className="mb-6 block">
-                <span className="mb-1 block text-xs font-semibold text-slate-700">Observaciones de revisión (para rechazos o ajustes)</span>
-                <textarea
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                  rows={2}
-                  className="w-full rounded-lg border border-slate-300 p-3 text-sm outline-none focus:border-violet-500"
-                  placeholder="Indica observaciones si deseas rechazar o solicitar cambios en algún artefacto generado…"
-                />
-              </label>
-
-              <section className="space-y-7">
-                <div>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="font-semibold text-slate-900">Generación del backend</h3><p className="mt-1 text-xs text-slate-500">Código propuesto desde las decisiones y RF aprobados. La verificación detecta módulos pendientes antes de aprobar.</p></div>
-                    <button disabled={busy} onClick={generateBackend} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 cursor-pointer"><Code2 size={15} />{backendArtifact ? 'Regenerar backend' : 'Generar backend'}</button>
-                  </div>
-                  {!backendArtifact && <GenerationReport projectId={projectId} artifact={null} />}
-                  {backendArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {backendArtifact.version} · {backendArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${backendArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{backendArtifact.estado}</span></div>
-                    {backendArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{backendArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                    <GenerationReport projectId={projectId} artifact={backendArtifact} />
-                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(backendArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                    <ArtifactVerification key={backendArtifact.id} projectId={projectId} artifact={backendArtifact} onArtifactChange={setBackendArtifact} />
-                    {backendArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewBackend('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewBackend('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar backend</button></div>}
-                  </div>}
-                </div>
-
-                <div className="border-t border-slate-200 pt-6">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="font-semibold text-slate-900">Generación del frontend</h3><p className="mt-1 text-xs text-slate-500">Aplicación React/Vite con rutas y vistas derivadas del árbol y mockups aprobados.</p></div>
-                    <div className="flex gap-2">{plataformas.map(p => <button key={p} disabled={busy} onClick={() => generateFrontend(p)} className="rounded-lg bg-slate-900 px-4 py-2 text-sm text-white">Generar {p}</button>)}</div>
-                  </div>
-                  {frontendArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {frontendArtifact.version} · {frontendArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${frontendArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{frontendArtifact.estado}</span></div>
-                    {frontendArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{frontendArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(frontendArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                    <ArtifactVerification key={frontendArtifact.id} projectId={projectId} artifact={frontendArtifact} onArtifactChange={setFrontendArtifact} />
-                    {frontendArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewFrontend('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewFrontend('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar frontend</button></div>}
-                  </div>}
-                </div>
-
-                <div className="border-t border-slate-200 pt-6">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="font-semibold text-slate-900">Generación de pruebas</h3><p className="mt-1 text-xs text-slate-500">Pruebas de trazabilidad, integración del API y navegación E2E vinculadas a versiones aprobadas.</p>{!testsEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba backend y frontend.</p>}</div>
-                    <button disabled={busy || !testsEnabled} onClick={generateTests} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><Code2 size={15} />{testArtifact ? 'Regenerar pruebas' : 'Generar pruebas'}</button>
-                  </div>
-                  {testArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {testArtifact.version} · {testArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${testArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{testArtifact.estado}</span></div>
-                    {testArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{testArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(testArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                    <ArtifactVerification key={testArtifact.id} projectId={projectId} artifact={testArtifact} onArtifactChange={setTestArtifact} />
-                    {testArtifact.estado === 'en_revision' && <div className="mt-3 flex flex-wrap items-center justify-end gap-2">{mockupFormWaiver(testArtifact.verificacion) && <label className="mr-auto flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup. La compilación, el arranque y el CRUD ya pasaron.</label>}<button disabled={busy} onClick={() => reviewTests('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewTests('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pruebas</button></div>}
-                  </div>}
-                </div>
-
-                <div className="border-t border-slate-200 pt-6">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="font-semibold text-slate-900">Infraestructura y puesta en marcha</h3><p className="mt-1 text-xs text-slate-500">Docker, Compose, proxy, persistencia y despliegue derivados de arquitectura y RNF aprobados.</p>{!infrastructureEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba backend y frontend.</p>}</div>
-                    <button disabled={busy || !infrastructureEnabled} onClick={generateInfrastructure} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><Settings2 size={15} />{infrastructureArtifact ? 'Regenerar infraestructura' : 'Generar infraestructura'}</button>
-                  </div>
-                  {infrastructureArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {infrastructureArtifact.version} · {infrastructureArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${infrastructureArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{infrastructureArtifact.estado}</span></div>
-                    {infrastructureArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{infrastructureArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(infrastructureArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                    <ArtifactVerification key={infrastructureArtifact.id} projectId={projectId} artifact={infrastructureArtifact} onArtifactChange={setInfrastructureArtifact} />
-                    {infrastructureArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewInfrastructure('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewInfrastructure('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar infraestructura</button></div>}
-                  </div>}
-                </div>
-
-                <div className="border-t border-slate-200 pt-6">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="font-semibold text-slate-900">Pipeline CI/CD</h3><p className="mt-1 text-xs text-slate-500">Validación, compilación, pruebas, contenedores y paquete de entrega mediante GitHub Actions.</p>{!pipelineEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba pruebas e infraestructura.</p>}</div>
-                    <button disabled={busy || !pipelineEnabled} onClick={generatePipeline} className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><Settings2 size={15} />{pipelineArtifact ? 'Regenerar pipeline' : 'Generar pipeline'}</button>
-                  </div>
-                  {pipelineArtifact && <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Versión {pipelineArtifact.version} · {pipelineArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${pipelineArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{pipelineArtifact.estado}</span></div>
-                    {pipelineArtifact.advertencias?.length > 0 && <ul className="mt-2 list-disc pl-4 text-xs text-amber-700">{pipelineArtifact.advertencias.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(pipelineArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                    <ArtifactVerification key={pipelineArtifact.id} projectId={projectId} artifact={pipelineArtifact} onArtifactChange={setPipelineArtifact} />
-                    {pipelineArtifact.estado === 'en_revision' && <div className="mt-3 flex justify-end gap-2"><button disabled={busy} onClick={() => reviewPipeline('rechazar')} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewPipeline('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar pipeline</button></div>}
-                  </div>}
-                </div>
-
-                <GeneratedSummary artifacts={{ backend: backendArtifact, frontend: frontendArtifact, tests: testArtifact, infrastructure: infrastructureArtifact, pipeline: pipelineArtifact, delivery: deliveryArtifact }} />
-
-                <FunctionalGatePanel projectId={projectId} refreshKey={`${backendArtifact?.id}-${frontendArtifact?.id}-${testArtifact?.id}`} onError={(message) => addToast({ type: 'error', message })} />
-
-                <div className="border-t border-slate-200 pt-6">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="font-semibold text-slate-900">Paquete final de entrega</h3><p className="mt-1 text-xs text-slate-500">Consolida código, pruebas, infraestructura, CI/CD, manifiesto de versiones y huellas.</p>{!deliveryEnabled && <p className="mt-1 text-xs text-amber-600">Primero aprueba el pipeline CI/CD.</p>}</div>
-                    <button disabled={busy || !deliveryEnabled} onClick={generateDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40 cursor-pointer"><FolderTree size={15} />{deliveryArtifact ? 'Regenerar paquete' : 'Generar paquete final'}</button>
-                  </div>
-                  {deliveryArtifact && <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50/50 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">Entrega v{deliveryArtifact.version} · {deliveryArtifact.archivos?.length || 0} archivos</p><span className={`rounded-full border px-2 py-0.5 text-[10px] ${deliveryArtifact.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{deliveryArtifact.estado}</span></div>
-                    <div className="mt-3 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-600">{(deliveryArtifact.archivos || []).map((file) => <div key={file.ruta}>{file.ruta}</div>)}</div>
-                    <ArtifactVerification key={deliveryArtifact.id} projectId={projectId} artifact={deliveryArtifact} onArtifactChange={setDeliveryArtifact} />
-                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                      {deliveryArtifact.estado === 'en_revision' && <><label className="mr-auto flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={autoRun} onChange={(event) => changeAutoRun(event.target.checked)} />Ejecutar el proyecto en Docker al aprobar</label>{mockupFormWaiver(deliveryArtifact.verificacion) && <label className="mr-auto flex items-start gap-2 text-xs text-amber-800"><input type="checkbox" checked={permissive} onChange={(event) => setPermissive(event.target.checked)} />Modo permisivo: aprobar aunque fallen los formularios del mockup.</label>}<button disabled={busy} onClick={() => reviewDelivery('rechazar')} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600">Rechazar</button><button disabled={busy} onClick={() => reviewDelivery('aprobar')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white">Aprobar entrega</button></>}
-                      {deliveryArtifact.aprobado && <button disabled={busy} onClick={downloadDelivery} className="flex items-center gap-1.5 rounded-lg bg-violet-700 px-4 py-2 text-xs font-semibold text-white"><Download size={14} />Descargar ZIP</button>}
-                    </div>
-                  </div>}
-                  {deliveryArtifact?.aprobado && <div className="mt-4"><LocalRunPanel key={deliveryArtifact.id} projectId={projectId} onError={(message) => addToast({ type: 'error', message })} /></div>}
-                </div>
-              </section>
-            </div>
+            <DeliveryStage projectId={projectId} pieces={deliveryPieces} delivery={deliveryPiece} busy={busy} notes={notes} setNotes={setNotes}
+              summaryChip={<span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${deliveryArtifact?.aprobado ? STATUS_STYLE.aprobada : STATUS_STYLE.en_revision}`}>{deliveryArtifact?.aprobado ? 'entrega aprobada' : 'compuerta habilitada'}</span>}
+              gate={<FunctionalGatePanel projectId={projectId} refreshKey={`${backendArtifact?.id}-${frontendArtifact?.id}-${testArtifact?.id}`} onError={(message) => addToast({ type: 'error', message })} />}
+              renderVerification={(piece) => <ArtifactVerification key={piece.artifact.id} projectId={projectId} artifact={piece.artifact} onArtifactChange={piece.setArtifact} />} />
           ) : (
             <div className="rounded-2xl border border-slate-200 bg-white p-7 shadow-xs">
               {current && <>
@@ -826,7 +722,7 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
     {artifact.pendiente_reverificacion && !loading && !result && <p role="status" className="mt-2 text-amber-700">Corrección pendiente de verificar: no se puede empaquetar hasta que pase.</p>}
     {result?.aprobacion_mantenida && <p role="status" className="mt-2 font-semibold text-emerald-700">La corrección pasó la verificación: la aprobación se mantiene.</p>}
     {result?.aprobacion_retirada && <p role="alert" className="mt-2 font-semibold text-red-700">La corrección no pasó la verificación: se retiró la aprobación. Corrige y vuelve a verificar.</p>}
-    {result && <><p className="mt-2 text-slate-500">{result.nota}</p>
+    {result && <>{result.nota && <p className="mt-2 text-[11px] text-slate-400">{result.nota}</p>}
       {result.pruebas?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-emerald-700">{result.pruebas.map((check) => <li key={check.paso}>{check.paso}: {check.resultado}</li>)}</ul>}
       {result.diagnostico?.ubicados?.length > 0 && <div className="mt-2 rounded-lg border border-red-200 bg-red-50/60 p-2" aria-label="Dónde está el error">
         <p className="font-semibold text-red-800">Dónde está el error ({result.diagnostico.total})</p>
@@ -845,7 +741,7 @@ function ArtifactVerification({ projectId, artifact, onArtifactChange }) {
         <button type="button" disabled={loading} onClick={acceptAsUi} className="mt-1 rounded bg-violet-700 px-3 py-1.5 font-semibold text-white disabled:opacity-50">Marcar como solo interfaz y volver a verificar</button>
       </div>}
       {result.errores?.length > 0 && <details className="mt-2" open={!result.diagnostico?.ubicados?.length}><summary className="cursor-pointer text-red-700">Salida completa del error</summary><ul className="mt-1 list-disc space-y-1 pl-4 text-red-700">{result.errores.map((item) => <li key={item}>{item}</li>)}</ul></details>}
-      {result.advertencias?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-700">{result.advertencias.map((item) => <li key={item}>{item}</li>)}</ul>}
+      {result.advertencias?.length > 0 && <details className="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-amber-800"><summary className="cursor-pointer text-xs font-semibold">{result.advertencias.length} {result.advertencias.length === 1 ? 'nota de la verificación' : 'notas de la verificación'}</summary><ul className="mt-1 list-disc space-y-1 pl-4">{result.advertencias.map((item) => <li key={item}>{item}</li>)}</ul></details>}
     </>}
     {['en_revision', 'aprobado'].includes(artifact.estado) && <details className="mt-3 border-t border-slate-100 pt-2" open={editorOpen} onToggle={(event) => setEditorOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-semibold text-violet-700">Revisar y corregir un archivo</summary>

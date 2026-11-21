@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Download,
   Info as InfoIcon, Layout, ListTree, Loader2, Monitor, Palette,
-  Ellipsis, ExternalLink, Maximize2, PanelLeftClose, RotateCcw, Smartphone, Tablet, Trash2, WandSparkles
+  Ellipsis, ExternalLink, Maximize2, PanelLeftClose, PanelLeftOpen, RotateCcw, Smartphone, Tablet, Trash2, WandSparkles
 } from "lucide-react";
 import {
   deleteMockupApi, fetchLatestMockupJobApi, fetchMockupJobApi, fetchMockupsApi, markMockupControlsUiApi,
@@ -377,10 +377,18 @@ export default function MockupsView({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {showCatalog && <aside className="w-56 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-3">
           <div className="mb-3 flex items-center justify-between"><span className="text-xs font-semibold text-slate-800">Flujos y pantallas</span><span className="flex items-center gap-1"><button type="button" onClick={() => setSelectedIds(selectedIds.size === screens.length ? new Set() : new Set(screens.map(p => p.slug)))} className="cursor-pointer text-[11px] text-[#7C3AED]">{selectedIds.size === screens.length ? "Ninguna" : "Todas"}</button><button type="button" onClick={() => setShowCatalog(false)} aria-label="Ocultar la lista de pantallas" title="Ocultar la lista de pantallas" className="cursor-pointer rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><PanelLeftClose size={14} /></button></span></div>
-          {[...groups.entries()].map(([flow, modules]) => <div key={flow} className="mb-4"><SectionCheck label={flow} slugs={[...modules.values()].flat().map(entry => entry.slug)} selectedIds={selectedIds} onToggle={setMany} className="mb-1.5 px-1" labelClass="text-[10px] font-bold uppercase tracking-wide text-slate-500" />{[...modules.entries()].map(([module, items]) => <div key={module} className="mb-2"><SectionCheck label={module} slugs={items.map(entry => entry.slug)} selectedIds={selectedIds} onToggle={setMany} className="mb-1 pl-3 pr-1" labelClass="text-[11px] font-medium text-slate-600" />{items.map(entry => { const generated = mockupMap.get(entry.slug); const state = generated ? quality(generated) : "faltante"; return <div key={entry.slug} className={`mb-1 flex items-start gap-2 rounded-lg border px-2 py-2 ${activeId === entry.slug ? "border-[#CFC0F1] bg-[#F2EDFF]" : "border-transparent hover:bg-white"}`}><input type="checkbox" checked={selectedIds.has(entry.slug)} onChange={() => toggleScreen(entry.slug)} className="mt-0.5 accent-[#7C3AED]" /><button onClick={() => selectScreen(entry)} className="min-w-0 flex-1 text-left"><span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-800">{platformIcon(entry.plataforma)}<span className="truncate">{entry.nombre || formatName(entry.slug)}</span></span><span className={`mt-1 flex items-center gap-1 text-[10px] ${state === 'invalido' ? 'text-red-600' : state === 'faltante' ? 'text-slate-400' : state === 'advertencia' ? 'text-amber-600' : 'text-[#4D7C0F]'}`}>{state === 'invalido' ? <AlertTriangle size={10} /> : state === 'valido' ? <Check size={10} /> : null}{state}</span></button></div>; })}</div>)}</div>)}
+          {[...groups.entries()].map(([flow, modules]) => <div key={flow} className="mb-4"><SectionCheck label={flow} slugs={[...modules.values()].flat().map(entry => entry.slug)} selectedIds={selectedIds} onToggle={setMany} className="mb-1.5" labelClass="text-[10px] font-bold uppercase tracking-wide text-slate-500" />{[...modules.entries()].map(([module, items]) => <div key={module} className="mb-2"><SectionCheck label={module} slugs={items.map(entry => entry.slug)} selectedIds={selectedIds} onToggle={setMany} className="mb-1 pl-2" labelClass="text-[11px] font-medium text-slate-600" />{items.map(entry => { const generated = mockupMap.get(entry.slug); const state = generated ? quality(generated) : "faltante"; return <div key={entry.slug} className={`mb-1 flex items-start gap-2 rounded-lg border px-2 py-2 ${activeId === entry.slug ? "border-[#CFC0F1] bg-[#F2EDFF]" : "border-transparent hover:bg-white"}`}><input type="checkbox" checked={selectedIds.has(entry.slug)} onChange={() => toggleScreen(entry.slug)} className="mt-0.5 accent-[#7C3AED]" /><button onClick={() => selectScreen(entry)} className="min-w-0 flex-1 text-left"><span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-800">{platformIcon(entry.plataforma)}<span className="truncate">{entry.nombre || formatName(entry.slug)}</span></span><span className={`mt-1 flex items-center gap-1 text-[10px] ${state === 'invalido' ? 'text-red-600' : state === 'faltante' ? 'text-slate-400' : state === 'advertencia' ? 'text-amber-600' : 'text-[#4D7C0F]'}`}>{state === 'invalido' ? <AlertTriangle size={10} /> : state === 'valido' ? <Check size={10} /> : null}{state}</span></button></div>; })}</div>)}</div>)}
           {!screens.length && <p className="text-xs text-slate-400">El árbol no contiene pantallas reconocibles.</p>}
         </aside>}
 
+        {!showCatalog && (
+          <button type="button" onClick={() => setShowCatalog(true)} aria-label="Mostrar la lista de pantallas" title="Mostrar la lista de pantallas"
+            className="flex w-9 shrink-0 cursor-pointer flex-col items-center gap-2 border-r border-slate-200 bg-white py-3 text-slate-500 hover:bg-slate-50 hover:text-[#6D28D9]">
+            <PanelLeftOpen size={16} />
+            <span className="text-[10px] font-semibold uppercase tracking-wide [writing-mode:vertical-rl]">Pantallas</span>
+            <span className="rounded-full bg-[#F2EDFF] px-1.5 py-0.5 text-[10px] font-semibold text-[#6D28D9]">{selectedIds.size}</span>
+          </button>
+        )}
         <main className="flex min-w-0 flex-1 flex-col bg-slate-100/70">
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-1.5">
             <div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-900">{currentEntry?.nombre || "Selecciona una pantalla"}</p><p className="truncate text-[10px] text-slate-500">{currentEntry?.ruta || `${currentEntry?.flujo || ''} / ${currentEntry?.modulo || ''}`}</p></div>
@@ -482,16 +490,20 @@ function ScaledMockupPreview({ html, platform = "web", title, zoom = "fit" }) {
   );
 }
 
-/** Casilla de un flujo o módulo: marca o desmarca todas sus pantallas y muestra «algunas» cuando la selección es parcial. */
+/** Encabezado de un flujo o módulo: su nombre a la izquierda (conserva la jerarquía) y, a la derecha, un botón con el conteo que marca o desmarca todas sus pantallas. */
 function SectionCheck({ label, slugs, selectedIds, onToggle, className = "", labelClass = "" }) {
   const count = slugs.filter(slug => selectedIds.has(slug)).length;
   const all = slugs.length > 0 && count === slugs.length;
+  const tone = all ? "border-[#7C3AED] bg-[#7C3AED] text-white" : count > 0 ? "border-[#CFC0F1] bg-[#F2EDFF] text-[#6D28D9]" : "border-slate-200 bg-white text-slate-400 hover:text-slate-600";
   return (
-    <label className={`flex cursor-pointer items-center gap-1.5 ${className}`}>
-      <input type="checkbox" checked={all} ref={element => { if (element) element.indeterminate = count > 0 && !all; }} onChange={() => onToggle(slugs, !all)} aria-label={`Seleccionar ${label}`} className="accent-[#7C3AED]" />
-      <span className={`min-w-0 truncate ${labelClass}`}>{label}</span>
-      <span className="ml-auto shrink-0 text-[10px] text-slate-400">{count}/{slugs.length}</span>
-    </label>
+    <div className={`flex items-center gap-2 ${className}`}>
+      <span className={`min-w-0 flex-1 truncate ${labelClass}`} title={label}>{label}</span>
+      <button type="button" onClick={() => onToggle(slugs, !all)} aria-pressed={all} aria-label={`${all ? "Quitar" : "Seleccionar"} todas las pantallas de ${label}`}
+        title={all ? "Quitar la selección de esta sección" : "Seleccionar toda esta sección"}
+        className={`shrink-0 cursor-pointer rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums leading-none transition-colors ${tone}`}>
+        {count}/{slugs.length}
+      </button>
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@
 node_modules/
 **/node_modules/
 
+generaciones/
 # Variables de entorno y credenciales sensibles (API keys, passwords)
 .env
 .env.*
