@@ -38,6 +38,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.3",
+    "markdown-it": "15.0.3",
     "mongoose": "^8.9.5",
     "multer": "^2.4.0",
     "parse5": "7.3.0",

@@ -14,17 +14,27 @@ Los insumos provienen de requisitos, diagramas, decisiones y artefactos aprobado
 
 ## Revisar y exportar
 
-Pulsa **Generar documentación**. La vista previa muestra el manual completo en HTML. **Imprimir / guardar PDF** abre el diálogo de impresión del navegador; selecciona Guardar como PDF. **Descargar HTML** conserva el manual completo, incluidas las imágenes que pudieron incrustarse.
+Pulsa **Generar documentación**. El panel sigue la interfaz de I-CASE, con pestañas independientes para los cinco manuales y una vista de guías animadas. **PDF completo** imprime los cinco manuales, aunque estés consultando una pestaña. **HTML completo** conserva el documento y los diagramas que pudieron incrustarse.
 
-**Descargar MkDocs** genera un ZIP con `documentation/mkdocs.yml`, cinco páginas, documentos originales, infografía SVG, fuentes de diagramas, estilos de impresión y manifiesto SHA-256. La exportación no modifica el proyecto guardado ni publica el sitio. También se incluyen las fuentes documentales al generar un paquete final de entrega nuevo.
+Los Markdown de los artefactos aprobados (README, CONTRIBUTING y otros manuales) aparecen renderizados: encabezados, listas, tablas, enlaces y bloques de código. **Ver Markdown original** permite consultar la fuente; los archivos originales se conservan sin cambios en `documentation/repository/`. El renderizado desactiva HTML ejecutable y protocolos de enlace peligrosos.
 
-La opción de imágenes utiliza el mismo servidor PlantUML del visor. Si no está disponible, se conserva el código fuente y se informa el fallo; no se sustituye el diagrama por una imagen ficticia.
+**Descargar MkDocs** genera un ZIP con `documentation/mkdocs.yml`, cinco páginas, documentos originales, infografía SVG por roles, fuentes de diagramas, estilos de impresión y manifiesto SHA-256. Generar o descargar no publica en GitHub. También se incluyen las fuentes documentales al generar un paquete final de entrega nuevo.
 
-## Videos cortos
+La opción de imágenes utiliza el servidor PlantUML del visor. Si no está disponible, se conserva la fuente y se informa del fallo.
 
-**Descargar con 3 videos** añade guías animadas WebM: flujo, funciones del proyecto y mantenimiento. Se generan en el navegador, sin audio, y se vinculan desde el manual de usuario. Mantén la pestaña visible durante la captura. Chrome y Edge compatibles con MediaRecorder pueden producir estos videos.
+## Flujos separados por rol
 
-Son guías narrativas basadas en los insumos aprobados. No son grabaciones de la aplicación ejecutándose ni evidencia de pruebas funcionales. Para demostrar interacciones reales, el equipo debe grabarlas sobre una entrega ejecutable y revisada.
+Cada recorrido utiliza los actores de los requisitos, los permisos aprobados y los actores de las operaciones confirmadas. Las funciones se agrupan por responsable; una función compartida aparece en los recorridos de los roles correspondientes. Se incluyen todos los RF aprobados, sin limitar el flujo a los primeros cuatro.
+
+Cada paso muestra requisito, descripción, acciones autorizadas cuando se especifican, precondiciones y resultado esperado. Las funciones sin responsable confirmado aparecen bajo **Rol por confirmar**. El orden es una guía de consulta: no inventa dependencias operativas que no estén documentadas. La infografía exportada conserva esta separación.
+
+## Guías animadas
+
+En **Guías animadas**, elige un rol y pulsa **Crear y reproducir guía**. Puedes verla dentro del panel y descargar el WebM individual. **ZIP con guías** incluye los cinco manuales y los videos de la selección actual; **Todos los roles** incluye todas las guías disponibles.
+
+Cada clip usa el estilo visual de la herramienta, un índice de pasos, requisito de origen, progreso animado y tres momentos: preparar, ejecutar y comprobar. Los recorridos largos se dividen en clips de hasta cuatro funciones; ninguna función desaparece por el límite de un clip. La guía de mantenimiento se distingue de los roles de negocio.
+
+Los videos son guías narrativas sin audio, no grabaciones de la aplicación ni evidencia de pruebas funcionales. Mantén la pestaña visible durante la captura. Son compatibles con navegadores Chromium que soporten MediaRecorder, como Chrome, Brave y Edge. Para demostrar interacciones reales, el equipo debe grabarlas sobre una entrega ejecutable y revisada.
 
 ## Construir HTML y PDF
 

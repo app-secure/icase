@@ -93,3 +93,53 @@ test('conserva documentos y licencia originales de la última versión aprobada'
   expect(result.archivos.find(file => file.ruta === 'documentation/repository/backend/OPERATIONS.md').contenido).toBe('Operación original');
   expect(result.archivos.find(file => file.ruta === 'documentation/LICENSE.md').contenido).toBe('Licencia del titular');
 });
+
+test('renderiza Markdown como contenido legible sin ejecutar HTML y conserva la fuente original', () => {
+  const markdown = '# Invalidaciones CRUD\n\n**Contenido importante** con `Socket.IO`.\n\n- Primera opción\n- Segunda opción\n\n| Campo | Valor |\n| --- | --- |\n| Estado | Activo |\n\n```js\nconst ready = true;\n```\n\n<script>alert(1)</script>\n\n[Enlace malicioso](javascript:alert(1))\n\n[Operación](./OPERATIONS.md)';
+  const result = new Generator().generar({ ...base(), artefactos: [{ tipo: 'codigo_backend', version: 1, aprobado: true, archivos: [
+    { ruta: 'backend/CHANGE-EVENTS.md', contenido: markdown }, { ruta: 'backend/OPERATIONS.md', contenido: '## Operación\n\nTexto de operación.' }
+  ] }] });
+  const document = new JSDOM(result.html).window.document;
+  const article = document.querySelector('.repository-document');
+  expect(article.querySelector('.markdown-body h1').textContent).toBe('Invalidaciones CRUD');
+  expect(article.querySelector('strong').textContent).toBe('Contenido importante');
+  expect(article.querySelectorAll('.markdown-body li')).toHaveLength(2);
+  expect(article.querySelector('.markdown-body table')).not.toBeNull();
+  expect(article.querySelector('code.language-js').textContent).toContain('const ready');
+  expect(document.querySelector('script, a[href^="javascript:"]')).toBeNull();
+  expect(article.querySelector('.source-details pre').textContent).toBe(markdown);
+  expect(article.querySelector('.markdown-body a').getAttribute('href')).toMatch(/^#repo-/);
+  expect(result.archivos.find(file => file.ruta === 'documentation/repository/backend/CHANGE-EVENTS.md').contenido).toBe(markdown);
+});
+
+test('separa todos los requisitos por sus roles y no mezcla funciones de cliente y cocina', () => {
+  const requirements = Array.from({ length: 8 }, (_, index) => ({ tipo: 'RF', aprobado: true, identificador: `RF-${index + 1}`, nombre: `Función ${index + 1}`, descripcion: 'Detalle del requisito.', actores: [index % 2 ? 'Cocinero' : 'Cliente'] }));
+  requirements.push({ tipo: 'RF', aprobado: true, identificador: 'RF-09', nombre: 'Sin responsable' });
+  const result = new Generator().generar({ proyecto: { nombre: 'Restaurante' }, requerimientos: requirements });
+  expect(result.flujos.find(flow => flow.role === 'Cliente').steps.map(step => step.id)).toEqual(['RF-1', 'RF-3', 'RF-5', 'RF-7']);
+  expect(result.flujos.find(flow => flow.role === 'Cocinero').steps.map(step => step.id)).toEqual(['RF-2', 'RF-4', 'RF-6', 'RF-8']);
+  expect(result.flujos.find(flow => flow.pending).steps.map(step => step.id)).toEqual(['RF-09']);
+  const document = new JSDOM(result.html).window.document;
+  expect(document.querySelector('[data-role="Cliente"]').textContent).not.toContain('Función 2');
+  expect(document.querySelector('[data-role="Cocinero"]').textContent).not.toContain('Función 1');
+  expect(result.videos.filter(video => video.roleId === 'cliente').flatMap(video => video.steps.map(step => step.id))).toEqual(['RF-1', 'RF-3', 'RF-5', 'RF-7']);
+  expect(result.paginas).toHaveLength(5);
+  expect(new JSDOM(result.paginas[0].html).window.document.querySelectorAll('main > section')).toHaveLength(1);
+});
+
+test('los permisos aprobados identifican roles aun cuando un requisito no trae actores', () => {
+  const result = new Generator().generar({ proyecto: { nombre: 'Ventas' }, requerimientos: [{ tipo: 'RF', aprobado: true, identificador: 'RF-01', nombre: 'Consultar ventas' }], plan: { etapas: [{ etapa: 'control_acceso', estado: 'aprobada', propuesta: {
+    roles: [{ id: 'vendedor', nombre: 'Vendedor' }], permisos: [{ operacion: 'RF-01', rol: 'vendedor', metodos: ['GET'] }]
+  } }] } });
+  expect(result.flujos).toHaveLength(1);
+  expect(result.flujos[0]).toMatchObject({ role: 'Vendedor', steps: [{ id: 'RF-01', actions: ['Consultar'] }] });
+});
+
+test('los recorridos largos generan varios clips sin perder funciones ni mezclarlos con otros roles', () => {
+  const requirements = Array.from({ length: 9 }, (_, index) => ({ tipo: 'RF', aprobado: true, identificador: `RF-${index + 1}`, nombre: `Función ${index + 1}`, actores: ['Cliente'] }));
+  const result = new Generator().generar({ proyecto: { nombre: 'Demo' }, requerimientos: requirements });
+  const clips = result.videos.filter(video => video.roleId === 'cliente');
+  expect(clips.map(clip => clip.steps.length)).toEqual([4, 4, 1]);
+  expect(clips.flatMap(clip => clip.steps.map(step => step.id))).toEqual(requirements.map(requirement => requirement.identificador));
+  expect(result.flujos[0].steps).toHaveLength(9);
+});
