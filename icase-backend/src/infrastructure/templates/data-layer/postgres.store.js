@@ -273,6 +273,7 @@ class RecordStore {
     for (const reference of table.references || []) {
       const id = values[reference.column];
       if (id == null) continue;
+      if ((scope?.shared || []).includes(reference.table)) continue; // catálogo que el rol consulta completo
       const target = model.tables[reference.table];
       if (!target || !target.columns.some((column) => column.column === 'owner_id')) throw new HttpError(409, 'El registro referencia un dato ajeno.');
       const result = await this.pool.query(`SELECT owner_id FROM ${quote(reference.table)} WHERE id = $1`, [id]);

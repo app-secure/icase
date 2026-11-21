@@ -126,6 +126,24 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
   const ask = confirmar || ((message) => (typeof globalThis.confirm === 'function' ? globalThis.confirm(message) : true));
   try {
     const porBoton = verb === 'editar' && named && ((named.booleanos && named.booleanos.length === 1) || named.inputs.length === 0); // «Marcar agotado»: el texto del botón es la orden
+    // «Emitir factura» en una venta (su fila o su detalle): el alta vinculada solo necesita el id de ese registro.
+    const urlId = typeof globalThis.location !== 'undefined' ? new URLSearchParams(globalThis.location.search || '').get('id') || '' : '';
+    const linkedId = named && named.vincula ? ((control ? recordId(control) : '') || urlId) : '';
+    const anular = verb === 'eliminar' && named && named.anula && named.vincula;
+    if ((verb === 'crear' || anular) && named && named.vincula && (anular || !control || !formOf(control))) {
+      if (!linkedId) return onResult({ estado: 'aviso', mensaje: `Elige primero el registro (${named.vincula.entidad || named.vincula.parametro}).` });
+      if (anular && !ask(`¿Anular ${String(named.vincula.entidad || 'el registro').toLowerCase()} #${linkedId}? No se puede deshacer.`)) return undefined;
+      // Lo que la operación pide además del registro (el motivo de la anulación) se pregunta antes de enviar.
+      const body = { [named.vincula.parametro]: linkedId };
+      for (const name of named.inputs.filter((item) => item !== named.vincula.parametro)) {
+        const value = typeof globalThis.prompt === 'function' ? globalThis.prompt(`Indica ${name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()}:`) : '';
+        if (value === null) return undefined;
+        body[name] = value;
+      }
+      const created = await api(named.path, { method: named.method, body: JSON.stringify(body) });
+      if (anular) return onResult({ estado: 'ok', mensaje: `${named.vincula.entidad || 'Registro'} #${linkedId} anulada` });
+      return onResult({ estado: 'ok', mensaje: `Registro creado${created && created.numero ? ` (${created.numero})` : ''}` });
+    }
     if (['crear', 'editar'].includes(verb) && !porBoton && (!control || !formOf(control))) {
       return onResult({ estado: 'aviso', mensaje: 'Esta acción necesita un formulario asociado antes de guardar.' });
     }
@@ -160,11 +178,14 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
       const body = only(control ? read(control) : {});
       // Alta compuesta: las líneas del formulario viajan en el mismo cuerpo; el servidor las guarda y suma el total.
       if (named && named.lineas) body.lineas = collectLines(formOf(control), named) || [];
-      await api(named ? named.path : base, { method: named ? named.method : method, body: JSON.stringify(body) });
-      return onResult({ estado: 'ok', mensaje: 'Registro creado' });
+      if (named && named.vincula && !body[named.vincula.parametro] && linkedId) body[named.vincula.parametro] = linkedId;
+      const created = await api(named ? named.path : base, { method: named ? named.method : method, body: JSON.stringify(body) });
+      return onResult({ estado: 'ok', mensaje: `Registro creado${created && created.numero ? ` (${created.numero})` : ''}` });
     }
     const chosen = selected && selected.operation === operation && selected.id ? selected : null;
-    const id = chosen ? String(chosen.id) : (control ? recordId(control) : '');
+    // Pantalla de edición o detalle abierta desde un listado («Editar» → /formulario-de-edicion-de-cliente?id=7): actúa sobre ese registro.
+    const fromUrl = typeof globalThis.location !== 'undefined' ? new URLSearchParams(globalThis.location.search || '').get('id') || '' : '';
+    const id = chosen ? String(chosen.id) : ((control ? recordId(control) : '') || fromUrl);
     if (!id) return onResult({ estado: 'aviso', mensaje: 'Selecciona primero un registro: usa Consultar y luego Seleccionar en la tabla.' });
     const target = named ? named.path.replace(':id', encodeURIComponent(id)) : `${base}/${encodeURIComponent(id)}`;
     if (verb === 'editar') {

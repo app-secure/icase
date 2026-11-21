@@ -18,6 +18,8 @@ const slug = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u
 const component = (value) => slug(value).split('-').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('');
 const STOPWORDS = new Set(['vista', 'pantalla', 'panel', 'modulo', 'seccion', 'pagina', 'inicio', 'listado', 'detalle', 'gestion', 'registro', 'edicion', 'consulta', 'para', 'del', 'las', 'los', 'una', 'con', 'por']);
 const tokensOf = (value) => slug(value).split('-').filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+// Pantalla que solo es el acceso («Inicio de sesión»): con sesión real la reemplaza el login de la aplicación.
+const isLoginOnlyScreen = (screen) => /^(?:pantalla de )?(?:inicio de sesion|iniciar sesion|login|acceso al sistema|autenticacion)$/.test(String(screen?.nombre || screen?.nombre_visible || screen?.nombre_pantalla || screen?.slug || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/-/g, ' ').trim());
 const isAuthScreen = (screen) => /inicio.*sesion|login|autentic/i.test(screen?.slug || screen?.nombre || screen?.nombre_visible || screen?.nombre_pantalla || screen?.ruta || '');
 const PlatformPolicy = require('../../core/services/PlatformPolicy');
 const platformOf = (screen) => PlatformPolicy.of(screen);
@@ -56,7 +58,7 @@ class GenericFrontendGenerator {
     const loginIds = new Set(identity.login);
     const allViews = screens.map((screen) => this._view(screen, screens, requerimientos))
       .filter((view, index) => !(auth && (
-        (isAuthScreen(screens[index]) && view.requirements.every((id) => loginIds.has(String(id).toUpperCase())))
+        (isAuthScreen(screens[index]) && (isLoginOnlyScreen(screens[index]) || view.requirements.every((id) => loginIds.has(String(id).toUpperCase()))))
         || (view.platform === 'web' && (view.route === '/usuarios' || view.id === 'usuarios'))
       )));
     const roleCatalog = [{ id: 'administrador', nombre: 'Administrador' }, ...((acceso?.roles || []).filter((role) => role.incluir !== false).map((role) => ({ id: slug(role.id), nombre: role.nombre || role.id })))];
@@ -182,9 +184,11 @@ class GenericFrontendGenerator {
     if (anyWired || specSummaries.size) {
       files.push(
         { ruta: 'frontend/src/mockupActions.js', lenguaje: 'javascript', contenido: template('mockup-actions.js') },
-        { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') }
+        { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') },
+        { ruta: 'frontend/src/uiControls.js', lenguaje: 'javascript', contenido: template('ui-controls.js') }
       );
     }
+    const uiControls = Boolean(anyWired || specSummaries.size);
     if (specSummaries.size) {
       anyReferences = true;
       files.push(
@@ -213,11 +217,18 @@ class GenericFrontendGenerator {
     }
     // Consola de datos del administrador: una entrada por operación con su editor genérico (y los módulos de adjuntos, reportes y cambios).
     const reqName = new Map((requerimientos || []).map((req) => [slug(req.identificador), req.nombre]));
-    const consoleOps = auth ? [...allowedOperations].filter((key) => !loginIds.has(String(key).toUpperCase())).map((key) => ({ key, name: `${String(key).toUpperCase()} · ${reqName.get(key) || key}`, label: reqName.get(key) || String(key).toUpperCase() })) : [];
+    // Entidad de cada operación (según la especificación) para no repetir en el menú lo que ya lista una pantalla y nombrar el registro por su dato.
+    const specActions = Array.isArray(spec?.acciones) ? spec.acciones : [];
+    const entityOfOp = (key) => specActions.find((action) => action.capability === key && action.entity)?.entity || null;
+    const lineOps = new Set(specActions.map((action) => action.lineas?.capability).filter(Boolean));
+    const lineEntities = new Set(specActions.map((action) => action.lineas?.entidadClave).filter(Boolean));
+    const humanize = (key, name) => { const [first, ...rest] = String(name || key).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(' '); const plural = /[aeiou]$/.test(first) ? first + 's' : first.replace(/z$/, 'c') + 'es'; const text = [plural, ...rest].join(' '); return text.charAt(0).toUpperCase() + text.slice(1); };
+    const entityName = (key) => specActions.find((action) => action.entity === key && action.entityName)?.entityName || null;
+    const consoleOps = auth ? [...allowedOperations].filter((key) => !loginIds.has(String(key).toUpperCase())).map((key) => { const entity = entityOfOp(key); return { key, name: `${String(key).toUpperCase()} · ${reqName.get(key) || key}`, label: reqName.get(key) || String(key).toUpperCase(), ...(entity ? { entity, menuLabel: humanize(entity, entityName(entity)) } : {}), ...(lineOps.has(key) || (entity && lineEntities.has(entity)) ? { linea: true } : {}) }; }) : [];
     if (consoleOps.length) files.push({ ruta: 'frontend/src/RegistryScreen.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('RegistryScreen.jsx'), { OPERACIONES: JSON.stringify(consoleOps.map(({ key, label }) => ({ key, label }))) }) });
     if (consoleOps.length) files.push({ ruta: 'frontend/src/DataConsole.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('DataConsole.jsx'), { OPERACIONES: JSON.stringify(consoleOps) }) });
     const first = views[0]?.route || '/';
-    files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone, consoleOps) : this._app(proyecto, views, imports, routes, first, standalone) });
+    files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone, consoleOps, uiControls) : this._app(proyecto, views, imports, routes, first, standalone) });
     if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth, mobileViews, spec));
     if(new ModuleService().activos(decisiones.modulos).includes('procesos_negocio')){
       if(!auth)throw new Error('La bandeja de procesos requiere JWT');
@@ -263,7 +274,7 @@ class GenericFrontendGenerator {
     const used = new Set(blocks.flatMap((block) => [block.operacion, ...block.acciones.map((action) => action.operacion)]));
     const actions = Object.fromEntries([...used].map((operation) => {
       const action = byName.get(operation);
-      return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, ...(action.permission && action.permission !== action.capability ? { permiso: action.permission } : {}), entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output, ...(action.relacionadas?.length ? { relacionadas: action.relacionadas.map((rel) => ({ clave: rel.clave, items: Boolean(rel.items) })) } : {}), ...(action.lineas?.capability ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad, destino: action.lineas.destino, precio: action.lineas.precio?.desde || null } } : {}) }];
+      return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, ...(action.permission && action.permission !== action.capability ? { permiso: action.permission } : {}), entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output, ...(action.relacionadas?.length ? { relacionadas: action.relacionadas.map((rel) => ({ clave: rel.clave, items: Boolean(rel.items) })) } : {}), ...(action.lineas?.capability ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad, destino: action.lineas.destino, precio: action.lineas.precio?.desde || null, ...(action.lineas.stock ? { stock: action.lineas.stock } : {}) } } : {}), ...(action.vincula ? { vincula: action.vincula } : {}), ...(action.anula ? { anula: action.anula } : {}) }];
     }));
     return { blocks, actions, used };
   }
@@ -274,10 +285,16 @@ class GenericFrontendGenerator {
     const map = {};
     const add = (action) => {
       const key = `${String(action.permiso || action.permission || action.capability).toLowerCase()}.${verb[action.type]}`; // el botón del mockup dice «RF-06.editar»: el requisito, no el almacén
-      if (verb[action.type] && !map[key]) map[key] = { name: action.name, method: action.method, path: action.path, byId: Boolean(action.byId), inputs: action.inputs || [], ...(action.lineas ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad } } : {}), booleanos: (action.inputs || []).filter((name) => action.fields?.[name]?.type === 'boolean'), ...((action.filters || []).some((filter) => filter.origen === 'parametro') ? { parametros: action.filters.filter((filter) => filter.origen === 'parametro').map((filter) => String(filter.valor)) } : {}) };
+      if (verb[action.type] && !map[key]) map[key] = { name: action.name, method: action.method, path: action.path, byId: Boolean(action.byId), inputs: [...(action.inputs || []), ...(action.vincula?.parametro && !(action.inputs || []).includes(action.vincula.parametro) ? [action.vincula.parametro] : [])], ...(action.vincula ? { vincula: { parametro: action.vincula.parametro, entidad: action.vincula.entidad, campo: action.vincula.campo, capability: action.vincula.capability } } : {}), ...(action.anula ? { anula: { estado: action.anula.estado, valor: action.anula.valor } } : {}), ...(action.lineas ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad, ...((typeof action.lineas.precio === 'string' ? action.lineas.precio : action.lineas.precio?.desde) ? { precio: typeof action.lineas.precio === 'string' ? action.lineas.precio : action.lineas.precio.desde } : {}), ...(action.lineas.stock ? { stock: action.lineas.stock } : {}) } } : {}), booleanos: (action.inputs || []).filter((name) => action.fields?.[name]?.type === 'boolean'), ...((action.filters || []).some((filter) => filter.origen === 'parametro') ? { parametros: action.filters.filter((filter) => filter.origen === 'parametro').map((filter) => String(filter.valor)) } : {}) };
     };
     Object.values(screenActions || {}).forEach(add);
     (spec?.acciones || []).forEach(add);
+    // «Cancelar venta» enlazado como eliminar: si el requisito anula (registra la anulación, repone stock y anula la factura), el botón
+    // llama a esa operación y no al borrado genérico.
+    for (const [key, entry] of Object.entries(map)) {
+      const del = key.replace(/.crear$/, '.eliminar');
+      if (entry.anula && del !== key && !map[del]) map[del] = entry;
+    }
     return map;
   }
 
@@ -377,17 +394,18 @@ class GenericFrontendGenerator {
   }
 
   /** Con autenticación: solo ve el menú de lo que su rol puede consultar y siempre puede cerrar sesión. */
-  _appWithAuth(proyecto, views, imports, routes, standalone = [], consoleOps = []) {
-    return `import React, { useState } from 'react';
-import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { useSession } from './session';
+  _appWithAuth(proyecto, views, imports, routes, standalone = [], consoleOps = [], uiControls = false) {
+    return `import React, { useState${uiControls ? ', useEffect' : ''} } from 'react';
+import { Link, Navigate, Route, Routes, useLocation${uiControls ? ', useNavigate' : ''} } from 'react-router-dom';
+import { useSession } from './session';${uiControls ? "\nimport { handleUiClick, handleRowClick, hydrateRecord } from './uiControls';" : ''}
 import LoginScreen from './LoginScreen';
 import UsersScreen from './UsersScreen';
 ${consoleOps.length ? "import DataConsole from './DataConsole';\nimport RegistryScreen from './RegistryScreen';" : ''}
 ${imports.join('\n')}
 
-const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: view.name, operations: view.operations, roles: view.roles, modulo: view.modulo || 'General', lista: view.lista || [] })))};
-const registryOperations = ${JSON.stringify(consoleOps.map(({ key, label }) => ({ key, label })))};
+const views = ${JSON.stringify(views.map((view) => ({ route: view.route, name: view.name, operations: view.operations, roles: view.roles, modulo: view.modulo || 'General', lista: view.lista || [], ...(/^(?:pantalla de |formulario de )?(?:detalle|edicion|editar|modificar)/.test(slug(view.name).replace(/-/g, ' ')) ? { menu: false } : {}) })))};
+const registryOperations = ${JSON.stringify(consoleOps.map(({ key, label, entity, linea, menuLabel }) => ({ key, label: menuLabel || label, ...(entity ? { entity } : {}), ...(linea ? { linea } : {}) })))};
+const entityOf = ${JSON.stringify(Object.fromEntries(consoleOps.filter((op) => op.entity).map((op) => [op.key, op.entity])))};
 const normalizarRol = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const puedeAbrirPantalla = (view, user, can) => {
   const roles = view.roles || [];
@@ -396,8 +414,24 @@ const puedeAbrirPantalla = (view, user, can) => {
 };
 
 export default function App() {
-  const { user, loading, can, logout } = useSession();
-  const location = useLocation();
+  const { user, loading, can, logout${uiControls ? ', api' : ''} } = useSession();
+  const location = useLocation();${uiControls ? `
+  const navigate = useNavigate();
+  // Volver, Cancelar, Nuevo, Editar, Ver y Limpiar del diseño: navegan a la pantalla que corresponde (ver uiControls.js).
+  useEffect(() => {
+    const context = { views, current: location.pathname, search: location.search, navigate };
+    const onClick = (event) => handleUiClick(event, context);
+    const onRow = (event) => handleRowClick(event, context);
+    document.addEventListener('click', onClick);
+    document.addEventListener('click', onRow, true);
+    return () => { document.removeEventListener('click', onClick); document.removeEventListener('click', onRow, true); };
+  }, [location.pathname, location.search, navigate]);
+  // Detalle o edición abierta con ?id=: se carga ese registro (las opciones de los selects llegan después, por eso dos intentos).
+  useEffect(() => {
+    if (!user || !location.search) return undefined;
+    const timers = [300, 1200].map((delay) => setTimeout(() => hydrateRecord(document.querySelector('.app-main .mockup-content'), { api, views, current: location.pathname, search: location.search, registries: registryOperations }), delay));
+    return () => timers.forEach(clearTimeout);
+  }, [location.pathname, location.search, user, api]);` : ''}
   const standalone = ${JSON.stringify(standalone)};
 
   if (loading) return <main className="screen"><p role="status">Cargando…</p></main>;
@@ -407,11 +441,15 @@ export default function App() {
     .filter((view) => view.route !== '/usuarios' && view.id !== 'usuarios' && view.name?.toLowerCase() !== 'usuarios')
     .filter((view) => puedeAbrirPantalla(view, user, can));
 
-  const modules = Array.from(new Set(visible.map((v) => v.modulo || 'General')));
+  const modules = Array.from(new Set(visible.filter((v) => v.menu !== false).map((v) => v.modulo || 'General')));
   // Lo que el rol puede consultar y ninguna de sus pantallas lista (la tabla de registros que el árbol de navegación no trajo).
   const listed = new Set(visible.flatMap((v) => v.lista || []));
-  const registries = user.administrador ? [] : registryOperations.filter((op) => can(op.key, 'GET') && !listed.has(op.key));
-  const home = visible[0]?.route || (registries[0] ? '/registros/' + registries[0].key : (user.administrador ? '/usuarios' : '/sin-acceso'));
+  const listedEntities = new Set([...listed].map((key) => entityOf[key]).filter(Boolean));
+  // Una entidad ya listada en una pantalla (las ventas) o que son las líneas de otra (el detalle de una venta) no se repite en «Registros».
+  const registries = user.administrador ? [] : registryOperations.filter((op, index, all) => can(op.key, 'GET') && !listed.has(op.key) && !op.linea
+    && !(op.entity && listedEntities.has(op.entity)) && !(op.entity && all.slice(0, index).some((other) => other.entity === op.entity && can(other.key, 'GET'))));
+  const menu = visible.filter((v) => v.menu !== false);
+  const home = menu[0]?.route || (registries[0] ? '/registros/' + registries[0].key : (user.administrador ? '/usuarios' : '/sin-acceso'));
 
   // El menú nombra la pantalla como el diseño: sin el «Pantalla de» con que el árbol de navegación la titula.
   const navName = (name) => { const clean = String(name || '').replace(/^pantalla\\s+(?:de\\s+la\\s+|del?\\s+)?/i, ''); return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : name; };
@@ -433,7 +471,7 @@ export default function App() {
             {modules.map((mod) => (
               <div key={mod}>
                 {modules.length > 1 && <p className="app-nav-group">{mod}</p>}
-                {visible.filter((v) => (v.modulo || 'General') === mod).map((s) => <Link key={s.route} to={s.route} {...linkProps(s.route)}>{navName(s.name)}</Link>)}
+                {menu.filter((v) => (v.modulo || 'General') === mod).map((s) => <Link key={s.route} to={s.route} {...linkProps(s.route)}>{navName(s.name)}</Link>)}
               </div>
             ))}
             {registries.length > 0 && (

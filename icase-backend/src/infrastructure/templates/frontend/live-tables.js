@@ -208,22 +208,109 @@ function findPager(table, size) {
 
 const labelOf = (row) => { for (const key of ['nombre', 'name', 'titulo', 'numero', 'codigo', 'descripcion']) if (row[key] !== undefined && row[key] !== null && String(row[key]).trim()) return String(row[key]); return `#${row.id}`; };
 
+// Un importe completo («S/ 1,947.60», «7875.00», «S/ 20»): empieza donde empieza el número, no a mitad de él.
+const MONEY = /(S\/\s?|\$\s?|€\s?)?(?<![\d.,])-?(?:\d{1,3}(?:[.,\s]\d{3})+|\d+)[.,]\d{2}(?!\d)|(S\/\s?|\$\s?|€\s?)\d+/;
+const asMoney = (template, value) => template.replace(MONEY, (match, a, b) => `${a || b || ''}${Number(value || 0).toFixed(2)}`);
+
 /**
- * Las líneas de un pedido del diseño (un select de plato y una cantidad por fila): el select se llena con los platos reales, «Añadir» y
- * «Quitar» copian y retiran filas. El envío las recoge con `collectLines`.
+ * Las líneas de una venta o pedido del diseño (un select de producto y una cantidad por fila). El select se llena con los productos
+ * reales; «Agregar» y «Quitar» (también un icono con aria-label) copian y retiran filas; el precio, el stock, el importe de cada línea
+ * y el total se recalculan con los datos reales (el diseño traía valores de ejemplo). El envío las recoge con `collectLines`.
  */
+/**
+ * Alta vinculada a un registro existente (emitir la factura de una venta): si el formulario del diseño no deja elegir ese registro, se
+ * añade un selector con los que aún no tienen uno (ni están anulados), preseleccionando el de ?id=. Los campos de solo lectura que
+ * calcula el sistema (número, IGV) traían valores de ejemplo: se vacían y avisan que se asignan al guardar.
+ */
+async function bindLinked(form, named, api) {
+  if (form.__linked) return;
+  form.__linked = true;
+  for (const input of form.querySelectorAll('input[readonly]')) { input.value = ''; input.placeholder = 'Se asigna al guardar'; }
+  // Importes de ejemplo del resumen (subtotal, total): los calcula el servidor al guardar; no se muestran cifras inventadas.
+  const walker = form.ownerDocument.createTreeWalker(form, 4);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.parentElement?.closest('select, option, button, label') && MONEY.test(node.nodeValue) && !/[a-z]{4,}/i.test(node.nodeValue.replace(MONEY, ''))) node.nodeValue = node.nodeValue.replace(MONEY, '—');
+  }
+  const { parametro, capability, campo, entidad } = named.vincula;
+  if (form.querySelector(`[name="${parametro}"]`)) return;
+  let rows = [];
+  try { const listed = await api(`/api/operations/${encodeURIComponent(capability)}?limit=200`); rows = (Array.isArray(listed) ? listed : (listed && listed.data) || []).map((row) => ({ id: row.id, ...(row.data || row) })); } catch { rows = []; }
+  const free = rows.filter((row) => !row[campo] && !/^(anul|cancel)/i.test(String(row.estado || '')));
+  const document = form.ownerDocument;
+  const sampleSelect = form.querySelector('select, input:not([type="hidden"]):not([readonly])');
+  const sampleLabel = form.querySelector('label');
+  const wrapper = document.createElement('div');
+  wrapper.style.marginBottom = '1rem';
+  const label = document.createElement('label');
+  label.htmlFor = `icase-${parametro}`;
+  label.className = sampleLabel ? sampleLabel.className : '';
+  label.textContent = entidad || parametro;
+  const select = document.createElement('select');
+  select.id = `icase-${parametro}`;
+  select.name = parametro;
+  select.required = true;
+  select.className = sampleSelect ? sampleSelect.className : '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = free.length ? 'Selecciona…' : `No hay registros de ${String(entidad || parametro).toLowerCase()} pendientes`;
+  select.append(empty);
+  for (const row of free) {
+    const option = document.createElement('option');
+    option.value = String(row.id);
+    const date = typeof row.fecha === 'string' ? ` · ${new Date(row.fecha).toLocaleDateString('es')}` : '';
+    const total = typeof row.total === 'number' ? ` · ${row.total.toFixed(2)}` : '';
+    option.textContent = `${entidad || ''} #${row.id}${total}${date}`.trim();
+    select.append(option);
+  }
+  const wanted = new URLSearchParams(globalThis.location ? globalThis.location.search : '').get('id');
+  if (wanted && free.some((row) => String(row.id) === wanted)) select.value = wanted;
+  wrapper.append(label, select);
+  form.prepend(wrapper);
+}
+
 export async function bindLines({ root, specMap, api }) {
   for (const form of root.querySelectorAll('form')) {
-    if (form.__lines) continue;
+    const linkedAction = (form.getAttribute('data-accion') || '').toLowerCase();
+    if (specMap && specMap[linkedAction] && specMap[linkedAction].vincula) await bindLinked(form, specMap[linkedAction], api);
+    // Ya enlazado: la pantalla vuelve a llamar tras guardar con éxito; se deja lista para la siguiente venta con el stock al día.
+    if (form.__lines) { if (typeof form.__linesRefresh === 'function') form.__linesRefresh(); continue; }
     const declared = (form.getAttribute('data-accion') || form.querySelector('[data-accion]:not([data-accion="ui"])')?.getAttribute('data-accion') || '').toLowerCase();
     const named = specMap && specMap[declared];
     if (!named || !named.lineas) continue;
     const rows = lineRows(form, named.inputs);
     if (!rows.length) continue;
+    form.__lines = true; // antes de esperar: dos montajes seguidos no deben duplicar las opciones
     let options;
-    try { options = await api(named.path); } catch { continue; }
-    if (!Array.isArray(options)) continue;
-    form.__lines = true;
+    try { options = await api(named.path); } catch { form.__lines = false; continue; }
+    if (!Array.isArray(options)) { form.__lines = false; continue; }
+    const priceField = named.lineas.precio || ['precioVenta', 'precio', 'precioUnitario'].find((name) => options.some((row) => row[name] !== undefined));
+    const stockField = named.lineas.stock || (options.some((row) => row.stock !== undefined) ? 'stock' : null);
+    const byId = new Map();
+    const load = (list) => { options = list; byId.clear(); for (const row of list) byId.set(String(row.id), row); };
+    load(options);
+    // La línea completa (producto, cantidad, precio, importe y quitar): con dos líneas de ejemplo, el contenedor más amplio con un solo
+    // select de línea; su padre es la lista de líneas. Se fija antes de retirar los ejemplos, porque con una sola línea no se distingue.
+    const widest = (item) => {
+      const selects = lineRows(form, named.inputs).map((line) => line.select);
+      let box = item.row || item.select.parentElement;
+      while (box && box.parentElement && box.parentElement !== form && selects.filter((select) => box.parentElement.contains(select)).length === 1) box = box.parentElement;
+      return box;
+    };
+    const lineList = rows.length > 1 ? widest(rows[0])?.parentElement : null;
+    const boxOf = (item) => {
+      if (lineList) { let element = item.select; while (element && element.parentElement !== lineList) element = element.parentElement; if (element) return element; }
+      return item.row || item.select.parentElement;
+    };
+    const templates = new Map(); // texto original del diseño de cada nodo que se reescribe
+    // Textos sueltos (no los de selects, botones ni etiquetas): «Activo · 24 unidades» puede compartir elemento con un icono.
+    const textsOf = (scope) => {
+      const walker = scope.ownerDocument.createTreeWalker(scope, 4);
+      const found = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) if ((node.nodeValue.trim() || templates.has(node)) && !node.parentElement?.closest('select, button, label, option')) found.push(node);
+      return found;
+    };
+    // Si la línea del diseño no tiene dónde mostrar el precio, la opción lo lleva («Lomo — 15.50»).
+    const showPrice = Boolean(priceField) && !textsOf(boxOf(rows[0])).some((node) => MONEY.test(node.nodeValue));
     const fill = (select) => {
       const keep = select.value;
       select.replaceChildren();
@@ -234,33 +321,88 @@ export async function bindLines({ root, specMap, api }) {
       for (const row of options) {
         const option = select.ownerDocument.createElement('option');
         option.value = String(row.id);
-        const price = row.precio !== undefined ? ` — ${Number(row.precio).toFixed(2)}` : '';
-        option.textContent = `${labelOf(row)}${price}`;
+        option.textContent = `${labelOf(row)}${showPrice && row[priceField] !== undefined ? ` — ${Number(row[priceField]).toFixed(2)}` : ''}`;
         select.append(option);
       }
       select.value = Array.from(select.options).some((option) => option.value === keep) ? keep : '';
     };
-    rows.forEach((item) => fill(item.select));
-    const template = rows[0].row;
+    const original = (node) => { if (!templates.has(node)) templates.set(node, node.nodeValue); return templates.get(node); };
+    // Un select cuyas opciones ya pone React (ReferenceOptions) no se toca: llenarlo aquí duplicaría las opciones. Las copias sí se llenan.
+    rows.forEach((item) => { if (!item.select.hasAttribute('data-ref-options')) fill(item.select); });
+    const template = boxOf(rows[0]).cloneNode(true);
+    // Las líneas de ejemplo del diseño se retiran: la venta empieza con una línea vacía.
+    rows.slice(1).forEach((item) => boxOf(item)?.remove());
+    rows[0].select.value = '';
+    if (rows[0].quantity) rows[0].quantity.value = '1';
+    // Totales del diseño fuera de las líneas: el importe total y «2 líneas · 3 unidades».
+    const inLine = (element) => lineRows(form, named.inputs).some((item) => boxOf(item)?.contains(element));
+    const totals = textsOf(form).filter((node) => !inLine(node) && MONEY.test(node.nodeValue) && !/[a-z]{4,}/i.test(node.nodeValue.replace(MONEY, '')));
+    const counters = textsOf(form).filter((node) => !inLine(node) && /\d+\s+l[ií]neas?/i.test(node.nodeValue));
+    const recompute = () => {
+      let total = 0;
+      let units = 0;
+      const items = lineRows(form, named.inputs);
+      for (const item of items) {
+        const product = byId.get(String(item.select.value));
+        const quantity = Number(item.quantity && item.quantity.value) || 0;
+        const price = product && priceField ? Number(product[priceField]) || 0 : 0;
+        if (product) { total += price * quantity; units += quantity; }
+        const box = boxOf(item);
+        if (!box) continue;
+        const cells = textsOf(box);
+        const prices = cells.filter((node) => MONEY.test(original(node)) && !/unidad/i.test(original(node)));
+        prices.forEach((node, position) => {
+          const amount = prices.length > 1 && position === prices.length - 1;
+          node.nodeValue = product ? asMoney(original(node), amount ? price * quantity : price) : '—';
+        });
+        for (const node of cells.filter((node) => /\d+\s+unidad/i.test(original(node)))) {
+          node.nodeValue = product && stockField ? original(node).replace(/\d+(\s+unidad)/i, `${product[stockField]}$1`) : ' ';
+        }
+        if (item.quantity) { if (product && stockField) item.quantity.max = String(product[stockField]); else item.quantity.removeAttribute('max'); }
+      }
+      for (const node of totals) node.nodeValue = asMoney(original(node), total);
+      const chosen = items.filter((item) => item.select.value).length;
+      for (const node of counters) node.nodeValue = original(node).replace(/\d+(\s+l[ií]neas?)/i, `${chosen}$1`).replace(/\d+(\s+unidad)/i, `${units}$1`);
+    };
+    form.addEventListener('change', recompute);
+    form.addEventListener('input', recompute);
     form.addEventListener('click', (event) => {
       const button = event.target.closest('button');
       if (!button || !form.contains(button)) return;
-      const label = plain(button.textContent);
+      const label = plain(button.textContent) || plain(button.getAttribute('aria-label') || button.getAttribute('title') || '');
       const current = lineRows(form, named.inputs);
       if (/^(\+ )?(anadir|agregar|otro|nuevo)/.test(label) || /anadir otr|agregar otr/.test(label)) {
-        if (!template) return;
         event.preventDefault();
         const copy = template.cloneNode(true);
         const select = copy.querySelector('select');
         if (select) { fill(select); select.value = ''; }
         const quantity = copy.querySelector('input[type="number"]');
         if (quantity) quantity.value = '1';
-        (current[current.length - 1]?.row || template).after(copy);
-      } else if (/^(eliminar|quitar|remover|x)$/.test(label)) {
-        const mine = current.find((item) => item.row && item.row.contains(button));
-        if (mine && current.length > 1) { event.preventDefault(); mine.row.remove(); }
+        // Cada línea con sus propios id y etiqueta («Producto de la línea 2»), no los de la primera.
+        const number = current.length + 1;
+        copy.querySelectorAll('[id]').forEach((element) => { element.id = `${element.id}-${number}`; });
+        copy.querySelectorAll('label[for]').forEach((label) => { label.htmlFor = `${label.htmlFor}-${number}`; label.textContent = label.textContent.replace(/\d+\s*$/, String(number)); });
+        const last = current[current.length - 1];
+        if (last) boxOf(last).after(copy);
+        recompute();
+      } else if (/^(eliminar|quitar|remover|borrar|x)\b/.test(label)) {
+        const mine = current.find((item) => boxOf(item)?.contains(button));
+        if (!mine) return;
+        event.preventDefault();
+        if (current.length > 1) boxOf(mine).remove();
+        else { mine.select.value = ''; if (mine.quantity) mine.quantity.value = '1'; }
+        recompute();
       }
     });
+    recompute();
+    form.__linesRefresh = async () => {
+      try { const fresh = await api(named.path); if (Array.isArray(fresh)) load(fresh); } catch { /* se conservan las opciones anteriores */ }
+      form.reset();
+      const current = lineRows(form, named.inputs);
+      current.slice(1).forEach((item) => boxOf(item)?.remove());
+      if (current[0]) { current[0].select.value = ''; if (current[0].quantity) current[0].quantity.value = '1'; }
+      recompute();
+    };
   }
 }
 

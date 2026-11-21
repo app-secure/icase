@@ -677,9 +677,12 @@ class ApplicationSpecService {
     for (const [campo, definicion] of Object.entries(propiedades)) {
       if (campo === 'id' || definicion?.readOnly || operacion.entradas.includes(campo) || [...sesion, ...auto].some((item) => item.campo === campo)) continue;
       const razon = systemManaged(campo, definicion);
-      if (razon === 'empieza en su estado inicial' && definicion?.enum?.length) auto.push({ campo, valor: 'inicial', opciones: definicion.enum });
+      // Quién lo registra (la venta y su vendedor) sale de la sesión: el formulario no lo pide y la regla «obligatorio» lo exige.
+      if (/^usuarios?$/i.test(String(definicion?.['x-references'] || '')) && entidad.key !== 'usuario') sesion.push({ campo, valor: 'usuario.id' });
+      else if (razon === 'empieza en su estado inicial' && definicion?.enum?.length) auto.push({ campo, valor: 'inicial', opciones: definicion.enum });
       else if (razon === 'lo genera el sistema' && definicion?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) auto.push({ campo, valor: 'generado' });
-      else if (MARCA_DE_REGISTRO.test(compacto(campo)) && definicion?.type === 'string') auto.push({ campo, valor: definicion?.format === 'date' ? 'hoy' : 'ahora' });
+      // La «fecha» a secas que el formulario no pide es la del propio registro (venta, factura, anulación).
+      else if ((MARCA_DE_REGISTRO.test(compacto(campo)) || /^(fecha|fechahora)$/.test(compacto(campo))) && definicion?.type === 'string') auto.push({ campo, valor: definicion?.format === 'date' ? 'hoy' : 'ahora' });
       else if (lineas?.total === campo) auto.push({ campo, valor: 'lineas' });
     }
     // Documentos numerados (F001-00001): el «numero» de una factura, boleta o recibo lo pone el sistema, correlativo con serie

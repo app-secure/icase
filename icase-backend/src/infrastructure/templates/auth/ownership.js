@@ -23,10 +23,32 @@ function policyUsesOwnership(policy) {
   return false;
 }
 
-function scopeOf(policy, user, operation) {
+/**
+ * Tablas que el rol consulta completas (catálogos como clientes o productos, y las cuentas): un registro propio puede
+ * referenciarlas aunque las haya creado otra persona. Una venta propia elige cualquier cliente del catálogo.
+ */
+function sharedTables(policy, user, model) {
+  const shared = new Set(model?.identity?.table ? [model.identity.table] : []);
+  for (const [key, table] of Object.entries(model?.operations || {})) {
+    const entry = policy?.operaciones?.[key]?.[user.rol];
+    if (methodsOf(entry).includes('GET') && alcanceOf(entry) === 'todos') shared.add(table);
+  }
+  return [...shared];
+}
+
+function ownerScope(policy, user, operation) {
   if (!user || user.rol === ADMIN) return null;
   if (alcanceOf(policy?.operaciones?.[operation]?.[user.rol]) !== 'propios') return null;
   return { ownerId: String(user.id) };
+}
+
+function scopeOf(policy, user, operation, model) {
+  const scope = ownerScope(policy, user, operation);
+  if (!scope) return null;
+  let data = model;
+  if (!data) { try { data = require('../data/model'); } catch { data = null; } }
+  const shared = sharedTables(policy, user, data);
+  return shared.length ? { ...scope, shared } : scope;
 }
 
 function keysForTable(model, tableName) {
@@ -59,5 +81,5 @@ function associationForbidden() {
 }
 
 module.exports = {
-  ADMIN, BLOCKED_MODULES, methodsOf, alcanceOf, policyUsesOwnership, scopeOf, associationScopes, associationForbidden, keysForTable
+  ADMIN, BLOCKED_MODULES, methodsOf, alcanceOf, policyUsesOwnership, scopeOf, sharedTables, associationScopes, associationForbidden, keysForTable
 };

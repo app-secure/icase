@@ -624,7 +624,27 @@ async function exerciseAction(api, operations, action) {
         const choice = await createValidRecord(api, operations, destino, cleanups, 1);
         body.lineas = [{ [action.lineas.referencia]: choice.id, [action.lineas.cantidad]: 2 }];
       }
+      // Emitir o anular para un registro existente (la factura de una venta): se crea ese registro y se indica su id.
+      let owner = null;
+      if (action.vincula) {
+        const source = operations.find((item) => item.key === action.vincula.capability);
+        if (!source) fail('no tiene operación para ' + action.vincula.entidad);
+        owner = await createValidRecord(api, operations, source, cleanups, 1);
+        body[action.vincula.parametro] = owner.id;
+      }
       const response = expectStatus(await api(action.path, 'POST', body), 201, 'crear');
+      if (owner) {
+        // Se lee por una operación de esa entidad que permita consultar (la de registrar ventas puede ser solo POST).
+        const reader = operations.find((item) => item.entity === action.vincula.entidadClave && (item.methods || []).includes('GET'));
+        if (reader) {
+          const listed = expectStatus(await api(reader.collectionPath + '?limit=200', 'GET'), 200, 'leer el registro vinculado').data;
+          const row = (Array.isArray(listed) ? listed : (listed.data || [])).find((item) => String(item.id) === String(owner.id));
+          const linked = row ? (row.data || row) : null;
+          if (!linked || String(linked[action.vincula.campo]) !== String(response.data.id)) fail('no quedó vinculado a ' + action.vincula.entidad);
+          if (action.anula && linked[action.anula.estado] !== action.anula.valor) fail(action.vincula.entidad + ' no quedó ' + action.anula.valor);
+        }
+        expectStatus(await api(action.path, 'POST', body), 409, 'repetir sobre el mismo registro');
+      }
       if (!response.data.id) fail('la creación no devolvió id');
       if (action.lineas && !(response.data.lineas >= 1)) fail('el alta con líneas no confirmó haberlas guardado');
       cleanups.unshift(async () => {
@@ -661,6 +681,13 @@ async function exerciseAction(api, operations, action) {
       const response = expectStatus(await api(route(routeId), 'POST', {}), 200, 'cambiar de estado');
       if (response.data[campo] !== a) fail('el estado quedó en ' + response.data[campo] + ' (se esperaba ' + a + ')');
       if (de.length && !de.includes(a)) expectStatus(await api(route(routeId), 'POST', {}), 409, 'repetir una transición no permitida');
+    } else if (action.type === 'resumen') {
+      // Un reporte agregado: con el rango de fechas abierto debe responder una lista con las columnas declaradas.
+      const params = (action.filters || []).filter((item) => item.origen === 'parametro').map((item) => item.valor + '=' + (/hasta|fin/i.test(item.valor) ? '2099-12-31' : '2000-01-01'));
+      const rows = expectStatus(await api(action.path + (params.length ? '?' + params.join('&') : ''), 'GET'), 200, 'consultar el resumen').data;
+      if (!Array.isArray(rows)) fail('el resumen debe devolver una lista');
+      const allowed = new Set(['id', ...(action.output || []), ...(action.output || []).map((name) => name + '__etiqueta')]);
+      for (const row of rows) for (const key of Object.keys(row)) if (!allowed.has(key)) fail('devolvió la columna no declarada «' + key + '»');
     } else fail('tipo de operación desconocido: ' + action.type);
   } finally {
     for (const cleanup of cleanups) await Promise.resolve(cleanup()).catch(() => {});

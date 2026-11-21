@@ -71,7 +71,7 @@ describe('pantallas de registros por rol', () => {
     expect(app).toContain('const registryOperations = [{"key":"rf-16","label":"Cobros"}]');
     expect(app).toContain('"lista":[]'); // la pantalla de cobros es un formulario: no lista nada
     expect(app).toContain('<Route path="/registros/:key" element={<RegistryScreen />} />');
-    expect(app).toContain('user.administrador ? [] : registryOperations.filter((op) => can(op.key, \'GET\') && !listed.has(op.key))');
+    expect(app).toContain("user.administrador ? [] : registryOperations.filter((op, index, all) => can(op.key, 'GET') && !listed.has(op.key)");
     expect(() => transformSync(app, { loader: 'jsx' })).not.toThrow();
   });
 

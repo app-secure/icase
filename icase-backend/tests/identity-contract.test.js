@@ -216,7 +216,7 @@ describe('select de referencias con registros reales', () => {
 
   test('el transformador sustituye las opciones del mockup por ReferenceOptions', () => {
     const jsx = HtmlToJsxTransformer.transform(form, { operaciones: new Set(['rf-02']), referencias: { cliente_id: 'rf-01' } });
-    expect(jsx).toContain('<select name="cliente_id"><ReferenceOptions operation="rf-01" /></select>');
+    expect(jsx).toContain('<select name="cliente_id" data-ref-options="rf-01"><ReferenceOptions operation="rf-01" /></select>');
     expect(jsx).not.toContain('Luis');
   });
 
@@ -239,12 +239,12 @@ describe('campos de referencia como texto o ocultos', () => {
 
   test('un input de texto con un id de ejemplo se vuelve un select con registros reales', () => {
     const jsx = HtmlToJsxTransformer.transform(doc('<input type="text" name="cliente_id" class="w-full" placeholder="CLI-1" required>'), opts);
-    expect(jsx).toContain('<select name="cliente_id" className="w-full" required><ReferenceOptions operation="rf-01" /></select>');
+    expect(jsx).toContain('<select name="cliente_id" className="w-full" required data-ref-options="rf-01"><ReferenceOptions operation="rf-01" /></select>');
   });
 
   test('un input oculto con un id inventado también', () => {
     const jsx = HtmlToJsxTransformer.transform(doc('<input type="hidden" name="cliente_id" value="CLI-8923">'), opts);
-    expect(jsx).toContain('<select name="cliente_id"><ReferenceOptions operation="rf-01" /></select>');
+    expect(jsx).toContain('<select name="cliente_id" data-ref-options="rf-01"><ReferenceOptions operation="rf-01" /></select>');
   });
 
   test('comportamiento previo: un campo de solo lectura de una vista de detalle no se toca', () => {

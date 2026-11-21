@@ -176,6 +176,7 @@ class ApplicationContractBuilder {
       // El permiso es el del requisito de la operación: la lista de recompensas del cliente (RF-18) se guarda en el almacén de RF-19, que es del administrador.
       permission: slug(op.rf),
       entity: op.entidadClave || entities.find((item) => item.name === op.entidad)?.key || null,
+      ...(op.entidad ? { entityName: op.entidad } : {}),
       actors: op.actores || [],
       filters: op.filtros || [],
       fields: this._fieldMeta(op, entities),

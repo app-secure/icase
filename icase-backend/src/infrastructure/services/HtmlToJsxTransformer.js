@@ -121,7 +121,7 @@ function nodeToJsx(node, context = null) {
     && !(node.attrs || []).some((attr) => attr.name.toLowerCase() === 'readonly') ? context.referencias[attrOf(node, 'name')] : null;
   if (refTarget) {
     const kept = attrs.filter((item) => !/^(?:type|defaultValue|value|placeholder|min|max|step|pattern|maxLength|autoComplete)(?:=|$)/.test(item));
-    return `<select${kept.length ? ' ' + kept.join(' ') : ''}><ReferenceOptions operation=${JSON.stringify(refTarget)} /></select>`;
+    return `<select${kept.length ? ' ' + kept.join(' ') : ''} data-ref-options="${refTarget}"><ReferenceOptions operation=${JSON.stringify(refTarget)} /></select>`;
   }
 
   // Un formulario del mockup nunca navega con el envío nativo; sus botones (o la acción del formulario) lo atienden.
@@ -133,7 +133,7 @@ function nodeToJsx(node, context = null) {
 
   // Un select cuyo name es una referencia a otra entidad (mesa_id) carga sus opciones reales del backend en lugar de las del mockup.
   const referenced = tag === 'select' ? context?.referencias?.[attrOf(node, 'name')] : null;
-  if (referenced) return `<${outTag}${attrStr}><ReferenceOptions operation=${JSON.stringify(referenced)} /></${outTag}>`;
+  if (referenced) return `<${outTag}${attrStr} data-ref-options="${referenced}"><ReferenceOptions operation=${JSON.stringify(referenced)} /></${outTag}>`;
   const formAction = tag === 'form' ? (attrOf(node, 'data-accion') || '').trim() : '';
   const childContext = tag === 'form' ? { ...context, formAction: ACTION.test(formAction) ? formAction : '' } : context;
   const children = (node.childNodes || []).map((child) => nodeToJsx(child, childContext)).join('');

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { fillFields } from './mockupActions';
 
 const show = (value) => (value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''));
@@ -12,6 +12,9 @@ const labelOf = (data, id) => Object.values(data).find((value) => typeof value =
  * Sin HTML no confiable.
  */
 export default function MockupResult({ result, selected, onSelect, onClose = null, selectable = true }) {
+  // El aviso aparece arriba de la pantalla: se trae a la vista para que quien guardó al final del formulario lo vea.
+  const box = useRef(null);
+  useEffect(() => { if (result && box.current && typeof box.current.scrollIntoView === 'function') box.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, [result]);
   if (!result && !selected) return null;
   const failed = result?.estado === 'error';
   const records = (result?.registros || []).map((item) => {
@@ -29,7 +32,7 @@ export default function MockupResult({ result, selected, onSelect, onClose = nul
   };
   const cell = { padding: '0.2rem 0.6rem' };
   return (
-    <div data-icase-result role={failed ? 'alert' : 'status'} style={{ margin: '0.75rem 1.5rem', padding: '0.75rem 1rem', borderRadius: '0.5rem', border: '1px solid ' + (failed ? '#fecaca' : '#bbf7d0'), background: failed ? '#fef2f2' : '#f0fdf4', color: failed ? '#991b1b' : '#166534', fontSize: '0.875rem' }}>
+    <div ref={box} data-icase-result role={failed ? 'alert' : 'status'} style={{ margin: '0.75rem 1.5rem', padding: '0.75rem 1rem', borderRadius: '0.5rem', border: '1px solid ' + (failed ? '#fecaca' : '#bbf7d0'), background: failed ? '#fef2f2' : '#f0fdf4', color: failed ? '#991b1b' : '#166534', fontSize: '0.875rem' }}>
       {result && <p style={{ margin: 0, display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}><span>{result.mensaje}</span>{onClose && <button type="button" onClick={onClose} aria-label="Cerrar resultado" style={{ background: 'none', border: 0, cursor: 'pointer', color: 'inherit', fontSize: '1rem', lineHeight: 1 }}>×</button>}</p>}
       {failed && Array.isArray(result.detalles) && result.detalles.length > 0 && <ul>{result.detalles.map((detail, index) => <li key={index}>{show(detail)}</li>)}</ul>}
       {selected && (

@@ -98,7 +98,43 @@ function unirAplicacionesArbol(diagramas, requerimientos = []) {
   return diagramas;
 }
 
+/**
+ * Si un RF aprobado pide iniciar sesión, la entidad de cuentas del dominio (Usuario, Cuenta) debe tener con qué entrar: correo y
+ * contraseña. Sin ellos la gestión de usuarios crea registros que no pueden iniciar sesión y una venta no puede apuntar a su vendedor.
+ */
+function asegurarCredencialesUsuario(diagramas, requerimientos) {
+  const { isLoginRequirement, isSensitiveField } = require('../../infrastructure/services/IdentityRequirements');
+  if (!(requerimientos || []).some((req) => String(req.tipo || 'RF').toUpperCase() === 'RF' && isLoginRequirement(req))) return diagramas;
+  for (const diagrama of diagramas || []) {
+    if (normalizeDiagramType(diagrama.tipo) !== 'clases_dominio' || !diagrama.codigo_plantuml) continue;
+    const codigo = String(diagrama.codigo_plantuml);
+    const cuerpo = codigo.match(/(^[ \t]*class\s+"?(?:Usuario|Cuenta|CuentaUsuario)"?(?=[\s{])[^{\n]*\{)([\s\S]*?)(\n[ \t]*\})/m);
+    if (!cuerpo) continue;
+    const atributos = cuerpo[2].split('\n').filter((linea) => linea.trim() && !linea.includes('('));
+    const nombreDe = (linea) => {
+      const texto = linea.trim().replace(/^[+#~-]\s*/, '');
+      if (texto.includes(':')) return texto.split(':')[0].trim(); // nombre : Tipo
+      const partes = texto.split(/\s+/);
+      return partes[partes.length - 1]; // Tipo nombre
+    };
+    const nombres = atributos.map(nombreDe);
+    const sangria = (atributos[0] || '    ').match(/^[ \t]*/)[0] || '    ';
+    const faltan = [];
+    if (!nombres.some((nombre) => /^(correo|email|mail)/i.test(nombre))) faltan.push(`${sangria}+String correo`);
+    if (!nombres.some((nombre) => isSensitiveField(nombre))) faltan.push(`${sangria}+String passwordHash`);
+    if (!faltan.length) continue;
+    const ultima = atributos[atributos.length - 1];
+    const corte = ultima ? cuerpo[2].lastIndexOf(ultima) + ultima.length : 0;
+    const nuevo = `${cuerpo[2].slice(0, corte)}\n${faltan.join('\n')}${cuerpo[2].slice(corte)}`;
+    diagrama.codigo_plantuml = codigo.replace(cuerpo[0], cuerpo[1] + nuevo + cuerpo[3]);
+    if (diagrama.codigo_mermaid === codigo) diagrama.codigo_mermaid = diagrama.codigo_plantuml;
+    console.warn('[ProcesarConIA] La entidad de cuentas no tenía credenciales para iniciar sesión; se añadieron correo y contraseña.');
+  }
+  return diagramas;
+}
+
 function asegurarActoresCasosUso(diagramas, requerimientos) {
+  asegurarCredencialesUsuario(diagramas, requerimientos);
   asegurarAsociacionesCasosUso(diagramas, requerimientos);
   unirAplicacionesArbol(diagramas, requerimientos);
   const casosUso = (diagramas || []).find((diagrama) => normalizeDiagramType(diagrama.tipo) === 'casos_de_uso');
@@ -886,3 +922,4 @@ class ProcesarConIA {
 module.exports = ProcesarConIA;
 module.exports.asegurarAsociacionesCasosUso = asegurarAsociacionesCasosUso;
 module.exports.esNombreProvisional = esNombreProvisional;
+module.exports.asegurarCredencialesUsuario = asegurarCredencialesUsuario;

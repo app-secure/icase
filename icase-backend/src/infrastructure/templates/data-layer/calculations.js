@@ -13,10 +13,14 @@ function evaluate(node,data,depth=0) {
   if(typeof value!=='number' || !Number.isFinite(value) || Math.abs(value)>1e15) throw new HttpError(422,'El cálculo requiere valores numéricos finitos dentro de rango');
   return value;
 }
+// Sin un dato de la fórmula no se calcula: la regla «obligatorio» de ese dato responde con su propio mensaje.
+function missing(node,data){ if(node && typeof node.campo==='string') return data[node.campo]===undefined||data[node.campo]===null||data[node.campo]===''; return Boolean(node && node.op && (missing(node.izquierda,data)||missing(node.derecha,data))); }
 function derive(rules,body,previous={}) {
   const result={...body};
   for(const rule of rules.filter(rule=>rule.tipo==='calculo')) {
-    let value=evaluate(rule.expresion,{...previous,...result});
+    const data={...previous,...result};
+    if(missing(rule.expresion,data)) continue;
+    let value=evaluate(rule.expresion,data);
     if(Number.isInteger(rule.decimales)) value=Number(value.toFixed(rule.decimales));
     result[rule.campo]=value;
   }

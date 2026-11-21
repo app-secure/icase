@@ -167,3 +167,43 @@ describe('pedido con líneas: formulario del diseño', () => {
     expect(actions.collectLines(form, named)).toEqual([{ plato_id: '2', cantidad: 4 }]);
   });
 });
+
+describe('venta con líneas: precios, stock y total con datos reales (caso Ventas)', () => {
+  const actions = load('frontend/mockup-actions.js');
+  const live = load('frontend/live-tables.js', () => actions);
+  const named = { inputs: ['cliente_id', 'medioPago'], lineas: { referencia: 'producto_id', cantidad: 'cantidad', precio: 'precioVenta', stock: 'stock' }, path: '/api/actions/crear-venta' };
+  const linea = (n, precio, importe) => `<div class="linea"><div><select name="producto_id"><option>Mouse</option></select><span><span class="dot"></span>Activo · 24 unidades disponibles</span></div><input type="number" name="cantidad" value="2"><div>S/ ${precio}</div><div>S/ ${importe}</div><button type="button" aria-label="Quitar producto ${n}"><svg></svg></button></div>`;
+  const html = `<form data-accion="RF-01.crear"><select name="cliente_id"><option value="1">C</option></select><section><button type="button">+ Agregar producto</button><div class="lista">${linea(1, '79.90', '159.80')}${linea(2, '149.90', '149.90')}</div></section>
+    <div><p>Total calculado automáticamente</p><p>S/ 309.70</p><p>2 líneas · 3 unidades</p></div><button type="submit">Registrar venta</button></form>`;
+  const api = jest.fn().mockResolvedValue([{ id: 1, nombre: 'Polo', precioVenta: 50, stock: 3 }, { id: 2, nombre: 'Gorra', precioVenta: 20, stock: 10 }]);
+
+  test('retira las líneas de ejemplo, recalcula importe y total, y quita una línea con el icono', async () => {
+    const document = new JSDOM(`<body>${html}</body>`).window.document;
+    const form = document.querySelector('form');
+    await live.bindLines({ root: document.body, specMap: { 'rf-01.crear': named }, api });
+    const lineas = () => form.querySelectorAll('.linea');
+    expect(lineas()).toHaveLength(1);
+    expect(form.textContent).toContain('S/ 0.00');
+    expect(form.textContent).toContain('0 líneas · 0 unidades');
+    const change = (element) => element.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
+    const first = lineas()[0];
+    first.querySelector('select').value = '1';
+    first.querySelector('input').value = '2';
+    change(first.querySelector('select'));
+    expect(first.textContent).toContain('S/ 50.00');
+    expect(first.textContent).toContain('S/ 100.00');
+    expect(first.textContent).toContain('3 unidades disponibles');
+    form.querySelector('button').dispatchEvent(new document.defaultView.MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(lineas()).toHaveLength(2);
+    expect(lineas()[1].parentElement).toBe(first.parentElement); // la copia va en la lista de líneas, no fuera
+    lineas()[1].querySelector('select').value = '2';
+    change(lineas()[1].querySelector('select'));
+    expect(form.textContent).toContain('S/ 120.00');
+    expect(form.textContent).toContain('2 líneas · 3 unidades');
+    expect(lineas()[0].querySelector('select').options).toHaveLength(3); // sin opciones duplicadas
+    lineas()[1].querySelector('button').dispatchEvent(new document.defaultView.MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(lineas()).toHaveLength(1);
+    expect(form.textContent).toContain('S/ 100.00');
+    expect(actions.collectLines(form, named)).toEqual([{ producto_id: '1', cantidad: 2 }]);
+  });
+});
