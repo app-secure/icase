@@ -55,6 +55,12 @@ function internalLink(node, context) {
 
 const ACTION = /^(RF-\d+)\.(consultar|crear|editar|eliminar)$/i;
 
+/** Texto visible de un nodo y sus hijos (etiqueta de un botón con iconos o spans). */
+function textContent(node) {
+  if (node.nodeName === '#text') return node.value || '';
+  return (node.childNodes || []).map(textContent).join(' ').replace(/\s+/g, ' ');
+}
+
 /** `onClick` solo para un `data-accion` válido cuya operación existe; cualquier otro control queda inerte. */
 function actionHandler(node, context) {
   if (!context?.operaciones?.size) return '';
@@ -64,7 +70,11 @@ function actionHandler(node, context) {
   let declared = (node.attrs || []).find((attr) => attr.name === 'data-accion')?.value.trim() || '';
   // El botón de envío de un formulario con `data-accion` (y sin otro propio) ejecuta la acción del formulario.
   const submits = tag === 'button' ? !['button', 'reset'].includes(String(typeAttr(node)).toLowerCase()) : tag === 'input' && String(typeAttr(node)).toLowerCase() === 'submit';
-  if (!declared && submits && context.formAction) declared = context.formAction;
+  // Un envío marcado «ui» («Registrar», «Guardar», «Emitir factura») dentro de un formulario enlazado también lo ejecuta:
+  // el <form> solo previene el envío nativo, así que antes ese botón quedaba inerte. Cancelar/limpiar/volver siguen siendo UI.
+  const submitText = textContent(node).trim().toLowerCase();
+  const uiOnlySubmit = declared.toLowerCase() === 'ui' && !/^(?:cancelar|cerrar|volver|regresar|limpiar|atr[aá]s|descartar)\b/.test(submitText);
+  if ((!declared || uiOnlySubmit) && submits && context.formAction) declared = context.formAction;
   const match = ACTION.exec(declared);
   const operation = match && match[1].toLowerCase();
   return match && context.operaciones.has(operation)

@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
-const METHOD_FOR_PERMISSION = { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' };
+const METHOD_FOR_PERMISSION = { consulta: 'GET', resumen: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' };
 const humanize = (name) => String(name).replace(/_id$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
 const shown = (value) => (value === null || value === undefined ? '' : typeof value === 'boolean' ? (value ? 'Sí' : 'No') : typeof value === 'object' ? JSON.stringify(value) : String(value));
 const pathOf = (action, id, query) => {

@@ -143,7 +143,11 @@ class AiRequestBudget {
     state.attempts++;
     // Local fallback has a separate allowance; it must not extend a cloud call.
     const remaining = Math.max(1, state.cloudDuration - (Date.now() - state.started));
-    const config = { ...options, signal: state.signal, timeout: Math.min(options.timeout || 60000, state.requestTimeout, remaining) };
+    // Bedrock (de pago) genera respuestas largas del análisis: 45 s lo corta a mitad y cae a un modelo gratuito.
+    // Respeta su propio límite (BEDROCK_TIMEOUT_MS, 180 s) dentro del presupuesto total de la generación.
+    const paidLongOutput = /(^|\.)bedrock-runtime\.[^/]+\.amazonaws\.com/i.test(String(url).replace(/^https?:\/\//, ''));
+    const perRequest = paidLongOutput ? Math.max(state.requestTimeout, options.timeout || 0) : state.requestTimeout;
+    const config = { ...options, signal: state.signal, timeout: Math.min(options.timeout || 60000, perRequest, remaining) };
     return method === 'get' ? axios.get(url, config) : axios.post(url, data, config);
   }
   post(url, data, options) { return this.transport('post', url, data, options); }

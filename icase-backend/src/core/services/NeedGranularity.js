@@ -59,15 +59,25 @@ function leadingFamily(segment) {
   return word ? familyOf(word[0]) : null;
 }
 function isRule(text) {
-  return /^(?:sin que|pero no|no\b|nunca\b)/i.test(clean(text)) || /\bno\s+(?:debe|pued[ae]|quier)/i.test(text);
+  return /^(?:sin que|pero no|no\b|nunca\b)/i.test(clean(text)) || /\bno\s+(?:se\s+)?(?:debe|pued[ae]|quier|permit)/i.test(text);
 }
 function partition(text) {
   const operations = [];
   const rules = [];
   let previous = null;
+  let bareVerb = '';
   for (const raw of segments(text)) {
-    const segment = clean(raw);
+    let segment = clean(raw);
     if (!segment) continue;
+    // «Ver y consultar la factura»: un verbo suelto comparte el objeto del segmento siguiente; no es otra operación.
+    if (/^\p{L}+$/u.test(segment) && !isRule(segment)) {
+      bareVerb = bareVerb ? `${bareVerb}, ${segment}` : segment;
+      continue;
+    }
+    if (bareVerb) {
+      segment = `${bareVerb} y ${segment.charAt(0).toLowerCase()}${segment.slice(1)}`;
+      bareVerb = '';
+    }
     if (isRule(segment) || /^(?:solo|solamente|únicamente|unicamente)\s+(?:él|ella|el|la|los|las)\b/i.test(segment)) {
       rules.push(segment);
       const exception = /salvo que\s+(.{8,120})/i.exec(raw);
@@ -124,9 +134,15 @@ function ensureSubject(item, input) {
   if (!item || item.tipo !== 'RF') return item;
   const quote = item.evidencia || item.evidencias?.find(entry => entry?.texto)?.texto || '';
   let necesidad = item.necesidad;
-  if (!/\b(?:el|la|los|las)\s+\S+\s+(?:debe|puede|podr)/i.test(necesidad)) {
+  // Solo una acción sin sujeto («Registrar…», «Consultar…») recibe el actor; una frase que ya tiene sujeto
+  // («Administrador y vendedores registran…», «Una venta anulada…») se deja como está.
+  const bareAction = /^[a-záéíóúñ]+(?:ar|er|ir)(?:se|lo|la|los|las|le|les)?\b/i.test(clean(necesidad));
+  if (bareAction && !/\b(?:el|la|los|las)\s+\S+\s+(?:debe|puede|podr)/i.test(necesidad)) {
     const prefix = actorModal(quote, input) || actorModal(necesidad, necesidad);
-    if (prefix) necesidad = withSubject(prefix, necesidad);
+    // «Editar clientes…, por administrador y vendedor»: si la necesidad ya nombra al actor, no se antepone otro.
+    const noun = normalize(prefix).split(/\s+/)[1] || '';
+    const named = noun.length >= 5 && normalize(necesidad).includes(noun.slice(0, 7));
+    if (prefix && !named) necesidad = withSubject(prefix, necesidad);
   }
   const current = /^((?:El|La|Los|Las)\s+\S+)\s+puede\s+/i.exec(necesidad);
   if (current && new RegExp(`${current[1]}\\s+debe poder`, 'i').test(turnOf(quote, input))) necesidad = necesidad.replace(current[0], `${current[1]} debe poder `);
@@ -202,6 +218,12 @@ function classify(sentence, inventory, accepted) {
     }
     items.push({ tipo, necesidad: clean(necesidad), estado });
   };
+  // Lo que el insumo declara «fuera de alcance» es una decisión explícita: si la IA solo lo dejó en el texto del alcance, se recupera.
+  if (/fuera (?:del|de) alcance/.test(text)) {
+    const covered = [...inventory, ...items].some(item => item.tipo === 'decision' && (item.estado === 'fuera_de_alcance' || /fuera (?:del|de) alcance|excluir|excluye/.test(normalize(item.necesidad))));
+    if (!covered) add('decision', sentence.replace(/^(?:anoto|anotamos|dejamos|queda(?:n)?)\s+como\s+/i, 'Queda ').trim(), 'fuera_de_alcance');
+    return items;
+  }
   if (/alta disponibilidad|balanceador|replicas|conmutacion|failover/.test(text) && /no queremos|no se debe|por ahora no|no exige/.test(text)) {
     add('decision', sentence, 'fuera_de_alcance');
     return items;
@@ -224,7 +246,9 @@ function classify(sentence, inventory, accepted) {
   }
   if (/respaldo|recuperar la informacion|copias de seguridad/.test(text)) {
     if (/caida breve|atender manualmente/.test(text) && !already(inventory, 'decision', /caida breve|manualmente/)) add('decision', 'Una caída breve se puede atender manualmente.');
-    if (!already(inventory, 'RF', /respaldo|recuper/) && !/menos de\s+(?:un|una|\d+)/.test(text)) add('RF', 'Permitir respaldos de la base de datos y recuperación de información.');
+    // Si la política de copias queda pendiente, la herramienta no la asume: la cubren las preguntas abiertas.
+    const pendiente = /pendiente|por definir|lo definimos despues/.test(text);
+    if (!pendiente && !already(inventory, 'RF', /respaldo|recuper/) && !/menos de\s+(?:un|una|\d+)/.test(text)) add('RF', 'Permitir respaldos de la base de datos y recuperación de información.');
     return items;
   }
   if (/botones claros|pocas acciones por pantalla/.test(text) && !already(inventory, 'RNF', /boton|usabilidad|facilidad de uso|pocas acciones/)) {
@@ -246,7 +270,7 @@ function classify(sentence, inventory, accepted) {
     if (/\bjwt\b/.test(text) && !already(inventory, 'restriccion_tecnica', /\bjwt\b/)) add('restriccion_tecnica', 'Usar JWT como mecanismo de autenticación.');
     return items;
   }
-  if (/no pueda|no pueden|no debe|sin que|pero no|solamente|unicamente|cualquier persona/.test(normalize(mainClause(sentence)))) {
+  if (/no pueda|no pueden|no debe|no se puede|no se pueden|sin que|pero no|solamente|unicamente|cualquier persona/.test(normalize(mainClause(sentence)))) {
     add('regla_negocio', sentence);
     const exception = /salvo que\s+((?:el|la|los|las)\s+[^.]{8,140})/i.exec(sentence);
     if (exception && /reasign/.test(normalize(exception[1])) && !already(inventory, 'RF', /reasign/)) add('RF', reassignmentName(sentence));
@@ -256,6 +280,28 @@ function classify(sentence, inventory, accepted) {
     const estado = pendingTech ? 'pendiente' : accepted || /usemos|quedan? confirmad|usaran/.test(text) ? 'confirmado' : 'pendiente';
     add('restriccion_tecnica', sentence, estado);
     return items;
+  }
+  // «gestiona productos, usuarios, anula ventas…»: el sustantivo suelto tras «gestiona» comparte esa acción.
+  // Sin esto, «usuarios» se pierde y la aplicación queda sin gestión de usuarios.
+  if (/\bgestion(?:a|ar|an)\b/.test(text)) {
+    const covered = noun => [...inventory, ...items].some(item => item.tipo === 'RF' && normalize(item.necesidad).includes(noun.slice(0, 6)));
+    const bare = value => normalize(value).replace(/[.;:]+$/, '').replace(/^(?:los|las|el|la|sus)\s+/, '');
+    let managing = false;
+    let previous = '';
+    for (const raw of segments(sentence)) {
+      const segment = clean(raw).replace(/[.;:]+$/, '');
+      const own = /\bgestion(?:a|ar|an)\s+(.+)$/i.exec(segment);
+      if (own) { managing = true; previous = bare(own[1]); continue; }
+      const verb = FAMILIES.some(([, pattern]) => pattern.test(segment)) || /^\p{L}+(?:a|an|e|en|ar|er|ir)\s+\p{L}/u.test(segment) && segment.split(/\s+/).length > 1 && !/^(?:los|las|el|la|sus|mis)\b/i.test(segment);
+      if (!managing || verb) { managing = false; continue; }
+      const noun = bare(segment);
+      if (!noun || noun.split(/\s+/).length > 3) continue;
+      // «gestionar usuarios y roles»: lo unido con «y» al objeto anterior es parte de ese objeto, no otro RF.
+      const joined = previous && normalize(sentence).includes(`${previous} y ${noun}`);
+      const object = joined ? `${previous} y ${noun}` : noun;
+      if (!covered(joined ? previous : noun)) add('RF', `Gestionar ${object}.`);
+      previous = noun;
+    }
   }
   if (/debe|podra|podran|puede|pueden/.test(text) && !isRule(sentence)) {
     for (const [name, pattern] of FAMILIES) {
@@ -588,9 +634,22 @@ function linkActors(inventory, actors) {
     return actor ? { ...item, actor_id: actor.id } : item;
   });
 }
+/**
+ * «Capturar en cada venta: fecha, vendedor, cliente…» no es otra función: son los datos que guarda la operación
+ * que registra la venta. Como RF genera un requisito, una operación y una pantalla duplicados.
+ */
+function dataDetailAsRule(item) {
+  if (item?.tipo !== 'RF') return item;
+  const text = normalize(item.necesidad);
+  const dataOnly = /^(?:capturar|almacenar|guardar|registrar|conservar)\s+(?:en|de|para|por)\s+cada\s+\p{L}+/u.test(text)
+    || /^(?:capturar|almacenar|guardar)\b[^.]*\bpor cada\s+\p{L}+/u.test(text);
+  if (!dataOnly) return item;
+  const { objetivo_id, actor_id, ...rest } = item;
+  return { ...rest, tipo: 'regla_negocio', ...(objetivo_id ? { objetivos_relacionados: [objetivo_id] } : {}) };
+}
 function refine(inventory, input, identifiers, actors) {
   const current = [];
-  for (const item of inventory || []) current.push(...splitItem(item, identifiers).map(part => ensureSubject(part === item ? item : withEvidence(part, item.evidencia), input)));
+  for (const item of (inventory || []).map(dataDetailAsRule)) current.push(...splitItem(item, identifiers).map(part => ensureSubject(part === item ? item : withEvidence(part, item.evidencia), input)));
   const recovered = clarifyQuestions(current.concat(recover(input, current, identifiers).map(item => ensureSubject(item, input))));
   return linkActors(polish(recovered, input, identifiers), actors);
 }

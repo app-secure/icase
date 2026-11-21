@@ -20,4 +20,14 @@ describe('formularios del mockup con data-accion', () => {
     const jsx = analyze('<form data-accion="RF-12.editar"><button type="button">Cancelar</button></form>');
     expect(jsx).not.toContain('handleAction');
   });
+
+  test('un envío marcado «ui» dentro de un formulario enlazado ejecuta la acción (antes quedaba inerte)', () => {
+    const jsx = analyze('<form data-accion="RF-12.crear"><input name="nombre"><button type="submit" data-accion="ui">Registrar</button></form>');
+    expect(jsx).toContain('handleAction(event, "rf-12", "crear")');
+  });
+
+  test('«Cancelar» marcado «ui» sigue siendo solo interfaz aunque sea de envío', () => {
+    const jsx = analyze('<form data-accion="RF-12.crear"><button type="submit" data-accion="ui"><span>Cancelar</span></button></form>');
+    expect(jsx).not.toContain('handleAction');
+  });
 });

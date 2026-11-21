@@ -127,7 +127,7 @@ class PlantUMLValidatorService {
       if (actores < 1 || actores > 10) errores.push('Casos de uso debe contener entre 1 y 10 actores.');
       const limits = useCaseLimits(opts.requisitos);
       metricas.limite_casos_uso = limits.max;
-      if (casos < limits.min || casos > limits.max) errores.push(`Casos de uso debe contener entre ${limits.min} y ${limits.max} casos para este alcance (${limits.rf} RF). Agrupa visualmente por módulos, sin eliminar funciones aprobadas.`);
+      if (casos < limits.min || casos > limits.max) errores.push(`Casos de uso debe contener entre ${limits.min} y ${limits.max} casos para este alcance (${limits.rf} RF). Agrupa visualmente por módulos, sin eliminar funciones aprobadas. Usa un caso por RF: un RF «Gestionar X» es un solo caso, no uno por operación.`);
       const presentation = reviewUseCasePresentation(trimmed, casos);
       advertencias.push(...presentation.advertencias);
       Object.assign(metricas, presentation.metricas);

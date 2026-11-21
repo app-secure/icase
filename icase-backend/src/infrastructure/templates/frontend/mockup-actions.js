@@ -135,7 +135,15 @@ export async function runAction({ event, operation, verb, api, can, onResult, co
       // Si la operación recibe parámetros (el código QR que se escanea), el valor escrito viaja como parámetro de la consulta.
       const declared = (named && named.parametros) || [];
       const query = {};
-      for (const name of declared) if (given[name] !== undefined) query[name] = given[name];
+      // El rango de fechas del diseño puede llamarse fechaInicio/fecha_fin: se acepta como «desde»/«hasta» del reporte.
+      const SYNONYMS = { desde: /(desde|inicio|from|start)/i, hasta: /(hasta|fin\b|fin$|final|to$|end)/i };
+      for (const name of declared) {
+        if (given[name] !== undefined) query[name] = given[name];
+        else if (SYNONYMS[name]) {
+          const alias = Object.keys(given).find((key) => SYNONYMS[name].test(key.replace(/[_-]/g, '')) || SYNONYMS[name].test(key));
+          if (alias) query[name] = given[alias];
+        }
+      }
       if (!Object.keys(query).length && declared.length === 1 && Object.keys(given).length === 1) query[declared[0]] = Object.values(given)[0];
       const searched = Object.keys(query).length > 0;
       // Un buscador o filtro de una lista que ya está en pantalla la filtra ahí mismo; no muestra otro listado.

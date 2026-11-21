@@ -24,9 +24,7 @@ function separarCamelCase(valor) {
 }
 
 function raiz(token) {
-  let value = token;
-  if (value.length > 6 && value.endsWith('es')) value = value.slice(0, -2);
-  else if (value.length > 4 && value.endsWith('s')) value = value.slice(0, -1);
+  const value = require('../../core/services/SpanishPlural').singular(token);
   return SYNONYMS.get(value) || value;
 }
 

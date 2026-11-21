@@ -26,6 +26,34 @@ function kindOf(property) {
   return 'texto';
 }
 
+/**
+ * Fórmula en texto → árbol { op, izquierda, derecha } | { campo } | número. Admite + - * /, paréntesis, decimales con
+ * punto o coma y porcentajes («18%» → 0.18). Si no se entiende, devuelve null y la validación la rechaza como antes.
+ */
+function parseFormula(text) {
+  const source = String(text || '').replace(/^\s*[\w.]+\s*=\s*/, '').replace(/[×x](?=\s*[\d(])/g, '*').replace(/÷/g, '/');
+  const tokens = source.match(/\d+(?:[.,]\d+)?\s*%|\d+(?:[.,]\d+)?|[A-Za-z_áéíóúñÁÉÍÓÚÑ][\w.áéíóúñÁÉÍÓÚÑ]*|[-+*/()]/g);
+  if (!tokens || tokens.join('').replace(/\s+/g, '') !== source.replace(/\s+/g, '')) return null;
+  let position = 0;
+  const peek = () => tokens[position];
+  const atom = () => {
+    const token = tokens[position++];
+    if (token === '(') { const inner = sum(); if (tokens[position++] !== ')') throw new Error('paréntesis'); return inner; }
+    if (token === undefined) throw new Error('fin');
+    const percent = /^(\d+(?:[.,]\d+)?)\s*%$/.exec(token);
+    if (percent) return Number(percent[1].replace(',', '.')) / 100;
+    if (/^\d/.test(token)) return Number(token.replace(',', '.'));
+    if (/^[-+*/)]$/.test(token)) throw new Error('operador');
+    return { campo: token.split('.').pop() };
+  };
+  const product = () => { let left = atom(); while (peek() === '*' || peek() === '/') { const op = tokens[position++]; left = { op, izquierda: left, derecha: atom() }; } return left; };
+  const sum = () => { let left = product(); while (peek() === '+' || peek() === '-') { const op = tokens[position++]; left = { op, izquierda: left, derecha: product() }; } return left; };
+  try {
+    const tree = sum();
+    return position === tokens.length ? tree : null;
+  } catch { return null; }
+}
+
 class BusinessRuleService {
   /**
    * @param {Array} reglas propuestas (cualquier estado de decisión)
@@ -122,6 +150,12 @@ class BusinessRuleService {
     };
     switch (regla.tipo) {
       case 'calculo': {
+        // La IA suele escribir la fórmula como texto («subtotal * 0.18», «subtotal * 18%»): se convierte al árbol que se valida.
+        if (typeof regla.expresion === 'string') {
+          const parsed = parseFormula(regla.expresion);
+          if (parsed) regla.expresion = parsed;
+        }
+        if (regla.decimales === undefined) regla.decimales = 2;
         const target=campo(regla.campo);
         if(!target || target.kind!=='numerico') {fail('el resultado del cálculo debe ser numérico.');break;}
         regla.campo=target.nombre;
@@ -147,7 +181,8 @@ class BusinessRuleService {
       case 'unico': {
         const lista = (Array.isArray(regla.campos) ? regla.campos : [regla.campo]).filter(Boolean);
         if (!lista.length || lista.length > 3) { fail('"campos" debe contener entre 1 y 3 campos.'); break; }
-        const resueltos = lista.map((nombre) => campo(nombre));
+        // «Una venta solo puede tener una factura»: unicidad sobre una referencia (clave foránea) cuando es el único campo.
+        const resueltos = lista.map((nombre) => campo(nombre, { permitirReferencia: lista.length === 1 }));
         if (resueltos.some((item) => !item)) break;
         if (resueltos.some((item) => ['lista', 'booleano'].includes(item.kind))) fail('no se puede exigir unicidad sobre listas o booleanos.');
         regla.campos = resueltos.map((item) => item.nombre);

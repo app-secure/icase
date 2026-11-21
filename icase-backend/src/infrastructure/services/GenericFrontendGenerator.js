@@ -270,7 +270,7 @@ class GenericFrontendGenerator {
 
   /** `rf-15.crear` → la operación de la especificación que guarda: un botón del mockup llama a la operación con nombre y no a un CRUD genérico. */
   _specActionMap(screenActions, spec) {
-    const verb = { consulta: 'consultar', crear: 'crear', actualizar: 'editar', transicion: 'editar', eliminar: 'eliminar' };
+    const verb = { consulta: 'consultar', resumen: 'consultar', crear: 'crear', actualizar: 'editar', transicion: 'editar', eliminar: 'eliminar' };
     const map = {};
     const add = (action) => {
       const key = `${String(action.permiso || action.permission || action.capability).toLowerCase()}.${verb[action.type]}`; // el botón del mockup dice «RF-06.editar»: el requisito, no el almacén

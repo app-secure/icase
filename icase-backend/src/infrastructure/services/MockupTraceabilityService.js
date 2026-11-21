@@ -6,8 +6,9 @@ const STOPWORDS = new Set([
   'accion', 'actualizar', 'administrar', 'aplicacion', 'crear', 'debe', 'digital',
   'el', 'en', 'gestionar', 'gestion', 'la', 'las', 'los', 'mostrar', 'nuevo',
   'para', 'permitir', 'procesar', 'realizar', 'registrar', 'sistema', 'una',
-  'usuario', 'validar', 'ver', 'consultar', 'consulta', 'pantalla', 'vista',
-  'formulario', 'detalle', 'informacion', 'datos', 'cliente', 'personal',
+  'validar', 'ver', 'consultar', 'consulta', 'pantalla', 'vista',
+  // «cliente» y «usuario» no son vacías: en ventas son entidades gestionadas (antes se perdía «Gestionar clientes»).
+  'formulario', 'detalle', 'informacion', 'datos', 'personal',
   'acceso', 'principal', 'modulo', 'flujo', 'interfaz', 'estado', 'por',
   'del', 'con', 'sin', 'sus', 'que', 'como', 'mediante', 'cada',
   'visualizacion', 'validacion', 'procesamiento', 'marcado', 'acumulacion'
@@ -32,9 +33,7 @@ function normalize(value) {
 }
 
 function stem(value) {
-  let token = value;
-  if (token.length > 6 && token.endsWith('es')) token = token.slice(0, -2);
-  else if (token.length > 4 && token.endsWith('s')) token = token.slice(0, -1);
+  const token = require('../../core/services/SpanishPlural').singular(value);
   return SYNONYMS.get(token) || token;
 }
 
@@ -129,6 +128,39 @@ function hasSemanticEvidence(requirement, screen) {
   return matches.length > 0 && (matches.length >= 2 || matches.length / fullExpected.length >= 0.5);
 }
 
+/**
+ * Un RF que no coincide con ninguna pantalla suele ser una acción sobre un registro («Anular ventas», «Emitir
+ * factura»): el árbol no le da pantalla propia y, sin asignarlo, la IA nunca recibe esa operación y la acción
+ * desaparece de la interfaz. Se asigna al detalle de su entidad (o al listado), entre las pantallas compatibles.
+ */
+function attachOrphanActions(manifest, functional) {
+  const nameTokens = (screen) => new Set(tokens(screen.nombre || screen.nombre_visible || ''));
+  for (const requirement of functional) {
+    const id = requirementId(requirement);
+    const title = tokens(requirement?.nombre);
+    if (!id || title.includes('autenticacion')) continue;
+    // Objeto del requisito: el primer término del título que no es su verbo («Anular ventas…» → venta).
+    const [verb] = normalize(requirement?.nombre).split(/\s+/);
+    const object = title.find((token) => !/(?:ar|er|ir)$/.test(token) || token !== stem(verb));
+    if (!object) continue;
+    const assigned = manifest.filter((screen) => (screen.rf_trazabilidad || []).includes(id));
+    if (assigned.some((screen) => nameTokens(screen).has(object))) continue;
+    // Alta o emisión → su formulario; acción sobre un registro (anular, desactivar…) → su detalle.
+    const createLike = /^(?:registrar|crear|emitir|agregar|anadir|generar|capturar)$/.test(verb);
+    const kindRank = (screen) => {
+      const text = normalize(`${screen.tipo || ''} ${screen.nombre || ''}`);
+      const kind = /\bdetail\b|detalle/.test(text) ? 'detail' : /\blist\b|listado|catalogo/.test(text) ? 'list' : /\bform\b|formulario/.test(text) ? 'form' : 'other';
+      const order = createLike ? ['form', 'detail', 'list', 'other'] : ['detail', 'list', 'other', 'form'];
+      return order.indexOf(kind);
+    };
+    const target = manifest
+      .filter((screen) => nameTokens(screen).has(object) && Compatibility.compatible(requirement, screen) && !/inicio de sesion|login/.test(normalize(screen.nombre)))
+      .sort((a, b) => kindRank(a) - kindRank(b))[0];
+    if (target) target.rf_trazabilidad = [...new Set([...(target.rf_trazabilidad || []), id])];
+  }
+  return manifest;
+}
+
 /** Por qué un requisito no se asocia a una pantalla, dicho de forma que se pueda actuar. */
 function explainDiscard(requirement, screen) {
   const verdict = Compatibility.check(requirement, screen);
@@ -198,13 +230,14 @@ class MockupTraceabilityService {
 
   buildManifest(screens = [], requirements = []) {
     const functional = this.functionalRequirements(requirements);
-    return (Array.isArray(screens) ? screens : []).map((screen) => ({
+    const manifest = (Array.isArray(screens) ? screens : []).map((screen) => ({
       ...screen,
       rf_trazabilidad: functional
         .filter((requirement) => hasSemanticEvidence(requirement, screen))
         .map(requirementId)
         .filter(Boolean)
     }));
+    return attachOrphanActions(manifest, functional);
   }
 
   enrichMockup(mockup, screen, requirements = []) {

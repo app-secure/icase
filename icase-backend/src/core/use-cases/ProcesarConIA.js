@@ -31,7 +31,76 @@ function normalizarActor(value) {
     .trim();
 }
 
+/**
+ * Cada actor de un RF debe estar asociado al caso de uso que lo realiza: si la IA omite «Vendedor --> Emitir factura»,
+ * el rol pierde esa operación en permisos, árbol de navegación y código. Se identifica el caso por su nota «RF-xx»
+ * o por su nombre igual al del RF, y se añade solo la asociación que falta.
+ */
+function asegurarAsociacionesCasosUso(diagramas, requerimientos) {
+  const casosUso = (diagramas || []).find((diagrama) => normalizeDiagramType(diagrama.tipo) === 'casos_de_uso');
+  if (!casosUso?.codigo_plantuml) return diagramas;
+  let codigo = String(casosUso.codigo_plantuml);
+  const actores = [...codigo.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s"]+))(?:\s+as\s+([\w.]+))?/gim)]
+    .map((m) => ({ nombre: normalizarActor(m[1] || m[2]), alias: m[3] || m[2] || m[1] }));
+  const casos = [...codigo.matchAll(/^\s*usecase\s+"([^"]+)"\s+as\s+([\w.]+)/gim)].map((m) => ({ nombre: normalizarActor(m[1]), alias: m[2] }));
+  const notas = [...codigo.matchAll(/note\s+(?:right|left|top|bottom)\s+of\s+([\w.]+)\s*\n([\s\S]*?)end\s*note/gi)].map((m) => ({ alias: m[1], texto: m[2] }));
+  const asociado = (actor, caso) => new RegExp(`^\\s*(?:${actor}\\s*-+>?\\s*${caso}|${caso}\\s*<?-+\\s*${actor})\\b`, 'im').test(codigo);
+  const nuevas = [];
+  for (const rf of (requerimientos || []).filter((item) => String(item.tipo || '').toUpperCase() === 'RF')) {
+    const id = String(rf.identificador || '').toUpperCase();
+    // Si el RF quedó repartido en varios casos («Gestionar productos» → crear / modificar / consultar), no se sabe
+    // a cuál pertenece cada actor (el Vendedor solo consulta): no se adivina, para no conceder operaciones de más.
+    const porNombre = casos.filter((item) => item.nombre === normalizarActor(rf.nombre));
+    const porNota = casos.filter((item) => notas.some((nota) => nota.alias === item.alias && new RegExp(`\\b${id}\\b`, 'i').test(nota.texto)));
+    const candidatos = porNombre.length ? porNombre : porNota;
+    const mismoRf = casos.filter((item) => notas.some((nota) => nota.alias === item.alias && new RegExp(`\\b${id}\\b`, 'i').test(nota.texto)));
+    if (candidatos.length !== 1 || mismoRf.length > 1) continue;
+    const [caso] = candidatos;
+    for (const nombre of (Array.isArray(rf.actores) ? rf.actores : [])) {
+      const actor = actores.find((item) => item.nombre === normalizarActor(nombre));
+      if (actor && !asociado(actor.alias, caso.alias) && !nuevas.includes(`${actor.alias} --> ${caso.alias}`)) nuevas.push(`${actor.alias} --> ${caso.alias}`);
+    }
+  }
+  if (!nuevas.length) return diagramas;
+  const bloque = `\n' Asociaciones completadas desde los actores de los requisitos aprobados\n${nuevas.join('\n')}\n`;
+  casosUso.codigo_plantuml = /@enduml\s*$/i.test(codigo) ? codigo.replace(/@enduml\s*$/i, `${bloque}@enduml`) : `${codigo}${bloque}@enduml`;
+  console.warn(`[ProcesarConIA] Se completaron asociaciones actor–caso omitidas por la IA: ${nuevas.join(', ')}`);
+  return diagramas;
+}
+
+/** Nombre puesto por la herramienta y no por el usuario: vacío, genérico o igual al del archivo subido. */
+function esNombreProvisional(nombre, fuentes = []) {
+  const plano = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/\.[a-z0-9]{2,5}$/, '').replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const actual = plano(nombre);
+  if (!actual || /^(?:nuevo proyecto|proyecto sin nombre|proyecto nuevo|sin titulo|gestion y control operativo)$/.test(actual)) return true;
+  return (Array.isArray(fuentes) ? fuentes : []).some((fuente) => plano(fuente?.nombre_archivo || fuente?.nombre) === actual);
+}
+
+/** Árbol de navegación: una aplicación por plataforma (no por rol); ver NavigationTreeReview.mergeSamePlatformApps. */
+function unirAplicacionesArbol(diagramas, requerimientos = []) {
+  const arbol = (diagramas || []).find((diagrama) => normalizeDiagramType(diagrama.tipo) === 'arbol_navegacion');
+  if (!arbol?.codigo_plantuml) return diagramas;
+  const review = require('../services/NavigationTreeReview');
+  const { codigo, unidas } = review.mergeSamePlatformApps(arbol.codigo_plantuml);
+  if (unidas.length) {
+    arbol.codigo_plantuml = codigo;
+    console.warn(`[ProcesarConIA] Árbol: se unieron aplicaciones o módulos separados por rol: ${unidas.join(', ')}`);
+  }
+  const texto = (requerimientos || []).map((r) => [r.nombre, r.descripcion].join(' ')).join(' ');
+  if (texto.trim()) {
+    const limpio = review.removeUnrequested(arbol.codigo_plantuml, texto);
+    if (limpio.quitadas.length) {
+      arbol.codigo_plantuml = limpio.codigo;
+      console.warn(`[ProcesarConIA] Árbol: se quitaron pantallas que ningún RF pide: ${limpio.quitadas.join(', ')}`);
+    }
+  }
+  return diagramas;
+}
+
 function asegurarActoresCasosUso(diagramas, requerimientos) {
+  asegurarAsociacionesCasosUso(diagramas, requerimientos);
+  unirAplicacionesArbol(diagramas, requerimientos);
   const casosUso = (diagramas || []).find((diagrama) => normalizeDiagramType(diagrama.tipo) === 'casos_de_uso');
   if (!casosUso?.codigo_plantuml) return diagramas;
 
@@ -744,7 +813,11 @@ class ProcesarConIA {
       return cleaned;
     };
 
-    let nombreFinal = cleanProjectName(resultadoIA.nombre_proyecto) || cleanProjectName(proyecto.nombre) || 'Gestión y Control Operativo';
+    // El nombre del proyecto es del usuario: la IA solo lo propone cuando el actual es provisional (vacío, genérico o
+    // derivado del archivo subido, p. ej. «Entrevista tienda ventas»). Antes cada generación lo reemplazaba.
+    const fuentesNombre = this.fuenteRepository ? await this.fuenteRepository.listarPorProyecto(proyectoId).catch(() => []) : [];
+    const nombreProvisional = esNombreProvisional(proyecto.nombre, fuentesNombre);
+    let nombreFinal = (nombreProvisional ? cleanProjectName(resultadoIA.nombre_proyecto) : '') || cleanProjectName(proyecto.nombre) || cleanProjectName(resultadoIA.nombre_proyecto) || 'Gestión y Control Operativo';
     let descripcionFinal = (resultadoIA.descripcion_proyecto && resultadoIA.descripcion_proyecto.trim()) || proyecto.descripcion;
 
     const updates = {
@@ -811,3 +884,5 @@ class ProcesarConIA {
 }
 
 module.exports = ProcesarConIA;
+module.exports.asegurarAsociacionesCasosUso = asegurarAsociacionesCasosUso;
+module.exports.esNombreProvisional = esNombreProvisional;

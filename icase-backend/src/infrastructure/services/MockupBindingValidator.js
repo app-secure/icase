@@ -1,4 +1,4 @@
-const { parse } = require('parse5');
+const { parse, serialize } = require('parse5');
 const { formOf, rootOf } = require('./HtmlFormOwnership');
 const { systemManaged } = require('./MockupFieldPolicy');
 
@@ -7,6 +7,7 @@ const WRITE_VERBS = new Set(['crear', 'editar']);
 const BLOCKED_TAGS = new Set(['script', 'style', 'template', 'nav', 'aside', 'footer']);
 const NON_FIELD_TYPES = new Set(['submit', 'button', 'reset']);
 const ACTION = /^(RF-\d+)\.([a-z]+)$/i;
+const UI_LABEL = /^(?:cancelar|cerrar|volver|regresar|limpiar|atr[aá]s)\b/;
 
 const attr = (node, name) => node?.attrs?.find((item) => item.name === name)?.value || '';
 const typeOf = (node) => attr(node, 'type').toLowerCase();
@@ -147,6 +148,42 @@ class MockupBindingValidator {
     let result = html;
     for (const edit of edits.sort((a, b) => b.at - a.at)) result = `${result.slice(0, edit.at)}${edit.text}${result.slice(edit.at)}`;
     return { html: result, enlazados, pendientes };
+  }
+
+  /**
+   * Un «Formulario de registro de cliente» cuyo <form> y botón de envío quedaron en data-accion="ui" (o sin enlace) no
+   * guarda nada: es un botón muerto en la aplicación generada. Si la pantalla es de alta o edición, se liga el formulario
+   * y su envío al RF cuya operación (con ese método) comparte más campos con el formulario; si hay empate, no se adivina.
+   */
+  enlazarFormularioPrincipal(html, { verbo, rfs = [], requerimientos = [], contrato = null, identidad = null } = {}) {
+    if (!html || !['crear', 'editar'].includes(verbo)) return { html, enlazado: null };
+    const document = parse(html);
+    const root = descendants(document, (node) => node.tagName === 'main')[0] || document;
+    const forms = descendants(root, (node) => node.tagName === 'form');
+    const open = forms.filter((form) => { const value = attr(form, 'data-accion').trim().toLowerCase(); return !value || value === 'ui'; });
+    if (forms.length !== 1 || open.length !== 1) return { html, enlazado: null };
+    const [form] = open;
+    const approved = new Set(requerimientos.filter((item) => item.identificador && item.tipo !== 'RNF' && item.aprobado !== false).map((item) => String(item.identificador).toUpperCase()));
+    const operations = new Map((contrato?.operations || []).map((operation) => [String(operation.id).toUpperCase(), operation]));
+    const login = new Set([...(identidad?.login || []), ...(contrato?.identity?.login || [])].map((id) => String(id).toUpperCase()));
+    const names = descendants(form, (node) => ['input', 'select', 'textarea'].includes(node.tagName)).map((node) => attr(node, 'name')).filter(Boolean);
+    const ranked = [...new Set(rfs.map((id) => String(id).trim().toUpperCase()))]
+      .filter((id) => approved.has(id) && !login.has(id) && operations.has(id))
+      .filter((id) => { const methods = operations.get(id).methods; return !methods || methods.includes(VERBS[verbo]); })
+      .map((id) => ({ id, points: names.filter((name) => Object.keys(operations.get(id).schema?.properties || {}).includes(name)).length }))
+      .filter((item) => item.points > 0)
+      .sort((a, b) => b.points - a.points);
+    if (!ranked.length || (ranked[1] && ranked[1].points === ranked[0].points)) return { html, enlazado: null };
+    const value = `${ranked[0].id}.${verbo}`;
+    const setAction = (node) => {
+      const existing = node.attrs.find((item) => item.name === 'data-accion');
+      if (existing) existing.value = value; else node.attrs.push({ name: 'data-accion', value });
+    };
+    setAction(form);
+    const submit = descendants(form, (node) => isButton(node) && (typeOf(node) === 'submit' || (node.tagName === 'button' && !typeOf(node))))
+      .find((node) => { const current = attr(node, 'data-accion').trim().toLowerCase(); return (!current || current === 'ui') && !UI_LABEL.test(label(node).toLowerCase()); });
+    if (submit) setAction(submit);
+    return { html: serialize(document), enlazado: value };
   }
 
   _controlLabel(node) {

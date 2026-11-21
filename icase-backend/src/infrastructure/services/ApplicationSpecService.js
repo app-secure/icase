@@ -6,7 +6,7 @@ const ApplicationContractBuilder = require('./ApplicationContractBuilder');
 const { systemManaged } = require('./MockupFieldPolicy');
 
 const PROMPT = path.join(__dirname, '..', 'prompts', 'analista_especificacion_aplicacion.md');
-const TIPOS = ['consulta', 'crear', 'actualizar', 'eliminar', 'transicion'];
+const TIPOS = ['consulta', 'crear', 'actualizar', 'eliminar', 'transicion', 'resumen'];
 const OPERADORES = ['==', '!=', '>', '>=', '<', '<='];
 const ORIGENES = ['sesion', 'parametro', 'constante'];
 const VALORES_SESION = ['usuario.id', 'usuario.email', 'usuario.rol'];
@@ -130,6 +130,19 @@ class ApplicationSpecService {
       operaciones.push({ ...corregida, origen: 'ia' });
     });
 
+    // Los RF de reporte («más vendidos», «reporte de ventas por fechas») necesitan agregados: se derivan como resumen aunque la
+    // IA haya propuesto una consulta plana (que solo listaría registros) o nada.
+    for (const requisito of rf) {
+      const id = String(requisito.identificador).toUpperCase();
+      if (operaciones.some((operacion) => operacion.rf === id && operacion.tipo === 'resumen')) continue;
+      const resumen = this._derivarResumen(requisito, { entidades, operaciones, nombres });
+      if (!resumen) continue;
+      const validado = this._operacion(resumen, { entidades, rfIds, nombres });
+      if (validado.error) { advertencias.push(`${id}: no se pudo derivar el reporte (${validado.error}).`); continue; }
+      nombres.add(validado.operacion.nombre);
+      operaciones.push({ ...validado.operacion, origen: 'derivado' });
+      advertencias.push(`${id}: reporte derivado «${validado.operacion.nombre}» (${validado.operacion.resumen.medidas.map((medida) => medida.nombre).join(', ')}). Revísalo.`);
+    }
     // Los RF que la IA no cubrió reciben una operación derivada del verbo y de la entidad asociada.
     for (const requisito of rf) {
       const id = String(requisito.identificador).toUpperCase();
@@ -148,9 +161,11 @@ class ApplicationSpecService {
     for (const { listar, actualizar } of gestion) operaciones.push(listar, actualizar);
     const porNombre = new Map(operaciones.map((operacion) => [operacion.nombre, operacion]));
     const vistas = this._pantallas(propuesta?.pantallas, { porNombre, entidades, pantallas, advertencias });
+    this._colgarResumenes(operaciones, vistas, pantallas);
     for (const triple of gestion) this._reorganizarGestion(vistas, triple, advertencias);
     operaciones.push(...this._cablearEdicion(operaciones, vistas, pantallas, advertencias));
     operaciones.forEach((operacion, index) => { operacion.id = `OP-${String(index + 1).padStart(2, '0')}`; });
+    this._reponerAlAnular(operaciones, entidades);
     const sinPantalla = operaciones.filter((operacion) => !vistas.some((vista) => vista.componentes.some((c) => c.operacion === operacion.nombre || c.acciones.some((a) => a.operacion === operacion.nombre))));
     if (vistas.length && sinPantalla.length) advertencias.push(`Operaciones sin ninguna pantalla que las use: ${sinPantalla.map((operacion) => operacion.nombre).join(', ')}.`);
 
@@ -185,7 +200,39 @@ class ApplicationSpecService {
       const relacionadas = this._completarRelacionadas(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, { entidades, verbosPorRf, avisos, nombres: new Set(operaciones.map((op) => op.nombre)) });
       for (const operacion of relacionadas) operaciones.push({ ...operacion, id: `OP-${String(operaciones.length + 1).padStart(2, '0')}` });
     }
+    this._reponerAlAnular(operaciones, entidades);
     return { operaciones, pantallas: vistas, errores, avisos };
+  }
+
+  /**
+   * Anular o cancelar un registro con líneas (una venta) devuelve las existencias que su alta descontó: la transición
+   * lleva las líneas del alta para reponer el stock de cada producto.
+   */
+  _reponerAlAnular(operaciones, entidades = null) {
+    for (const transicion of operaciones.filter((op) => op.tipo === 'transicion' && op.transicion && /^(anul|cancel|devuel|revert|rechaz)/i.test(String(op.transicion.a || '')))) {
+      const alta = operaciones.find((op) => op.tipo === 'crear' && op.entidad === transicion.entidad && op.lineas?.stock && op.estado_decision !== 'rechazado');
+      if (alta) transicion.reponer = { ...alta.lineas };
+    }
+    // «Anular venta» registrada como alta de AnulacionVenta (con su motivo) para una venta: además de guardar el motivo, la venta
+    // pasa a «anulada», sus productos recuperan el stock y sus documentos vinculados (la factura) quedan anulados.
+    for (const alta of operaciones.filter((op) => op.tipo === 'crear' && op.vincula && /anul|cancel/i.test(`${op.entidad} ${op.nombre}`))) {
+      const dueño = entidades?.get(alta.vincula.entidad);
+      const props = dueño?.schema?.properties || {};
+      const estado = Object.keys(props).find((campo) => /^estado$/i.test(campo));
+      if (!estado) continue;
+      const anulado = (props[estado].enum || []).find((valor) => /^(anul|cancel)/i.test(valor)) || 'anulada';
+      const lineasDueño = operaciones.find((op) => op.tipo === 'crear' && op.entidad === alta.vincula.entidad && op.lineas?.stock && op.estado_decision !== 'rechazado')?.lineas;
+      const documentos = Object.entries(props)
+        .filter(([campo, def]) => campo !== alta.vincula.campo && def?.['x-references'] && entidades.get(def['x-references'])?.schema?.properties?.estado)
+        .map(([campo, def]) => {
+          const doc = entidades.get(def['x-references']);
+          const valores = doc.schema.properties.estado.enum || [];
+          return { campo, entidad: doc.name, entidadClave: doc.key, estado: 'estado', valor: valores.find((valor) => /^(anul|cancel)/i.test(valor)) || 'anulada' };
+        })
+        .filter((doc) => /factura|boleta|recibo|comprobante|ticket/i.test(doc.entidad));
+      alta.anula = { estado, valor: anulado, ...(lineasDueño ? { reponer: { ...lineasDueño } } : {}), ...(documentos.length ? { documentos } : {}) };
+    }
+    return operaciones;
   }
 
   _operacion(candidata, { entidades, rfIds, nombres }) {
@@ -202,8 +249,23 @@ class ApplicationSpecService {
     const campos = entidad.schema.properties;
     const existe = (campo) => Object.prototype.hasOwnProperty.call(campos, campo);
 
+    // Resumen (reporte): agrupa, cuenta y suma; su rango de fechas puede estar en la cabecera («via»): las líneas no tienen fecha.
+    let resumen = null;
+    if (tipo === 'resumen') {
+      resumen = this._resumenDe(candidata.resumen, entidad, entidades);
+      if (resumen.error) return { error: resumen.error };
+    }
+    const camposVia = resumen?.via ? entidades.get(resumen.via.entidad)?.schema?.properties || {} : null;
     const filtros = [];
     for (const filtro of list(candidata.filtros)) {
+      if (resumen && filtro?.en === 'via' && camposVia && Object.prototype.hasOwnProperty.call(camposVia, filtro.campo)
+        && OPERADORES.includes(filtro.operador || '==') && ORIGENES.includes(filtro.origen) && filtro.origen !== 'sesion' && filtro.valor !== undefined && filtro.valor !== '') {
+        filtros.push({ campo: filtro.campo, operador: filtro.operador || '==', origen: filtro.origen, valor: filtro.valor, en: 'via' });
+        continue;
+      }
+      // En un alta, edición o transición los filtros no eligen filas: uno con un campo ajeno se ignora en vez de descartar
+      // la operación entera (así se perdían «emitirFactura» y «anularVenta»).
+      if ((!filtro || !existe(filtro.campo)) && !['consulta', 'resumen'].includes(tipo)) continue;
       if (!filtro || !existe(filtro.campo)) return { error: `el filtro usa el campo inexistente «${filtro?.campo}».` };
       if (!OPERADORES.includes(filtro.operador || '==')) return { error: `el operador «${filtro.operador}» no es válido.` };
       if (!ORIGENES.includes(filtro.origen)) return { error: `el origen de filtro «${filtro.origen}» no es válido.` };
@@ -216,20 +278,54 @@ class ApplicationSpecService {
       const falta = valores.find((campo) => !existe(campo));
       return falta ? { error: `${etiqueta} incluye el campo inexistente «${falta}».` } : { valores: [...new Set(valores)] };
     };
-    const entradas = subconjunto(candidata.entradas, 'las entradas');
+    // «venta_id» en una operación sobre Venta es el propio registro (el id de la ruta), no un campo de entrada.
+    const propioId = new Set(['id', `${String(entidad.key || '').toLowerCase()}_id`, `${String(entidad.name || '').toLowerCase()}_id`]);
+    // Emitir una factura «para la venta X»: la referencia vive en Venta (factura_id), no en Factura. El alta recibe el
+    // id de la venta y, al crearse, la venta queda vinculada a esta factura (una sola por venta).
+    let vincula = null;
+    // Una especificación ya normalizada trae la vinculación guardada (su venta_id ya no está en las entradas): se revalida.
+    if (tipo === 'crear' && candidata.vincula) {
+      const dueño = entidades.get(text(candidata.vincula.entidad));
+      const campoDueño = text(candidata.vincula.campo);
+      if (dueño && dueño.schema.properties[campoDueño]?.['x-references'] === entidad.name) {
+        vincula = { entidad: dueño.name, entidadClave: dueño.key, parametro: text(candidata.vincula.parametro) || `${dueño.key}_id`, campo: campoDueño };
+      }
+    }
+    const brutas = list(candidata.entradas).filter((campo) => !propioId.has(String(text(campo)).toLowerCase()));
+    if (tipo === 'crear') {
+      for (const campo of brutas.map(text).filter((item) => !existe(item) && /_id$/i.test(item))) {
+        const dueño = [...entidades.values()].find((item) => campo.toLowerCase() === `${String(item.key || '').toLowerCase()}_id` || campo.toLowerCase() === `${String(item.name || '').toLowerCase()}_id`);
+        const enlace = dueño && Object.entries(dueño.schema.properties).find(([, def]) => def?.['x-references'] === entidad.name);
+        if (enlace && !vincula) vincula = { entidad: dueño.name, entidadClave: dueño.key, parametro: campo, campo: enlace[0] };
+      }
+    }
+    const entradas = subconjunto(brutas.filter((campo) => !(vincula && text(campo) === vincula.parametro)), 'las entradas');
     if (entradas.error) return { error: entradas.error };
     const relacionadas = this._relacionadasDe(candidata.relacionadas, entidades);
     const derivados = new Set(relacionadas.flatMap((rel) => [...rel.campos.map((campo) => `${rel.clave}_${campo}`), ...(rel.items ? [`${rel.clave}_items`] : [])]));
-    const salida = subconjunto(list(candidata.salida).filter((campo) => !derivados.has(text(campo))), 'la salida');
+    // La salida de un resumen son su agrupación y sus medidas, no campos guardados.
+    const salida = resumen ? { valores: [...(resumen.agruparPor ? [resumen.agruparPor] : []), ...resumen.medidas.map((medida) => medida.nombre)] }
+      : subconjunto(list(candidata.salida).filter((campo) => !derivados.has(text(campo))), 'la salida');
     if (salida.error) return { error: salida.error };
     if (derivados.size) salida.valores = [...new Set([...list(candidata.salida).map(text).filter((campo) => derivados.has(campo)), ...salida.valores])];
     const sobre = this._sobreDe(candidata.sobre, entidades, entidad);
-    if (['crear', 'actualizar'].includes(tipo) && !entradas.valores.length) return { error: `una operación de tipo ${tipo} necesita entradas.` };
+    if (['crear', 'actualizar'].includes(tipo) && !entradas.valores.length && !vincula) return { error: `una operación de tipo ${tipo} necesita entradas.` };
 
     let transicion = null;
     if (tipo === 'transicion') {
-      const campo = text(candidata.transicion?.campo);
-      const valores = campos[campo]?.enum;
+      // «desactivarProducto» sin campo ni estados: el campo es «estado» y el destino sale del verbo (desactivar → inactivo).
+      const verbo = strip(nombre);
+      const inferido = /^desactiv|^inhabilit|^bloque/.test(verbo) ? { de: ['activo'], a: 'inactivo' } : /^(activ|habilit|reactiv)/.test(verbo) ? { de: ['inactivo'], a: 'activo' }
+        : /^anul/.test(verbo) ? { de: ['activa'], a: 'anulada' } : /^cancel/.test(verbo) ? { de: [], a: 'cancelada' } : null;
+      const campo = text(candidata.transicion?.campo) || (Object.keys(campos).find((item) => /^estado$/i.test(item)) || '');
+      if (campos[campo] && inferido && !text(candidata.transicion?.a)) {
+        const valoresEnum = campos[campo].enum;
+        const ajustar = (valor) => (valoresEnum ? valoresEnum.find((item) => strip(item).startsWith(strip(valor).slice(0, 5))) || valor : valor);
+        candidata = { ...candidata, transicion: { campo, de: inferido.de.map(ajustar), a: ajustar(inferido.a) } };
+      }
+      // Un «estado» de texto (sin enum en el diagrama) admite los estados que la propia transición declara.
+      const declarados = [...list(candidata.transicion?.de).map(text), text(candidata.transicion?.a)].filter(Boolean);
+      const valores = campos[campo]?.enum || (campos[campo]?.type === 'string' && /^(estado|status|situacion)$/i.test(campo) && declarados.length >= 2 ? [...new Set(declarados)] : null);
       if (!valores) return { error: `la transición debe usar un campo enum del dominio (recibido «${campo}»).` };
       const destino = text(candidata.transicion?.a);
       const origen = list(candidata.transicion?.de).map(text).filter(Boolean);
@@ -241,11 +337,77 @@ class ApplicationSpecService {
       actores: list(candidata.actores).map(text).filter(Boolean),
       filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
       ...(relacionadas.length && tipo === 'consulta' ? { relacionadas } : {}), ...(sobre && tipo === 'transicion' ? { sobre } : {}),
+      ...(vincula ? { vincula } : {}),
+      ...(resumen ? { resumen } : {}),
       descripcion: text(candidata.descripcion).slice(0, 300), estado_decision: 'pendiente',
       ...(list(candidata.sesionEntradas).length ? { sesionEntradas: list(candidata.sesionEntradas).filter((item) => existe(item?.campo) && item.valor === 'usuario.id').map((item) => ({ campo: item.campo, valor: item.valor })) } : {}),
-      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado', 'cero', 'lineas'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}) })) } : {})
+      ...(list(candidata.autoEntradas).length ? { autoEntradas: list(candidata.autoEntradas).filter((item) => existe(item?.campo) && ['ahora', 'hoy', 'inicial', 'generado', 'cero', 'lineas', 'correlativo', 'vinculado'].includes(item.valor)).map((item) => ({ campo: item.campo, valor: item.valor, ...(item.valor === 'inicial' && Array.isArray(item.opciones) ? { opciones: item.opciones.map(String) } : {}), ...(item.valor === 'correlativo' ? { prefijo: String(item.prefijo || ''), digitos: Number(item.digitos) || 5 } : {}), ...(item.valor === 'vinculado' && item.desde ? { desde: String(item.desde) } : {}) })) } : {})
     };
     return { operacion: this._completarDelSistema(operacion, entidad, entidades) };
+  }
+
+  /** Valida un resumen: agrupación por un campo propio, medidas contar/sumar/promedio sobre números, y cabecera opcional. */
+  _resumenDe(candidato, entidad, entidades) {
+    const props = entidad.schema.properties;
+    const numero = (campo) => ['number', 'integer'].includes(props[campo]?.type);
+    const agruparPor = text(candidato?.agruparPor);
+    if (agruparPor && !props[agruparPor]) return { error: `el resumen agrupa por el campo inexistente «${agruparPor}».` };
+    const medidas = list(candidato?.medidas).map((medida) => ({ funcion: text(medida?.funcion), campo: text(medida?.campo), nombre: camel(medida?.nombre || `${medida?.funcion}_${medida?.campo || 'registros'}`) }));
+    if (!medidas.length) return { error: 'el resumen necesita al menos una medida.' };
+    const invalida = medidas.find((medida) => !['contar', 'sumar', 'promedio'].includes(medida.funcion) || (medida.funcion !== 'contar' && !numero(medida.campo)));
+    if (invalida) return { error: `medida inválida «${invalida.nombre}»: usa contar, o sumar/promedio sobre un campo numérico.` };
+    let via = null;
+    if (candidato?.via) {
+      const cabecera = entidades.get(text(candidato.via.entidad));
+      const campo = text(candidato.via.campo);
+      if (!cabecera || props[campo]?.['x-references'] !== cabecera.name) return { error: 'la cabecera del resumen no corresponde a una referencia del registro.' };
+      via = { entidad: cabecera.name, entidadClave: cabecera.key, campo };
+    }
+    const excluir = candidato?.excluir && text(candidato.excluir.campo) ? { campo: text(candidato.excluir.campo), patron: text(candidato.excluir.patron) || '^(anul|cancel)', ...(candidato.excluir.en === 'via' && via ? { en: 'via' } : {}) } : null;
+    return { ...(agruparPor ? { agruparPor } : {}), medidas, ...(via ? { via } : {}), ...(excluir ? { excluir } : {}), orden: candidato?.orden === 'asc' ? 'asc' : 'desc', ...(Number.isInteger(candidato?.limite) && candidato.limite > 0 ? { limite: Math.min(candidato.limite, 100) } : {}) };
+  }
+
+  /**
+   * Reportes que la IA no logra expresar (agregados): «Productos más vendidos» agrupa las líneas de la venta por producto y
+   * suma la cantidad; «Reporte de ventas por fechas» cuenta las ventas y suma su total. Ambos por rango de fechas de la venta
+   * y sin las anuladas. Se derivan del modelo (la venta con líneas y sus campos), no de un dominio fijo.
+   */
+  _derivarResumen(requisito, { entidades, operaciones, nombres }) {
+    const titulo = strip(`${requisito.nombre || ''}`);
+    if (!/\b(reporte|resumen|informe|ranking|estadistic\w*)\b|mas vendid/.test(titulo)) return null;
+    const fechaDe = (props) => Object.keys(props).find((campo) => /^(fecha|fechahora|fecha_?registro|creado_?en)$/i.test(campo) || props[campo]?.format === 'date' || props[campo]?.format === 'date-time');
+    const estadoDe = (props) => Object.keys(props).find((campo) => /^estado$/i.test(campo));
+    const unico = (base) => { let nombre = base; let n = 2; while (nombres.has(nombre)) nombre = `${base}${n++}`; return nombre; };
+    const rango = (campo, extra = {}) => campo ? [{ campo, operador: '>=', origen: 'parametro', valor: 'desde', ...extra }, { campo, operador: '<=', origen: 'parametro', valor: 'hasta', ...extra }] : [];
+    const alta = operaciones.find((op) => op.tipo === 'crear' && op.lineas && op.estado_decision !== 'rechazado');
+    if (/mas vendid|ranking|top\b/.test(titulo) && alta) {
+      const lineas = entidades.get(alta.lineas.entidad);
+      const cabecera = entidades.get(alta.entidad);
+      if (!lineas || !cabecera) return null;
+      const fecha = fechaDe(cabecera.schema.properties);
+      const estado = estadoDe(cabecera.schema.properties);
+      const medidas = [{ funcion: 'sumar', campo: alta.lineas.cantidad, nombre: 'cantidadVendida' }];
+      return {
+        nombre: unico(camel(requisito.nombre).slice(0, 40) || 'masVendidos'), rf: String(requisito.identificador).toUpperCase(), tipo: 'resumen', entidad: lineas.name, entidadClave: lineas.key,
+        actores: list(requisito.actores), filtros: rango(fecha, { en: 'via' }), entradas: [], salida: [alta.lineas.referencia, 'cantidadVendida'],
+        resumen: { agruparPor: alta.lineas.referencia, medidas, via: { entidad: cabecera.name, entidadClave: cabecera.key, campo: alta.lineas.fk }, ...(estado ? { excluir: { campo: estado, patron: '^(anul|cancel)', en: 'via' } } : {}), orden: 'desc' },
+        descripcion: `Suma la cantidad vendida de cada ${alta.lineas.destino} en el rango de fechas, sin ${cabecera.name.toLowerCase()}s anuladas.`, estado_decision: 'pendiente', origen: 'derivado'
+      };
+    }
+    // «Reporte de ventas…»: la entidad nombrada en el título con fecha (y total, si lo tiene).
+    const candidata = [...entidades.values()].find((item) => titulo.includes(strip(item.name)) && fechaDe(item.schema.properties)) || (alta && entidades.get(alta.entidad));
+    if (!candidata) return null;
+    const props = candidata.schema.properties;
+    const total = Object.keys(props).find((campo) => /^total$/i.test(campo) && ['number', 'integer'].includes(props[campo]?.type));
+    const estado = estadoDe(props);
+    const plural = `${strip(candidata.name)}s`;
+    const medidas = [{ funcion: 'contar', nombre: `numero${candidata.name}s` }, ...(total ? [{ funcion: 'sumar', campo: total, nombre: 'totalVendido' }] : [])];
+    return {
+      nombre: unico(camel(requisito.nombre).slice(0, 40) || 'reporte'), rf: String(requisito.identificador).toUpperCase(), tipo: 'resumen', entidad: candidata.name, entidadClave: candidata.key,
+      actores: list(requisito.actores), filtros: rango(fechaDe(props)), entradas: [], salida: medidas.map((medida) => medida.nombre),
+      resumen: { medidas, ...(estado ? { excluir: { campo: estado, patron: '^(anul|cancel)' } } : {}), orden: 'desc' },
+      descripcion: `Número de ${plural} y total en el rango de fechas, sin las anuladas.`, estado_decision: 'pendiente', origen: 'derivado'
+    };
   }
 
   /** Datos del registro relacionado que acompañan a cada fila de una consulta (la mesa y los platos del pedido de una comanda). Se revalida contra el dominio. */
@@ -455,21 +617,33 @@ class ApplicationSpecService {
     if (operacion.tipo !== 'crear' || !entidades) return null;
     const numero = (def) => ['number', 'integer'].includes(def?.type);
     for (const hijo of entidades.values()) {
-      const union = list(hijo.references).find((ref) => ref.entity === entidad.name && ref.relation === 'composicion');
+      // Composición, o una asociación de muchos (Venta "1" -- "*" LineaVenta) cuyo hijo es una línea: cantidad + otra referencia.
+      const union = list(hijo.references).find((ref) => ref.entity === entidad.name && (ref.relation === 'composicion' || ref.cardinality === 'uno_a_muchos' || ref.cardinality === 'muchos_a_uno'));
       if (!union) continue;
       const props = hijo.schema.properties;
       const referencia = Object.entries(props).find(([campo, def]) => campo !== union.field && def?.['x-references'] && def['x-references'] !== entidad.name);
       const cantidad = Object.keys(props).find((campo) => /^(cantidad|unidades|qty)$/i.test(campo) && numero(props[campo]));
       const destino = referencia && entidades.get(referencia[1]['x-references']);
       if (!referencia || !cantidad || !destino) continue;
+      const destinoProps = destino.schema.properties;
       const precioHijo = Object.keys(props).find((campo) => /precio|importe|monto/i.test(campo) && numero(props[campo]));
-      const precioOrigen = Object.keys(destino.schema.properties).find((campo) => /^precio/i.test(campo) && numero(destino.schema.properties[campo]));
+      const precioOrigen = Object.keys(destinoProps).find((campo) => /^precio/i.test(campo) && numero(destinoProps[campo]));
       const total = Object.keys(entidad.schema.properties).find((campo) => /^total$/i.test(campo) && numero(entidad.schema.properties[campo]));
+      // Existencias del producto: se validan y se descuentan al vender (y se reponen al anular).
+      const stock = Object.keys(destinoProps).find((campo) => /^(stock|existencias?|inventario|cantidad_?disponible|disponibles)$/i.test(campo) && numero(destinoProps[campo]));
+      // Sin composición, el destino debe ser el artículo vendido (con precio o existencias): «Producto» no es cabecera de LineaVenta.
+      if (union.relation !== 'composicion' && !precioOrigen && !stock) continue;
+      // Un producto desactivado no se vende: estado «activo» o bandera booleana activo/disponible.
+      const estado = Object.keys(destinoProps).find((campo) => /^estado$/i.test(campo));
+      const activo = destinoProps.disponible?.type === 'boolean' ? { campo: 'disponible', valor: true }
+        : destinoProps.activo?.type === 'boolean' ? { campo: 'activo', valor: true }
+          : estado ? { campo: estado, valor: (destinoProps[estado].enum || []).find((item) => /^activ/i.test(item)) || 'activo' } : null;
       return {
         entidad: hijo.name, entidadClave: hijo.key, fk: union.field, referencia: referencia[0], destino: destino.name, destinoClave: destino.key, cantidad,
         ...(precioHijo && precioOrigen ? { precio: { campo: precioHijo, desde: precioOrigen } } : {}), ...(total ? { total } : {}),
+        ...(stock ? { stock } : {}), ...(activo ? { activo } : {}),
         // Solo se pueden pedir los disponibles.
-        ...(destino.schema.properties.disponible?.type === 'boolean' ? { filtros: [{ campo: 'disponible', operador: '==', origen: 'constante', valor: true }] } : {})
+        ...(activo ? { filtros: [{ campo: activo.campo, operador: '==', origen: 'constante', valor: activo.valor }] } : {})
       };
     }
     return null;
@@ -507,6 +681,28 @@ class ApplicationSpecService {
       else if (razon === 'lo genera el sistema' && definicion?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) auto.push({ campo, valor: 'generado' });
       else if (MARCA_DE_REGISTRO.test(compacto(campo)) && definicion?.type === 'string') auto.push({ campo, valor: definicion?.format === 'date' ? 'hoy' : 'ahora' });
       else if (lineas?.total === campo) auto.push({ campo, valor: 'lineas' });
+    }
+    // Documentos numerados (F001-00001): el «numero» de una factura, boleta o recibo lo pone el sistema, correlativo con serie
+    // (no un código aleatorio ni algo que la persona escriba). En otras entidades («Mesa.numero») sí lo escribe la persona.
+    if (/factura|boleta|recibo|comprobante|ticket|nota ?de ?credito/i.test(String(entidad.name || ''))) {
+      const numero = Object.keys(propiedades).find((campo) => /^(numero|nro|correlativo)$/i.test(campo) && propiedades[campo]?.type === 'string');
+      if (numero && !auto.some((item) => item.campo === numero)) auto.push({ campo: numero, valor: 'generado' });
+    }
+    for (const item of auto) {
+      if (item.valor === 'generado' && /^(numero|nro|correlativo|num_?documento)$/i.test(item.campo)) {
+        Object.assign(item, { valor: 'correlativo', prefijo: `${String(entidad.name || 'D').charAt(0).toUpperCase()}001-`, digitos: 5 });
+      }
+    }
+    // Emitir para un registro existente (factura de una venta): el importe base sale de ese registro (subtotal ← total).
+    if (operacion.vincula && entidades) {
+      const dueño = entidades.get(operacion.vincula.entidad);
+      const origen = dueño && Object.keys(dueño.schema.properties).find((campo) => /^total$/i.test(campo) && ['number', 'integer'].includes(dueño.schema.properties[campo]?.type));
+      const base = Object.keys(propiedades).find((campo) => /^subtotal$/i.test(campo)) || Object.keys(propiedades).find((campo) => /^total$/i.test(campo));
+      if (origen && base) {
+        const existente = auto.find((item) => item.campo === base);
+        if (existente) Object.assign(existente, { valor: 'vinculado', desde: origen });
+        else auto.push({ campo: base, valor: 'vinculado', desde: origen });
+      }
     }
     const completados = new Set([...sesion, ...auto].map((item) => item.campo));
     // «Quién lo registra» solo se omite cuando se puede resolver (la cuenta de la sesión). Una referencia al propio actor
@@ -579,6 +775,28 @@ class ApplicationSpecService {
 
   _esAcceso(requisito) {
     return /\b(?:autentic\w*|inicio de sesion|iniciar sesion|login)\b/.test(strip(requisito.nombre));
+  }
+
+  /**
+   * Un reporte derivado (resumen) que ninguna pantalla usa se muestra como tabla en la pantalla del árbol que traza su RF,
+   * prefiriendo la que se llama «Reporte…»: si la IA ató la pantalla a operaciones descartadas, quedaba vacía.
+   */
+  _colgarResumenes(operaciones, vistas, pantallas) {
+    for (const op of operaciones.filter((item) => item.tipo === 'resumen')) {
+      if (vistas.some((vista) => vista.componentes.some((componente) => componente.operacion === op.nombre))) continue;
+      const candidatas = list(pantallas).filter((screen) => list(screen.rf_trazabilidad).map((id) => String(id).toUpperCase()).includes(op.rf));
+      // La trazabilidad puede citar el mismo RF en varias pantallas: gana la que más se parece al nombre del reporte.
+      const palabras = (value) => new Set(strip(value).replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 3).map((word) => word.slice(0, 5)));
+      const propias = palabras(String(op.nombre).replace(/([a-z])([A-Z])/g, '$1 $2'));
+      const puntaje = (screen) => [...palabras(screen.nombre || screen.slug || '')].filter((word) => propias.has(word)).length
+        + (/reporte|informe|resumen|mas vendid/.test(strip(screen.nombre || screen.slug || '')) ? 1 : 0);
+      const pantalla = [...candidatas].sort((a, b) => puntaje(b) - puntaje(a))[0];
+      if (!pantalla) continue;
+      const id = this._screenId(pantalla);
+      let vista = vistas.find((item) => item.id === id);
+      if (!vista) { vista = { id, componentes: [] }; vistas.push(vista); }
+      vista.componentes.unshift({ tipo: 'tabla', operacion: op.nombre, acciones: [] });
+    }
   }
 
   _pantallas(propuestas, { porNombre, entidades, pantallas, advertencias }) {

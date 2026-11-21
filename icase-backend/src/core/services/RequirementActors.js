@@ -10,11 +10,29 @@ function interviewSpeakerOnly(name, input) {
   const body = source.replace(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*:`, 'gi'), '\n');
   return !new RegExp(`\\b(?:el|la|los|las)\\s+${escaped}\\b|\\b${escaped}\\s+(?:debe|puede|podr[aá]n?)\\b`, 'i').test(body);
 }
+/**
+ * Quien habla («Dueña:») puede ser también un actor con otro nombre («Yo, como administradora…»).
+ * Si el nombre es solo un rótulo de turno, se conserva el actor con el alias o rol de su descripción
+ * que sí aparece en el insumo fuera de los rótulos; si no hay ninguno, se descarta como antes.
+ */
+function roleNameFor(item, input) {
+  const body = String(input || '').replace(/(?:^|\n)\s*[A-ZÁÉÍÓÚÑ][\p{L} ]{1,30}:/gu, '\n');
+  const mentioned = name => {
+    const escaped = String(name || '').trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return escaped.length >= 4 && new RegExp(`(?<!\\p{L})${escaped}(?!\\p{L})`, 'iu').test(body);
+  };
+  const aliases = (Array.isArray(item?.alias) ? item.alias : []).map(String).filter(name => mentioned(name) && !interviewSpeakerOnly(name, input));
+  if (aliases.length) return aliases[0].charAt(0).toUpperCase() + aliases[0].slice(1);
+  const role = /\b(administrador(?:a)?|vendedor(?:a)?|cajer[oa]|gerente|supervisor(?:a)?|operador(?:a)?)\b/i.exec(String(item?.descripcion || ''));
+  if (role && mentioned(role[1])) return role[1].charAt(0).toUpperCase() + role[1].slice(1).toLowerCase();
+  return '';
+}
 function normalizeActors(candidates, input) {
   const actors = [];
   for (const item of Array.isArray(candidates) ? candidates : []) {
-    const nombre = String(item?.nombre || '').trim();
-    if (!nombre || interviewSpeakerOnly(nombre, input)) continue;
+    let nombre = String(item?.nombre || '').trim();
+    if (nombre && interviewSpeakerOnly(nombre, input)) nombre = roleNameFor(item, input);
+    if (!nombre) continue;
     const evidence = inspectEvidence(item, input);
     const existing = actors.find(actor => key(actor.nombre) === key(nombre));
     if (existing) {

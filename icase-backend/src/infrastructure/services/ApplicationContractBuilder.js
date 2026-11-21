@@ -170,7 +170,7 @@ class ApplicationContractBuilder {
       id: op.id || null,
       name: op.nombre,
       type: op.tipo,
-      method: { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', eliminar: 'DELETE', transicion: 'POST' }[op.tipo],
+      method: { consulta: 'GET', resumen: 'GET', crear: 'POST', actualizar: 'PATCH', eliminar: 'DELETE', transicion: 'POST' }[op.tipo],
       path: `/api/actions/${kebab}${byId ? '/:id' : ''}`,
       byId,
       // El permiso es el del requisito de la operación: la lista de recompensas del cliente (RF-18) se guarda en el almacén de RF-19, que es del administrador.
@@ -183,6 +183,10 @@ class ApplicationContractBuilder {
       ...(op.sesionEntradas?.length ? { sessionInputs: op.sesionEntradas } : {}),
       ...(op.autoEntradas?.length ? { autoInputs: op.autoEntradas } : {}),
       ...(op.lineas ? { lineas: op.lineas } : {}),
+      ...(op.reponer ? { reponer: op.reponer } : {}),
+      ...(op.vincula ? { vincula: op.vincula } : {}),
+      ...(op.anula ? { anula: op.anula } : {}),
+      ...(op.resumen ? { resumen: op.resumen } : {}),
       ...(op.relacionadas?.length ? { relacionadas: op.relacionadas } : {}),
       ...(op.sobre ? { sobre: op.sobre } : {}),
       output: op.salida || [],
@@ -225,6 +229,13 @@ class ApplicationContractBuilder {
       if (hijo && destino) lineas = { ...action.lineas, capability: hijo, destinoCapability: destino };
       else warnings.push(`«${action.name}»: no se pudo guardar las líneas (${action.lineas.entidad}); se crea sin ellas.`);
     }
+    // Anular devuelve existencias: los almacenes de las líneas y del producto cuyo stock se repone.
+    let reponer;
+    if (action.reponer) {
+      const hijo = operationOf.get(action.reponer.entidadClave);
+      const destino = operationOf.get(action.reponer.destinoClave);
+      if (hijo && destino) reponer = { ...action.reponer, capability: hijo, destinoCapability: destino };
+    }
     // Datos del registro relacionado que acompañan a las filas: sus almacenes y el de cada referencia (para mostrar nombres y no ids).
     let relacionadas;
     if (action.relacionadas?.length) {
@@ -241,7 +252,28 @@ class ApplicationContractBuilder {
         return { ...rel, capability: store, referencias, items };
       }).filter(Boolean);
     }
-    return { ...action, capability, filters, fields, lineas, relacionadas };
+    // Emitir para un registro existente: el almacén del registro al que queda vinculado (la venta de la factura).
+    const vincula = action.vincula && operationOf.get(action.vincula.entidadClave) ? { ...action.vincula, capability: operationOf.get(action.vincula.entidadClave) } : undefined;
+    // Anular con motivo: almacenes del stock que se devuelve y de los documentos (factura) que se anulan.
+    let anula;
+    if (action.anula && vincula) {
+      const lineasAnula = action.anula.reponer && operationOf.get(action.anula.reponer.entidadClave) && operationOf.get(action.anula.reponer.destinoClave)
+        ? { ...action.anula.reponer, capability: operationOf.get(action.anula.reponer.entidadClave), destinoCapability: operationOf.get(action.anula.reponer.destinoClave) } : null;
+      const documentos = (action.anula.documentos || []).filter((doc) => operationOf.get(doc.entidadClave)).map((doc) => ({ ...doc, capability: operationOf.get(doc.entidadClave) }));
+      anula = { estado: action.anula.estado, valor: action.anula.valor, ...(lineasAnula ? { reponer: lineasAnula } : {}), ...(documentos.length ? { documentos } : {}) };
+    }
+    // Reporte: el almacén de la cabecera (la fecha de la venta) y el del registro agrupado (para mostrar su nombre).
+    let resumen;
+    if (action.resumen) {
+      const agrupado = action.resumen.agruparPor && entity?.schema?.properties?.[action.resumen.agruparPor]?.['x-references'];
+      const objetivo = agrupado ? entities.find((item) => item.name === agrupado) : null;
+      resumen = {
+        ...action.resumen,
+        ...(action.resumen.via && operationOf.get(action.resumen.via.entidadClave) ? { via: { ...action.resumen.via, capability: operationOf.get(action.resumen.via.entidadClave) } } : {}),
+        ...(objetivo && operationOf.get(objetivo.key) ? { agrupadoCapability: operationOf.get(objetivo.key) } : {})
+      };
+    }
+    return { ...action, capability, filters, fields, lineas, relacionadas, ...(reponer ? { reponer } : {}), ...(vincula ? { vincula } : {}), ...(anula ? { anula } : {}), ...(resumen ? { resumen } : {}) };
   }
 
   /** GET más los métodos de los verbos válidos declarados, en orden canónico; sin verbos, CRUD completo. */

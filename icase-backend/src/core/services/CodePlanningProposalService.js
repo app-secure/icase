@@ -150,8 +150,13 @@ class CodePlanningProposalService {
 
   _alcance_plataforma({ texto, diseno }) {
     const plataformas = [];
-    if (/\bweb\b|react(?!\s+native)\b|navegador/i.test(texto)) plataformas.push('web');
-    if (/react native|\bandroid\b|\bios\b|m[oó]vil/i.test(texto)) plataformas.push('móvil');
+    // «No se desarrollará aplicación móvil» o «queda fuera de alcance la app móvil» no piden esa plataforma:
+    // solo cuentan las frases que la mencionan sin negarla ni excluirla.
+    const NEGADA = /\b(?:no|sin|ni|excluy\w*|exclusi\w*|descart\w*|fuera\s+del?\s+alcance|queda\s+fuera|quedan\s+fuera)\b/i;
+    const frases = String(texto || '').split(/(?<=[.;!?\n])\s+|\n+/);
+    const pedida = (patron) => frases.some((frase) => patron.test(frase) && !NEGADA.test(frase));
+    if (pedida(/\bweb\b|react(?!\s+native)\b|navegador/i)) plataformas.push('web');
+    if (pedida(/react native|\bandroid\b|\bios\b|m[oó]vil/i)) plataformas.push('móvil');
     // Las pantallas del árbol de navegación también cuentan: una pantalla móvil exige la aplicación móvil.
     const PlatformPolicy = require('./PlatformPolicy');
     const arbol = Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];

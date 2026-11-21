@@ -41,6 +41,11 @@ function normalizeActors(req, batch, actors) {
       if (byId.has(need.actor_id)) names.push(byId.get(need.actor_id));
     }
   }
+  // El acceso con usuario y contraseña lo usan todas las personas del sistema: un RF de autenticación sin actor
+  // dejaría el inicio de sesión fuera de los permisos y de la navegación de cada rol.
+  if (!names.length && req.tipo === 'RF' && /autentic|iniciar sesi|inicio de sesi|acceso seg[uú]n (?:el )?rol/i.test(`${req.nombre || ''} ${req.descripcion || ''}`)) {
+    names.push(...actors.filter(actor => actor.tipo !== 'sistema_externo' && actor.estado !== 'rechazado' && actor.nombre).map(actor => actor.nombre));
+  }
   return { ...req, actores: [...new Set(names)] };
 }
 function auditView(result, inventory) {

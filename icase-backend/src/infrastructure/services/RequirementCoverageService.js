@@ -20,6 +20,48 @@ const comparable = (text) => String(text || '').normalize('NFC').toLowerCase()
   .replace(/[“”«»]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim();
 const key = (text) => comparable(text).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-]+/g, '_');
 
+/**
+ * «Crear productos…» que cubre crear, editar y consultar ya no es «crear»: el nombre guía pantallas y operaciones.
+ * Si las necesidades que cubre un RF empiezan con verbos distintos, el nombre pasa a «Gestionar <objeto>».
+ */
+function nameCoveredNeeds(req, batch) {
+  if (req.tipo !== 'RF' || /^gestionar\b/i.test(req.nombre || '')) return req;
+  const plainText = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const verbOf = text => plainText(text)
+    .replace(/^(?:(?:el|la|los|las)\s+\S+\s+(?:debe(?:n)? poder|puede|pueden)\s+|permitir\s+(?:al|a\s+la|a\s+los|a\s+las|a)\s+\S+\s+)/, '')
+    .split(/[^a-zñ]+/).filter(Boolean)[0] || '';
+  const needs = (req.necesidades_origen || []).map(id => batch.find(need => need.id === id)).filter(Boolean);
+  const verbs = new Set(needs.map(need => verbOf(need.necesidad)).filter(Boolean));
+  if (needs.length < 2 || verbs.size < 2) return req;
+  const object = (/^\S+\s+(?:(?:el|la|los|las|un|una|todas?|todos?|sus?|datos|de|del)\s+)*(\p{L}+)/iu.exec(String(req.nombre || '')) || [])[1];
+  return object ? { ...req, nombre: `Gestionar ${object}` } : req;
+}
+
+/** Une en un solo requisito los que cubren necesidades del mismo objetivo (y tipo) dentro de un lote. */
+function mergeSameObjective(merged, req, batch) {
+  const groupOf = candidate => {
+    const groups = new Set((candidate.necesidades_origen || []).map(id => batch.find(need => need.id === id)).filter(Boolean).map(objectiveOf));
+    return groups.size === 1 ? [...groups][0] : null;
+  };
+  const group = groupOf(req);
+  const target = group && merged.find(other => other.tipo === req.tipo && groupOf(other) === group);
+  if (!target) return [...merged, req];
+  const union = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+  const joinText = (a, b) => [a, b].map(value => String(value || '').trim()).filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join(' ');
+  Object.assign(target, {
+    descripcion: joinText(target.descripcion, req.descripcion),
+    actores: union(target.actores, req.actores),
+    necesidades_origen: union(target.necesidades_origen, req.necesidades_origen),
+    reglas_relacionadas: union(target.reglas_relacionadas, req.reglas_relacionadas),
+    criterios_aceptacion: [...(target.criterios_aceptacion || []), ...(req.criterios_aceptacion || [])],
+    evidencias: [...new Map([...(target.evidencias || []), ...(req.evidencias || [])].map(item => [JSON.stringify(item), item])).values()],
+    precondiciones: joinText(target.precondiciones, req.precondiciones),
+    poscondiciones: joinText(target.poscondiciones, req.poscondiciones),
+    requiere_confirmacion: Boolean(target.requiere_confirmacion || req.requiere_confirmacion)
+  });
+  return merged;
+}
+
 /** Valida referencias comprobables; no pretende certificar semánticamente un texto libre. */
 class RequirementCoverageService {
   _preserveEvidence(req, inventory, input, previous = null) {
@@ -91,13 +133,21 @@ class RequirementCoverageService {
       else { ids.add(item.id); valid.push(item); }
     });
     if (validateLinks) {
-      const goals = new Set(valid.filter(isRequirementNeed).map(n => n.objetivo_id));
-      for (let index = valid.length - 1; index >= 0; index--) {
-        const item = valid[index];
-        if ((item.objetivos_relacionados || []).some(id => !goals.has(id))) {
-          invalid.push({ indice: normalized.findIndex(n => n.id === item.id) + 1, id: item.id, elemento: item, errores: ['referencia_objetivo_inexistente'] });
-          valid.splice(index, 1);
+      // Una regla o pregunta con evidencia válida no se pierde por citar un objetivo que la numeración ya no tiene
+      // («El vendedor solo ve las ventas que él mismo registró» → O-04 inexistente): se quitan las referencias
+      // rotas y, si no queda ninguna, se vincula con los RF que comparten sus términos.
+      const needs = valid.filter(isRequirementNeed);
+      const goals = new Set(needs.map(n => n.objetivo_id));
+      const terms = text => new Set(key(text).split(/[^a-z0-9ñ]+/).filter(word => word.length > 4).map(word => word.slice(0, 5)));
+      for (const item of valid) {
+        if (!Array.isArray(item.objetivos_relacionados) || item.objetivos_relacionados.every(id => goals.has(id))) continue;
+        const kept = item.objetivos_relacionados.filter(id => goals.has(id));
+        if (!kept.length) {
+          const own = terms(item.necesidad);
+          kept.push(...new Set(needs.filter(need => [...terms(need.necesidad)].filter(word => own.has(word)).length >= 2).map(need => need.objetivo_id)));
         }
+        if (kept.length) item.objetivos_relacionados = kept;
+        else delete item.objetivos_relacionados;
       }
     }
     return { valid, invalid };
@@ -403,7 +453,11 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
         .filter((req) => req && typeof req === 'object' && req.nombre && req.descripcion)
         .filter(req => !approvedAnalysis || (req.necesidades_origen?.length && req.necesidades_origen.every(id => batch.some(n => n.id === id && n.tipo === req.tipo))))
         .map(req => approvedAnalysis ? require('./ApprovedRequirementContext').normalizeActors(req, batch, actors) : req)
-        .map(req => this._preserveEvidence(req, inventory, input));
+        .map(req => this._preserveEvidence(req, inventory, input))
+        // El contrato pide un requisito por objetivo y la aprobación rechaza objetivos duplicados; si el modelo
+        // separó «crear / editar / consultar producto» (mismo objetivo), se unen aquí en vez de bloquear la aprobación.
+        .reduce((merged, req) => approvedAnalysis ? mergeSameObjective(merged, req, batch) : [...merged, req], [])
+        .map(req => approvedAnalysis ? nameCoveredNeeds(req, batch) : req);
       const requested = batch.map(item => item.id);
       // En local un lote pequeño debe devolver exactamente un requisito por objetivo.
       // Rechazar el lote completo evita incorporar extras con referencias falsas.
@@ -785,3 +839,5 @@ ${hintContext}INSUMO:\n${input}`, { promptGroq: compactPrompts.extraction(input,
   }
 }
 module.exports = RequirementCoverageService;
+module.exports.mergeSameObjective = mergeSameObjective;
+module.exports.nameCoveredNeeds = nameCoveredNeeds;

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useSession } from './session';
 import ReferenceOptions from './ReferenceOptions';
 
-const METHOD_FOR_PERMISSION = { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' };
+const METHOD_FOR_PERMISSION = { consulta: 'GET', resumen: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' };
 const humanize = (name) => String(name).replace(/_id$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
 const pathOf = (action, id, query) => {
   const base = action.path.replace(':id', encodeURIComponent(id ?? ''));
@@ -146,7 +146,7 @@ function Toolbar({ action, buttons, actions, allowed, query, setQuery, reload })
   const open = create.find((button) => button.operacion === creating);
   return <div className="toolbar">
     {params.length > 0 && <form className="form-grid" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); setQuery(Object.fromEntries(params.map((name) => [name, data.get(name)]))); }}>
-      {params.map((name) => <div className="form-row" key={name}><label htmlFor={`filtro-${name}`}>{humanize(name)}</label><input id={`filtro-${name}`} name={name} className="input" defaultValue={query[name] || ''} /></div>)}
+      {params.map((name) => <div className="form-row" key={name}><label htmlFor={`filtro-${name}`}>{humanize(name)}</label><input id={`filtro-${name}`} name={name} className="input" type={/^(desde|hasta|fecha|inicio|fin)/i.test(name) ? 'date' : 'text'} defaultValue={query[name] || ''} /></div>)}
       <div className="form-row"><button type="submit" className="button">Filtrar</button></div>
     </form>}
     <button type="button" className="button secondary" onClick={reload}>Actualizar</button>

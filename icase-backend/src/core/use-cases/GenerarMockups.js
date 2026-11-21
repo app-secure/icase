@@ -422,7 +422,9 @@ class GenerarMockups {
     const mermaidUtil = typeof mermaid === 'string' && /^\s*\*+/m.test(mermaid) ? mermaid : '';
 
     const codigoArbol = arbolNav.codigo_plantuml || mermaidUtil || '';
-    const pantallas = this._extraerPantallasDelArbol(codigoArbol);
+    this._cargarActoresCasosUso(diagramas);
+    let pantallas;
+    try { pantallas = this._extraerPantallasDelArbol(codigoArbol); } finally { this._actoresProyecto = null; this._casosUsoRoles = null; }
     return { arbolNav, codigoArbol, pantallas };
   }
 
@@ -743,7 +745,55 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     return 'web';
   }
 
+  /**
+   * Roles de una pantalla según los actores REALES del proyecto (diagrama de casos de uso aprobado): se eligen los
+   * casos cuyo nombre comparte más términos con el módulo y la pantalla, y se unen sus actores. Así «Reporte de ventas»
+   * queda para el Administrador y «Ventas» para Vendedor y Administrador. Antes se usaba una lista fija del restaurante
+   * (Mesero, Cajero, Cliente…): en otro dominio el Vendedor nunca aparecía y «Clientes» recibía un rol «Cliente».
+   */
+  _rolesDesdeCasosUso(ruta) {
+    const casos = this._casosUsoRoles || [];
+    const actores = this._actoresProyecto || [];
+    if (!actores.length) return null;
+    const partes = (Array.isArray(ruta) ? ruta : [ruta]).slice(1).filter((parte) => !PlatformPolicy.marked(parte));
+    const propios = this._terminosRol(partes.join(' '));
+    let mejor = 0;
+    let elegidos = [];
+    for (const caso of casos) {
+      const puntaje = [...propios].filter((termino) => caso.terminos.has(termino)).length;
+      if (puntaje > mejor) { mejor = puntaje; elegidos = [caso]; } else if (puntaje && puntaje === mejor) elegidos.push(caso);
+    }
+    const roles = [...new Set(elegidos.flatMap((caso) => caso.actores))];
+    if (roles.length) return roles;
+    const nombrados = actores.filter((actor) => propios.has(this._terminosRol(actor).values().next().value));
+    return nombrados.length ? nombrados : actores;
+  }
+
+  _terminosRol(texto) {
+    const genericos = /^(?:gestion|gestionar|formul|detal|lista|listad|modul|panta|consu|visua|gener|siste|aplic|datos|infor|nuevo|nueva|edici|acces|segun)/;
+    return new Set(this._textoRuta(texto).split(/[^a-z0-9ñ]+/).filter((palabra) => palabra.length >= 4)
+      .map((palabra) => palabra.slice(0, 5)).filter((raiz) => !genericos.test(raiz)));
+  }
+
+  /** Actores y asociaciones del diagrama de casos de uso aprobado (o el más reciente). */
+  _cargarActoresCasosUso(diagramas) {
+    const caso = (diagramas || []).filter((d) => d.tipo === 'casos_de_uso' || d.tipo === 'casos_uso')
+      .sort((a, b) => (Number(b.aprobado === true) - Number(a.aprobado === true)) || ((b.version || 0) - (a.version || 0)))[0];
+    const codigo = String(caso?.codigo_plantuml || '');
+    const alias = new Map([...codigo.matchAll(/^\s*actor\s+(?:"([^"]+)"|([^\s"]+))(?:\s+as\s+([\w.]+))?/gim)].map((m) => [m[3] || m[2] || m[1], m[1] || m[2]]));
+    const casos = [...codigo.matchAll(/^\s*usecase\s+"([^"]+)"\s+as\s+([\w.]+)/gim)].map((m) => ({ alias: m[2], terminos: this._terminosRol(m[1]), actores: [] }));
+    for (const m of codigo.matchAll(/^\s*([\w.]+)\s*-+>\s*([\w.]+)/gim)) {
+      const actor = alias.get(m[1]);
+      const destino = casos.find((item) => item.alias === m[2]);
+      if (actor && destino && !destino.actores.includes(actor)) destino.actores.push(actor);
+    }
+    this._actoresProyecto = [...new Set(alias.values())];
+    this._casosUsoRoles = casos.filter((item) => item.actores.length);
+  }
+
   _inferirRoles(ruta) {
+    const desdeCasos = this._rolesDesdeCasosUso(ruta);
+    if (desdeCasos) return desdeCasos;
     const texto = this._textoRuta(ruta);
     const roles = [];
     if (/cliente|comensal/.test(texto)) roles.push('Cliente');
@@ -838,10 +888,18 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     const accionesReparadas = this.actionRepair.reparar(this.validator.aplicarSistemaDiseno(sanitizado.html, sistemaDiseno), { rfs: mockup.rf_trazabilidad, requerimientos });
     // Reparación determinista (sin IA): filas «Cargando…», clases sin definir, moneda y controles solo visuales.
     const contenidoReparado = new MockupContentRepair().reparar(accionesReparadas.html, { moneda: MockupContentRepair.currencyOf({ requerimientos }), contrato: contratoEnlaces, requerimientos });
-    const htmlConSistemaDiseno = contenidoReparado.html;
+    const pantalla = manifiestoPorSlug.get(mockup.nombre_pantalla);
+    // Un formulario de alta o edición que la IA dejó en «ui» se liga a su operación: si no, «Registrar» no guarda nada.
+    const nombrePantalla = this._textoRuta(pantalla?.nombre || mockup.nombre_visible || mockup.nombre_pantalla);
+    const verboFormulario = /formulario de (?:registro|creacion|alta|nuev[oa])|^(?:registro|alta|creacion|nuev[oa]) de\b/.test(nombrePantalla) ? 'crear'
+      : /formulario de (?:edicion|modificacion|actualizacion)|^(?:edicion|modificacion) de\b/.test(nombrePantalla) ? 'editar' : null;
+    const formularioEnlazado = verboFormulario
+      ? new (require('../../infrastructure/services/MockupBindingValidator'))().enlazarFormularioPrincipal(contenidoReparado.html, {
+        verbo: verboFormulario, rfs: [...new Set([...(pantalla?.rf_trazabilidad || []), ...(mockup.rf_trazabilidad || [])])], requerimientos, contrato: contratoEnlaces })
+      : { html: contenidoReparado.html, enlazado: null };
+    const htmlConSistemaDiseno = formularioEnlazado.html;
     const validacion = this.validator.validar(htmlConSistemaDiseno);
     const enlazado = this.bindingService.evaluar({ html: htmlConSistemaDiseno, requerimientos, contrato: contratoEnlaces });
-    const pantalla = manifiestoPorSlug.get(mockup.nombre_pantalla);
     const rfTrazabilidad = this.traceabilityService.enrichMockup({ ...mockup, enlaces: enlazado.enlaces }, pantalla, requerimientos);
     const erroresTrazabilidad = pantalla
       ? []

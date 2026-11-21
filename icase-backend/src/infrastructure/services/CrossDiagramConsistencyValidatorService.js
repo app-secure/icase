@@ -29,9 +29,7 @@ function tokens(value) {
     .replace(/[^a-z0-9]+/g, ' ')
     .split(/\s+/)
     .map((token) => {
-      let result = token;
-      if (result.length > 6 && result.endsWith('es')) result = result.slice(0, -2);
-      else if (result.length > 4 && result.endsWith('s')) result = result.slice(0, -1);
+      const result = require('../../core/services/SpanishPlural').singular(token);
       return SYNONYMS.get(result) || result;
     })
     .filter((token) => token.length >= 2 && !IGNORED.has(token)))];

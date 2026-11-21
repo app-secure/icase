@@ -400,7 +400,15 @@ ${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/opera
       ...(action.type === 'crear' && action.lineas?.capability ? { lineas: action.lineas } : {}),
       // Consulta con los datos del registro relacionado (comanda → pedido) y transición sobre ese registro.
       ...(action.type === 'consulta' && action.relacionadas?.length ? { relacionadas: action.relacionadas } : {}),
-      ...(action.type === 'transicion' && action.sobre ? { sobre: action.sobre } : {})
+      ...(action.type === 'transicion' && action.sobre ? { sobre: action.sobre } : {}),
+      // Anular una venta devuelve al producto el stock que sus líneas descontaron.
+      ...(action.type === 'transicion' && action.reponer?.capability && action.reponer?.stock ? { reponer: action.reponer } : {}),
+      // Emitir la factura de una venta: recibe el id de la venta, toma su total y la deja vinculada (una sola vez).
+      ...(action.type === 'crear' && action.vincula?.capability ? { vincula: action.vincula } : {}),
+      // Anular con motivo: la venta pasa a anulada, devuelve stock y su factura queda anulada.
+      ...(action.type === 'crear' && action.vincula?.capability && action.anula ? { anula: action.anula } : {}),
+      // Reporte: agrupa, cuenta y suma (con la fecha de la cabecera y el nombre del registro agrupado).
+      ...(action.type === 'resumen' && action.resumen ? { resumen: action.resumen } : {})
     })));
     const source = fs.readFileSync(path.join(__dirname, '..', 'templates', 'actions', 'actions-runtime.js'), 'utf8');
     return [{ ruta: 'backend/src/actions/actions.js', lenguaje: 'javascript', contenido: renderTemplate(source, { DEFINITIONS: JSON.stringify(definitions, null, 2) }) }];
@@ -565,7 +573,7 @@ ${this._hasActions(contract) ? this._expressActionRoutes() : ''}app.use((error,_
   _syncActionPermissions(contract, policy) {
     if (!policy?.habilitada || !policy.operaciones) return;
     const Compatibility = require('../../core/services/RequirementScreenCompatibility');
-    const needed = { consulta: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' };
+    const needed = { consulta: 'GET', resumen: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' };
     const order = ['GET', 'POST', 'PATCH', 'DELETE'];
     const roles = Object.entries(policy.roles || {});
     for (const operation of contract.operations || []) {

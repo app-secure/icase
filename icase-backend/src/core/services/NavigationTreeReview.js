@@ -79,4 +79,106 @@ function isUnder(node, ancestor) {
   return false;
 }
 
-module.exports = { review, parse };
+/**
+ * Una aplicación por plataforma, nunca por rol: «Aplicación Web Vendedor» + «Aplicación Web Administrador» duplica el
+ * inicio de sesión, los listados y los formularios (y sus mockups y rutas). Se unen en una sola aplicación de esa
+ * plataforma, se fusionan los módulos con el mismo nombre y se quitan las pantallas repetidas. La visibilidad por rol
+ * la deciden después los actores de cada RF.
+ */
+function mergeSamePlatformApps(codigo) {
+  const lines = String(codigo || '').split(/\r?\n/);
+  const nodeIndexes = lines.map((line, index) => (/^\*+\s*\S/.test(line) ? index : -1)).filter((index) => index >= 0);
+  if (!nodeIndexes.length) return { codigo, unidas: [] };
+  const root = { level: 0, name: '', children: [] };
+  const stack = [root];
+  for (const index of nodeIndexes) {
+    const [, stars, name] = /^(\*+)\s*(.+?)\s*$/.exec(lines[index]);
+    const node = { level: stars.length, name, children: [] };
+    while (stack.length > 1 && stack[stack.length - 1].level >= node.level) stack.pop();
+    stack[stack.length - 1].children.push(node);
+    stack.push(node);
+  }
+  const system = root.children.length === 1 ? root.children[0] : root;
+  const unidas = [];
+  const merged = [];
+  const byPlatform = new Map();
+  for (const app of system.children) {
+    const platform = PlatformPolicy.marked(app.name);
+    if (!['móvil', 'web'].includes(platform)) { merged.push(app); continue; }
+    if (!byPlatform.has(platform)) { byPlatform.set(platform, app); merged.push(app); continue; }
+    const target = byPlatform.get(platform);
+    unidas.push(app.name);
+    target.name = platform === 'web' ? 'Aplicación Web' : 'Aplicación Móvil';
+    for (const module of app.children) {
+      const same = target.children.find((item) => strip(item.name) === strip(module.name));
+      if (!same) { target.children.push(module); continue; }
+      for (const screen of module.children) {
+        if (!same.children.some((item) => strip(item.name) === strip(screen.name))) same.children.push(screen);
+      }
+    }
+  }
+  // «Módulo de Vendedor» / «Módulo de Administrador» que agrupan módulos (Ventas, Clientes…) repiten las mismas
+  // pantallas por rol y bajan las pantallas a un quinto nivel: se aplanan en la aplicación y se fusionan.
+  const ROLE_GROUP = /^(?:modulo|panel|area|menu|seccion|portal)\s+(?:del?|para(?:\s+el|\s+la)?)\s+\S+/;
+  const mergeInto = (target, module) => {
+    const same = target.children.find((item) => strip(item.name) === strip(module.name));
+    if (!same) { target.children.push(module); return; }
+    for (const child of module.children) {
+      if (child.children.length) mergeInto(same, child);
+      else if (!same.children.some((item) => strip(item.name) === strip(child.name))) same.children.push(child);
+    }
+  };
+  for (const app of merged) {
+    const groups = app.children.filter((module) => ROLE_GROUP.test(strip(module.name)) && module.children.some((child) => child.children.length));
+    if (!groups.length) continue;
+    const rest = app.children.filter((module) => !groups.includes(module));
+    app.children = [];
+    for (const module of rest) mergeInto(app, module);
+    for (const group of groups) {
+      unidas.push(group.name);
+      for (const module of group.children) mergeInto(app, module.children.length ? module : { ...module, children: [] });
+    }
+  }
+  if (!unidas.length) return { codigo, unidas };
+  system.children = merged;
+  const out = [];
+  const write = (node, level) => { out.push(`${'*'.repeat(level)} ${node.name}`); node.children.forEach((child) => write(child, level + 1)); };
+  if (system === root) root.children.forEach((child) => write(child, 1)); else write(system, 1);
+  const first = nodeIndexes[0];
+  const last = nodeIndexes[nodeIndexes.length - 1];
+  return { codigo: [...lines.slice(0, first), ...out, ...lines.slice(last + 1)].join('\n'), unidas };
+}
+
+/**
+ * Quita pantallas de cuenta que ningún RF aprobado pide (recuperar contraseña, registro abierto, perfil): el prompt ya
+ * lo prohíbe, pero si el modelo las añade generan mockups, rutas y botones sin operación detrás.
+ */
+const UNREQUESTED = [
+  [/^(?:recuperacion|restablecimiento|cambio|olvido)\s+de\s+(?:la\s+)?contrasena/, /contrasena\b.*\b(?:recuper|restablec|olvid|cambi)|(?:recuper|restablec|olvid|cambi)\w*\b.*\bcontrasena/],
+  [/^(?:registro|creacion)\s+de\s+cuenta|^registrarse$|^crear cuenta$/, /registr\w*\s+(?:de\s+)?(?:su\s+)?cuenta|autoregistro|crear\s+(?:su\s+)?cuenta/],
+  [/^(?:perfil(?:\s+de(?:l)?\s+usuario)?|mi perfil|mi cuenta)$/, /\bperfil\b|mi cuenta/]
+];
+function removeUnrequested(codigo, textoRequisitos) {
+  const requisitos = strip(textoRequisitos);
+  const quitadas = [];
+  const lines = String(codigo || '').split(/\r?\n/).filter((line) => {
+    const match = /^(\*{3,})\s*(.+?)\s*$/.exec(line);
+    if (!match) return true;
+    const name = strip(match[2]);
+    const rule = UNREQUESTED.find(([screen, need]) => screen.test(name) && !need.test(requisitos));
+    if (rule) quitadas.push(match[2]);
+    return !rule;
+  });
+  // Un módulo que se queda vacío («Configuración» con solo «Perfil de usuario») tampoco es navegable.
+  const out = lines.filter((line, index) => {
+    const match = /^(\*+)\s/.exec(line);
+    if (!match || match[1].length < 3) return true;
+    const next = lines.slice(index + 1).find((item) => /^\*+\s/.test(item));
+    const nextLevel = next ? /^(\*+)/.exec(next)[1].length : 0;
+    const wasParent = String(codigo).includes(`${line}\n${'*'.repeat(match[1].length + 1)} `) || String(codigo).includes(`${line}\r\n${'*'.repeat(match[1].length + 1)} `);
+    return !(wasParent && nextLevel <= match[1].length);
+  });
+  return { codigo: out.join('\n'), quitadas };
+}
+
+module.exports = { review, parse, mergeSamePlatformApps, removeUnrequested };

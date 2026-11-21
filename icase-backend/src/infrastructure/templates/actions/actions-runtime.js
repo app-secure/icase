@@ -136,7 +136,7 @@ async function resolveFilters(store, def, ctx) {
     else value = filter.valor;
     // Un filtro de parámetro sin valor no restringe; uno de sesión sin registro asociado no devuelve nada.
     if (filter.origen === 'parametro' && (value === undefined || value === '')) continue;
-    resolved.push({ campo: filter.campo, operador: filter.operador || '==', value, empty: value === null || value === undefined });
+    resolved.push({ campo: filter.campo, operador: filter.operador || '==', value, empty: value === null || value === undefined, ...(filter.en ? { en: filter.en } : {}) });
   }
   return resolved;
 }
@@ -165,11 +165,39 @@ async function prepareLines(store, def, body) {
     const record = await store.getRecord(spec.destinoCapability, reference, null);
     if (!record) throw new ActionError(400, `Línea ${index + 1}: ${spec.destino} inexistente.`);
     if (record.data?.disponible === false) throw new ActionError(409, `Línea ${index + 1}: ${labelOf(record.data) || spec.destino} no está disponible.`);
+    // Un producto desactivado no se vende.
+    if (spec.activo && record.data?.[spec.activo.campo] !== undefined && record.data[spec.activo.campo] !== spec.activo.valor) {
+      throw new ActionError(409, `Línea ${index + 1}: ${labelOf(record.data) || spec.destino} está desactivado y no se puede vender.`);
+    }
+    // No se vende más de lo que hay: suma las líneas del mismo producto antes de comparar con su stock.
+    if (spec.stock) {
+      const available = Number(record.data?.[spec.stock]);
+      const requested = received.slice(0, index + 1).filter((item) => String(item?.[spec.referencia]) === String(reference))
+        .reduce((sum, item) => sum + (Number(item?.[spec.cantidad]) || 0), 0);
+      if (Number.isFinite(available) && requested > available) {
+        throw new ActionError(409, `Línea ${index + 1}: stock insuficiente de ${labelOf(record.data) || spec.destino} (disponible ${available}, pedido ${requested}).`);
+      }
+    }
     const price = spec.precio ? Number(record.data?.[spec.precio.desde]) : 0;
     const values = { [spec.referencia]: reference, [spec.cantidad]: quantity, ...(spec.precio ? { [spec.precio.campo]: Number.isFinite(price) ? price : 0 } : {}) };
     prepared.push({ values, subtotal: (Number.isFinite(price) ? price : 0) * quantity });
   }
   return prepared;
+}
+
+/** Suma `delta` (negativo al vender, positivo al anular) al stock de cada producto de las líneas. */
+async function adjustStock(store, spec, lines, sign) {
+  const totals = new Map();
+  for (const line of lines) {
+    const reference = String(line[spec.referencia]);
+    totals.set(reference, (totals.get(reference) || 0) + (Number(line[spec.cantidad]) || 0));
+  }
+  for (const [reference, quantity] of totals) {
+    const record = await store.getRecord(spec.destinoCapability, reference, null);
+    if (!record) continue;
+    const current = Number(record.data?.[spec.stock]) || 0;
+    await store.update(spec.destinoCapability, reference, { [spec.stock]: current + sign * quantity }, null);
+  }
 }
 
 async function run(store, def, ctx = {}) {
@@ -192,7 +220,27 @@ async function run(store, def, ctx = {}) {
       if (!Object.keys(values).length && (def.inputs || []).length) throw new ActionError(400, `Envía al menos uno de: ${(def.inputs || []).join(', ')}.`);
       // Lo que completa el servidor no se toma de la petición: quien crea es la sesión y la marca de tiempo es la del registro.
       for (const input of def.sessionInputs || []) values[input.campo] = await sessionValue(store, ctx.user, input);
-      for (const input of def.autoInputs || []) values[input.campo] = autoValue(input);
+      // Emitir para un registro existente (la factura de una venta): debe existir y no tener ya uno vinculado.
+      let linked = null;
+      if (def.vincula) {
+        const ownerId = body[def.vincula.parametro];
+        if (ownerId === undefined || ownerId === null || ownerId === '') throw new ActionError(400, `Indica ${def.vincula.parametro}.`);
+        linked = await store.getRecord(def.vincula.capability, ownerId, ctx.scope || null);
+        if (!linked) throw new ActionError(404, `${def.vincula.entidad} inexistente.`);
+        if (linked.data?.[def.vincula.campo]) throw new ActionError(409, `${def.vincula.entidad} ya tiene su ${def.entity || 'documento'}: solo se emite uno.`);
+        if (/^anulad/i.test(String(linked.data?.estado || ''))) throw new ActionError(409, `${def.vincula.entidad} está anulada.`);
+      }
+      for (const input of def.autoInputs || []) {
+        if (input.valor === 'correlativo') {
+          // F001-00001, F001-00002…: el siguiente número de la serie según los ya emitidos.
+          const rows = await store.list(def.capability, {}, null);
+          const used = (Array.isArray(rows) ? rows : rows?.data || []).map(flat).map((row) => String(row[input.campo] || ''))
+            .filter((value) => value.startsWith(input.prefijo || '')).map((value) => Number(value.slice((input.prefijo || '').length)) || 0);
+          values[input.campo] = `${input.prefijo || ''}${String((used.length ? Math.max(...used) : 0) + 1).padStart(input.digitos || 5, '0')}`;
+        } else if (input.valor === 'vinculado') {
+          values[input.campo] = Number(linked?.data?.[input.desde]) || 0;
+        } else values[input.campo] = autoValue(input);
+      }
       const lines = def.lineas ? await prepareLines(store, def, body) : [];
       if (def.lineas?.total && lines.length) values[def.lineas.total] = Math.round(lines.reduce((sum, line) => sum + line.subtotal, 0) * 100) / 100;
       const created = await store.create(def.capability, values, ctx.scope || null);
@@ -203,6 +251,20 @@ async function run(store, def, ctx = {}) {
         try { await store.remove(def.capability, created.id, ctx.scope || null); } catch { /* se informa el fallo original */ }
         throw error;
       }
+      // Al registrar la venta, el stock de cada producto baja automáticamente.
+      if (def.lineas?.stock && lines.length) await adjustStock(store, def.lineas, lines.map((line) => line.values), -1);
+      if (linked) await store.update(def.vincula.capability, linked.id, { [def.vincula.campo]: created.id, ...(def.anula ? { [def.anula.estado]: def.anula.valor } : {}) }, ctx.scope || null);
+      if (linked && def.anula) {
+        // Anular devuelve al producto el stock de cada línea y deja anulados los documentos de la venta (su factura).
+        if (def.anula.reponer?.stock) {
+          const found = await store.list(def.anula.reponer.capability, { [def.anula.reponer.fk]: linked.id }, null);
+          await adjustStock(store, def.anula.reponer, (Array.isArray(found) ? found : found?.data || []).map(flat), +1);
+        }
+        for (const doc of def.anula.documentos || []) {
+          const docId = linked.data?.[doc.campo];
+          if (docId) await store.update(doc.capability, docId, { [doc.estado]: doc.valor }, null);
+        }
+      }
       return { ...flat(created), ...(lines.length ? { lineas: lines.length } : {}) };
     }
     case 'actualizar': {
@@ -211,6 +273,48 @@ async function run(store, def, ctx = {}) {
       const updated = await store.update(def.capability, ctx.id, values, ctx.scope || null);
       if (!updated) throw new ActionError(404, 'Registro inexistente');
       return flat(updated);
+    }
+    case 'resumen': {
+      // Reporte: filtra (rango de fechas, también sobre la cabecera), quita lo anulado, agrupa y calcula las medidas.
+      const spec = def.resumen || {};
+      const filters = await resolveFilters(store, def, ctx);
+      const rowsOf = (found) => (Array.isArray(found) ? found : found?.data || []).map(flat);
+      const base = rowsOf(await store.list(def.capability, {}, ctx.scope || null));
+      const headers = spec.via?.capability ? new Map(rowsOf(await store.list(spec.via.capability, {}, null)).map((row) => [String(row.id), row])) : null;
+      const sourceOf = (row, where) => (where === 'via' && headers ? headers.get(String(row[spec.via.campo])) || {} : row);
+      // «hasta 2026-11-21» incluye todo ese día aunque la fecha guardada tenga hora.
+      const bound = (filter) => (filter.operador === '<=' && /^\d{4}-\d{2}-\d{2}$/.test(String(filter.value)) ? `${filter.value}T23:59:59.999Z` : filter.value);
+      const excluded = spec.excluir ? new RegExp(spec.excluir.patron || '^(anul|cancel)', 'i') : null;
+      const kept = base.filter((row) => filters.every((filter) => {
+        const value = sourceOf(row, filter.en)[filter.campo];
+        return value !== undefined && value !== null && compare(value, filter.operador, bound(filter));
+      }) && !(excluded && excluded.test(String(sourceOf(row, spec.excluir.en)[spec.excluir.campo] ?? ''))));
+      const groups = new Map();
+      for (const row of kept) {
+        const key = spec.agruparPor ? String(row[spec.agruparPor] ?? '') : 'total';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+      }
+      if (!spec.agruparPor && !groups.size) groups.set('total', []);
+      const round = (value) => Math.round(value * 100) / 100;
+      const result = [];
+      for (const [key, rows] of groups) {
+        const out = { id: key };
+        if (spec.agruparPor) {
+          out[spec.agruparPor] = key;
+          const record = spec.agrupadoCapability ? await store.getRecord(spec.agrupadoCapability, key, null) : null;
+          if (record) out[`${spec.agruparPor}__etiqueta`] = labelOf(record.data) || key;
+        }
+        for (const medida of spec.medidas || []) {
+          const values = rows.map((row) => Number(row[medida.campo])).filter(Number.isFinite);
+          const sum = values.reduce((total, value) => total + value, 0);
+          out[medida.nombre] = medida.funcion === 'contar' ? rows.length : medida.funcion === 'promedio' ? (values.length ? round(sum / values.length) : 0) : round(sum);
+        }
+        result.push(out);
+      }
+      const first = spec.medidas?.[0]?.nombre;
+      if (spec.agruparPor && first) result.sort((a, b) => (spec.orden === 'asc' ? a[first] - b[first] : b[first] - a[first]));
+      return spec.limite ? result.slice(0, spec.limite) : result;
     }
     case 'eliminar': {
       const removed = await store.remove(def.capability, ctx.id, ctx.scope || null);
@@ -231,7 +335,15 @@ async function run(store, def, ctx = {}) {
       const { campo, de = [], a } = def.transition;
       const actual = current.data?.[campo];
       if (de.length && !de.includes(actual)) throw new ActionError(409, `No se puede pasar de «${actual ?? 'sin valor'}» a «${a}»: el estado debe ser ${de.join(' o ')}.`);
-      return flat(await store.update(def.capability, targetId, { [campo]: a }, ctx.scope || null));
+      if (actual === a) throw new ActionError(409, `El registro ya está «${a}».`);
+      const updated = flat(await store.update(def.capability, targetId, { [campo]: a }, ctx.scope || null));
+      // Anular una venta devuelve al producto el stock que descontaron sus líneas.
+      if (def.reponer?.stock) {
+        const found = await store.list(def.reponer.capability, { [def.reponer.fk]: targetId }, null);
+        const lines = (Array.isArray(found) ? found : found?.data || []).map(flat);
+        await adjustStock(store, def.reponer, lines, +1);
+      }
+      return updated;
     }
     default:
       throw new ActionError(500, 'Tipo de operación no soportado.');

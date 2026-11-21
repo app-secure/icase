@@ -68,6 +68,8 @@ class InitialAnalysisService {
     const warnings = report.invalid.filter(item => !isRequirementNeed(item.elemento)).map(item => `${item.id}: elemento auxiliar pendiente.`);
     const grouped = new Map();
     for (const item of report.valid.filter(isRequirementNeed)) {
+      // Un RNF sin objetivo no «comparte» objetivo con otro: antes salía como «undefined: objetivo compartido…».
+      if (!item.objetivo_id) continue;
       if (!grouped.has(item.objetivo_id)) grouped.set(item.objetivo_id, []);
       grouped.get(item.objetivo_id).push(item.id);
     }

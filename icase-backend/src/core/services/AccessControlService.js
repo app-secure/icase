@@ -43,6 +43,51 @@ function metodosDe(requisito, verbosPorRf = {}) {
     || (metodo === 'POST' && CREATES.test(texto)) || (metodo === 'PATCH' && EDITS.test(texto)) || (metodo === 'DELETE' && DELETES.test(texto)));
 }
 
+const plano = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const textoRequisito = (requisito) => plano([requisito.nombre, requisito.descripcion,
+  ...(Array.isArray(requisito.criterios_aceptacion) ? requisito.criterios_aceptacion.map((item) => item?.descripcion || item) : [])].join('. '));
+const VERBOS_METODO = [
+  ['GET', /\b(?:consult|ver\b|visualiz|mostr|busc|list|filtr|seleccion|localiz)\w*/],
+  ['POST', /\b(?:registr|cre[ae]|agreg|anad|emit|alta|captur|gener)\w*/],
+  ['PATCH', /\b(?:modific|edit|actualiz|cambi|desactiv|anul|marc|asign)\w*/],
+  ['DELETE', /\b(?:elimin|borr|quit)\w*/]
+];
+const raizRol = (actor) => plano(actor).split(/\s+/).pop().replace(/(?:es|as|os|a|o|s)$/, '').slice(0, 7);
+
+/**
+ * Permisos con evidencia en el propio RF: solo los métodos que su texto respalda (un RF que solo consulta no da
+ * DELETE) y sin los que el RF reserva a otro rol («Solo el administrador puede crear productos; un vendedor que intente
+ * crear recibe rechazo»). Antes el vendedor heredaba crear/editar/eliminar productos por ser actor de la consulta.
+ */
+function metodosConEvidencia(requisito, actor, metodos) {
+  // «…las ventas que él mismo registró» describe quién hizo el registro, no un permiso para registrar.
+  // Los verbos de los mockups aprobados mandan; aquí solo se quitan los que el RF reserva expresamente a otro rol.
+  const texto = textoRequisito(requisito).replace(/\bque\s+(?:el|ella)\s+mism[oa]\s+\p{L}+/gu, ' ');
+  let resultado = [...metodos];
+  const propio = raizRol(actor);
+  for (const [metodo, patron] of VERBOS_METODO) {
+    const frases = texto.split(/(?<=[.;|])\s+/).filter((frase) => patron.test(frase));
+    const reservado = frases.some((frase) => {
+      const solo = /\b(?:solo|solamente|unicamente|exclusivamente)\s+(?:el|la|los|las)?\s*(\p{L}+)\s+(?:puede|pueden|podra|podran)\b/u.exec(frase);
+      return solo && !plano(solo[1]).startsWith(propio);
+    });
+    const rechazado = frases.some((frase) => new RegExp(`\\b(?:un|una|el|la)\\s+${propio}\\w*\\s+que\\s+intente\\b[^.]*\\b(?:rechaz|deneg|impid|bloque)`).test(frase));
+    if (reservado || rechazado) resultado = resultado.filter((item) => item !== metodo);
+  }
+  // Si a un rol no se le permite crear ni editar, tampoco eliminar: quedaría con un poder mayor que el que se le negó.
+  if (metodos.includes('POST') && metodos.includes('PATCH') && !resultado.includes('POST') && !resultado.includes('PATCH')) {
+    resultado = resultado.filter((item) => item !== 'DELETE');
+  }
+  return resultado;
+}
+
+/** «…mostrar exclusivamente las ventas que él mismo registró» (en la frase del rol) → ese rol trabaja con alcance propio. */
+function alcancePropio(requisito, actor) {
+  const propio = raizRol(actor);
+  return textoRequisito(requisito).split(/(?<=[.;|])\s+/).some((frase) => frase.includes(propio)
+    && /\b(?:exclusivamente|solo|solamente|unicamente)\b[^.]{0,80}\bque\s+(?:el|ella)\s+mism[oa]\s+(?:registr|cre|emit|hiz|realiz)/.test(frase));
+}
+
 class AccessControlService {
   /** Propuesta inicial: un rol por actor humano y acceso completo a los RF donde participa. */
   proponer({ requerimientos = [], verbosPorRf = {} } = {}) {
@@ -58,9 +103,12 @@ class AccessControlService {
         if (id === ADMIN_ROLE) { adminMencionado = true; continue; }
         if (!roles.has(id)) roles.set(id, { id, nombre: actor, incluir: !SYSTEM_ACTOR.test(actor), autoregistro: false });
         if (esAcceso(requisito)) continue;
-        const metodos = metodosDe(requisito, verbosPorRf);
-        // Quien consume el servicio solo debería ver y modificar lo suyo: sus reservas, pedidos y paquetes.
-        permisos.push({ operacion: requisito.identificador, rol: id, metodos, alcance: id === 'cliente' && metodos.some((metodo) => metodo !== 'GET') ? 'propios' : 'todos' });
+        const metodos = metodosConEvidencia(requisito, actor, metodosDe(requisito, verbosPorRf));
+        if (!metodos.length) continue;
+        // Quien consume el servicio solo debería ver y modificar lo suyo: sus reservas, pedidos y paquetes; y si el RF
+        // dice «solo ve las ventas que él mismo registró», ese rol también trabaja con alcance propio.
+        const propio = alcancePropio(requisito, actor) || (id === 'cliente' && metodos.some((metodo) => metodo !== 'GET'));
+        permisos.push({ operacion: requisito.identificador, rol: id, metodos, alcance: propio ? 'propios' : 'todos' });
       }
     }
     const lista = [...roles.values()];
