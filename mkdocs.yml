@@ -33,6 +33,7 @@ nav:
       - Prompts por fase: ia/prompts.md
   - Desarrollo:
       - Instalación: desarrollo/instalacion.md
+      - Documentación del proyecto generado: desarrollo/documentacion-generada.md
       - Arquitectura: desarrollo/arquitectura.md
       - Contrato de diagramas: desarrollo/contratos/diagram-generation-contract.md
       - Contrato de enlaces de mockups: desarrollo/contratos/mockup-binding-contract.md

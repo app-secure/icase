@@ -305,6 +305,13 @@ class CodificacionController {
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
 
+  async generarDocumentacion(req, res) {
+    try {
+      const documentacion = await this.gestionarArtefactosCodigo.generarDocumentacion(req.params.id, req.body || {});
+      res.json(documentacion);
+    } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
   async generarPaquete(req, res) {
     try { res.status(201).json(await this.gestionarArtefactosCodigo.generarPaquete(req.params.id)); }
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }

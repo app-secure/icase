@@ -54,7 +54,7 @@ async function fetchPngDataUrl(plantumlCode) {
   const url = getPlantUMLPngUrl(plantumlCode);
   if (!url) return null;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) return null;
     const blob = await res.blob();
     return new Promise((resolve) => {
@@ -99,13 +99,16 @@ export default function PdfPreviewModal({ project, onClose }) {
   const [pdfUrl, setPdfUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let blobUrl = null;
+    let cancelled = false;
 
     async function generatePdfBlob() {
       try {
         setLoading(true);
+        setError('');
 
         // 1. Cargar las imágenes de los diagramas en paralelo
         const softDiag = project.diagrams?.softwareArchitecture || project.diagrams?.architecture;
@@ -126,7 +129,8 @@ export default function PdfPreviewModal({ project, onClose }) {
           format: "a4",
           compress: true,
           putOnlyUsedFonts: true
-        });        const margin = 18;
+        });
+        const margin = 18;
         let y = margin;
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
@@ -142,7 +146,7 @@ export default function PdfPreviewModal({ project, onClose }) {
             doc.setFontSize(8.5);
             doc.setTextColor(100, 116, 139);
             doc.text(
-              `ISO/IEC/IEEE 29148:2018 • ${project.name || "Sistema de Información"} • Especificación Técnica`,
+              doc.splitTextToSize(`${project.name || "Sistema de Información"} · Especificación técnica`, maxLineWidth)[0],
               margin,
               headerTextY
             );
@@ -164,6 +168,15 @@ export default function PdfPreviewModal({ project, onClose }) {
         const COLOR_TABLE_HEADER = [30, 41, 59];  // #1e293b
         const COLOR_PRIMARY = [11, 87, 208];     // #0b57d0 Azul formal IEEE
 
+        // Cada línea comprueba el margen: los párrafos mayores que una página se continúan.
+        const drawLines = (lines, { x = margin, lineHeight = 4.8, font = 'normal', fontSize = 10, color = COLOR_TEXT } = {}) => {
+          for (const line of lines) {
+            checkPageBreak(lineHeight);
+            doc.setFont('helvetica', font); doc.setFontSize(fontSize); doc.setTextColor(...color);
+            doc.text(String(line), x, y); y += lineHeight;
+          }
+        };
+
         // --- HELPERS DE TIPOGRAFÍA Y FORMATO PROFESIONAL ---
 
         // Título de Sección Principal (Nivel 1)
@@ -175,8 +188,8 @@ export default function PdfPreviewModal({ project, onClose }) {
           doc.setFont("helvetica", "bold");
           doc.setFontSize(13.5);
           doc.setTextColor(...COLOR_TITLE);
-          doc.text(titleText, margin, y);
-          y += 3;
+          drawLines(doc.splitTextToSize(titleText, maxLineWidth), { font: 'bold', fontSize: 13.5, color: COLOR_TITLE, lineHeight: 6 });
+          y += 1;
           doc.setDrawColor(...COLOR_LINE);
           doc.setLineWidth(0.3);
           doc.line(margin, y, pageWidth - margin, y);
@@ -189,8 +202,7 @@ export default function PdfPreviewModal({ project, onClose }) {
           doc.setFont("helvetica", "bold");
           doc.setFontSize(11);
           doc.setTextColor(...COLOR_HEADING);
-          doc.text(subTitleText, margin, y);
-          y += 4.5;
+          drawLines(doc.splitTextToSize(subTitleText, maxLineWidth), { font: 'bold', fontSize: 11, color: COLOR_HEADING, lineHeight: 5 });
         };
 
         // Párrafo estándar con interlineado confortable a escala 100%
@@ -199,10 +211,9 @@ export default function PdfPreviewModal({ project, onClose }) {
           doc.setFont("helvetica", "normal");
           doc.setFontSize(10);
           doc.setTextColor(...COLOR_TEXT);
-          const lines = doc.splitTextToSize(text, maxLineWidth);
-          checkPageBreak(lines.length * 4.8 + 3);
-          doc.text(lines, margin, y);
-          y += lines.length * 4.8 + 3.5;
+          const lines = doc.splitTextToSize(String(text), maxLineWidth);
+          drawLines(lines);
+          y += 3.5;
         };
 
         // Viñeta ideal con Sangría Francesa (Hanging Indent)
@@ -217,7 +228,7 @@ export default function PdfPreviewModal({ project, onClose }) {
           doc.setFont("helvetica", "normal");
           doc.setFontSize(9.8);
           const lines = doc.splitTextToSize(text, textW);
-          checkPageBreak(lines.length * lineHeight + 2);
+          checkPageBreak(lineHeight + 2);
 
           // Punto de viñeta
           doc.setFont("helvetica", "bold");
@@ -229,119 +240,13 @@ export default function PdfPreviewModal({ project, onClose }) {
           doc.setFont("helvetica", "normal");
           doc.setFontSize(9.8);
           doc.setTextColor(...COLOR_TEXT);
-          for (let i = 0; i < lines.length; i++) {
-            doc.text(lines[i], textX, y + i * lineHeight);
-          }
-
-          y += lines.length * lineHeight + 2.5;
+          drawLines(lines, { x: textX, lineHeight, fontSize: 9.8 });
+          y += 2.5;
         };
 
         // Viñeta estructurada con prefijo en negrita (ej: "• Componentes: ...")
         const drawStructuredBullet = (prefix, text, indent = 4) => {
-          if (!prefix && !text) return;
-          const bulletX = margin + indent;
-          const textX = bulletX + 5;
-          const textW = maxLineWidth - indent - 5;
-          const lineHeight = 4.8;
-
-          if (!text) {
-            drawBulletItem(prefix, indent);
-            return;
-          }
-
-          const prefixStr = `${prefix}: `;
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(9.8);
-          const prefixW = doc.getTextWidth(prefixStr);
-
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(9.8);
-
-          // Si el prefijo cabe en la primera línea con espacio razonable para texto:
-          if (prefixW < textW - 35) {
-            const words = text.split(/\s+/).filter(Boolean);
-            let firstLineWords = [];
-            let remainingWords = [];
-            let currentFirstLineStr = "";
-
-            for (let i = 0; i < words.length; i++) {
-              const candidate = currentFirstLineStr ? `${currentFirstLineStr} ${words[i]}` : words[i];
-              if (prefixW + doc.getTextWidth(candidate) <= textW - 2) {
-                currentFirstLineStr = candidate;
-                firstLineWords.push(words[i]);
-              } else {
-                remainingWords = words.slice(i);
-                break;
-              }
-            }
-
-            const restText = remainingWords.join(" ");
-            const remainingLines = restText ? doc.splitTextToSize(restText, textW) : [];
-            const totalLinesCount = 1 + remainingLines.length;
-
-            checkPageBreak(totalLinesCount * lineHeight + 2);
-
-            // Viñeta
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(10);
-            doc.setTextColor(...COLOR_PRIMARY);
-            doc.text("•", bulletX, y);
-
-            // Prefijo en negrita
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9.8);
-            doc.setTextColor(...COLOR_HEADING);
-            doc.text(prefixStr, textX, y);
-
-            // Texto continuado de primera línea
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(9.8);
-            doc.setTextColor(...COLOR_TEXT);
-            if (currentFirstLineStr) {
-              doc.text(currentFirstLineStr, textX + prefixW, y);
-            }
-
-            // Siguientes líneas
-            for (let i = 0; i < remainingLines.length; i++) {
-              doc.text(remainingLines[i], textX, y + (i + 1) * lineHeight);
-            }
-
-            y += totalLinesCount * lineHeight + 2.5;
-          } else {
-            // Si el prefijo es largo, imprimirlo y luego el texto
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9.8);
-            const prefixLines = doc.splitTextToSize(prefixStr, textW);
-
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(9.8);
-            const textLines = doc.splitTextToSize(text, textW);
-
-            const totalLinesCount = prefixLines.length + textLines.length;
-            checkPageBreak(totalLinesCount * lineHeight + 2);
-
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(10);
-            doc.setTextColor(...COLOR_PRIMARY);
-            doc.text("•", bulletX, y);
-
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9.8);
-            doc.setTextColor(...COLOR_HEADING);
-            for (let i = 0; i < prefixLines.length; i++) {
-              doc.text(prefixLines[i], textX, y + i * lineHeight);
-            }
-
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(9.8);
-            doc.setTextColor(...COLOR_TEXT);
-            const startYText = y + prefixLines.length * lineHeight;
-            for (let i = 0; i < textLines.length; i++) {
-              doc.text(textLines[i], textX, startYText + i * lineHeight);
-            }
-
-            y += totalLinesCount * lineHeight + 2.5;
-          }
+          drawBulletItem(text ? `${prefix}: ${text}` : prefix, indent);
         };
 
         // Función para tablas formales de especificación (IEEE / APA)
@@ -383,32 +288,28 @@ export default function PdfPreviewModal({ project, onClose }) {
           doc.setDrawColor(...COLOR_LINE);
           doc.setLineWidth(0.25);
 
-          preparedRows.forEach(({ label, wrapped, rowH }, idx) => {
-            const needsContinuation = y + rowH + 2 > pageHeight - margin - 12;
-            checkPageBreak(rowH + 2);
-            if (needsContinuation) drawTableHeader();
-
-            // Celda etiqueta (gris neutro alternado)
-            doc.setFillColor(idx % 2 === 0 ? 248 : 255, idx % 2 === 0 ? 250 : 255, idx % 2 === 0 ? 252 : 255);
-            doc.rect(margin, y, col1W, rowH, "FD");
-
-            // Celda valor (blanco)
-            doc.setFillColor(255, 255, 255);
-            doc.rect(margin + col1W, y, col2W, rowH, "FD");
-
-            // Texto etiqueta
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9);
-            doc.setTextColor(...COLOR_HEADING);
-            doc.text(label, margin + 3.5, y + 5);
-
-            // Texto valor (9.5pt legible al 100%)
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(9.5);
-            doc.setTextColor(...COLOR_TEXT);
-            doc.text(wrapped, margin + col1W + 3.5, y + 4.8);
-
-            y += rowH;
+          preparedRows.forEach(({ label, wrapped }, idx) => {
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+            const labelLines = doc.splitTextToSize(String(label), col1W - 7);
+            const totalLines = Math.max(wrapped.length, labelLines.length);
+            let offset = 0;
+            while (offset < totalLines) {
+              if (y + rowPadding * 2 + lineHeight > pageHeight - margin - 12) {
+                checkPageBreak(pageHeight); drawTableHeader();
+              }
+              const available = Math.max(1, Math.floor((pageHeight - margin - 12 - y - rowPadding * 2) / lineHeight));
+              const count = Math.min(available, totalLines - offset);
+              const rowH = Math.max(7.5, count * lineHeight + rowPadding * 2);
+              doc.setDrawColor(...COLOR_LINE); doc.setLineWidth(0.25);
+              doc.setFillColor(idx % 2 === 0 ? 248 : 255, idx % 2 === 0 ? 250 : 255, idx % 2 === 0 ? 252 : 255);
+              doc.rect(margin, y, col1W, rowH, 'FD');
+              doc.setFillColor(255, 255, 255); doc.rect(margin + col1W, y, col2W, rowH, 'FD');
+              doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...COLOR_HEADING);
+              doc.text(labelLines.slice(offset, offset + count), margin + 3.5, y + 4.8, { lineHeightFactor: lineHeight / (9 * 25.4 / 72) });
+              doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...COLOR_TEXT);
+              doc.text(wrapped.slice(offset, offset + count), margin + col1W + 3.5, y + 4.8, { lineHeightFactor: lineHeight / (9.5 * 25.4 / 72) });
+              y += rowH; offset += count;
+            }
           });
 
           y += 5.5;
@@ -449,6 +350,7 @@ export default function PdfPreviewModal({ project, onClose }) {
             drawParagraph(descripcionTexto);
           }
 
+          checkPageBreak(h + 16);
           const x = margin + (maxLineWidth - w) / 2;
           try {
             doc.addImage(imgData, "PNG", x, y, w, h, undefined, "FAST");
@@ -458,8 +360,9 @@ export default function PdfPreviewModal({ project, onClose }) {
             doc.setFont("helvetica", "bold");
             doc.setFontSize(9);
             doc.setTextColor(...COLOR_HEADING);
-            doc.text(caption, pageWidth / 2, y, { align: "center" });
-            y += 6.5;
+            const diagramCaption = doc.splitTextToSize(caption, maxLineWidth);
+            drawLines(diagramCaption, { font: 'bold', fontSize: 9, color: COLOR_HEADING, lineHeight: 4.5 });
+            y += 2;
 
             // Explicación operativa generada por la IA
             const listItems = Array.isArray(jerarquia) && jerarquia.length > 0 ? jerarquia : null;
@@ -506,7 +409,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         doc.setFontSize(8.5);
         doc.setTextColor(...COLOR_MUTED);
         doc.text(
-          `Fecha de Emisión: ${new Date().toLocaleDateString("es-ES", { year: "numeric", month: "long", day: "numeric" })}   |   Normativa: ISO/IEC/IEEE 29148:2018   |   Estado: Aprobado`,
+          `Fecha: ${new Date().toLocaleDateString("es-ES")} | Referencia: ISO/IEC/IEEE 29148:2018 | Auditoría: ${project.finalAudit ? (project.finalAudit.exportable ? 'exportable' : 'requiere correcciones') : 'sin evaluar'}`,
           margin,
           y
         );
@@ -549,13 +452,11 @@ export default function PdfPreviewModal({ project, onClose }) {
         // --- 4. PALABRAS CLAVE DEL NEGOCIO / DOMINIO ---
         drawSectionHeader("4. Palabras Clave del Negocio / Dominio");
 
-        const cleanFunctional = (project.requirements?.functional || []).filter(
-          (rf) => !rf.name?.includes("Ajuste Validado por Experto")
-        );
+        const cleanFunctional = project.requirements?.functional || [];
 
         let domainKeywords = Array.isArray(project.palabras_clave) && project.palabras_clave.length > 0
           ? project.palabras_clave
-          : cleanFunctional.slice(0, 6).map((rf) => rf.name.replace(/^(Gestión de|Control de|Registro de|Módulo de)\s*/i, ""));
+          : cleanFunctional.slice(0, 6).map((rf) => String(rf.name || rf.identificador || rf.id || "Requisito").replace(/^(Gestión de|Control de|Registro de|Módulo de)\s*/i, ""));
 
         domainKeywords = domainKeywords.filter((k) => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
         if (domainKeywords.length === 0) {
@@ -615,11 +516,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         // 7.2 Requisitos No Funcionales
         drawSubSectionHeader("7.2 Requerimientos No Funcionales (RNF)");
 
-        const cleanNonFunctional = (project.requirements?.nonFunctional || []).filter(
-          (rnf) =>
-            !rnf.category?.includes("Ajuste Validado por Experto") &&
-            !rnf.description?.includes("Requisito incorporado por corrección")
-        );
+        const cleanNonFunctional = project.requirements?.nonFunctional || [];
 
         if (cleanNonFunctional.length > 0) {
           cleanNonFunctional.forEach((rnf, i) => {
@@ -965,6 +862,7 @@ export default function PdfPreviewModal({ project, onClose }) {
         drawParagraph(certText);
         y += 10;
 
+        checkPageBreak(30);
         // Firmas formales
         const signW = 65;
         const sign1X = margin + 12;
@@ -1009,17 +907,20 @@ export default function PdfPreviewModal({ project, onClose }) {
         // Finalizar y crear URL del Blob
         const pdfOutput = doc.output("blob");
         blobUrl = URL.createObjectURL(pdfOutput);
-        setPdfUrl(blobUrl);
+        if (cancelled) URL.revokeObjectURL(blobUrl);
+        else setPdfUrl(blobUrl);
       } catch (err) {
         console.error("Error generando PDF completo:", err);
+        if (!cancelled) setError('No se pudo generar el PDF. Revisa los datos del proyecto y vuelve a abrir la vista previa.');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     generatePdfBlob();
 
     return () => {
+      cancelled = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, [project]);
@@ -1092,7 +993,7 @@ export default function PdfPreviewModal({ project, onClose }) {
               className="w-full h-full border-none"
             />
           ) : (
-            <div className="text-white text-xs">Error al cargar la previsualización del PDF.</div>
+            <div role="alert" className="text-white text-xs">{error || 'Error al cargar la previsualización del PDF.'}</div>
           )}
         </div>
       </div>
