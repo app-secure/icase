@@ -929,3 +929,11 @@ async function saveZip(res) {
 }
 
 
+export async function generateProjectDocumentationApi(projectId, options = {}) {
+  const response = await fetch(`${API_URL}/proyectos/${projectId}/codificacion/documentacion`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(options)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo generar la documentación.');
+  return data;
+}

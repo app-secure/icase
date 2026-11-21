@@ -38,6 +38,23 @@
     }
   ],
   "paths": {
+    "/proyectos/{id}/codificacion/documentacion": {
+      "post": {
+        "tags": ["Codificación"],
+        "summary": "Generar los cinco manuales MkDocs del proyecto sin publicarlos",
+        "description": "Requiere sesión y propiedad del proyecto. Devuelve fuentes, HTML, advertencias, diagramas y guiones para videos. No crea registros ni publica en GitHub; las imágenes y videos se incorporan en el navegador.",
+        "operationId": "post_proyectos_id_codificacion_documentacion",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"githubActions": {"type": "boolean", "default": false}}}}}},
+        "responses": {
+          "200": {"description": "Fuentes, HTML, categorías, advertencias, diagramas y guiones", "content": {"application/json": {"schema": {"type": "object"}}}},
+          "400": {"description": "No se pudo generar la documentación"},
+          "401": {"description": "Sesión no válida"},
+          "404": {"description": "Proyecto inexistente o ajeno"}
+        }
+      }
+    },
     "/proyectos/{id}/transferencia/exportar": {
       "get": {
         "tags": ["Proyectos"], "summary": "Exportar proyecto portable con originales e informe SHA-256",

@@ -21,6 +21,7 @@ import LocalRunPanel from './LocalRunPanel';
 import FolderExplorer from './FolderExplorer';
 import CodeSummary from './CodeSummary';
 import GeneratedSummary from './GeneratedSummary';
+import ProjectDocumentationPanel from './ProjectDocumentationPanel';
 import { ToastContainer, useToasts } from './Toast';
 
 const DECISION_PHASES = ['alcance_plataforma', 'stack_tecnologico', 'estructura_carpetas', 'reglas_negocio', 'control_acceso', 'modulos'];
@@ -613,6 +614,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
                   </div>}
                 </div>
 
+                <ProjectDocumentationPanel key={projectId} projectId={projectId} />
                 <GeneratedSummary artifacts={{ backend: backendArtifact, frontend: frontendArtifact, tests: testArtifact, infrastructure: infrastructureArtifact, pipeline: pipelineArtifact, delivery: deliveryArtifact }} />
 
                 <FunctionalGatePanel projectId={projectId} refreshKey={`${backendArtifact?.id}-${frontendArtifact?.id}-${testArtifact?.id}`} onError={(message) => addToast({ type: 'error', message })} />

@@ -10,6 +10,7 @@ function buildCodificacionRoutes(controller, access) {
   router.param('artefactoId', access.artefacto);
   router.param('trabajoId', access.trabajo);
   router.get('/:id/codificacion', (req, res) => controller.obtenerPlan(req, res));
+  router.post('/:id/codificacion/documentacion', (req, res) => controller.generarDocumentacion(req, res));
   router.post('/:id/codificacion/un-clic', (req, res) => controller.ejecutarModoUnClic(req, res));
   router.get('/:id/codificacion/vista-previa', (req, res) => controller.vistaPrevia(req, res));
   router.post('/:id/codificacion/etapas/:etapa/sugerencia', (req, res) => controller.sugerirEtapa(req, res));

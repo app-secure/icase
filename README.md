@@ -42,6 +42,8 @@ La codificación ofrece CRUD genérico por RF y pantallas conectadas; todavía n
 
 ## Instalación y configuración
 
+La sección **Documentación del proyecto generado** permite revisar cinco manuales, descargar un sitio MkDocs, guías animadas y exportar PDF. Puede incluir un workflow manual de GitHub Actions para publicar la documentación después de revisarla. Consulta [la guía de documentación generada](docs/desarrollo/documentacion-generada.md).
+
 Terminal backend:
 
 ```powershell
