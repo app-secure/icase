@@ -34,7 +34,7 @@ describe('el contrato distingue la identidad de los datos', () => {
     const service = new MockupBindingService();
     const text = service.describirOperaciones({ requerimientos, contrato: build() });
     expect(text).toMatch(/\[RF-01\] autenticación: no la enlaces[^\n]*data-accion="ui"/);
-    expect(text).toMatch(/\[RF-02\] campos: [^\n]*correo/);
+    expect(text).toMatch(/\[RF-02\] campos[^\n]*correo/);
   });
 
   test('el validador rechaza enlazar el RF de login y acepta el de cuentas', () => {

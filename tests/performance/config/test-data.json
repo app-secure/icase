@@ -1,0 +1,64 @@
+{
+  "description": "Datos de prueba parametrizados para K6 y pruebas no funcionales de I-CASE",
+  "users": [
+    {
+      "id": "6afb2216b96dacf8b00f7de3",
+      "nombre": "Tester QA 1",
+      "correo": "qa-user-1@icase.test",
+      "password": "Password123!",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhZmIyMjE2Yjk2ZGFjZjhiMDBmN2RlMyIsImNvcnJlbyI6InFhLXVzZXItMUBpY2FzZS50ZXN0Iiwibm9tYnJlIjoiVGVzdGVyIiwiYXBlbGxpZG8iOiJRQSAxIiwiaWF0IjoxNzk0ODQ0NTkzLCJleHAiOjE3OTQ4ODc3OTMsImp0aSI6ImE5MDkxZGFlLTQ3YzItNDgzMy1hNTU1LTAxYzkzM2ZhNjNkZSJ9.Z3XaX7fnwMFXKdKIr1fUt20eH79V3KqoiFnTbBSlhf0"
+    },
+    {
+      "id": "6afb2216b96dacf8b00f7de9",
+      "nombre": "Tester QA 2",
+      "correo": "qa-user-2@icase.test",
+      "password": "Password123!",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhZmIyMjE2Yjk2ZGFjZjhiMDBmN2RlOSIsImNvcnJlbyI6InFhLXVzZXItMkBpY2FzZS50ZXN0Iiwibm9tYnJlIjoiVGVzdGVyIiwiYXBlbGxpZG8iOiJRQSAyIiwiaWF0IjoxNzk0ODQ0NTkzLCJleHAiOjE3OTQ4ODc3OTMsImp0aSI6ImNjNTU5YmFlLWMwMzEtNGQ4My05YmNlLWRjNDhjZGVmYTc5ZiJ9.MQ1UAbYFmpw7byP1xsm7ADaCeXWaEPHmlL1ZXeYYDyA"
+    },
+    {
+      "id": "6afb2216b96dacf8b00f7dec",
+      "nombre": "Tester QA 3",
+      "correo": "qa-user-3@icase.test",
+      "password": "Password123!",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhZmIyMjE2Yjk2ZGFjZjhiMDBmN2RlYyIsImNvcnJlbyI6InFhLXVzZXItM0BpY2FzZS50ZXN0Iiwibm9tYnJlIjoiVGVzdGVyIiwiYXBlbGxpZG8iOiJRQSAzIiwiaWF0IjoxNzk0ODQ0NTk0LCJleHAiOjE3OTQ4ODc3OTQsImp0aSI6IjU3ODJlODJlLTlkMWQtNDY5OS1hNzUxLTNlNWY5YzY5YTM5YyJ9.4pAz0iNkFUkuXhf9bWkph6h2yf__KEUoEoMwSK1o95Q"
+    }
+  ],
+  "projects": [
+    {
+      "size": "small",
+      "id": "6afb2216b96dacf8b00f7def",
+      "nombre": "Proyecto Pequeño - Microservicio de Autenticación",
+      "descripcion": "Gestión de sesiones, login y perfil básico con alcance reducido.",
+      "total_rf": 2,
+      "total_rnf": 1,
+      "total_diagramas": 1,
+      "total_mockups": 1,
+      "artefactoId": "6afb27b2b8b857774d06190d",
+      "insumo_bruto": "El usuario inicia sesión con correo y contraseña. Si las credenciales son válidas, accede al panel principal."
+    },
+    {
+      "size": "medium",
+      "id": "6afb2216b96dacf8b00f7df2",
+      "nombre": "Proyecto Mediano - Sistema de Reservas de Restaurante",
+      "descripcion": "Gestión de mesas, reservas con anticipación, cancelación y asignación de meseros.",
+      "total_rf": 8,
+      "total_rnf": 3,
+      "total_diagramas": 4,
+      "total_mockups": 3,
+      "artefactoId": "6afb27b2b8b857774d06191a",
+      "insumo_bruto": "El cliente reserva mesas indicando fecha, hora y número de personas. El recepcionista confirma o rechaza reservas. El mesero consulta los pedidos asignados a sus mesas."
+    },
+    {
+      "size": "large",
+      "id": "6afb2216b96dacf8b00f7df5",
+      "nombre": "Proyecto Grande - Plataforma Integral de Comercio Electrónico",
+      "descripcion": "Catálogo de productos, carrito de compras, pasarela de pago, inventario en tiempo real, logística y facturación.",
+      "total_rf": 22,
+      "total_rnf": 6,
+      "total_diagramas": 8,
+      "total_mockups": 7,
+      "artefactoId": "6afb27b2b8b857774d061927",
+      "insumo_bruto": "El comprador navega por categorías, aplica filtros de búsqueda, añade productos al carrito y efectúa el checkout mediante tarjeta o transferencia. El sistema reserva stock temporalmente, genera factura electrónica y notifica al centro de despacho para el tracking del envío."
+    }
+  ]
+}

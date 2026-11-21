@@ -21,7 +21,9 @@
     "verify:nm": "node scripts/verify-associations-runtime.js",
     "audit:generated": "node scripts/audit-generated-backend.js",
     "test:e2e:real": "env RUN_REAL_AI_E2E=true jest tests/real-model-flow.e2e.test.js --runInBand",
-    "proyectos:asignar": "node scripts/asignar-proyectos-huerfanos.js"
+    "proyectos:asignar": "node scripts/asignar-proyectos-huerfanos.js",
+    "test:resilience": "jest --roots ../tests/resilience --runInBand",
+    "seed:perf": "node scripts/seed-performance.js"
   },
   "keywords": [
     "icase",

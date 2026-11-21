@@ -51,7 +51,8 @@ describe('paquete final de entrega', () => {
     expect(() => service.crear([{ ruta: '../secreto.txt', contenido: 'x' }])).toThrow('Ruta no válida');
   });
 
-  test('la vista previa local crea secretos una vez, muestra la URL y conserva datos al detener', () => {
+  // Simula Docker con un script sh en PATH (separador ':'): solo es reproducible en sistemas Unix.
+  (process.platform === 'win32' ? test.skip : test)('la vista previa local crea secretos una vez, muestra la URL y conserva datos al detener', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'icase-preview-'));
     try {
       const script = fs.readFileSync(path.join(__dirname, '../src/infrastructure/templates/verification/preview-local.cjs'), 'utf8');

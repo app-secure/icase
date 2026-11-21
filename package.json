@@ -1,0 +1,12 @@
+{
+  "name": "icase-root",
+  "version": "1.0.0",
+  "description": "I-CASE CASE Tool - Root Testing & Performance Workspace",
+  "private": true,
+  "scripts": {
+    "test:resilience": "npm --prefix icase-backend run test:resilience",
+    "test:perf:load": "k6 run tests/performance/scripts/01-load-endpoints.js",
+    "test:perf:export": "k6 run tests/performance/scripts/02-export-sizes.js",
+    "test:perf:ai": "k6 run tests/performance/scripts/03-ai-generation.js"
+  }
+}

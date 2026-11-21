@@ -1,0 +1,9 @@
+| Escenario / Métrica | Herramienta | Umbral de Aceptación (SLA) | Fuente / Justificación |
+| :--- | :--- | :--- | :--- |
+| **Consultas y navegación** (listado de proyectos y artefactos) | K6 | Tiempo de respuesta p95 <= 3 s hasta 50 usuarios concurrentes | RNF-01 del proyecto I-CASE |
+| **Tasa de error del servidor** (endpoints propios sin IA) | K6 | 0% de errores HTTP 5xx (límite de degradación identificado en > 50 VUs) | Estabilidad interna de la API |
+| **Exportación de proyectos** (Pequeño / Mediano / Grande) | K6 | Pequeño <= 1 s; Mediano <= 3 s; Grande (.zip completo) <= 8 s | Escalamiento por tamaño de artefactos |
+| **Generación con IA** (controlada, 1–2 VUs) | K6 / Jest | Requisitos/CU <= 60 s; Diagramas/Mockups <= 120 s; Código <= 5 min | RNF-02 del proyecto I-CASE |
+| **Consumo y caché local de IA** | Jest | >= 60% de consultas repetitivas resueltas localmente; 100% de llamadas con tokens registrados | RNF-06 del proyecto I-CASE |
+| **Recuperación ante fallos y reinicio en caliente** | Jest + Docker | 0 versiones aprobadas perdidas; trabajos interrumpidos pasan a estado consistente (no colgados) | RNF-09 del proyecto I-CASE |
+| **Consumo de infraestructura** (Backend + PostgreSQL) | Docker Stats | CPU promedio < 80%; sin desbordamiento de memoria (OOMKilled) bajo 50 VUs | Salud de contenedores en ejecución |

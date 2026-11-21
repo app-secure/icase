@@ -1,5 +1,5 @@
 const CodeGenerationWorkflowService = require('../services/CodeGenerationWorkflowService');
-const { CODE_PHASE_STATES } = require('../constants/CodeGenerationPhases');
+const { CODE_PHASE_STATES, CODE_PHASE_DEFINITIONS } = require('../constants/CodeGenerationPhases');
 const BusinessRuleService = require('../services/BusinessRuleService');
 const AccessControlService = require('../services/AccessControlService');
 const ModuleService = require('../services/ModuleService');
@@ -20,7 +20,8 @@ class GestionarPlanCodificacion {
     disenoRepository = null,
     artefactoRepository = null,
     proposalService = null,
-    specService = null
+    specService = null,
+    contextCheckpointService = null
   }) {
     this.proyectoRepository = proyectoRepository;
     this.planCodificacionRepository = planCodificacionRepository;
@@ -30,6 +31,7 @@ class GestionarPlanCodificacion {
     this.artefactoRepository = artefactoRepository;
     this.proposalService = proposalService;
     this.specService = specService || proposalService?.specService || null;
+    this.contextCheckpointService = contextCheckpointService;
     this.workflow = new CodeGenerationWorkflowService();
     this.ruleService = new BusinessRuleService();
     this.accessService = new AccessControlService();
@@ -161,7 +163,7 @@ class GestionarPlanCodificacion {
     return this._conModulos(this.workflow.enriquecer(guardado));
   }
 
-  async revisar({ proyectoId, etapa, decision, observaciones = '', aprobadoPor = null }) {
+  async revisar({ proyectoId, etapa, decision, observaciones = '', aprobadoPor = null, compilarContexto = true }) {
     await this._obtenerProyectoListo(proyectoId);
     if (!['aprobar', 'rechazar'].includes(decision)) throw new Error(`Decisión no válida: ${decision}.`);
     const definition = this.workflow.obtenerDefinicion(etapa);
@@ -206,6 +208,10 @@ class GestionarPlanCodificacion {
       etapas,
       version: (plan.version || 0) + 1
     });
+    const requeridas = Object.values(CODE_PHASE_DEFINITIONS).filter((item) => item.tipo === 'decision' && !item.opcional).map((item) => item.id);
+    if (compilarContexto && decision === 'aprobar' && requeridas.every((id) => etapas.find((item) => item.etapa === id)?.estado === CODE_PHASE_STATES.APPROVED)) {
+      await this._compilarContextoSiCorresponde(proyectoId);
+    }
     return this._conModulos(this.workflow.enriquecer(guardado));
   }
 
@@ -238,7 +244,7 @@ class GestionarPlanCodificacion {
       plataformas: sugAlcance.propuesta?.plataformas?.length ? sugAlcance.propuesta.plataformas : ['web']
     };
     await this.proponer({ proyectoId, etapa: 'alcance_plataforma', propuesta: propAlcance, observaciones: 'Propuesta segura generada en modo un clic.' });
-    await this.revisar({ proyectoId, etapa: 'alcance_plataforma', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+    await this.revisar({ proyectoId, etapa: 'alcance_plataforma', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
     etapasAprobadas.push('alcance_plataforma');
 
     // 2. Stack tecnológico
@@ -247,7 +253,7 @@ class GestionarPlanCodificacion {
       dudas.push(...sugStack.advertencias.map((adv) => ({ etapa: 'stack_tecnologico', tipo: 'advertencia', detalle: adv })));
     }
     await this.proponer({ proyectoId, etapa: 'stack_tecnologico', propuesta: sugStack.propuesta, observaciones: 'Stack seguro derivado de los requisitos.' });
-    await this.revisar({ proyectoId, etapa: 'stack_tecnologico', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+    await this.revisar({ proyectoId, etapa: 'stack_tecnologico', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
     etapasAprobadas.push('stack_tecnologico');
 
     // 4. Estructura de carpetas
@@ -256,7 +262,7 @@ class GestionarPlanCodificacion {
       dudas.push(...sugCarpetas.advertencias.map((adv) => ({ etapa: 'estructura_carpetas', tipo: 'advertencia', detalle: adv })));
     }
     await this.proponer({ proyectoId, etapa: 'estructura_carpetas', propuesta: sugCarpetas.propuesta, observaciones: 'Árbol de carpetas estándar.' });
-    await this.revisar({ proyectoId, etapa: 'estructura_carpetas', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+    await this.revisar({ proyectoId, etapa: 'estructura_carpetas', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
     etapasAprobadas.push('estructura_carpetas');
 
     // 5. Reglas de negocio: solo reglas explícitas con evidencia literal
@@ -325,7 +331,7 @@ class GestionarPlanCodificacion {
       notas: `Modo un clic: ${reglasConfirmadas} reglas explícitas confirmadas y ${reglasDescartadas} reglas sin evidencia literal descartadas.`
     };
     await this.proponer({ proyectoId, etapa: 'reglas_negocio', propuesta: propReglas, observaciones: 'Reglas filtradas por evidencia literal.' });
-    await this.revisar({ proyectoId, etapa: 'reglas_negocio', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+    await this.revisar({ proyectoId, etapa: 'reglas_negocio', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
     etapasAprobadas.push('reglas_negocio');
 
     // 6. Autenticación y roles: login con roles, sin registro abierto
@@ -356,7 +362,7 @@ class GestionarPlanCodificacion {
       });
     }
     await this.proponer({ proyectoId, etapa: 'control_acceso', propuesta: propAcceso, observaciones: 'Control de acceso seguro sin autoregistro.' });
-    await this.revisar({ proyectoId, etapa: 'control_acceso', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+    await this.revisar({ proyectoId, etapa: 'control_acceso', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
     etapasAprobadas.push('control_acceso');
 
     // 6b. Comportamiento: se confirman las operaciones propuestas con IA; las derivadas sin IA quedan fuera y se reportan.
@@ -366,14 +372,14 @@ class GestionarPlanCodificacion {
       dudas.push(...(sugEspec.advertencias || []).map((adv) => ({ etapa: 'especificacion_aplicacion', tipo: 'advertencia', detalle: adv })));
       const decididas = operacionesEspec.map((op) => ({ ...op, estado_decision: op.origen === 'ia' ? 'confirmado' : 'rechazado' }));
       await this.proponer({ proyectoId, etapa: 'especificacion_aplicacion', propuesta: { ...sugEspec.propuesta, operaciones: decididas }, observaciones: 'Operaciones con IA confirmadas en modo un clic; las derivadas quedaron fuera.' });
-      await this.revisar({ proyectoId, etapa: 'especificacion_aplicacion', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+      await this.revisar({ proyectoId, etapa: 'especificacion_aplicacion', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
       etapasAprobadas.push('especificacion_aplicacion');
     }
 
     // 7. Módulos: modo automático con valores recomendados por defecto
     const { propuesta: propModulos } = await this.sugerir({ proyectoId, etapa: 'modulos' });
     await this.proponer({ proyectoId, etapa: 'modulos', propuesta: propModulos, observaciones: 'Módulos sugeridos por los requisitos y las decisiones aprobadas.' });
-    await this.revisar({ proyectoId, etapa: 'modulos', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor });
+    await this.revisar({ proyectoId, etapa: 'modulos', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
     etapasAprobadas.push('modulos');
 
     // Informe final
@@ -404,6 +410,8 @@ class GestionarPlanCodificacion {
     const guardado = await this.planCodificacionRepository.guardar(proyectoId, {
       modo_un_clic: informe
     });
+
+    await this._compilarContextoSiCorresponde(proyectoId, proyecto);
 
     const resultadoEnriquecido = this._conModulos(this.workflow.enriquecer(guardado));
     return {
@@ -438,6 +446,26 @@ class GestionarPlanCodificacion {
   }
 
   /** Valida las reglas contra el modelo de dominio y los RF aprobados; devuelve la propuesta con reglas normalizadas. */
+  /** Compila la vista Markdown del contexto (Mongo sigue siendo la fuente de verdad); un fallo nunca bloquea el plan. */
+  async _compilarContextoSiCorresponde(proyectoId, proyectoExistente = null) {
+    if (!this.contextCheckpointService) return;
+    try {
+      const proyecto = proyectoExistente || await this.proyectoRepository.obtenerPorId(proyectoId);
+      const plan = await this._obtenerOCrear(proyectoId);
+      const [requerimientos, diagramas, diseno] = await Promise.all([
+        this.requerimientoRepository ? this.requerimientoRepository.listarPorProyecto(proyectoId) : [],
+        this.diagramaRepository ? this.diagramaRepository.listarPorProyecto(proyectoId) : [],
+        this.disenoRepository?.obtenerPorProyecto ? this.disenoRepository.obtenerPorProyecto(proyectoId) : null
+      ]);
+      const decisiones = Object.fromEntries((plan.etapas || [])
+        .filter((item) => item.estado === CODE_PHASE_STATES.APPROVED && item.propuesta)
+        .map((item) => [item.etapa, item.propuesta]));
+      await this.contextCheckpointService.compilarContexto(proyectoId, { proyecto, plan, decisiones, requerimientos, diagramas, disenos: diseno ? [diseno] : [] });
+    } catch (err) {
+      console.warn(`[ContextCheckpoint] Error al compilar contexto: ${err.message}`);
+    }
+  }
+
   async _normalizarReglas(proyectoId, propuesta) {
     const reglas = propuesta?.reglas === undefined ? [] : propuesta.reglas;
     if (!Array.isArray(reglas)) throw new Error('Las reglas de negocio deben enviarse como una lista en "reglas".');

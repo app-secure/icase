@@ -1,0 +1,10 @@
+node_modules/
+.git/
+.icase-context/
+**/.icase-context/
+uploads/
+logs/
+coverage/
+.env*
+!*.env.example
+

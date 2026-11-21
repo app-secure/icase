@@ -48,3 +48,11 @@ coverage/
 /site/
 __pycache__/
 *.pyc
+
+# Contexto compilado por proyecto (vista Markdown de Mongo; se regenera)
+.icase-context/
+**/.icase-context/
+
+# Corridas de prueba del proyecto de Ventas (resultados, hallazgos y salidas generadas)
+/docs/pruebas/ventas/runs/
+/salida-ventas*/
