@@ -58,7 +58,11 @@ export const prepareMockupHtml = (rawHtml, designSystem = DEFAULT_DESIGN_SYSTEM,
     .text-amber-600,.text-yellow-600{color:var(--icase-warning)!important}
     .text-red-600,.text-red-700{color:var(--icase-error)!important}
   </style>`;
-  html = html.includes("</head>") ? html.replace(/<\/head>/i, `${paletteStyles}</head>`) : `${paletteStyles}${html}`;
+  // El marco de la pantalla (cabecera, menú y contenido) ya gestiona su propio desplazamiento: el documento no debe tener una segunda barra exterior.
+  const shellStyles = /data-icase-shell-version=/.test(html)
+    ? '<style id="icase-preview-shell">html,body{overflow:hidden!important}*::-webkit-scrollbar{width:6px;height:6px}*::-webkit-scrollbar-track{background:transparent}*::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:9999px}</style>'
+    : '';
+  html = html.includes("</head>") ? html.replace(/<\/head>/i, `${paletteStyles}${shellStyles}</head>`) : `${paletteStyles}${shellStyles}${html}`;
   // Los enlaces entre pantallas avisan a la aplicación (vista previa) o navegan (archivos descargados); el resto de controles no hace nada.
   const guard = `<script id="icase-preview-guard">document.addEventListener('click',function(e){var a=e.target.closest('a[data-icase-href]');if(a){e.preventDefault();var h=a.getAttribute('data-icase-href')||'';if(h.charAt(0)==='#'&&window.parent!==window){window.parent.postMessage({type:'icase-navigate',slug:h.slice(1)},'*');}return;}var t=e.target.closest('button,a[href="#"]');if(t){e.preventDefault();}},true);document.addEventListener('submit',function(e){e.preventDefault();},true);</script>`;
   return html.includes("</body>") ? html.replace(/<\/body>/i, `${guard}</body>`) : `${html}${guard}`;
