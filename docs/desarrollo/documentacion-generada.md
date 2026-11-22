@@ -14,6 +14,8 @@ npm run dev
 
 El instalador prepara Python/MkDocs Material/print-site y Chromium/FFmpeg dentro de carpetas locales ignoradas por Git. Requiere Python y conexión durante la instalación. Después las capturas y los videos de mockups funcionan sin consultar CDN; Tailwind se compila localmente. PlantUML se renderiza en el servidor indicado por DOCUMENTATION_PLANTUML_SERVER; Mermaid se renderiza con la dependencia local.
 
+El exportador PDF usa temporales privados por ejecución. El servidor comprueba que puede escribir y pasa esa ruta a Python y al driver de Playwright mediante TEMP, TMP y TMPDIR. La exportación local prepara su carpeta `.icase-runtime` dentro de documentation, sin depender del Temp general de Windows, y limpia los temporales al terminar. ICASE_DOCUMENTATION_TEMP permite indicar una carpeta alternativa escribible; en Windows utiliza una ruta corta si extraes el ZIP dentro de muchas subcarpetas. El detalle de un fallo de exportación queda en export-pdf.log, fuera del ZIP; la interfaz muestra un mensaje breve. Una versión fallida anterior se conserva: después de actualizar el servidor, genera una nueva versión.
+
 Configuración opcional: ICASE_DOCUMENTATION_DIR cambia el almacén persistente; DOCUMENTATION_PYTHON selecciona Python; DOCUMENTATION_BROWSER_CHANNEL=chrome permite usar Chrome instalado; BEDROCK_DOCUMENTATION_MODEL selecciona el modelo de redacción (por defecto Haiku 4.5 mediante el cliente Bedrock existente). No incluyas claves en los manuales.
 
 ## Generar y revisar

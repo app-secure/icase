@@ -88,8 +88,19 @@ class DocumentationJobs {
     } finally { await browser.close(); }
     await progress('Construyendo Material, validando enlaces y exportando PDF', 75);
     const docs = path.join(base, 'package/documentation');
-    const pythonEnv = { ...process.env, PYTHONPATH: [path.join(backendRoot, '.documentation-python'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) };
-    await this.execute(process.env.DOCUMENTATION_PYTHON || 'python', ['tools/export_pdf.py'], { cwd: docs, windowsHide: true, timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: pythonEnv }).catch(error => { throw new Error(`No se pudo construir MkDocs/PDF. Ejecuta npm run docs:setup en icase-backend. ${String(error.stderr || error.message).slice(-1800)}`); });
+    const runtimeDir = path.join(base, 'runtime');
+    await fs.mkdir(runtimeDir, { recursive: true });
+    const probe = path.join(runtimeDir, crypto.randomUUID() + '.probe');
+    try { await fs.writeFile(probe, ''); await fs.unlink(probe); }
+    catch { throw new Error('No se puede escribir en la carpeta temporal de esta versión de documentación. Revisa los permisos de ICASE_DOCUMENTATION_DIR.'); }
+    const pythonEnv = { ...process.env, ICASE_DOCUMENTATION_TEMP: runtimeDir, TEMP: runtimeDir, TMP: runtimeDir, TMPDIR: runtimeDir, PYTHONPATH: [path.join(backendRoot, '.documentation-python'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) };
+    await this.execute(process.env.DOCUMENTATION_PYTHON || 'python', ['tools/export_pdf.py'], { cwd: docs, windowsHide: true, timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: pythonEnv }).catch(async error => {
+      const detail = String(error.stderr || error.message);
+      await fs.writeFile(path.join(base, 'export-pdf.log'), String(error.stdout || '') + '\n' + detail);
+      if (/EPERM|EACCES|PermissionError|Access is denied/i.test(detail)) throw new Error('Chromium no pudo utilizar su carpeta temporal privada. Revisa los permisos de escritura del almacén de documentación. El detalle se guardó en export-pdf.log.');
+      if (/Executable doesn't exist|No module named/i.test(detail)) throw new Error('Faltan dependencias de PDF en el servidor. Ejecuta npm run docs:setup en icase-backend y vuelve a generar.');
+      throw new Error('No se pudo construir o validar el sitio y su PDF. El detalle se guardó en export-pdf.log dentro de esta versión.');
+    });
     const walk = async folder => (await Promise.all((await fs.readdir(folder, { withFileTypes: true })).map(async entry => entry.isDirectory() ? walk(path.join(folder, entry.name)) : path.join(folder, entry.name)))).flat();
     let paths = await walk(path.join(base, 'package'));
     const manifestPath = path.join(docs, 'documentation-manifest.json');
