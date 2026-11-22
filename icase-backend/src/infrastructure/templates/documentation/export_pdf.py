@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def export_pdf():
     subprocess.run([sys.executable, "-m", "mkdocs", "build", "--strict"], cwd=ROOT, check=True)
     subprocess.run([sys.executable, str(ROOT / "tools" / "check_links.py")], cwd=ROOT, check=True)
+    if '--build-only' in sys.argv:
+        return
     target = ROOT / "site" / "documentacion.pdf"
     server = ThreadingHTTPServer(('127.0.0.1', 0), partial(SimpleHTTPRequestHandler, directory=str(ROOT / 'site')))
     Thread(target=server.serve_forever, daemon=True).start()

@@ -5,6 +5,42 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const execute = promisify(execFile);
 
+test('el servidor construye MkDocs sin pedir a Python que abra Chromium', async () => {
+  const Jobs = require('../src/infrastructure/services/DocumentationJobs');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'icase-pdf-'));
+  const subprocess = jest.fn(async () => ({}));
+  try {
+    await new Jobs({ execute: subprocess }).buildSite(root);
+    const [, args, options] = subprocess.mock.calls[0];
+    expect(args).toEqual(['tools/export_pdf.py', '--build-only']);
+    expect(options.env.ICASE_DOCUMENTATION_TEMP).toBe(path.join(root, 'runtime'));
+    expect(options.env.TEMP).toBe(options.env.ICASE_DOCUMENTATION_TEMP);
+  } finally {
+    if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep + 'icase-pdf-')) throw new Error('Limpieza fuera del directorio temporal');
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('la exportación del servidor reutiliza un único navegador y lo cierra después de imprimir', async () => {
+  const Jobs = require('../src/infrastructure/services/DocumentationJobs');
+  const Generator = require('../src/infrastructure/services/ProjectDocumentationGenerator');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'icase-pdf-'));
+  const events = [], browser = { close: jest.fn(async () => events.push('cerrar')) };
+  const jobs = new Jobs({ root, browserFactory: async () => { events.push('abrir'); return browser; } });
+  for (const method of ['diagrams', 'screenshots', 'report']) jobs[method] = async () => {};
+  jobs.buildSite = async () => events.push('construir');
+  jobs.printSite = async (_, actualBrowser) => { expect(actualBrowser).toBe(browser); events.push('imprimir'); };
+  try {
+    const state = await jobs.start('demo', new Generator().generar({ proyecto: { nombre: 'Demo' } }));
+    await jobs.queue;
+    expect((await jobs.status('demo', state.id)).estado).toBe('lista');
+    expect(events).toEqual(['abrir', 'construir', 'imprimir', 'cerrar']);
+  } finally {
+    if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep + 'icase-pdf-')) throw new Error('Limpieza fuera del directorio temporal');
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('el driver Node de Python crea artefactos con TEMP inválido y restaura el entorno incluso al fallar', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'icase-pdf-'));
   try {

@@ -85,22 +85,13 @@ class DocumentationJobs {
       await this.screenshots(base, bundle, browser, state);
       if (options.videos === true) { await progress('Grabando recorridos en el servidor', 45); await this.videos(base, bundle, browser, state, runtime, options); }
       await this.report(base, bundle, browser, state);
+      await progress('Construyendo Material y validando enlaces', 75);
+      await this.buildSite(base);
+      await progress('Exportando PDF con Chromium del servidor', 85);
+      await this.printSite(base, browser);
     } finally { await browser.close(); }
-    await progress('Construyendo Material, validando enlaces y exportando PDF', 75);
+    await progress('Preparando el paquete de documentación', 95);
     const docs = path.join(base, 'package/documentation');
-    const runtimeDir = path.join(base, 'runtime');
-    await fs.mkdir(runtimeDir, { recursive: true });
-    const probe = path.join(runtimeDir, crypto.randomUUID() + '.probe');
-    try { await fs.writeFile(probe, ''); await fs.unlink(probe); }
-    catch { throw new Error('No se puede escribir en la carpeta temporal de esta versión de documentación. Revisa los permisos de ICASE_DOCUMENTATION_DIR.'); }
-    const pythonEnv = { ...process.env, ICASE_DOCUMENTATION_TEMP: runtimeDir, TEMP: runtimeDir, TMP: runtimeDir, TMPDIR: runtimeDir, PYTHONPATH: [path.join(backendRoot, '.documentation-python'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) };
-    await this.execute(process.env.DOCUMENTATION_PYTHON || 'python', ['tools/export_pdf.py'], { cwd: docs, windowsHide: true, timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: pythonEnv }).catch(async error => {
-      const detail = String(error.stderr || error.message);
-      await fs.writeFile(path.join(base, 'export-pdf.log'), String(error.stdout || '') + '\n' + detail);
-      if (/EPERM|EACCES|PermissionError|Access is denied/i.test(detail)) throw new Error('Chromium no pudo utilizar su carpeta temporal privada. Revisa los permisos de escritura del almacén de documentación. El detalle se guardó en export-pdf.log.');
-      if (/Executable doesn't exist|No module named/i.test(detail)) throw new Error('Faltan dependencias de PDF en el servidor. Ejecuta npm run docs:setup en icase-backend y vuelve a generar.');
-      throw new Error('No se pudo construir o validar el sitio y su PDF. El detalle se guardó en export-pdf.log dentro de esta versión.');
-    });
     const walk = async folder => (await Promise.all((await fs.readdir(folder, { withFileTypes: true })).map(async entry => entry.isDirectory() ? walk(path.join(folder, entry.name)) : path.join(folder, entry.name)))).flat();
     let paths = await walk(path.join(base, 'package'));
     const manifestPath = path.join(docs, 'documentation-manifest.json');
@@ -111,6 +102,45 @@ class DocumentationJobs {
     await fs.writeFile(path.join(base, 'documentacion.zip'), zipSync(entries));
     Object.assign(state, { estado: 'lista', etapa: 'Lista para revisar', progreso: 100, categorias: bundle.categorias, flujos: bundle.flujos.map(flow => ({ id: flow.id, role: flow.role, pending: flow.pending, funciones: flow.steps.length })), archivos: manifest.archivos });
     await this.save(base, state);
+  }
+  async buildSite(base) {
+    const docs = path.join(base, 'package/documentation');
+    const runtimeDir = path.join(base, 'runtime');
+    await fs.mkdir(runtimeDir, { recursive: true });
+    const probe = path.join(runtimeDir, crypto.randomUUID() + '.probe');
+    try { await fs.writeFile(probe, ''); await fs.unlink(probe); }
+    catch { throw new Error('No se puede escribir en la carpeta temporal de esta versión de documentación. Revisa los permisos de ICASE_DOCUMENTATION_DIR.'); }
+    const pythonEnv = { ...process.env, ICASE_DOCUMENTATION_TEMP: runtimeDir, TEMP: runtimeDir, TMP: runtimeDir, TMPDIR: runtimeDir, PYTHONPATH: [path.join(backendRoot, '.documentation-python'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) };
+    await this.execute(process.env.DOCUMENTATION_PYTHON || 'python', ['tools/export_pdf.py', '--build-only'], { cwd: docs, windowsHide: true, timeout: 240000, maxBuffer: 4 * 1024 * 1024, env: pythonEnv }).catch(async error => {
+      const detail = String(error.stderr || error.message);
+      await fs.writeFile(path.join(base, 'export-pdf.log'), String(error.stdout || '') + '\n' + detail);
+      if (/EPERM|EACCES|PermissionError|Access is denied/i.test(detail)) throw new Error('Python no pudo construir el sitio por un error de permisos. Revisa el almacén de documentación. El detalle se guardó en export-pdf.log.');
+      if (/Executable doesn't exist|No module named/i.test(detail)) throw new Error('Faltan dependencias de PDF en el servidor. Ejecuta npm run docs:setup en icase-backend y vuelve a generar.');
+      throw new Error('No se pudo construir o validar el sitio y su PDF. El detalle se guardó en export-pdf.log dentro de esta versión.');
+    });
+  }
+  async printSite(base, browser) {
+    // Reutiliza el Chromium que ya capturó los mockups y el informe.
+    // Python solo construye MkDocs: no inicia un segundo driver/browser.
+    const express = require('express'), app = express();
+    const site = path.join(base, 'package/documentation/site');
+    app.use(express.static(site));
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
+    let page;
+    try {
+      page = await browser.newPage();
+      await page.goto(`http://127.0.0.1:${server.address().port}/print_page.html`, { waitUntil: 'networkidle', timeout: 60000 });
+      await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(() => Promise.all([...document.images].map(image => image.decode().catch(() => {}))));
+      await page.evaluate(() => document.querySelectorAll('details').forEach(item => { item.open = true; }));
+      await page.pdf({ path: path.join(site, 'documentacion.pdf'), format: 'A4', printBackground: true, preferCSSPageSize: true,
+        displayHeaderFooter: true, headerTemplate: '<span></span>',
+        footerTemplate: '<div style="font-size:9px;text-align:center;width:100%">Documentación · <span class="pageNumber"></span> / <span class="totalPages"></span></div>' });
+    } finally {
+      if (page) await page.close();
+      await new Promise(resolve => server.close(resolve));
+    }
   }
   async diagrams(base, bundle, browser, state) {
     for (const [index, diagram] of bundle.diagramas.entries()) {
