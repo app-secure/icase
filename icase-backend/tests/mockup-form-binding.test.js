@@ -26,3 +26,12 @@ test('un formulario ya enlazado no se toca', () => {
   const bound = html.replace('<form data-accion="ui">', '<form data-accion="RF-07.crear">');
   expect(new MockupBindingValidator().enlazarFormularioPrincipal(bound, { verbo: 'crear', rfs: ['RF-07'], requerimientos, contrato }).enlazado).toBeNull();
 });
+
+describe('envío de un formulario enlazado', () => {
+  const MockupBindingValidatorClass = require('../src/infrastructure/services/MockupBindingValidator');
+  test('«Buscar» sin data-accion dentro de <form data-accion="RF-07.consultar"> no cuenta como sin enlace (lo hereda)', () => {
+    const html = '<main><form data-accion="RF-07.consultar"><input name="nombre"><button type="submit">Buscar</button></form><button>Exportar</button></main>';
+    const { advertencias } = new MockupBindingValidatorClass().validar({ html, requerimientos: [{ identificador: 'RF-07', tipo: 'RF', nombre: 'Gestionar clientes' }] });
+    expect(advertencias.filter((item) => item.startsWith('sin enlace'))).toEqual(['sin enlace: Exportar']);
+  });
+});

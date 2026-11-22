@@ -185,7 +185,8 @@ class GenericFrontendGenerator {
       files.push(
         { ruta: 'frontend/src/mockupActions.js', lenguaje: 'javascript', contenido: template('mockup-actions.js') },
         { ruta: 'frontend/src/MockupResult.jsx', lenguaje: 'javascript', contenido: template('MockupResult.jsx') },
-        { ruta: 'frontend/src/uiControls.js', lenguaje: 'javascript', contenido: template('ui-controls.js') }
+        { ruta: 'frontend/src/uiControls.js', lenguaje: 'javascript', contenido: template('ui-controls.js') },
+        { ruta: 'frontend/src/dashboard.js', lenguaje: 'javascript', contenido: template('dashboard.js') }
       );
     }
     const uiControls = Boolean(anyWired || specSummaries.size);
@@ -397,7 +398,7 @@ class GenericFrontendGenerator {
   _appWithAuth(proyecto, views, imports, routes, standalone = [], consoleOps = [], uiControls = false) {
     return `import React, { useState${uiControls ? ', useEffect' : ''} } from 'react';
 import { Link, Navigate, Route, Routes, useLocation${uiControls ? ', useNavigate' : ''} } from 'react-router-dom';
-import { useSession } from './session';${uiControls ? "\nimport { handleUiClick, handleRowClick, hydrateRecord } from './uiControls';" : ''}
+import { useSession } from './session';${uiControls ? "\nimport { handleUiClick, handleRowClick, hydrateRecord } from './uiControls';\nimport { bindDashboard } from './dashboard';" : ''}
 import LoginScreen from './LoginScreen';
 import UsersScreen from './UsersScreen';
 ${consoleOps.length ? "import DataConsole from './DataConsole';\nimport RegistryScreen from './RegistryScreen';" : ''}
@@ -410,8 +411,19 @@ const normalizarRol = (value) => String(value || '').normalize('NFD').replace(/[
 const puedeAbrirPantalla = (view, user, can) => {
   const roles = view.roles || [];
   const rolPermitido = !roles.length || roles.some((rol) => ['usuario', normalizarRol(user.rol)].includes(normalizarRol(rol)));
-  return rolPermitido && (!view.operations.length || view.operations.some((operation) => can(operation, 'GET')));
+  // Como kindOf (uiControls.js): el alta exige poder crear y la edición poder modificar; el resto, poder consultar.
+  const nombre = normalizarRol(view.name);
+  const metodo = /^(?:formulario-de-)?(?:edicion|editar|modificar|modificacion)(?:-|$)/.test(nombre) ? 'PATCH'
+    : /^(?:formulario-de-)?(?:registro|creacion|alta|nuevo|nueva|registrar|crear)(?:-|$)/.test(nombre) ? 'POST' : 'GET';
+  // Un formulario de alta o edición se juzga por las operaciones de SU dato («producto»), no por toda la trazabilidad de la pantalla,
+  // que suele ser ruidosa (la de crear producto trae también la de registrar ventas, que el vendedor sí puede).
+  const dato = metodo === 'GET' ? '' : nombre.replace(/^(?:formulario-de-)?(?:edicion|editar|modificar|modificacion|registro|creacion|alta|nuevo|nueva|registrar|crear)-(?:de-)?/, '').split('-')[0].replace(/([lrndzj])es$/, '$1').replace(/s$/, '');
+  const propias = dato ? view.operations.filter((operation) => String(entityOf[operation] || '').startsWith(dato)) : [];
+  const evaluadas = propias.length ? propias : view.operations;
+  return rolPermitido && (!view.operations.length || evaluadas.some((operation) => can(operation, metodo)));
 };
+// Pantalla diseñada que lista los usuarios: sustituye en el menú al enlace genérico «Usuarios» (su ruta se conserva).
+const esListadoUsuarios = (view) => /^(?:pantalla-de-)?(?:listado|lista|catalogo|gestion)-(?:de-)?usuarios(?:-|$)/.test(normalizarRol(view.name));
 
 export default function App() {
   const { user, loading, can, logout${uiControls ? ', api' : ''} } = useSession();
@@ -431,7 +443,14 @@ export default function App() {
     if (!user || !location.search) return undefined;
     const timers = [300, 1200].map((delay) => setTimeout(() => hydrateRecord(document.querySelector('.app-main .mockup-content'), { api, views, current: location.pathname, search: location.search, registries: registryOperations }), delay));
     return () => timers.forEach(clearTimeout);
-  }, [location.pathname, location.search, user, api]);` : ''}
+  }, [location.pathname, location.search, user, api]);
+  // Tablero del diseño: sus cifras y su tabla de recientes salen de los registros reales (ver dashboard.js).
+  useEffect(() => {
+    const view = views.find((item) => item.route === location.pathname);
+    if (!user || !view || !/^(?:dashboard|tablero|panel|inicio|resumen general)/i.test(String(view.name).normalize('NFD').replace(/[\\u0300-\\u036f]/g, ''))) return undefined;
+    const timer = setTimeout(() => bindDashboard(document.querySelector('.app-main .mockup-content'), { api, can, registries: registryOperations }), 300);
+    return () => clearTimeout(timer);
+  }, [location.pathname, user, api]);` : ''}
   const standalone = ${JSON.stringify(standalone)};
 
   if (loading) return <main className="screen"><p role="status">Cargando…</p></main>;
@@ -449,6 +468,7 @@ export default function App() {
   const registries = user.administrador ? [] : registryOperations.filter((op, index, all) => can(op.key, 'GET') && !listed.has(op.key) && !op.linea
     && !(op.entity && listedEntities.has(op.entity)) && !(op.entity && all.slice(0, index).some((other) => other.entity === op.entity && can(other.key, 'GET'))));
   const menu = visible.filter((v) => v.menu !== false);
+  const usuariosDisenados = menu.some(esListadoUsuarios);
   const home = menu[0]?.route || (registries[0] ? '/registros/' + registries[0].key : (user.administrador ? '/usuarios' : '/sin-acceso'));
 
   // El menú nombra la pantalla como el diseño: sin el «Pantalla de» con que el árbol de navegación la titula.
@@ -483,7 +503,7 @@ export default function App() {
             {user.administrador && (
               <div>
                 <p className="app-nav-group">Administración</p>
-                <Link to="/usuarios" {...linkProps('/usuarios')}>Usuarios</Link>
+                {!usuariosDisenados && <Link to="/usuarios" {...linkProps('/usuarios')}>Usuarios</Link>}
                 ${consoleOps.length ? "<Link to=\"/datos\" {...linkProps('/datos')}>Datos</Link>" : ''}
               </div>
             )}

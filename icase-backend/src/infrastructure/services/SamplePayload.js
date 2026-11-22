@@ -135,6 +135,13 @@ async function createValidRecord(api, operations, target, cleanups, depth) {
   const body = { ...sample.payload };
   for (const parent of sample.parents) {
     const parentOperation = operations.find((item) => item.schema && item.schema.title === parent.entidad);
+    // Una referencia a la entidad de cuentas (el vendedor de una venta) apunta a una cuenta real: la de quien actúa. Crear un
+    // «usuario» como dato no es posible (lo resuelve /api/users) y su perfil comparte el id de la cuenta.
+    if (operations.some((item) => item.identity && item.schema && item.schema.title === parent.entidad)) {
+      const me = await api('/api/auth/me', 'GET');
+      const own = me && me.data && (me.data.usuario || me.data.user || me.data);
+      if (own && own.id !== undefined) { body[parent.campo] = String(own.id); continue; }
+    }
     body[parent.campo] = parentOperation
       ? (await createValidRecord(api, operations, parentOperation, cleanups, depth + 1)).id
       : '1';

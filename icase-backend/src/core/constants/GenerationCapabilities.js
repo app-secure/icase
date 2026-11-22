@@ -17,7 +17,8 @@ const CAPABILITIES = Object.freeze([
     id: 'archivos',
     modulo: 'archivos_imagenes',
     etiqueta: 'Archivos e imágenes',
-    patron: /\b(?:subir|cargar|adjuntar|adjunt[oa]s?)\b|\b(?:foto|fotograf[ií]a|imagen|im[aá]genes|logo|avatar)s?\b|almacenamiento de archivos/i,
+    // Límites que entienden las tildes: con \b, «catálogo» contiene «logo» (la «á» no cuenta como letra para \b).
+    patron: /(?<![a-záéíóúñü])(?:subir|cargar|adjuntar|adjunt[oa]s?)(?![a-záéíóúñü])|(?<![a-záéíóúñü])(?:foto|fotograf[ií]a|imagen|im[aá]genes|logo|avatar)s?(?![a-záéíóúñü])|almacenamiento de archivos/i,
     alternativa: 'El módulo opcional archivos_imagenes adjunta PNG/JPEG/PDF privados por registro (512 KiB) en Express/NestJS con JWT y almacenamiento local de un proceso. No incluye S3, antivirus ni gestión avanzada de medios.'
   },
   {

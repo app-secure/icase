@@ -61,6 +61,13 @@ class MockupBindingValidator {
         && this._formOf(item) === node && attr(item, 'data-accion').trim().toLowerCase() === declared.toLowerCase())) continue;
       const control = this._controlLabel(node);
       if (!declared) {
+        // El envío de un formulario enlazado («Buscar» en <form data-accion="RF-07.consultar">) ejecuta la acción del formulario:
+        // así lo genera HtmlToJsxTransformer, y el formulario ya cuenta como su enlace.
+        const form = this._formOf(node);
+        const formAction = form ? attr(form, 'data-accion').trim().toLowerCase() : '';
+        const type = attr(node, 'type').trim().toLowerCase();
+        const submits = node.tagName === 'button' ? !['button', 'reset'].includes(type) : node.tagName === 'input' && type === 'submit';
+        if (submits && formAction && formAction !== 'ui') continue;
         advertencias.push(`sin enlace: ${control}`);
         continue;
       }

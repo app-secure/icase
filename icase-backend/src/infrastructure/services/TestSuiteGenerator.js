@@ -11,7 +11,10 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     const frontendRf = new Set(frontend.trazabilidad_rf || []);
     const routes = this._frontendRoutes(frontend);
     // Cada pantalla se abre con una cuenta de su rol: el administrador no ve las pantallas de los demás roles.
-    this._rolesByRoute = Object.fromEntries(this._allFrontendScreens(frontend).filter((screen) => (screen.roles || []).length).map((screen) => [screen.route || screen.ruta, screen.roles[0]]));
+    // Un formulario de alta o edición lo abre quien puede crear o modificar: si el administrador está entre sus roles, él (el vendedor
+    // que solo consulta productos ya no ve «Formulario de creación de producto»). El resto, con su primer rol.
+    const formulario = (screen) => /^(?:formulario de )?(?:creaci|registro|alta|edici|editar|modificar|nuevo|nueva)/.test(String(screen.name || screen.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase());
+    this._rolesByRoute = Object.fromEntries(this._allFrontendScreens(frontend).filter((screen) => (screen.roles || []).length).map((screen) => [screen.route || screen.ruta, formulario(screen) && screen.roles.includes('administrador') ? 'administrador' : screen.roles[0]]));
     const contract = this._backendContract(backend);
     const mobileOnly = frontend.archivos?.some(f => f.ruta === 'mobile/package.json') && !frontend.archivos.some(f => f.ruta === 'frontend/package.json');
     const auth = mobileOnly ? contract.auth || {} : this._frontendAuth(frontend);
@@ -35,6 +38,7 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       ...(functional ? [{ ruta: 'tests/integration/contract-flow.test.js', lenguaje: 'javascript', contenido: this._contractIntegrationTest(contract) }] : []),
       ...(contract.extensions?.enabled?.length ? [{ruta:'tests/integration/extensions.test.js',lenguaje:'javascript',contenido:require('node:fs').readFileSync(require('node:path').join(__dirname,'../templates/verification/extensions.integration.template'),'utf8').replace('__SAMPLES__',()=>samplePayload.runtimeSource()).replace('__EXTENSIONS__',JSON.stringify(contract.extensions.enabled))}] : []),
       { ruta: 'tests/e2e/navigation.spec.js', lenguaje: 'javascript', contenido: this._e2eTest(routes, auth) },
+      { ruta: 'tests/e2e/controls.spec.js', lenguaje: 'javascript', contenido: this._controlsE2eTest({ routes, auth, screens: this._allFrontendScreens(frontend) }) },
       ...(this._hasActions(contract) ? [{ ruta: 'tests/integration/actions.test.js', lenguaje: 'javascript', contenido: this._actionsIntegrationTest(contract) }] : []),
       ...((contract.associations || []).length ? [{ ruta: 'tests/e2e/associations.spec.js', lenguaje: 'javascript', contenido: this._associationsE2eTest({ screens: this._frontendScreens(frontend), contract, auth }) }] : []),
       ...(functional && !typedForms ? [{ ruta: 'tests/e2e/contract-interaction.spec.js', lenguaje: 'javascript', contenido: this._contractE2eTest(routes, auth, { screens: this._frontendScreens(frontend), contract }) }] : []),
@@ -108,7 +112,9 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     if (!auth.habilitada) return own;
     const hasConsole = frontend.archivos?.some((file) => file.ruta === 'frontend/src/DataConsole.jsx');
     const consoleScreens = hasConsole ? (contract.operations || []).filter((operation) => operation.entity && !operation.identity).map((operation) => ({ id: 'datos-' + operation.key, name: operation.name, route: '/datos/' + operation.key, operations: [operation.key], roles: ['administrador'] })) : [];
-    return [...own, ...consoleScreens];
+    // La consola va primero: los paneles de los módulos (adjuntos, reportes, cambios en vivo) están en su editor genérico, que una
+    // pantalla diseñada (un tablero, un formulario del mockup) no trae.
+    return [...consoleScreens, ...own];
   }
 
   _allFrontendScreens(frontend) {
@@ -123,7 +129,10 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
     const cases = screens.filter((screen) => screen.origen === 'especificacion').map((screen) => {
       const lists = (screen.especificacion?.bloques || []).filter((block) => ['tabla', 'tarjetas'].includes(block.tipo) && actions.get(block.operacion)?.type === 'consulta');
       const first = lists[0] && actions.get(lists[0].operacion);
-      return { id: screen.id, route: screen.route || screen.ruta, name: screen.name, path: first?.path || null, action: first?.name || null, single: lists.length === 1 };
+      // La consulta de los productos en el formulario de una venta con líneas se muestra en el selector de cada línea, no en una tabla.
+      const forms = (screen.especificacion?.bloques || []).map((block) => actions.get(block.operacion)).filter((action) => action?.lineas);
+      const options = Boolean(first && forms.some((action) => action.lineas.destinoCapability === first.capability || action.lineas.destino === first.entityName));
+      return { id: screen.id, route: screen.route || screen.ruta, name: screen.name, path: first?.path || null, action: first?.name || null, single: lists.length === 1, ...(options ? { options: true } : {}) };
     });
     if (!cases.length) return '';
     const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
@@ -148,8 +157,18 @@ for (const item of cases) {
     const operaciones = page.getByRole('button', { name: /Operaciones|datos reales/i });
     if (await operaciones.count()) await operaciones.first().click();
     await expect(page.locator('[data-screen="' + item.id + '"] .error')).toHaveCount(0);
-    if (rows && item.single) {
-      if (rows.length) await expect(page.locator('[data-screen="' + item.id + '"] [data-id]')).toHaveCount(rows.length);
+    if (rows && item.options) {
+      // Un selector de línea ofrece exactamente los registros reales (más «Selecciona…»), no las opciones de ejemplo del diseño.
+      await expect.poll(() => page.locator('[data-screen="' + item.id + '"] select').evaluateAll((selects, total) => selects.some((select) => select.options.length === total + 1), rows.length)).toBe(true);
+    } else if (rows && item.single) {
+      // Con paginación del diseño se ve una página de registros reales y el pie dice el total («Mostrando 4 de 9»).
+      if (rows.length) {
+        const shown = page.locator('[data-screen="' + item.id + '"] [data-id]');
+        await expect.poll(() => shown.count()).toBeGreaterThan(0);
+        const count = await shown.count();
+        expect(count).toBeLessThanOrEqual(rows.length);
+        if (count < rows.length) await expect(page.locator('[data-screen="' + item.id + '"]').getByText(new RegExp('de\\\\s+' + rows.length + '\\\\b'))).toBeVisible();
+      }
       else await expect(page.getByText('No hay registros para mostrar.')).toBeVisible();
     }
   });
@@ -647,12 +666,14 @@ for (const item of cases.filter((entry) => entry.verb === 'consultar')) {
     const operation = (targetScreen?.operations || []).map((key) => operations.find(op => op.key === key)).find(Boolean);
     // Sin una pantalla con editor de registros conectada a una operación del contrato (las pantallas de la especificación se prueban en spec-screens), no hay nada que ejercitar aquí.
     if (!targetScreen || !operation) return "import { test } from '@playwright/test';\ntest.skip('ninguna pantalla con editor de registros usa una operación del contrato', () => {});\n";
+    // Con sesión, la pantalla diseñada (un tablero, un formulario del mockup) no trae el editor genérico: el administrador lo tiene en su
+    // consola de datos (/datos/<operación>), que es lo que esta prueba ejercita.
     return `import { test, expect } from '@playwright/test';
 ${this._e2eSession(auth)}
 ${samplePayload.runtimeSource()}
 const operations = ${JSON.stringify(operations)};
 test('una pantalla ejecuta una operación declarada en el contrato', async ({ page }) => {
-  await page.goto(${JSON.stringify(firstRoute)});
+  await page.goto(${JSON.stringify(auth.habilitada ? '/datos/' + operation.key : firstRoute)});
   await expect(page.locator('[data-screen]')).toBeVisible();
   const editor = page.getByLabel('Datos JSON');
   const toggle = page.getByRole('button', { name: /Gestión de Datos/i });
@@ -795,6 +816,140 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
     ].join('\n');
   }
 
+  /**
+   * Prueba de navegador que pulsa cada botón y enlace visible del mockup, con cada rol y en cada ruta de su menú, y exige que
+   * el clic produzca algo (navegación, petición a /api/, aviso [data-icase-result], diálogo o cambio en la pantalla): un botón
+   * muerto falla con su ruta y su texto. confirm y prompt se anulan (devuelven «cancelar») para no borrar datos reales.
+   */
+  _controlsE2eTest({ routes = [], auth = {}, screens = [] }) {
+    const roles = auth.habilitada ? [...new Set(['administrador', ...screens.flatMap((screen) => screen.roles || [])])] : [null];
+    const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
+    return `import { test, expect } from '@playwright/test';
+${session}
+const roles = ${JSON.stringify(roles)};
+const fallbackRoutes = ${JSON.stringify(routes)};
+const MENU = '.app-nav a[href], .nav-links a[href]';
+const CONTROLS = '.mockup-content button, .mockup-content a, .mockup-content input[type="submit"], .mockup-content input[type="button"], .mockup-content [role="button"]';
+
+// Corre en la página: lista los controles visibles y habilitados del mockup o, con mark, prepara la sonda sobre ese control.
+function probe({ selector, mark }) {
+  const items = [];
+  const counts = {};
+  for (const el of document.querySelectorAll(selector)) {
+    if (!el.getClientRects().length) continue;
+    const style = getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.display === 'none' || style.pointerEvents === 'none') continue;
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true' || el.closest('fieldset[disabled]')) continue;
+    // Un control dentro de otro (un icono con role=button dentro de un botón) se prueba con el exterior.
+    if (el.parentElement && el.parentElement.closest(selector)) continue;
+    const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.title || '').replace(/\\s+/g, ' ').trim() || '(' + el.tagName.toLowerCase() + ' sin texto)';
+    if (/^cerrar sesi[oó]n$/i.test(label)) continue;
+    counts[label] = (counts[label] || 0) + 1;
+    const href = el.tagName === 'A' ? el.getAttribute('href') || '' : '';
+    const item = { label, occurrence: counts[label], external: /^(mailto|tel):/i.test(href) };
+    if (mark && mark.label === label && mark.occurrence === item.occurrence) {
+      document.querySelectorAll('[data-icase-probe]').forEach((node) => node.removeAttribute('data-icase-probe'));
+      el.setAttribute('data-icase-probe', '');
+      const state = { mutations: 0, dialogs: 0, invalid: 0, results: document.querySelectorAll('[data-icase-result]').length };
+      window.__icaseProbe = state;
+      window.confirm = () => { state.dialogs += 1; return false; };
+      window.prompt = () => { state.dialogs += 1; return null; };
+      document.addEventListener('invalid', () => { state.invalid += 1; }, true);
+      const scope = el.closest('[data-screen]') || el.closest('.mockup-content');
+      new MutationObserver((records) => { state.mutations += records.filter((record) => record.attributeName !== 'data-icase-probe').length; })
+        .observe(scope, { subtree: true, childList: true, attributes: true, characterData: true });
+      return item;
+    }
+    items.push(item);
+  }
+  return mark ? null : items;
+}
+
+async function settle(page) {
+  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+}
+
+async function openRoute(goto, page, route) {
+  await goto(route);
+  const ready = await page.locator('.mockup-content').first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+  if (ready) await settle(page);
+  return ready;
+}
+
+for (const role of roles) {
+  const who = role ? ' (rol ' + role + ')' : '';
+  test('cada botón y enlace visible del mockup hace algo' + who, async ({ page }) => {
+    test.setTimeout(30 * 60 * 1000);
+    // La sesión es la del rol probado en todas las rutas: se evita el goto que elige la cuenta por pantalla.
+    const goto = Object.getPrototypeOf(page).goto.bind(page);
+    if (role && typeof tokenFor === 'function') {
+      const session = await tokenFor(role);
+      await page.addInitScript((value) => window.localStorage.setItem('icase_token', value), session);
+    }
+    let armed = false;
+    let effects = [];
+    page.on('request', (request) => { if (armed && request.url().includes('/api/')) effects.push('petición ' + request.method() + ' ' + new URL(request.url()).pathname); });
+    page.on('popup', () => { if (armed) effects.push('ventana nueva'); });
+    page.on('download', () => { if (armed) effects.push('descarga'); });
+    page.on('dialog', (dialog) => { if (armed) effects.push('diálogo ' + dialog.type()); dialog.dismiss().catch(() => {}); });
+
+    await goto('/');
+    await page.locator(MENU).first().waitFor({ timeout: 15000 }).catch(() => {});
+    const menu = await page.locator(MENU).evaluateAll((links) => links.map((link) => new URL(link.href).pathname));
+    const routes = [...new Set(menu.length ? menu : fallbackRoutes)];
+
+    const dead = [];
+    const missing = [];
+    let checked = 0;
+    for (const route of routes) {
+      if (!(await openRoute(goto, page, route))) continue;
+      const controls = await page.evaluate(probe, { selector: CONTROLS, mark: null });
+      for (const control of controls) {
+        if (control.external) continue;
+        const name = 'ruta ' + route + ' → «' + control.label + '»' + (control.occurrence > 1 ? ' (n.º ' + control.occurrence + ')' : '');
+        // Cada control se pulsa sobre la pantalla recién abierta: el clic anterior pudo navegar o cambiarla.
+        await openRoute(goto, page, route);
+        const found = await page.evaluate(probe, { selector: CONTROLS, mark: control });
+        if (!found) { missing.push(name); continue; }
+        const before = page.url();
+        effects = [];
+        armed = true;
+        try {
+          await page.locator('[data-icase-probe]').first().click({ timeout: 5000, noWaitAfter: true });
+        } catch (error) {
+          armed = false;
+          dead.push(name + ' (no se pudo pulsar: ' + String(error.message).split('\\n')[0] + ')');
+          continue;
+        }
+        checked += 1;
+        const deadline = Date.now() + 2500;
+        while (!effects.length && Date.now() < deadline) {
+          if (page.url() !== before) { effects.push('navegación a ' + page.url()); break; }
+          const state = await page.evaluate(() => {
+            const probeState = window.__icaseProbe;
+            if (!probeState) return { reloaded: true };
+            return { ...probeState, resultsNow: document.querySelectorAll('[data-icase-result]').length };
+          }).catch(() => ({ reloaded: true }));
+          if (state.reloaded) effects.push('recarga de la página');
+          else if (state.resultsNow > state.results) effects.push('aviso [data-icase-result]');
+          else if (state.dialogs) effects.push('confirmación o petición de datos');
+          else if (state.invalid) effects.push('validación del formulario');
+          else if (state.mutations) effects.push('cambio en la pantalla');
+          else await page.waitForTimeout(100);
+        }
+        armed = false;
+        if (!effects.length) dead.push(name);
+      }
+    }
+    if (missing.length) test.info().annotations.push({ type: 'controles no encontrados al reabrir', description: missing.join('; ') });
+    if (!checked && !dead.length) test.info().annotations.push({ type: 'sin controles', description: 'ninguna ruta del menú mostró controles en .mockup-content' + who });
+    expect(dead, 'Controles sin efecto' + who + ':\\n' + dead.join('\\n')).toEqual([]);
+  });
+}
+`;
+  }
+
   _authE2eTest(routes) {
     const firstRoute = routes[0] || '/';
     return `import { test, expect } from '@playwright/test';
@@ -824,7 +979,11 @@ test('iniciar y cerrar sesión desde la interfaz', async ({ page }) => {
 
 test('el administrador accede a la gestión de usuarios', async ({ page }) => {
   await signIn(page);
-  await page.getByRole('link', { name: 'Usuarios', exact: true }).click();
+  // Con un listado de usuarios diseñado el menú no repite el enlace genérico «Usuarios», pero su ruta sigue disponible.
+  const link = page.getByRole('link', { name: 'Usuarios', exact: true });
+  if (await link.count()) await link.click();
+  // Navegación dentro de la aplicación (sin recargar): la sesión iniciada desde el formulario se conserva.
+  else await page.evaluate(() => { window.history.pushState({}, '', '/usuarios'); window.dispatchEvent(new PopStateEvent('popstate')); });
   await expect(page.locator('[data-screen="usuarios"]')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Usuarios', exact: true })).toBeVisible();
 });

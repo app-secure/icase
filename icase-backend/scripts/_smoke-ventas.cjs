@@ -43,6 +43,13 @@ const rows = (data) => (Array.isArray(data) ? data : data?.data || []).map((row)
 
   const venta = await call(vendedor, 'POST', crearVenta.path, { cliente_id: cliente.id, medioPago: 'efectivo', lineas: [{ producto_id: producto.id, cantidad: 2 }, { producto_id: otro.id, cantidad: 1 }] });
   check(venta.status === 201 && venta.data.total === 120, 'el vendedor registra una venta de 2 líneas con total 120', venta.status + ' ' + JSON.stringify(venta.data));
+  const misVentas = find('consulta', 'venta', (action) => (action.filters || []).some((filter) => filter.origen === 'sesion'));
+  if (misVentas) {
+    const vistas = rows((await call(admin, 'GET', misVentas.path)).data);
+    check(vistas.some((row) => String(row.id) === String(venta.data.id)), 'el administrador ve en el listado las ventas del vendedor');
+    const propias = rows((await call(vendedor, 'GET', misVentas.path)).data);
+    check(propias.some((row) => String(row.id) === String(venta.data.id)), 'el vendedor ve su propia venta');
+  }
   const stockDe = async (id) => rows((await call(admin, 'GET', productos.path)).data).find((row) => String(row.id) === String(id))?.stock;
   check(await stockDe(producto.id) === 4, 'el stock baja de 6 a 4', String(await stockDe(producto.id)));
   const sinStock = await call(vendedor, 'POST', crearVenta.path, { cliente_id: cliente.id, medioPago: 'efectivo', lineas: [{ producto_id: producto.id, cantidad: 50 }] });

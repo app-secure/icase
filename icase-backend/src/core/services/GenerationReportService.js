@@ -36,8 +36,19 @@ class GenerationReportService {
     const items = rf.map((requirement, index) => {
       const operation = operations.get(requirement.identificador);
       const entity = operation?.entity ? entities.get(operation.entity) : null;
-      const capabilities = this._capabilities(requirement);
+      // Lo que la especificación aprobada sí implementa para este RF no es una carencia: una venta con líneas y total, una factura
+      // correlativa vinculada a su venta, una anulación que repone stock, reglas de cálculo (IGV) o reportes agregados (resumen).
+      const actions = operation?.actions || [];
+      const covered = {
+        calculos: actions.some((action) => action.lineas || action.vincula || action.anula || action.type === 'resumen' || (action.autoInputs || []).some((input) => ['lineas', 'correlativo', 'vinculado'].includes(input.valor)))
+          || (operation?.rules || []).some((rule) => rule.tipo === 'calculo'),
+        reportes: actions.some((action) => action.type === 'resumen')
+      };
+      const detected = this._capabilities(requirement);
+      const capabilities = detected.filter((capability) => !covered[capability.id]);
       const reasons = [];
+      const implemented = detected.filter((capability) => covered[capability.id]);
+      if (implemented.length) reasons.push(`Implementado por la especificación aprobada: ${implemented.map((capability) => capability.etiqueta.toLowerCase()).join(', ')} (${actions.filter((action) => action.lineas || action.vincula || action.anula || action.type === 'resumen').map((action) => action.name).join(', ') || 'reglas de cálculo'}).`);
       let level;
       if (!capabilities.length && entity) level = 'completo';
       else if (capabilities.length && !entity) level = 'no_soportado';

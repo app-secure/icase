@@ -42,7 +42,7 @@ describe('propiedad de registros con una operación hija de solo consulta (HTTP 
     expect(operations.find((item) => item.id === 'RF-02').methods).toEqual(['GET']);
     const parent = operations.find((item) => item.id === 'RF-01');
     await expect(runtime.exerciseOwnership(access, operations, parent, booted.manifest.auth.operaciones[parent.key], { base: booted.base, associations: [], auth: booted.manifest.auth })).resolves.toBeUndefined();
-  });
+  }, 30000); // arranca un servidor real: con la máquina cargada supera los 5 s por defecto
 });
 
 describe('backend generado con una operación solo de consulta (HTTP real)', () => {

@@ -50,7 +50,9 @@ if (process.env.DRY_CONFIRM_DERIVED) {
   const dry = {};
   const { gestionarArtefactosCodigo } = createApp({ repositories: {
     artefactoGenerado: readOnly(repo('MongoArtefactoGeneradoRepository'), {
-      obtenerUltimoAprobado: (target) => async (id, tipo) => dry[tipo] || target.obtenerUltimoAprobado(id, tipo)
+      obtenerUltimoAprobado: (target) => async (id, tipo) => dry[tipo] || target.obtenerUltimoAprobado(id, tipo),
+      // Siempre se genera de nuevo: reutilizar la última versión guardada (misma huella de entrada) ocultaría los cambios del generador.
+      obtenerUltimo: () => async (id, tipo) => dry[tipo] || null
     }),
     planCodificacion: readOnly(repo('MongoPlanCodificacionRepository'), planPatch)
   } });

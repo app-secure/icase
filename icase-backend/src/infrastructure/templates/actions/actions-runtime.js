@@ -131,6 +131,8 @@ async function resolveFilters(store, def, ctx) {
   const resolved = [];
   for (const filter of def.filters || []) {
     let value;
+    // «Mis ventas» para el administrador: no es vendedor y tiene acceso completo, así que ve todas (el vendedor sigue viendo las suyas).
+    if (filter.origen === 'sesion' && filter.valor === 'usuario.id' && def.type === 'consulta' && ctx.user && ctx.user.rol === 'administrador') continue;
     if (filter.origen === 'sesion') value = await sessionValue(store, ctx.user, filter);
     else if (filter.origen === 'parametro') value = ctx.query?.[filter.valor];
     else value = filter.valor;

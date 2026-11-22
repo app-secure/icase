@@ -222,7 +222,7 @@ networks:
       auth: manifest.auth || { habilitada: false },
       map: manifest.storage?.operations || {},
       tables: (manifest.storage?.tables || []).map((table) => ({ name: table.name, references: table.references || [] })),
-      operations: operations.map((item) => ({ id: item.id, key: item.key, entity: item.entity || null, collectionPath: item.collectionPath, itemPath: item.itemPath, schema: item.schema, rules: item.rules || [], methods: item.methods, actions: item.actions || [] }))
+      operations: operations.map((item) => ({ id: item.id, key: item.key, entity: item.entity || null, collectionPath: item.collectionPath, itemPath: item.itemPath, schema: item.schema, rules: item.rules || [], methods: item.methods, actions: item.actions || [], ...(item.identity ? { identity: item.identity } : {}) }))
     };
     const smoke = renderTemplate(await fs.readFile(path.join(__dirname, '..', 'templates', 'verification', 'smoke.mjs'), 'utf8'), { CONFIG: JSON.stringify(config), SAMPLE: samplePayload.runtimeSource() });
     await Promise.all([

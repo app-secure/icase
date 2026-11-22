@@ -24,6 +24,9 @@ export function matchField(header, fields, entity, types = {}) {
   // «Disponibilidad» ↔ «disponible», «Precio actual» ↔ «precio»: comparten la raíz de la palabra.
   const root = candidates.find((item) => item.key.length >= 5 && compact.length >= 5 && item.key.slice(0, 5) === compact.slice(0, 5));
   if (root) return root.name;
+  // «Vendedor», «Cajero», «Registrado por»: la persona que registró el dato es la cuenta referenciada (usuario_id).
+  const account = fields.find((name) => /^(usuario|cuenta|user)_?id$/i.test(name));
+  if (account && /^(vendedor|vendedora|cajero|cajera|mesero|mesera|responsable|empleado|empleada|operador|operadora|atendidopor|registradopor|creadopor|usuario)/.test(compact)) return account;
   // «Plato», «Mesa»: la columna que nombra al registro muestra su nombre o número.
   if (entity && compact.startsWith(plain(entity).replace(/ /g, '').slice(0, 4))) return LABELS.find((label) => fields.includes(label)) || null;
   return null;
@@ -164,7 +167,7 @@ export function filterLive(root, given = {}) {
 function findPager(table, size) {
   let scope = table.parentElement;
   for (let depth = 0; scope && depth < 4; depth += 1, scope = scope.parentElement) {
-    const info = Array.from(scope.querySelectorAll('p, span, div')).find((element) => !element.children.length && !table.contains(element) && /mostrando\s+\d+(?:\s*[-–]\s*\d+)?\s+de\s+\d+/i.test(element.textContent));
+    const info = Array.from(scope.querySelectorAll('p, span, div')).find((element) => !element.children.length && !table.contains(element) && /mostrando\s+\d+(?:\s*(?:[-–]|al?)\s*\d+)?\s+de\s+\d+/i.test(element.textContent)); // «1–4 de 18» o «1 a 4 de 18»
     if (!info) continue;
     const buttons = Array.from(scope.querySelectorAll('button')).filter((button) => !table.contains(button));
     const prev = buttons.find((button) => plain(button.textContent) === 'anterior');
@@ -176,9 +179,10 @@ function findPager(table, size) {
     const template = info.textContent;
     const document = table.ownerDocument;
     return {
-      size: Math.max(1, size),
+      // Se pagina con el tamaño del diseño, salvo que traiga una sola fila de ejemplo: eso no es una página real (un cliente por página).
+      size: size <= 1 ? 10 : size,
       update({ total, shown, page, pages, go }) {
-        info.textContent = template.replace(/(mostrando\s+)\d+(?:\s*[-–]\s*\d+)?(\s+de\s+)\d+/i, `$1${shown}$2${total}`);
+        info.textContent = template.replace(/(mostrando\s+)\d+(?:\s*(?:[-–]|al?)\s*\d+)?(\s+de\s+)\d+/i, `$1${shown}$2${total}`);
         if (!bar) return;
         bar.style.display = pages > 1 ? '' : 'none';
         numbers.forEach((button) => button.remove());
@@ -202,6 +206,52 @@ function findPager(table, size) {
         void document;
       }
     };
+  }
+  return null;
+}
+
+/**
+ * Filtros del diseño sobre un listado real: las fechas de ejemplo ocultarían los registros de hoy, así que se vacían; un select
+ * «Todos los clientes» con nombres inventados pasa a ofrecer los valores reales de la tabla (y recibe name para poder filtrar).
+ * Un select que no corresponde a ninguna columna se queda solo con «Todos». No toca formularios que guardan.
+ */
+function cleanFilters(root, list) {
+  const saving = (element) => element.closest('form[data-accion]:not([data-accion="ui"])');
+  for (const input of root.querySelectorAll('input[type="date"], input[type="datetime-local"]')) {
+    if (!saving(input) && input.value) { input.value = ''; input.defaultValue = ''; }
+  }
+  for (const select of root.querySelectorAll('select')) {
+    if (saving(select) || select.hasAttribute('data-ref-options') || !select.options.length || !/^tod[oa]s?\b/i.test(select.options[0].textContent.trim())) continue;
+    const label = (select.id && root.querySelector(`label[for="${select.id}"]`)?.textContent) || select.getAttribute('name') || select.id || '';
+    const field = matchField(label, list.fields, null) || null;
+    const first = select.options[0];
+    first.value = '';
+    const values = field ? [...new Set(list.rows.map((row) => display(row, field)).filter((text) => text && text !== '—'))].sort((a, b) => a.localeCompare(b)) : [];
+    select.replaceChildren(first);
+    for (const value of values) {
+      const option = select.ownerDocument.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      select.append(option);
+    }
+    if (field && !select.getAttribute('name')) select.setAttribute('name', field);
+    select.value = '';
+  }
+}
+
+/**
+ * Contador del diseño junto a la tabla («24 clientes», «24 registros»): pasa a contar los registros reales. Devuelve una función que
+ * recibe el total, o null si el diseño no trae uno.
+ */
+function findCounter(table) {
+  let scope = table.parentElement;
+  for (let depth = 0; scope && depth < 4; depth += 1, scope = scope.parentElement) {
+    const found = Array.from(scope.querySelectorAll('span, p, div, small')).find((element) => !element.children.length && !table.contains(element) && /^\d+\s+[a-záéíóúñ]+$/i.test(element.textContent.trim()) && !/^\d+\s+de$/i.test(element.textContent.trim()));
+    if (found) {
+      const word = found.textContent.trim().replace(/^\d+\s+/, '');
+      const singular = word.replace(/([lrndzj])es$/i, '$1').replace(/s$/i, '');
+      return (total) => { found.textContent = `${total} ${total === 1 ? singular : word}`; };
+    }
   }
   return null;
 }
@@ -440,10 +490,12 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
     });
     // «Mostrando 5 de 18 usuarios» y los botones de página del diseño pasan a reflejar los registros reales.
     const pager = findPager(table, samples.length);
+    const counter = findCounter(table);
     const state = { page: 1 };
     let current = rows;
     const render = (all, reset = false) => {
       current = all;
+      if (counter) counter(all.length);
       if (reset) state.page = 1;
       const size = pager ? pager.size : all.length || 1;
       const pages = Math.max(1, Math.ceil(all.length / size));
@@ -496,6 +548,7 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
     bound += 1;
     boundCards += 1;
   }
+  if (live.length) cleanFilters(root, live[0]);
   // Solo se avisa de lo que quedó con datos de ejemplo: tablas o rejillas del diseño sin llenar (una lista sin su tabla en el diseño no muestra nada de ejemplo).
   notifySamples(root, Math.max(0, tables.length - boundTables) + Math.max(0, Math.min(leftover.length, grids.length) - boundCards), onShowOperations);
 }

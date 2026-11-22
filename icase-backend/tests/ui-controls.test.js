@@ -100,3 +100,45 @@ describe('altas vinculadas desde el botón de un registro (factura de una venta,
     expect(onResult).toHaveBeenCalledWith({ estado: 'ok', mensaje: 'Venta #3 anulada' });
   });
 });
+
+describe('detalle de venta con sus datos reales', () => {
+  const detailViews = [{ route: '/detalle-de-venta', name: 'Detalle de venta' }];
+  const registries = [{ key: 'rf-04', entity: 'venta' }, { key: 'rf-02', entity: 'lineaventa', linea: true }, { key: 'rf-03', entity: 'factura' }, { key: 'rf-07', entity: 'cliente' }, { key: 'rf-05', entity: 'producto' }];
+  const data = {
+    'rf-04': [{ id: '16', fecha: '2026-11-21T10:00:00Z', total: 120, estado: 'anulada', cliente_id: '5', factura_id: '4' }, { id: '15', fecha: '2026-11-21T09:00:00Z', total: 150, estado: 'activa', cliente_id: '5' }],
+    'rf-02': [{ id: '1', venta_id: '16', producto_id: '2', cantidad: 2, precioUnitario: 50 }, { id: '2', venta_id: '15', producto_id: '2', cantidad: 3, precioUnitario: 50 }],
+    'rf-03': [{ id: '4', numero: 'F001-00004', estado: 'anulada' }],
+    'rf-07': [{ id: '5', nombre: 'Ana Ríos' }],
+    'rf-05': [{ id: '2', nombre: 'Polo' }]
+  };
+  const api = jest.fn(async (url) => { if (/\/\d+$/.test(url.split('?')[0])) throw new Error('sin ruta'); const key = url.match(/operations\/([^/?]+)/)[1]; return { data: data[key].map(({ id, ...rest }) => ({ id, data: rest })) }; });
+  const html = `<p>Parte de esta vista muestra datos de ejemplo del diseño.</p><div><p>VENTA N.º 000184</p><span><span class="dot"></span>Activa</span><div><p>Cliente</p><p>Comercial Andina</p></div></div>
+    <section><h2>Factura interna</h2><span><span class="dot"></span>Emitida</span><div><p>Número</p><p>F001-00128</p></div></section>
+    <table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio unitario</th><th>Importe</th></tr></thead><tbody><tr><td>Laptop</td><td>1</td><td>S/ 2290.00</td><td>S/ 2290.00</td></tr></tbody></table>
+    <div><p>Subtotal</p><p>S/ 2445.00</p></div><p>La factura F001-00128 quedará anulada.</p>`;
+
+  test('venta anulada con factura: número, estado, cliente, líneas y factura reales; sin cifras de ejemplo', async () => {
+    const document = dom(html);
+    const root = document.querySelector('.mockup-content');
+    await ui.hydrateRecord(root, { api, views: detailViews, current: '/detalle-de-venta', search: '?id=16', registries });
+    const text = root.textContent.replace(/\s+/g, ' ');
+    expect(text).toContain('VENTA N.º 000016');
+    expect(text).toContain('Ana Ríos');
+    expect(text).toContain('F001-00004');
+    expect(text).toContain('La factura F001-00004 quedará anulada.');
+    expect(root.querySelector('tbody').textContent).toBe('Polo2S/ 50.00S/ 100.00');
+    expect([...root.querySelectorAll('span')].map((item) => item.textContent.trim()).filter(Boolean)).toEqual(['Anulada', 'Anulada']);
+    expect(text).not.toMatch(/2445|2290|F001-00128|Comercial Andina/);
+    expect(root.querySelector('p').style.display).toBe('none');
+  });
+
+  test('venta sin factura: la tarjeta de factura queda «Sin emitir» y sin número', async () => {
+    const document = dom(html);
+    const root = document.querySelector('.mockup-content');
+    await ui.hydrateRecord(root, { api, views: detailViews, current: '/detalle-de-venta', search: '?id=15', registries });
+    const card = root.querySelector('section').textContent.replace(/\s+/g, ' ');
+    expect(card).toContain('Sin emitir');
+    expect(card).not.toContain('F001-00128');
+    expect(root.textContent).toContain('La factura asociada quedará anulada.');
+  });
+});
