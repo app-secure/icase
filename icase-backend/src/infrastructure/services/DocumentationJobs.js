@@ -6,6 +6,7 @@ const { promisify } = require('node:util');
 const run = promisify(execFile);
 const { safePath } = require('./DocumentationFacts');
 const { zipSync } = require('fflate');
+const { selectDiagramSource, encodePlantUML } = require('./DocumentationDiagramSource');
 const backendRoot = path.resolve(__dirname, '../../..');
 process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(backendRoot, '.icase-browsers');
 const sourceFingerprint = bundle => crypto.createHash('sha256').update(JSON.stringify({ informe: bundle.informe, pantallas: bundle.pantallas, diagramas: bundle.diagramas, hechos: bundle.hechos, fuentes: bundle.manifiesto.fuentes })).digest('hex');
@@ -95,7 +96,7 @@ class DocumentationJobs {
     const walk = async folder => (await Promise.all((await fs.readdir(folder, { withFileTypes: true })).map(async entry => entry.isDirectory() ? walk(path.join(folder, entry.name)) : path.join(folder, entry.name)))).flat();
     let paths = await walk(path.join(base, 'package'));
     const manifestPath = path.join(docs, 'documentation-manifest.json');
-    const manifest = { ...bundle.manifiesto, id: state.id, version: state.version, createdAt: state.createdAt, advertencias: state.advertencias, videos: state.videos, capturas: state.capturas, archivos: await Promise.all(paths.filter(file => file !== manifestPath).map(async file => ({ ruta: path.relative(path.join(base, 'package'), file).replace(/\\/g, '/'), sha256: crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex') }))) };
+    const manifest = { ...bundle.manifiesto, id: state.id, version: state.version, createdAt: state.createdAt, advertencias: state.advertencias, diagramas_renderizados: state.diagramas || [], videos: state.videos, capturas: state.capturas, archivos: await Promise.all(paths.filter(file => file !== manifestPath).map(async file => ({ ruta: path.relative(path.join(base, 'package'), file).replace(/\\/g, '/'), sha256: crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex') }))) };
     await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
     paths = await walk(path.join(base, 'package'));
     const entries = {}; for (const file of paths) entries[path.relative(path.join(base, 'package'), file).replace(/\\/g, '/')] = new Uint8Array(await fs.readFile(file));
@@ -143,19 +144,23 @@ class DocumentationJobs {
     }
   }
   async diagrams(base, bundle, browser, state) {
+    state.diagramas = [];
     for (const [index, diagram] of bundle.diagramas.entries()) {
       const ruta = `documentation/docs/assets/diagram-${index + 1}.svg`;
+      const selected = selectDiagramSource(diagram);
+      const evidence = { tipo: diagram.tipo, version: diagram.version, formato: selected?.format || null, ruta, sha256_fuente: selected ? crypto.createHash('sha256').update(selected.code).digest('hex') : null };
       try {
+        if (!selected) throw new Error('No hay una fuente real disponible; se omitió el respaldo genérico Inicio/Módulo/Fin.');
         let svg;
-        if (diagram.codigo_mermaid) {
+        if (selected.format === 'mermaid') {
           const context = await browser.newContext({ javaScriptEnabled: true }); const page = await context.newPage();
           try {
             await page.setContent('<html><body></body></html>');
             await page.addScriptTag({ path: require.resolve('mermaid/dist/mermaid.min.js') });
-            svg = await page.evaluate(async source => { mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, flowchart: { htmlLabels: false } }); return (await mermaid.render('diagram', source)).svg; }, diagram.codigo_mermaid);
+            svg = await page.evaluate(async source => { mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, flowchart: { htmlLabels: false } }); return (await mermaid.render('diagram', source)).svg; }, selected.code);
           } finally { await context.close(); }
         } else {
-          const encoded = '~h' + Buffer.from(diagram.codigo_plantuml || '', 'utf8').toString('hex');
+          const encoded = encodePlantUML(selected.code);
           const server = process.env.DOCUMENTATION_PLANTUML_SERVER || 'https://www.plantuml.com/plantuml';
           const response = await fetch(`${server.replace(/\/$/, '')}/svg/${encoded}`, { signal: AbortSignal.timeout(25000), redirect: 'error' });
           if (!response.ok) throw new Error(`PlantUML HTTP ${response.status}`);
@@ -163,9 +168,11 @@ class DocumentationJobs {
         }
         if (!/<svg[\s>]/.test(svg) || /<script|<foreignObject|<iframe|\son\w+\s*=|(?:href|src)\s*=\s*["']?\s*javascript:/i.test(svg)) throw new Error('Respuesta SVG no válida o insegura');
         await this.write(base, { ruta, contenido: svg });
+        state.diagramas.push({ ...evidence, estado: 'renderizado' });
       } catch (error) {
+        state.diagramas.push({ ...evidence, estado: 'no_disponible', error: error.message });
         state.advertencias.push(`Diagrama ${diagram.titulo || diagram.tipo}: ${error.message}; se conserva la fuente editable.`);
-        await this.write(base, { ruta, contenido: require('./DocumentationInfographics').buildInfographics([], [], { models: [], services: [] })[0].contenido });
+        await this.write(base, { ruta, contenido: '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="180" viewBox="0 0 1000 180"><rect width="100%" height="100%" rx="12" fill="#fff7ed"/><text x="30" y="60" font-family="Arial" font-size="24" fill="#9a3412">Diagrama no disponible</text><text x="30" y="105" font-family="Arial" font-size="18" fill="#9a3412">Consulta el aviso de renderizado y la fuente editable. No se sustituyó por otro diagrama.</text></svg>' });
       }
     }
   }

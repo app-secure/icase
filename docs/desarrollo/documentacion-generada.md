@@ -33,6 +33,7 @@ La grabación real recorre pantallas de la aplicación levantada en Docker. El a
 - README.md, CONTRIBUTING.md, ARCHITECTURE.md, CHANGELOG.md y LICENSE.md en la raíz. Se conservan las instrucciones originales y se agrega la información de la entrega.
 - documentation/docs/*.md: las cinco páginas y el inicio, sin un manual HTML editorial paralelo.
 - Cuatro infografías SVG: flujo por rol, módulos y pantallas, modelo de datos y arquitectura. Los diagramas aprobados se guardan como SVG y fuentes editables; no se incrustan como base64.
+- Si un diagrama guarda PlantUML y Mermaid, se utiliza PlantUML, igual que en el visor. Mermaid se usa cuando es la única fuente real disponible. El respaldo antiguo «Inicio → Ejecución de Módulo → Fin» se descarta; una fuente ausente o un error de renderizado se señala como no disponible. La generación de diagramas deja Mermaid vacío cuando la IA solo devuelve PlantUML. Las solicitudes PlantUML usan compresión y la codificación del visor, para evitar URLs hexadecimales excesivas. El manifiesto registra formato, estado y huella de la fuente de cada SVG.
 - Capturas PNG de todos los mockups aprobados y videos WebM opcionales por rol.
 - documentation/site/: sitio Material con búsqueda, modo oscuro, navegación por pestañas y soporte Mermaid; print_page.html y documentacion.pdf se derivan de las mismas páginas.
 - informe-final.md, informe-final.html e informe-final.pdf: reporte desde los datos aprobados, capturado e impreso en el servidor con CSS de impresión.
