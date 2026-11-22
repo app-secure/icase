@@ -12,3 +12,6 @@ tests/.generated-*/
 verification-results/
 
 .icase-runs/
+.icase-documentation/
+.icase-browsers/
+.documentation-python/

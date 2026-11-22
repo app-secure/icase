@@ -16,7 +16,8 @@ class DeliveryPackageGenerator extends IGeneradorArtefacto {
       }
     }
     for (const file of insumos.documentacion?.archivos || []) {
-      if (byPath.has(file.ruta) && byPath.get(file.ruta).contenido !== file.contenido) throw new Error(`Conflicto en documentación: ${file.ruta}`);
+      const rootDocumentation = ['README.md', 'CONTRIBUTING.md', 'ARCHITECTURE.md', 'CHANGELOG.md', 'LICENSE.md'].includes(file.ruta) || /^licen[cs]e(?:\.txt)?$/i.test(file.ruta);
+      if (!rootDocumentation && byPath.has(file.ruta) && byPath.get(file.ruta).contenido !== file.contenido) throw new Error(`Conflicto en documentación: ${file.ruta}`);
       byPath.set(file.ruta, { ...file });
     }
     const cobertura = new GenerationCoverageService().exigirEntrega({ archivos: [...byPath.values()] });
@@ -31,6 +32,7 @@ class DeliveryPackageGenerator extends IGeneradorArtefacto {
     const manifest = {
       alcance: cobertura,
       proyecto: proyecto.nombre,
+      documentacion: insumos.documentacion?.versionId ? { id: insumos.documentacion.versionId, version: insumos.documentacion.version, manifiesto: 'documentation/documentation-manifest.json' } : null,
       generado_en: new Date().toISOString(),
       artefactos: artifacts.map((item) => ({ tipo: item.tipo, version: item.version, huella_entrada: item.huella_entrada,
         verificacion: item.verificacion ? { estado: item.verificacion.estado, nivel: item.verificacion.nivel, huella: item.verificacion.huella,

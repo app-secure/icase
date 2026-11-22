@@ -937,3 +937,11 @@ export async function generateProjectDocumentationApi(projectId, options = {}) {
   if (!response.ok) throw new Error(data.error || 'No se pudo generar la documentación.');
   return data;
 }
+
+export async function documentationRequest(projectId, suffix = '', options = {}) {
+  const response = await apiFetch(`${API_URL}/proyectos/${projectId}/codificacion/documentacion/versiones${suffix}`, {
+    ...options, headers: getAuthHeaders({ ...(options.body ? { 'Content-Type': 'application/json' } : {}) })
+  });
+  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'No se pudo acceder a la documentación.'); }
+  return options.binary ? response.blob() : response.json();
+}

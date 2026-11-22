@@ -444,18 +444,19 @@ class GestionarArtefactosCodigo {
   }
 
   async generarDocumentacion(proyectoId, opciones = {}) {
-    const [proyecto, requerimientos, diagramas, plan, artefactos] = await Promise.all([
+    const [proyecto, requerimientos, diagramas, plan, artefactos, diseno] = await Promise.all([
       this.proyectoRepository.obtenerPorId(proyectoId),
       this.requerimientoRepository?.listarPorProyecto(proyectoId) || [],
       this.diagramaRepository?.listarPorProyecto(proyectoId) || [],
       this.planRepository?.obtenerPorProyecto(proyectoId) || null,
-      this.artefactoRepository?.listarPorProyecto?.(proyectoId) || []
+      this.artefactoRepository?.listarPorProyecto?.(proyectoId) || [],
+      this.disenoRepository?.obtenerPorProyecto?.(proyectoId) || null
     ]);
     if (!proyecto) throw new Error('Proyecto no encontrado.');
     const Generator = require('../../infrastructure/services/ProjectDocumentationGenerator');
-    return new Generator().generar({ proyecto, requerimientos, diagramas, plan,
+    return new Generator().generar({ proyecto, requerimientos, diagramas, plan, diseno,
       artefactos: artefactos.filter(item => item.tipo !== 'paquete_entrega'),
-      opciones: { githubActions: opciones.githubActions === true } });
+      opciones: { githubActions: opciones.githubActions === true, licencia: opciones.licencia, titular: opciones.titular } });
   }
 
   async generarPaquete(proyectoId) {
@@ -473,11 +474,13 @@ class GestionarArtefactosCodigo {
     this._exigirPuertaFuncional(artefactos, plan);
     for (const artefacto of artefactos) this._exigirVerificacion(artefacto);
     const versionesOrigen = Object.fromEntries(artefactos.map((item) => [item.tipo, item.version]));
-    const documentacion = await this.generarDocumentacion(proyectoId);
+    const sourceDocumentation = await this.generarDocumentacion(proyectoId);
+    const documentacion = await new (require('../../infrastructure/services/DocumentationJobs'))().forDelivery(proyectoId, sourceDocumentation);
     const huellaEntrada = crypto.createHash('sha256').update(JSON.stringify({contrato_generacion:'entrega-v5-documentacion',versionesOrigen, documentacion: documentacion.archivos})).digest('hex');
     const ultimo = await this.artefactoRepository.obtenerUltimo(proyectoId, 'paquete_entrega');
     if (ultimo?.huella_entrada === huellaEntrada && !['fallido', 'rechazado', 'desactualizado'].includes(ultimo.estado) && ultimo.verificacion?.estado !== 'fallida') return { artefacto: ultimo, reutilizado: true };
     const generado = await this.deliveryGenerator.generar({ proyecto, insumos: { artefactos, documentacion }, versionesOrigen });
+    generado.modulos = { ...(artefactos[0].modulos || this._modulosDelPlan(plan)), documentacion_version: documentacion.versionId };
     const artefacto = await this.artefactoRepository.crear({ proyecto_id: proyectoId, tipo: 'paquete_entrega', version: (ultimo?.version || 0) + 1, estado: 'en_revision', aprobado: false, huella_entrada: huellaEntrada, modulos: artefactos[0].modulos || this._modulosDelPlan(plan), ...generado });
     if (ultimo?.aprobado) await this.artefactoRepository.actualizar(ultimo.id, { estado: 'desactualizado', aprobado: false });
     await this._actualizarEtapa(plan, 'paquete_entrega', CODE_PHASE_STATES.IN_REVIEW, `Paquete de entrega v${artefacto.version} generado.`);

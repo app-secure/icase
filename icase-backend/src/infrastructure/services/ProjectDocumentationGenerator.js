@@ -1,92 +1,104 @@
 const crypto = require('node:crypto');
-const { renderRepositoryDocuments } = require('./DocumentationMarkdown');
-const { buildRoleFlows, renderRoleFlows, buildTutorials, renderFlowSvg } = require('./DocumentationRoleFlows');
+const fs = require('node:fs');
+const path = require('node:path');
+const MarkdownIt = require('markdown-it');
+const { buildRoleFlows, buildTutorials } = require('./DocumentationRoleFlows');
+const { approved, safePath, latestApproved, deliveryFacts, criterionText } = require('./DocumentationFacts');
+const { buildInfographics } = require('./DocumentationInfographics');
+const { CODE_PHASE_DEFINITIONS } = require('../../core/constants/CodeGenerationPhases');
+const md = value => String(value ?? '').replace(/<[^>]*>/g, '').replace(/\|/g, '\\|');
+const bullets = items => items.length ? items.map(item => `- ${md(item)}`).join('\n') : '- No consta en los artefactos aprobados.';
+const fence = (text, language = 'sh') => `\n\n\`\`\`${language}\n${text}\n\`\`\`\n\n`;
+const table = (headers, rows) => `| ${headers.join(' | ')} |\n| ${headers.map(() => '---').join(' | ')} |\n${rows.map(row => '| ' + row.map(md).join(' | ') + ' |').join('\n')}\n`;
+const titles = { usuario: 'Manual de usuario', desarrollador: 'Guía de desarrollador', mantenimiento: 'Manual de mantenimiento', instalacion: 'Instalación y despliegue', tecnica: 'Referencia técnica y diagramas' };
+const template = name => fs.readFileSync(path.join(__dirname, '../templates/documentation', name), 'utf8');
 
-const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const paragraph = text => `<p>${escape(text)}</p>`;
-const list = values => `<ul>${values.map(value => `<li>${escape(value)}</li>`).join('')}</ul>`;
-const code = text => `<pre><code>${escape(text)}</code></pre>`;
-const CSS = require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/documentation/documentation.css'), 'utf8');
-
-/** Un paquete separado evita sobreescribir README, licencia o workflows del código generado. */
+/** Las páginas Markdown son la única fuente editorial del sitio y de su PDF. */
 class ProjectDocumentationGenerator {
-  generar({ proyecto, requerimientos = [], diagramas = [], artefactos = [], plan = null, opciones = {} }) {
-    const approved = item => item.aprobado === true && !item.desactualizado && !['desactualizado', 'rechazado'].includes(item.estado);
-    const rf = requerimientos.filter(item => approved(item) && String(item.tipo).toUpperCase() === 'RF');
-    const rnf = requerimientos.filter(item => approved(item) && String(item.tipo).toUpperCase() === 'RNF');
-    const latest = new Map();
-    for (const diagram of diagramas.filter(approved)) {
-      if (!latest.has(diagram.tipo) || Number(diagram.version || 1) > Number(latest.get(diagram.tipo).version || 1)) latest.set(diagram.tipo, diagram);
-    }
-    const latestArtifacts = new Map();
-    for (const item of artefactos.filter(approved).filter(item => item.tipo !== 'paquete_entrega')) {
-      if (!latestArtifacts.has(item.tipo) || Number(item.version || 1) > Number(latestArtifacts.get(item.tipo).version || 1)) latestArtifacts.set(item.tipo, item);
-    }
-    const artifacts = [...latestArtifacts.values()];
-    const repository = artifacts.flatMap(item => item.archivos || []);
-    const name = proyecto.nombre || 'Proyecto generado';
-    const decisions = Object.fromEntries((plan?.etapas || []).filter(item => item.estado === 'aprobada').map(item => [item.etapa, item.propuesta]));
-    const stack = decisions.stack_tecnologico || {};
+  generar({ proyecto, requerimientos = [], diagramas = [], artefactos = [], plan = null, diseno = null, opciones = {} }) {
+    const requirements = requerimientos.filter(approved), rf = requirements.filter(item => item.tipo === 'RF');
+    const artifacts = latestApproved(artefactos.filter(item => item.tipo !== 'paquete_entrega'));
+    const repository = artifacts.flatMap(item => item.archivos || []).filter(file => safePath(file.ruta));
+    const facts = deliveryFacts(repository), diagrams = latestApproved(diagramas);
+    const decisions = Object.fromEntries((plan?.etapas || []).filter(item => item.estado === 'aprobada' && CODE_PHASE_DEFINITIONS[item.etapa]?.tipo === 'decision').map(item => [item.etapa, item.propuesta]));
     const flows = buildRoleFlows(rf, decisions);
-    const tutorials = buildTutorials(flows, name);
-    const warnings = [];
-    const unassigned = flows.find(flow => flow.pending);
-    if (unassigned) warnings.push(`${unassigned.steps.length} funciones no tienen un rol confirmado; se muestran por separado sin asignarlas a otros roles.`);
-    if (!rf.length) warnings.push('No hay requisitos funcionales aprobados: el manual de usuario está pendiente de completar.');
-    if (!latest.size) warnings.push('No hay diagramas aprobados y vigentes para esta versión.');
-    if (!artifacts.length) warnings.push('No hay artefactos de código aprobados: la guía no acredita una aplicación ejecutable.');
-    warnings.push('Las guías animadas explican los pasos documentados; no son evidencia de ejecución ni de pruebas funcionales.');
-    const existingLicense = repository.find(file => /(^|\/)licen[cs]e(?:\.[\w-]+)?$/i.test(file.ruta));
-    if (!existingLicense) warnings.push('Licencia pendiente de decisión del titular. No se concede una licencia de distribución automáticamente.');
-    const files = [];
-    const add = (ruta, contenido) => files.push({ ruta: `documentation/${ruta}`, contenido, lenguaje: ruta.endsWith('.md') ? 'markdown' : ruta.endsWith('.html') ? 'html' : 'text' });
-    const flow = renderRoleFlows(flows);
-    const requirementTable = `<table><thead><tr><th>Requisito</th><th>Función</th><th>Actores</th></tr></thead><tbody>${rf.map(item => `<tr><td>${escape(item.identificador)}</td><td>${escape(item.nombre)}</td><td>${escape(flows.filter(flow => flow.steps.some(step => step.id === String(item.identificador || item.id || '').toUpperCase())).map(flow => flow.role).join(', ') || 'Rol por confirmar')}</td></tr>`).join('')}</tbody></table>`;
-    const pages = [
-      { id: 'usuario', title: 'Manual de usuario', body: paragraph(`Guía de ${name}, derivada de los requisitos aprobados. Confirma permisos y datos de prueba antes de utilizar una función.`) + '<h2>Flujo de trabajo por roles</h2>' + flow + '<h2>Funcionalidades por rol</h2>' + requirementTable + rf.map(item => `<h3>${escape(item.identificador)} · ${escape(item.nombre)}</h3>${paragraph(item.descripcion)}${list([`Antes: ${item.precondiciones || 'Precondiciones no especificadas; confirmar con el responsable.'}`, `Resultado esperado: ${item.poscondiciones || 'Resultado no especificado; validar con el requisito aprobado.'}`])}`).join('') + '<h2>Guías animadas por rol</h2><div class="notice">Guías animadas del flujo documentado. No representan grabaciones de la aplicación ni certifican funcionalidades.</div><p>En I-CASE, abre Guías animadas para elegir un rol y reproducir su recorrido. Las guías se incorporan aquí al descargar el ZIP con guías.</p><div id="tutorial-videos"></div>' },
-      { id: 'desarrollador', title: 'Guía de desarrollador', body: paragraph('Trabaja en una rama de Git, revisa los contratos y conserva la trazabilidad con los requisitos aprobados.') + '<h2>Tecnologías aprobadas</h2>' + list(Object.entries(stack).filter(([, value]) => typeof value === 'string').map(([key, value]) => `${key}: ${value}`)) + '<h2>Archivos del repositorio</h2>' + list(repository.filter(file => /(?:package\.json|pom\.xml|openapi\.json|README\.md)$/.test(file.ruta)).map(file => file.ruta)) + '<h2>Contribuir</h2>' + paragraph('Consulta CONTRIBUTING.md. Ejecuta las pruebas indicadas en cada módulo antes de abrir una revisión. No incluyas secretos ni datos personales.') + '<h2>Licencia</h2>' + paragraph(existingLicense ? `Se conserva la licencia de ${existingLicense.ruta}; consulta repository/ para el texto original.` : 'Pendiente de decisión del titular. El paquete no asigna una licencia por su cuenta.') },
-      { id: 'mantenimiento', title: 'Manual de mantenimiento', body: '<h2>Operación y diagnóstico</h2>' + list(['Revisar disponibilidad, errores y capacidad de almacenamiento.', 'Consultar logs sin copiar tokens, contraseñas o información personal.', 'Comprobar la conexión de persistencia y los servicios definidos en ops/.env.', 'Registrar incidente, versión afectada, reproducción y resolución.']) + '<h2>Copias y recuperación</h2>' + paragraph(`Motor aprobado: ${stack.base_datos || 'no especificado'}. Programa copias de la base y de los volúmenes; verifica una restauración en un entorno separado antes de aceptar el respaldo. Define RPO y RTO con el responsable; no hay valores confirmados por defecto.`) + '<h2>Actualizar con revisión</h2>' + code('node tools/update.cjs --from RUTA_NUEVA') + paragraph('Este comando muestra una vista previa si la entrega incluye la herramienta. Revisa conflictos y respalda los datos antes de aplicar. No uses docker compose down -v sobre datos que deban conservarse.') + '<h2>Lista de verificación</h2>' + list(['Guardar versión y respaldo antes del cambio.', 'Revisar cambios de esquema y compatibilidad.', 'Probar arranque, permisos y funciones críticas.', 'Documentar plan de reversión y responsable.']) },
-      { id: 'instalacion', title: 'Instalación y despliegue', body: '<h2>Requisitos</h2>' + paragraph(`Consulta los README originales para las versiones y comandos efectivos. Backend: ${stack.backend || 'por confirmar'}; frontend: ${stack.frontend || 'por confirmar'}; base de datos: ${stack.base_datos || 'por confirmar'}.`) + '<h2>Arranque de la entrega</h2>' + code('node tools/preview-local.cjs start\nnode tools/preview-local.cjs stop') + paragraph('Ejecuta desde la raíz de la entrega si contiene tools/preview-local.cjs. Docker debe estar disponible. Conserva ops/.env; nunca lo publiques.') + '<h2>Consultar este sitio</h2>' + code('cd documentation\npython -m pip install -r requirements.txt\npython -m mkdocs serve') + '<h2>Construir HTML y PDF</h2>' + code('python -m mkdocs build --strict\npython tools/export_pdf.py') + paragraph('El PDF se guarda en site/documentacion.pdf. Instala Chromium con python -m playwright install chromium la primera vez. También puedes usar Imprimir / Guardar como PDF en la vista completa.') + '<h2>GitHub Pages opcional</h2>' + paragraph(opciones.githubActions === true ? 'Incluido .github/workflows/documentation.yml en el ZIP, fuera de documentation/. Activa Pages → Source: GitHub Actions y ejecuta manualmente el workflow. Solo publica si seleccionas publicar=true. No se despliega al generar o descargar.' : 'No se incluye workflow de despliegue. Puedes regenerar el paquete marcando la opción GitHub Actions.') },
-      { id: 'tecnica', title: 'Referencia técnica y diagramas', body: '<h2>Requisitos no funcionales</h2>' + list(rnf.map(item => `${item.identificador} · ${item.nombre}: ${item.metrica_medible || item.descripcion || 'Métrica pendiente'}`)) + '<h2>Diagramas aprobados</h2>' + [...latest.values()].map((diagram, i) => {
-        const source = diagram.codigo_plantuml || diagram.codigo_mermaid || '';
-        const extension = diagram.codigo_plantuml ? 'puml' : 'mmd';
-        add(`docs/assets/diagram-${i + 1}.${extension}`, source);
-        return `<h3>${escape(diagram.titulo || diagram.tipo)} · v${escape(diagram.version || 1)}</h3>${paragraph(diagram.descripcion || '')}<div data-diagram-index="${i}"></div><p>Fuente editable: assets/diagram-${i + 1}.${extension}. Si no se muestra la imagen, renderiza la fuente con PlantUML o Mermaid.</p><details><summary>Ver fuente editable</summary>${code(source)}</details>`;
-      }).join('') + '<h2>Versiones de los artefactos</h2>' + list(artifacts.map(item => `${item.tipo}: v${item.version}; verificación ${item.verificacion?.estado || 'sin evidencia'}`)) + '<h2>Alcance</h2>' + paragraph('La documentación describe insumos aprobados; una función especificada no se considera implementada hasta revisar el código y las pruebas de la entrega. Consulta los informes originales incluidos en repository/.') }
+    const approvedDesign = diseno?.aprobado === true || ['mockups_aprobados', 'diseno_aprobado', 'finalizado'].includes(proyecto.estado_fase);
+    const screens = (diseno?.mockups || []).filter(screen => (screen.estado === 'aprobado' || approvedDesign) && screen.preview_code && screen.estado_calidad !== 'invalido');
+    const name = md(proyecto.nombre || 'Proyecto generado');
+    const warnings = [...facts.warnings];
+    if (!rf.length) warnings.push('No hay requisitos funcionales aprobados.');
+    if (!screens.length) warnings.push('No hay mockups aprobados disponibles para capturas.');
+    if (flows.some(flow => flow.pending)) warnings.push('Hay funciones cuyo rol debe confirmarse. No se asignan a otro rol.');
+    const files = [], add = (ruta, contenido) => files.push({ ruta, contenido: String(contenido), lenguaje: ruta.endsWith('.md') ? 'markdown' : 'text' });
+    const addDoc = (ruta, contenido) => add(`documentation/${ruta}`, contenido);
+    const existingLicense = repository.find(file => /(^|\/)licen[cs]e(?:\.md|\.txt)?$/i.test(file.ruta));
+    const license = opciones.licencia || (existingLicense ? 'conservar' : 'pendiente');
+    if (!['pendiente', 'conservar', 'MIT', 'Apache-2.0', 'propietaria'].includes(license)) throw new Error('Licencia no válida.');
+    if (license === 'conservar' && !existingLicense) throw new Error('No existe una licencia para conservar.');
+    const holder = md(opciones.titular || proyecto.nombre || 'Titular del proyecto');
+    const year = new Date().getFullYear();
+    let licenseText = existingLicense?.contenido || '# Decisión de licencia pendiente\n\nSelecciona una licencia y el titular en I-CASE antes de distribuir la entrega. Este documento no concede permisos.\n';
+    if (license === 'MIT') licenseText = template('LICENSE-MIT.txt').replaceAll('{{YEAR}}', year).replaceAll('{{HOLDER}}', holder);
+    if (license === 'Apache-2.0') licenseText = `Copyright ${year} ${holder}\n\n` + template('LICENSE-APACHE.txt');
+    if (license === 'propietaria') licenseText = `Copyright ${year} ${holder}. Todos los derechos reservados.\n\nNo se permite usar, copiar, modificar ni distribuir este software sin autorización escrita del titular, salvo los derechos establecidos por la legislación aplicable.\n`;
+    if (license === 'pendiente') warnings.push('Selecciona la licencia y el titular antes de distribuir el proyecto.');
+
+    const screenName = screen => md(screen.nombre_visible || screen.nombre_pantalla);
+    const rolesMarkdown = flows.map(flow => `## ${md(flow.role)}\n\n${flow.pending ? '> Rol pendiente de confirmar.\n\n' : ''}${flow.steps.map((step, i) => {
+      const requirement = rf.find(item => String(item.identificador).toUpperCase() === step.id);
+      const related = screens.filter(screen => (screen.rf_trazabilidad || []).includes(step.id) && (!(screen.roles || []).length || screen.roles.some(role => String(role).toLowerCase() === flow.role.toLowerCase())));
+      const criteria = requirement?.criterios_aceptacion || requirement?.criteriosAceptacion || [];
+      const fields = [...new Set(related.flatMap(screen => (screen.campos_formulario || []).map(field => `${field.nombre}${field.requerido ? ' (obligatorio)' : ''}${field.validacion ? ': ' + field.validacion : ''}`)))];
+      const actions = [...new Set(related.flatMap(screen => screen.acciones_principales || []))];
+      return `### ${i + 1}. ${md(step.title)} (${md(step.id)})\n\n${md(step.description)}\n\n1. **Antes:** ${md(step.before)}\n2. **Abre la pantalla:** ${related.length ? related.map(screenName).join(' o ') + '.' : 'Pantalla asociada pendiente de confirmar; consulta el requisito aprobado.'}\n3. **Prepara los datos:** ${fields.length ? fields.map(md).join('; ') + '.' : 'No hay campos documentados en estas pantallas.'}\n4. **Ejecuta la acción:** ${actions.length ? actions.map(md).join('; ') + '.' : 'Consulta los controles aprobados de la pantalla; no hay acciones descritas.'}\n5. **Comprueba:** ${md(step.outcome)}\n\n**Criterios de aceptación aprobados**\n\n${bullets(Array.isArray(criteria) ? criteria.map(criterionText) : [String(criteria)])}\n\n${related.map(screen => `![${screenName(screen)}](assets/capturas/${screens.indexOf(screen) + 1}.png)`).join('\n\n')}\n`;
+    }).join('\n')}`).join('\n');
+    const commands = facts.commands.map(command => `${command.run}  # ${command.command}`).join('\n');
+    const compose = facts.services.map(service => [service.name, service.source, service.ports.map(port => typeof port === 'object' ? JSON.stringify(port) : port).join(', ') || 'Internos', service.health.join(' ') || 'No declarado']);
+    const env = table(['Variable', 'Archivo', 'Configuración'], facts.variables.map(variable => [variable.name, variable.source, variable.value]));
+    const endpoints = table(['Método', 'Ruta', 'Descripción'], facts.endpoints.map(endpoint => [endpoint.method, endpoint.route, endpoint.description]));
+    const tree = [...new Set(facts.paths.map(file => file.split('/').slice(0, 2).join('/')))].sort().join('\n');
+    const modules = facts.packages.flatMap(pkg => pkg.dependencies);
+    const diagnostics = [
+      ...facts.services.map(service => `Si ${service.name} no está saludable, revisa el healthcheck declarado en ${service.source}: ${service.health.join(' ') || 'no declarado'}. Comprueba dependencias: ${service.depends.join(', ') || 'ninguna declarada'}.`),
+      ...(modules.includes('mongoose') ? ['MongoDB: revisa conectividad, autenticación y disponibilidad de la réplica si se utilizan transacciones.'] : []),
+      ...(modules.includes('redis') ? ['Redis: comprueba su conexión y el prefijo de las claves; no vacíes cachés compartidas sin revisar su alcance.'] : []),
+      ...(modules.includes('nodemailer') ? ['Correo: revisa host y puerto SMTP, credenciales y conectividad; no incluyas contraseñas en los registros del incidente.'] : [])
     ];
-    const repositoryDocs = repository.filter(file => /\.(md|markdown)$/i.test(file.ruta) || /(?:^|\/)licen[cs]e$/i.test(file.ruta));
-    const renderedRepository = renderRepositoryDocuments(repositoryDocs);
-    pages[1].body += '<h2>Documentación del repositorio</h2>' + paragraph('Los documentos se muestran con su formato Markdown. También puedes consultar la fuente original de cada archivo.') + renderedRepository;
-    add('docs/repositorio.md', '<h1>Documentación del repositorio</h1>' + paragraph('Documentos renderizados de los artefactos aprobados. Las fuentes originales se conservan en repository/.') + renderedRepository);
-    const contract = repository.find(file => /(?:^|\/)openapi\.json$/.test(file.ruta));
-    if (contract) {
-      try {
-        const api = JSON.parse(contract.contenido);
-        pages[4].body += '<h2>Contrato API</h2>' + list(Object.entries(api.paths || {}).flatMap(([route, operations]) => Object.entries(operations).filter(([method]) => ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'].includes(method)).map(([method, operation]) => `${method.toUpperCase()} ${route}: ${operation.summary || operation.operationId || 'Sin descripción'}`)));
-      } catch { warnings.push('El contrato OpenAPI no es JSON válido; revisa el archivo original.'); }
-    }
-    const render = page => `<section class="manual-section" id="${page.id}"><h1>${escape(page.title)}</h1>${page.body}</section>`;
-    const renderDocument = (selected, includeWarnings = true) => `<!doctype html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(name)} · Documentación</title><style>${CSS}</style></head><body${selected.length === 1 ? ' class="single-manual"' : ''}><header class="doc-header"><p class="eyebrow">DOCUMENTACIÓN DEL PROYECTO</p><h1>${escape(name)}</h1>${paragraph(proyecto.descripcion || '')}${selected.length > 1 ? `<nav class="manual-nav">${selected.map(page => `<a href="#${page.id}">${escape(page.title)}</a>`).join('')}</nav>` : ''}</header><main>${includeWarnings ? `<div class="notice">${list(warnings)}</div>` : ''}${selected.map(render).join('')}</main></body></html>`;
-    const documentHtml = renderDocument(pages);
-    add('docs/index.md', `<h1>${escape(name)}</h1>${paragraph(proyecto.descripcion || '')}${list(warnings)}<h2>Cinco tipos de documentación</h2>${list(pages.map(page => page.title))}<p><a href="manual-completo.html">Abrir manual completo para imprimir o guardar como PDF</a></p>`);
-    pages.forEach(page => add(`docs/${page.id}.md`, `<h1>${escape(page.title)}</h1>\n\n${page.body}\n`));
-    add('docs/manual-completo.html', documentHtml);
-    add('docs/assets/documentation.css', CSS);
-    add('docs/assets/flujo.svg', renderFlowSvg(flows));
-    add('mkdocs.yml', `site_name: ${JSON.stringify(name)}\nsite_description: "Documentación del proyecto generado por I-CASE"\nuse_directory_urls: false\ntheme:\n  name: mkdocs\n  locale: es\nnav:\n  - Inicio: index.md\n${pages.map(page => `  - ${JSON.stringify(page.title)}: ${page.id}.md`).join('\n')}\n  - Documentos del repositorio: repositorio.md\n  - Manual completo y PDF: manual-completo.html\nextra_css:\n  - assets/documentation.css\nmarkdown_extensions:\n  - tables\n  - fenced_code\n`);
-    add('requirements.txt', 'mkdocs==1.6.1\nplaywright==1.65.0\n');
-    add('tools/export_pdf.py', require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/documentation/export_pdf.py'), 'utf8'));
-    add('README.md', `# Documentación de ${name}\n\nCinco manuales generados con MkDocs a partir de los insumos aprobados.\n\nDesde esta carpeta:\n\n\`\`\`sh\npython -m pip install -r requirements.txt\npython -m playwright install chromium\npython -m mkdocs serve\n\`\`\`\n\nHTML: \`python -m mkdocs build --strict\`. PDF: \`python tools/export_pdf.py\` (construye el sitio si hace falta).\n\nLa vista completa también permite imprimir como PDF. La infografía de recorridos separados por rol está en docs/assets/flujo.svg. Las guías animadas se agregan desde la aplicación al descargar el ZIP con videos.\n\n${warnings.map(item => '- ' + item).join('\n')}\n`);
-    add('CONTRIBUTING.md', '# Contribuir\n\n1. Crea una rama desde la rama acordada por el equipo.\n2. Vincula cambios con requisitos y decisiones aprobadas.\n3. Ejecuta las pruebas de cada módulo y `python -m mkdocs build --strict` desde documentation/.\n4. Revisa HTML, diagramas, videos y PDF.\n5. Abre una revisión y registra incompatibilidades.\n\nNunca agregues secretos o datos reales a ejemplos, capturas o videos.\n');
-    add('LICENSE.md', existingLicense ? existingLicense.contenido : '# Licencia pendiente\n\nEl titular debe escoger y aprobar una licencia antes de distribuir el proyecto. Este archivo no concede permisos de distribución ni sustituye esa decisión.\n');
-    for (const file of repositoryDocs) {
-      if (file.ruta.split(/[\\/]/).some(part => part === '..') || /^[\\/]|^[a-z]:/i.test(file.ruta)) continue;
-      add(`repository/${file.ruta}`, file.contenido);
-    }
-    if (opciones.githubActions === true) files.push({ ruta: '.github/workflows/documentation.yml', lenguaje: 'yaml', contenido: require('node:fs').readFileSync(require('node:path').join(__dirname, '../templates/documentation/workflow.yml'), 'utf8') });
-    const manifest = { version: 2, flujos: flows.map(flow => ({ rol: flow.role, requisitos: flow.steps.map(step => step.id) })), videos: tutorials.map(({ id, role, title }) => ({ id, role, title })), proyecto: name, categorias: pages.map(({ id, title }) => ({ id, title })), requisitos: rf.map(item => item.identificador), diagramas: [...latest.values()].map(item => ({ tipo: item.tipo, version: item.version })), artefactos: artifacts.map(item => ({ tipo: item.tipo, version: item.version })), github_actions: opciones.githubActions === true, advertencias: warnings, archivos: files.map(file => ({ ruta: file.ruta, sha256: crypto.createHash('sha256').update(file.contenido).digest('hex') })) };
-    add('documentation-manifest.json', JSON.stringify(manifest, null, 2));
-    return { archivos: files, html: documentHtml, paginas: pages.map(page => ({ id: page.id, title: page.title, html: renderDocument([page], false) })), categorias: manifest.categorias, flujos: flows, advertencias: warnings, diagramas: [...latest.values()].map(item => ({ codigo_plantuml: item.codigo_plantuml || '', codigo_mermaid: item.codigo_mermaid || '', titulo: item.titulo || item.tipo })), videos: tutorials };
+    const pages = [
+      { id: 'usuario', title: titles.usuario, markdown: `# ${titles.usuario}\n\nProyecto: **${name}**. Recorridos derivados de requisitos y pantallas aprobadas. Las funciones documentadas no acreditan ejecución.\n\n![Flujo principal por rol](assets/flujo.svg)\n\n${rolesMarkdown}\n\n## Glosario\n\n${bullets(['Rol: actor al que se asigna una función en los insumos aprobados.', 'Requisito funcional (RF): comportamiento acordado del proyecto.', 'Criterio de aceptación: condición aprobada para comprobar el resultado.', 'Mockup: diseño aprobado de una pantalla; sus capturas no prueban la aplicación.'])}\n\n## Preguntas frecuentes\n\n### ¿Qué funciones puedo utilizar?\n\nConsulta el recorrido de tu rol y los permisos aprobados.\n\n### ¿Qué hago si una pantalla no coincide?\n\nRegistra versión, requisito, pasos y resultado observado; comunica la incidencia al responsable.\n\n### ¿Cómo interpreto un video?\n\nLa ficha indica si procede de la aplicación ejecutándose o de un recorrido de mockups aprobados.\n` },
+      { id: 'desarrollador', title: titles.desarrollador, markdown: `# ${titles.desarrollador}\n\n## Estructura del repositorio\n${fence(tree, 'text')}\n## Comandos declarados\n${fence(commands || '# Sin scripts declarados')}\n## Modelo de datos\n\n![Modelo simplificado](assets/datos.svg)\n\n${table(['Entidad', 'Campos', 'Fuente'], facts.models.map(model => [model.name, model.fields.join(', '), model.source]))}\n## API desde OpenAPI\n\n${endpoints}\n## Documentación original del repositorio\n\n${repository.filter(file => /\.md$/i.test(file.ruta)).map(file => `### ${md(file.ruta)}\n\n${file.contenido}\n`).join('\n')}\n## Licencia\n\nDecisión: **${license}**. Consulta LICENSE.md en la raíz de la entrega.\n` },
+      { id: 'mantenimiento', title: titles.mantenimiento, markdown: `# ${titles.mantenimiento}\n\n## Servicios y salud\n\n${table(['Servicio', 'Compose', 'Puertos', 'Healthcheck'], compose)}\n## Configuración documentada\n\n${env}\n## Diagnóstico de esta entrega\n\n${bullets(diagnostics)}\n## Semillas y datos de demostración\n\n${bullets(facts.seeds)}\n${fence(facts.commands.filter(command => /seed|demo|migrat/.test(command.name)).map(command => command.run).join('\n') || '# No hay comandos de semillas declarados')}\nLas cuentas de demostración y sus valores deben consultarse en los archivos de semillas y en el entorno local de la entrega. No se publican contraseñas en los manuales ni en capturas.\n\n## Respaldo y recuperación\n\nIdentifica los volúmenes de cada servicio antes de actualizar. Define RPO, RTO y ubicación de las copias con el responsable. Verifica la restauración en un entorno separado.\n\n${bullets(facts.services.flatMap(service => service.volumes.map(volume => `${service.name}: ${typeof volume === 'object' ? JSON.stringify(volume) : volume}`)))}\n\n## Actualización e incidentes\n\n1. Registra versión y conserva un respaldo verificado.\n2. Revisa cambios de esquema y compatibilidad.\n3. Ejecuta los comandos de pruebas declarados en la guía de desarrollador.\n4. Documenta resultado y plan de reversión. No elimines volúmenes que contienen datos necesarios.\n` },
+      { id: 'instalacion', title: titles.instalacion, markdown: `# ${titles.instalacion}\n\n## Servicios y puertos reales de la entrega\n\n${table(['Servicio', 'Archivo', 'Puertos', 'Healthcheck'], compose)}\n## Variables de los ejemplos de entorno\n\n${env}\n## Arranque\n${fence(facts.paths.includes('tools/preview-local.cjs') ? 'node tools/preview-local.cjs start\nnode tools/preview-local.cjs stop' : '# Consulta los comandos declarados por cada módulo\n' + commands)}\n${facts.services.length ? 'Docker y Docker Compose son necesarios para los servicios declarados. Utiliza los archivos .env.example para preparar la configuración local.' : 'No hay Compose aprobado en esta versión.'}\n\n## Construir este sitio y su PDF\n${fence('cd documentation\npython -m pip install -r requirements.txt\npython -m playwright install chromium\npython -m mkdocs serve\npython tools/export_pdf.py')}\nEl PDF se imprime desde site/print_page.html, construido por MkDocs a partir de estas mismas páginas.\n\n## Publicación opcional\n\n${opciones.githubActions ? 'El workflow valida y construye al cambiar documentation/** y también permite ejecución manual. Solo publica al elegir publicar en la ejecución manual o habilitar la variable de repositorio DOCUMENTATION_PUBLISH=true.' : 'Activa GitHub Actions al generar para incluir el workflow; generar y descargar no publica.'}\n` },
+      { id: 'tecnica', title: titles.tecnica, markdown: `# ${titles.tecnica}\n\n## Arquitectura\n\n![Arquitectura de la entrega](assets/arquitectura.svg)\n\n## Módulos y pantallas\n\n![Mapa de módulos](assets/modulos.svg)\n\n## Requisitos no funcionales\n\n${bullets(requirements.filter(item => item.tipo === 'RNF').map(item => `${item.identificador}: ${item.nombre}. ${item.metrica_medible || item.descripcion || ''}`))}\n\n## Diagramas aprobados\n\n${diagrams.map((diagram, index) => {
+        const mermaid = diagram.codigo_mermaid, ext = mermaid ? 'mmd' : 'puml';
+        addDoc(`docs/assets/diagram-${index + 1}.${ext}`, mermaid || diagram.codigo_plantuml || '');
+        return `### ${md(diagram.titulo || diagram.tipo)} · v${diagram.version || 1}\n\n![${md(diagram.titulo || diagram.tipo)}](assets/diagram-${index + 1}.svg)\n\n[Fuente editable](assets/diagram-${index + 1}.${ext})\n\n${mermaid ? fence(mermaid, 'mermaid') : ''}`;
+      }).join('\n')}\n\n## Versiones de origen\n\n${table(['Artefacto', 'Versión', 'Verificación'], artifacts.map(item => [item.tipo, item.version, item.verificacion?.estado || 'Sin evidencia']))}\n` }
+    ];
+    for (const page of pages) addDoc(`docs/${page.id}.md`, page.markdown);
+    addDoc('docs/index.md', `# ${name}\n\n${md(proyecto.descripcion || '')}\n\n## Manuales\n\n${pages.map(page => `- [${page.title}](${page.id}.md)`).join('\n')}\n\n## Estado de la documentación\n\n${bullets(warnings.length ? warnings : ['Fuentes aprobadas procesadas. Revisa las evidencias de ejecución antes de entregar.'])}\n`);
+    for (const image of buildInfographics(flows, screens, facts)) add(image.ruta, image.contenido);
+    addDoc('mkdocs.yml', `site_name: ${JSON.stringify(name)}\nuse_directory_urls: false\ntheme:\n  name: material\n  language: es\n  font: false\n  features: [navigation.tabs, navigation.top, search.suggest, search.highlight, content.code.copy, content.tabs.link]\n  palette:\n    - scheme: default\n      primary: deep purple\n      toggle: {icon: material/weather-night, name: Modo oscuro}\n    - scheme: slate\n      primary: deep purple\n      toggle: {icon: material/weather-sunny, name: Modo claro}\nplugins:\n  - search\n  - print-site:\n      add_to_navigation: false\n      add_cover_page: false\n      toc_title: Índice de contenidos\n      print_page_title: Documento completo\nmarkdown_extensions:\n  - tables\n  - admonition\n  - attr_list\n  - pymdownx.tabbed:\n      alternate_style: true\n  - pymdownx.superfences:\n      custom_fences:\n        - name: mermaid\n          class: mermaid\n          format: !!python/name:pymdownx.superfences.fence_code_format\nnav:\n  - Inicio: index.md\n${pages.map(page => `  - ${JSON.stringify(page.title)}: ${page.id}.md`).join('\n')}\nextra_css:\n  - assets/documentation.css\n`);
+    addDoc('docs/assets/documentation.css', template('documentation.css') + '\n@page { @bottom-right { content: none; } @bottom-left { content: none; } }\n@media print { .md-header,.md-sidebar,.md-footer,.md-tabs {display:none!important} .md-main__inner {margin:0} .md-content {margin:0} img,svg {max-width:100%;max-height:240mm;object-fit:contain} pre,td {overflow-wrap:anywhere;white-space:pre-wrap} h1,h2,h3 {break-after:avoid} tr,figure {break-inside:avoid} }\n');
+    addDoc('requirements.txt', template('requirements.txt'));
+    addDoc('tools/export_pdf.py', template('export_pdf.py'));
+    addDoc('tools/check_links.py', template('check_links.py'));
+    if (opciones.githubActions) add('.github/workflows/documentation.yml', template('workflow.yml'));
+    const original = filename => repository.find(file => file.ruta === filename)?.contenido || '';
+    const append = (filename, content) => add(filename, original(filename) ? original(filename) + '\n\n---\n\n' + content : content);
+    append('README.md', `# ${name}: entrega documentada\n\n[Manuales](documentation/docs/index.md) · [Arquitectura](ARCHITECTURE.md) · [Contribuir](CONTRIBUTING.md)\n\n## Ejecutar\n${fence(commands || '# Comandos pendientes de declarar')}\n## Estructura\n${fence(tree, 'text')}`);
+    append('CONTRIBUTING.md', '# Contribuir\n\n1. Crea una rama y vincula cada cambio con su requisito aprobado.\n2. No agregues datos personales, secretos ni archivos .env.\n3. Ejecuta los comandos de pruebas declarados:\n' + fence(facts.commands.filter(command => /test|lint|check/.test(command.name)).map(command => command.run).join('\n') || '# No hay scripts de pruebas declarados') + '\n4. Valida documentación con `python tools/check_links.py` y `python -m mkdocs build --strict` desde documentation/.\n5. Solicita revisión antes de integrar.\n');
+    append('ARCHITECTURE.md', `# Arquitectura de ${name}\n\n![Servicios](documentation/docs/assets/arquitectura.svg)\n\n${table(['Servicio', 'Fuente', 'Puertos', 'Salud'], compose)}\n## Modelo de datos\n\n${table(['Entidad', 'Campos'], facts.models.map(model => [model.name, model.fields.join(', ')]))}\n## Endpoints desde OpenAPI\n\n${endpoints}`);
+    append('CHANGELOG.md', '# Historial de la entrega\n\n## Documentación generada\n\n' + bullets(artifacts.map(item => `${item.tipo}: versión ${item.version}`)) + '\n\nLas versiones de origen se registran en documentation/documentation-manifest.json. Este historial no inventa cambios de implementación.\n');
+    add('LICENSE.md', licenseText);
+    if (existingLicense && /^licen[cs]e(?:\.txt)?$/i.test(existingLicense.ruta)) add(existingLicense.ruta, licenseText);
+    const manifest = { version: 3, proyecto: name, licencia: license, titular: holder, categorias: pages.map(({ id, title }) => ({ id, title })), fuentes: { requisitos: requirements.map(item => item.identificador), artefactos: artifacts.map(item => ({ tipo: item.tipo, version: item.version })), pantallas: screens.map(screen => screen.pantalla_id || screen.nombre_pantalla), diagramas: diagrams.map(item => ({ tipo: item.tipo, version: item.version })) }, advertencias: warnings };
+    manifest.archivos = files.map(file => ({ ruta: file.ruta, sha256: crypto.createHash('sha256').update(file.contenido).digest('hex') }));
+    addDoc('documentation-manifest.json', JSON.stringify(manifest, null, 2));
+    const parser = new MarkdownIt({ html: false, linkify: true });
+    const css = template('documentation.css');
+    const render = page => `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style></head><body><main class="markdown-body">${parser.render(page.markdown)}</main></body></html>`;
+    return { archivos: files, paginas: pages.map(page => ({ ...page, html: render(page) })), categorias: manifest.categorias, flujos: flows, advertencias: warnings, videos: buildTutorials(flows, name).filter(video => video.roleId !== 'mantenimiento-documentacion'), diagramas: diagrams, pantallas: screens, hechos: facts, manifiesto: manifest, informe: { proyecto, requerimientos: requirements, modelo: diseno?.modelo_datos || null, decisiones: decisions }, proyecto: { nombre: name, descripcion: proyecto.descripcion || '' } };
   }
 }
 module.exports = ProjectDocumentationGenerator;

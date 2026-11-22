@@ -21,7 +21,9 @@
     "verify:nm": "node scripts/verify-associations-runtime.js",
     "audit:generated": "node scripts/audit-generated-backend.js",
     "test:e2e:real": "env RUN_REAL_AI_E2E=true jest tests/real-model-flow.e2e.test.js --runInBand",
-    "proyectos:asignar": "node scripts/asignar-proyectos-huerfanos.js"
+    "proyectos:asignar": "node scripts/asignar-proyectos-huerfanos.js",
+    "docs:setup": "node scripts/setup-documentation.cjs",
+    "docs:verify": "node scripts/verify-documentation-ui.cjs"
   },
   "keywords": [
     "icase",
@@ -37,12 +39,17 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "fflate": "0.8.3",
     "jsonwebtoken": "^9.0.3",
     "markdown-it": "15.0.3",
+    "mermaid": "12.3.0",
     "mongoose": "^8.9.5",
     "multer": "^2.4.0",
     "parse5": "7.3.0",
-    "pdf-parse": "^2.4.5"
+    "pdf-parse": "^2.4.5",
+    "playwright": "1.65.0",
+    "tailwindcss": "4.3.5",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",

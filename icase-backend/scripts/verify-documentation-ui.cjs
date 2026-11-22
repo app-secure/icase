@@ -1,87 +1,101 @@
-// Prueba de interfaz con datos sintéticos. No modifica proyectos ni usa credenciales.
-const fs = require('node:fs');
+// Auditoría de documentación: fuente real en modo lectura o caso amplio de 48 pantallas.
+const fs = require('node:fs/promises');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createRequire } = require('node:module');
-const { chromium } = require('@playwright/test');
-const { unzipSync } = createRequire(path.resolve(__dirname, '../../icase-frontend/package.json'))('fflate');
+process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.resolve(__dirname, '../.icase-browsers');
+const { chromium } = require('playwright');
 const Generator = require('../src/infrastructure/services/ProjectDocumentationGenerator');
-
+const Jobs = require('../src/infrastructure/services/DocumentationJobs');
+const arg = name => { const index = process.argv.indexOf(name); return index < 0 ? null : process.argv[index + 1]; };
+async function source() {
+  const projectId = arg('--project');
+  if (projectId) {
+    require('dotenv').config({ quiet: true }); const mongoose = require('mongoose');
+    await mongoose.connect(process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/icase_db');
+    const repo = name => new (require(`../src/interface-adapters/repositories/Mongo${name}Repository`))();
+    try {
+      const [proyecto, requerimientos, diagramas, plan, artefactos, diseno] = await Promise.all([
+        repo('Proyecto').obtenerPorId(projectId), repo('Requerimiento').listarPorProyecto(projectId), repo('Diagrama').listarPorProyecto(projectId), repo('PlanCodificacion').obtenerPorProyecto(projectId), repo('ArtefactoGenerado').listarPorProyecto(projectId), repo('Diseno').obtenerPorProyecto(projectId)
+      ]);
+      if (!proyecto) throw new Error('Proyecto no encontrado.');
+      return { proyecto, requerimientos, diagramas, plan, artefactos, diseno, opciones: { githubActions: true } };
+    } finally { await mongoose.disconnect(); }
+  }
+  const roles = ['Cliente', 'Cocinero', 'Administrador'];
+  const requerimientos = roles.map((rol, index) => ({ tipo: 'RF', identificador: `RF-0${index + 1}`, nombre: ['Reservar mesa', 'Preparar pedido', 'Gestionar usuarios'][index], descripcion: `Función aprobada para ${rol}.`, aprobado: true, actores: [rol], criterios_aceptacion: ['El resultado se muestra en la pantalla.'] }));
+  return {
+    proyecto: { nombre: 'Restaurante · auditoría de 48 pantallas', descripcion: 'Caso amplio de prueba, distinto de los proyectos del usuario.', estado_fase: 'mockups_aprobados' }, requerimientos,
+    diseno: { mockups: Array.from({ length: 48 }, (_, index) => ({ pantalla_id: `pantalla-${index + 1}`, nombre_pantalla: `Pantalla ${index + 1}`, nombre_visible: `${roles[index % 3]} · Pantalla ${index + 1}`, modulo: ['Reservas', 'Cocina', 'Administración'][index % 3], roles: [roles[index % 3]], rf_trazabilidad: [`RF-0${index % 3 + 1}`], estado_calidad: 'valido', preview_code: `<main class="bg-white rounded-xl p-8 shadow-lg"><span class="text-purple-700 font-bold">${roles[index % 3]}</span><h1 class="text-3xl font-bold mt-4">Pantalla ${index + 1}</h1><p class="text-slate-600 my-4">Recorrido aprobado para ${roles[index % 3]}.</p><label>Descripción <input class="border rounded p-2" placeholder="Escribe los datos" /></label><button class="ml-4">Confirmar</button><table class="mt-8"><tr><th>Referencia</th><th>Estado</th></tr><tr><td>RF-0${index % 3 + 1}</td><td>Registrado</td></tr></table></main>` })) },
+    diagramas: [{ tipo: 'arquitectura', version: 1, aprobado: true, codigo_mermaid: 'flowchart LR\n  Web --> API\n  API --> DB' }],
+    artefactos: [{ tipo: 'codigo_backend', version: 1, aprobado: true, archivos: [
+      { ruta: 'backend/README.md', contenido: '# Arranque del backend\n\n**Instala** las dependencias.\n\n```sh\nnpm install\n```\n' },
+      { ruta: 'backend/package.json', contenido: JSON.stringify({ scripts: { start: 'node app.js', test: 'node --test' } }) },
+      { ruta: 'ops/docker-compose.yml', contenido: 'services:\n  api:\n    ports: ["3000:3000"]\n    healthcheck:\n      test: [CMD, curl, http://localhost:3000/health]\n  database:\n    image: mongo:8\n' },
+      { ruta: 'backend/openapi.json', contenido: JSON.stringify({ paths: { '/reservas': { get: { summary: 'Consultar reservas' } } }, components: { schemas: { Reserva: { properties: { fecha: { type: 'string' }, mesa: { type: 'string' } } } } } }) }
+    ] }], opciones: { githubActions: true, licencia: 'MIT', titular: 'Equipo de pruebas' }
+  };
+}
 async function main() {
-  if (!process.argv[2]) throw new Error('Indica la carpeta de evidencias.');
-  const output = path.resolve(process.argv[2]); fs.mkdirSync(output, { recursive: true });
-  const url = process.env.DOCS_TEST_URL || 'http://127.0.0.1:5180';
-  const bundle = new Generator().generar({ proyecto: { nombre: 'Gestión de Restaurante', descripcion: 'Reservas, preparación y atención, con recorridos específicos para cada responsable.' }, requerimientos: [
-    { tipo: 'RF', aprobado: true, identificador: 'RF-01', nombre: 'Reservar una mesa', descripcion: 'Selecciona fecha, horario y número de personas. Revisa los datos antes de confirmar la reserva.', actores: ['Cliente'], precondiciones: 'Selecciona un horario con mesas disponibles.', poscondiciones: 'Se registra la reserva y se muestra su referencia.' },
-    { tipo: 'RF', aprobado: true, identificador: 'RF-02', nombre: 'Preparar los pedidos asignados', descripcion: 'Consulta los pedidos pendientes de cocina y actualiza su estado al terminar la preparación.', actores: ['Cocinero'], precondiciones: 'Existe un pedido pendiente asignado a cocina.', poscondiciones: 'El pedido queda listo para ser entregado.' },
-    { tipo: 'RF', aprobado: true, identificador: 'RF-03', nombre: 'Administrar usuarios y permisos', descripcion: 'Asigna los roles aprobados para cada usuario del equipo.', actores: ['Administrador'], precondiciones: 'La cuenta tiene permiso de administración.', poscondiciones: 'Los permisos del usuario quedan actualizados.' }
-  ], artefactos: [{ tipo: 'codigo_backend', version: 1, aprobado: true, archivos: [{ ruta: 'backend/README.md', contenido: '# Iniciar el proyecto\n\n**Requisitos**: Node.js y la base de datos configurada.\n\n1. Instala las dependencias.\n2. Configura el entorno.\n\n```sh\nnpm install\nnpm start\n```\n\n| Servicio | Uso |\n| --- | --- |\n| API | Funciones del proyecto |\n' }] }], opciones: { githubActions: true } });
-  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+  const output = path.resolve(arg('--output') || process.argv[2] || 'verification-results/documentation');
+  await fs.mkdir(output, { recursive: true });
+  const input = await source(), bundle = new Generator().generar(input);
+  const jobs = new Jobs({ root: path.join(output, 'versiones') });
+  const previous = process.argv.includes('--reuse') ? (await jobs.list('auditoria')).find(item => item.estado === 'lista') : null;
+  const job = previous || await jobs.start('auditoria', bundle, { videos: process.argv.includes('--videos') }); await jobs.queue;
+  const state = await jobs.status('auditoria', job.id); assert.equal(state.estado, 'lista', state.error);
+  const base = jobs.dir('auditoria', job.id), packageRoot = path.join(base, 'package');
+  assert.equal(state.capturas.length, bundle.pantallas.length);
+  const manifest = JSON.parse(await fs.readFile(path.join(packageRoot, 'documentation/documentation-manifest.json'), 'utf8'));
+  for (const entry of manifest.archivos) assert.equal(crypto.createHash('sha256').update(await fs.readFile(path.join(packageRoot, entry.ruta))).digest('hex'), entry.sha256, entry.ruta);
+  const pdf = await fs.readFile(path.join(packageRoot, 'documentation/site/documentacion.pdf')); assert.equal(pdf.subarray(0, 4).toString(), '%PDF');
+  await fs.copyFile(path.join(base, 'documentacion.zip'), path.join(output, 'documentacion.zip'));
+  await fs.copyFile(path.join(packageRoot, 'documentation/site/documentacion.pdf'), path.join(output, 'manuales.pdf'));
+  await fs.copyFile(path.join(packageRoot, 'informe-final.pdf'), path.join(output, 'informe-final.pdf'));
+  const app = require('express')(); app.use(require('express').static(path.join(packageRoot, 'documentation/site')));
+  const siteServer = app.listen(0, '127.0.0.1'); await new Promise(resolve => siteServer.once('listening', resolve));
+  const browser = await chromium.launch({ channel: process.env.DOCUMENTATION_BROWSER_CHANNEL || 'chrome', headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, acceptDownloads: true });
-    const failures = []; page.on('pageerror', error => failures.push(error.message));
-    await page.route('**/proyectos/docs-test/codificacion/documentacion', route => route.fulfill({ json: bundle }));
-    await page.goto(url);
-    await page.evaluate(async () => {
-      const React = (await import('/node_modules/.vite/deps/react.js')).default;
-      const client = await import('/node_modules/.vite/deps/react-dom_client.js');
-      const createRoot = client.createRoot || client.default.createRoot;
-      const Panel = (await import('/src/components/ProjectDocumentationPanel.jsx')).default;
-      const target = document.createElement('div'); target.style.cssText = 'padding:24px;max-width:1240px;margin:auto'; document.body.replaceChildren(target);
-      window.docsTestRoot = createRoot(target); window.docsTestRoot.render(React.createElement(Panel, { projectId: 'docs-test' }));
-    });
-    await page.getByRole('button', { name: 'Generar documentación', exact: true }).click();
-    await page.getByRole('status').filter({ hasText: 'lista para revisar' }).waitFor();
-    const frame = page.frameLocator('iframe[title="Manuales del proyecto generado"]');
-    await frame.locator('[data-role="Cliente"]').waitFor();
-    assert(!(await frame.locator('[data-role="Cliente"]').textContent()).includes('Preparar los pedidos'));
-    assert(!(await frame.locator('[data-role="Cocinero"]').textContent()).includes('Reservar una mesa'));
-    assert.equal(await frame.locator('main > section').count(), 1);
-    await frame.locator('[data-role="Cliente"]').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: path.join(output, 'manual-por-roles.png'), fullPage: true });
-    await page.getByRole('button', { name: /Desarrollador Código/ }).click();
-    await frame.locator('.markdown-body h1').waitFor();
-    assert.equal(await frame.locator('.markdown-body h1').textContent(), 'Iniciar el proyecto');
-    assert.equal(await frame.locator('.markdown-body table').count(), 1);
-    assert.equal(await frame.locator('.markdown-body code.language-sh').count(), 1);
-    await frame.locator('.repository-document').first().scrollIntoViewIfNeeded();
-    await page.screenshot({ path: path.join(output, 'markdown-renderizado.png'), fullPage: true });
-    await page.getByRole('button', { name: /Guías animadas/ }).click();
-    await page.getByLabel('Ver guías de').selectOption('cliente');
-    await page.screenshot({ path: path.join(output, 'guias-por-rol.png'), fullPage: true });
-    await page.getByRole('button', { name: 'Crear y reproducir guía', exact: true }).first().click();
-    await page.getByRole('status').filter({ hasText: 'Guía lista' }).waitFor({ timeout: 60000 });
-    await page.waitForFunction(() => document.querySelector('.docs-video-preview video')?.readyState >= 2);
-    const video = page.locator('.docs-video-preview video').first();
-    assert.equal(await video.evaluate(element => element.videoWidth), 1280);
-    assert.equal(await video.evaluate(element => element.videoHeight), 720);
-    await video.evaluate(element => new Promise(resolve => { element.pause(); element.addEventListener('seeked', resolve, { once: true }); element.currentTime = 2.5; setTimeout(resolve, 2000); }));
-    const frameImage = await video.evaluate(element => { const canvas = document.createElement('canvas'); canvas.width = element.videoWidth; canvas.height = element.videoHeight; canvas.getContext('2d').drawImage(element, 0, 0); return canvas.toDataURL('image/png').split(',')[1]; });
-    fs.writeFileSync(path.join(output, 'fotograma-guia.png'), Buffer.from(frameImage, 'base64'));
-    const videoDownload = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Descargar WebM', exact: true }).first().click();
-    await (await videoDownload).saveAs(path.join(output, 'guia-cliente.webm'));
-    assert(fs.statSync(path.join(output, 'guia-cliente.webm')).size > 1000);
-    const zipDownload = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'ZIP con guías (1)', exact: true }).click();
-    const zipPath = path.join(output, 'documentacion-con-guia.zip'); await (await zipDownload).saveAs(zipPath);
-    const entries = unzipSync(new Uint8Array(fs.readFileSync(zipPath)));
-    const manifest = JSON.parse(Buffer.from(entries['documentation/documentation-manifest.json']).toString());
-    assert.equal(manifest.videos_exportados.length, 1);
-    for (const file of manifest.archivos) assert.equal(crypto.createHash('sha256').update(entries[file.ruta]).digest('hex'), file.sha256);
-    assert(Buffer.from(entries['documentation/docs/manual-completo.html']).toString().includes('<video controls'));
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({ path: path.join(output, 'panel-movil.png'), fullPage: true });
-    assert(!(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)), 'Desbordamiento horizontal en móvil');
-    await page.getByRole('button', { name: /Manuales/ }).click();
-    await page.screenshot({ path: path.join(output, 'manual-movil.png'), fullPage: true });
-    const printed = page.frameLocator('iframe[title="Documento completo para imprimir"]');
-    assert.equal(await printed.locator('main > section').count(), 5);
-    const pdf = await browser.newPage(); await pdf.setContent(bundle.html); await pdf.evaluate(() => document.fonts.ready);
-    await pdf.pdf({ path: path.join(output, 'manual-completo.pdf'), format: 'A4', printBackground: true, preferCSSPageSize: true }); await pdf.close();
-    assert.deepEqual(failures, []);
-    console.log('OK: Markdown renderizado y seguro; flujos separados por rol; guía WebM reproducible 1280×720; ZIP con hashes válidos; móvil sin desbordamiento; PDF completo de cinco manuales.');
-  } finally { await browser.close(); }
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${siteServer.address().port}/usuario.html`, { waitUntil: 'networkidle' });
+    await page.screenshot({ path: path.join(output, 'manual-usuario.png'), fullPage: false });
+    if (process.env.DOCS_TEST_URL) {
+      await page.route('**/proyectos/docs-test/codificacion/documentacion/versiones**', async route => {
+        const request = route.request(), url = new URL(request.url());
+        if (url.pathname.endsWith('/archivo')) {
+          const file = await jobs.file('auditoria', job.id, url.searchParams.get('ruta'));
+          const ext = path.extname(file); const contentType = ({ '.html': 'text/html', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webm': 'video/webm', '.pdf': 'application/pdf', '.zip': 'application/zip' })[ext] || 'text/plain';
+          return route.fulfill({ body: await fs.readFile(file), contentType });
+        }
+        return route.fulfill({ json: request.method() === 'POST' || url.pathname.endsWith(job.id) ? state : [state] });
+      });
+      await page.goto(process.env.DOCS_TEST_URL);
+      await page.evaluate(async () => {
+        const React = (await import('/node_modules/.vite/deps/react.js')).default;
+        const client = await import('/node_modules/.vite/deps/react-dom_client.js');
+        const Panel = (await import('/src/components/ProjectDocumentationPanel.jsx')).default;
+        const target = document.createElement('div'); target.style.cssText = 'padding:24px;max-width:1240px;margin:auto'; document.body.replaceChildren(target);
+        (client.createRoot || client.default.createRoot)(target).render(React.createElement(Panel, { projectId: 'docs-test' }));
+      });
+      const frame = page.frameLocator('iframe[title="Manuales del proyecto generado"]');
+      await frame.getByRole('heading', { name: 'Manual de usuario', exact: true }).waitFor();
+      await frame.locator('img').evaluateAll(images => Promise.all(images.map(image => image.decode().catch(() => null))));
+      await page.screenshot({ path: path.join(output, 'panel-documentacion.png'), fullPage: true });
+      assert.equal(await frame.locator('img').evaluateAll(images => images.filter(image => !image.complete || image.naturalWidth === 0).length), 0);
+      await page.screenshot({ path: path.join(output, 'panel-documentacion.png'), fullPage: true });
+      const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Descargar PDF', exact: true }).click(); await (await download).saveAs(path.join(output, 'pdf-desde-interfaz.pdf'));
+      await page.getByRole('button', { name: 'Guía de desarrollador', exact: true }).click();
+      await frame.getByRole('heading', { name: 'Guía de desarrollador', exact: true }).waitFor();
+      assert((await frame.locator('strong').count()) > 0);
+      await page.screenshot({ path: path.join(output, 'markdown-renderizado.png'), fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await page.screenshot({ path: path.join(output, 'panel-movil.png'), fullPage: true });
+    }
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); await new Promise(resolve => siteServer.close(resolve)); }
+  const summary = { caso: arg('--project') || 'sintetico-48', proyecto: input.proyecto.nombre, pantallas: state.capturas.length, roles: state.flujos.length, videos: state.videos.length, archivos: manifest.archivos.length, advertencias: state.advertencias, estado: state.estado };
+  await fs.writeFile(path.join(output, 'resultado.json'), JSON.stringify(summary, null, 2)); console.log(JSON.stringify(summary));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

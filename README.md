@@ -42,7 +42,7 @@ La codificación ofrece CRUD genérico por RF y pantallas conectadas; todavía n
 
 ## Instalación y configuración
 
-La sección **Documentación del proyecto generado** permite revisar cinco manuales, descargar un sitio MkDocs, guías animadas y exportar PDF. Puede incluir un workflow manual de GitHub Actions para publicar la documentación después de revisarla. Consulta [la guía de documentación generada](docs/desarrollo/documentacion-generada.md).
+La sección **Documentación del proyecto generado** conserva versiones de cinco manuales en Markdown, un sitio MkDocs Material y PDF, capturas y videos por rol generados en el servidor. Incluye elección de licencia, mejora opcional con IA y GitHub Actions manual/automático con publicación opcional. Prepara Chromium y Python con `npm run docs:setup` en backend. Consulta [la guía de documentación generada](docs/desarrollo/documentacion-generada.md).
 
 Terminal backend:
 

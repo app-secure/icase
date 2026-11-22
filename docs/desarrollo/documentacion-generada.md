@@ -1,83 +1,76 @@
 # Documentación del proyecto generado
 
-La sección **Documentación del proyecto generado** está disponible en el documento final y en la vista de generación de código. Genera documentación del proyecto seleccionado, no de la herramienta I-CASE.
+La documentación describe el proyecto seleccionado, usando requisitos, decisiones, diseños y código aprobados. Se conservan cinco manuales en Markdown real: usuario, desarrollador, mantenimiento, instalación y referencia técnica. Los recorridos se separan por roles y conservan la trazabilidad con requisitos y criterios de aceptación.
 
-## Cinco manuales
+## Preparar el servidor
 
-1. Usuario: funciones, roles, precondiciones, resultados esperados y flujo.
-2. Desarrollador: tecnologías aprobadas, contratos y documentos del repositorio.
-3. Mantenimiento: operación, respaldo, recuperación, actualización y diagnóstico.
-4. Instalación y despliegue: arranque de la entrega, MkDocs, PDF y Pages.
-5. Referencia técnica: RNF, fuentes de diagramas aprobados, versiones y contrato OpenAPI cuando existe.
+Desde icase-backend:
 
-Los insumos provienen de requisitos, diagramas, decisiones y artefactos aprobados. Las versiones rechazadas o desactualizadas no se incluyen. Los documentos originales de los artefactos se conservan; una licencia existente se respeta. Si no hay licencia aprobada, se indica la decisión pendiente, sin otorgar una licencia automáticamente.
+```powershell
+npm install
+npm run docs:setup
+npm run dev
+```
 
-## Revisar y exportar
+El instalador prepara Python/MkDocs Material/print-site y Chromium/FFmpeg dentro de carpetas locales ignoradas por Git. Requiere Python y conexión durante la instalación. Después las capturas y los videos de mockups funcionan sin consultar CDN; Tailwind se compila localmente. PlantUML se renderiza en el servidor indicado por DOCUMENTATION_PLANTUML_SERVER; Mermaid se renderiza con la dependencia local.
 
-Pulsa **Generar documentación**. El panel sigue la interfaz de I-CASE, con pestañas independientes para los cinco manuales y una vista de guías animadas. **PDF completo** imprime los cinco manuales, aunque estés consultando una pestaña. **HTML completo** conserva el documento y los diagramas que pudieron incrustarse.
+Configuración opcional: ICASE_DOCUMENTATION_DIR cambia el almacén persistente; DOCUMENTATION_PYTHON selecciona Python; DOCUMENTATION_BROWSER_CHANNEL=chrome permite usar Chrome instalado; BEDROCK_DOCUMENTATION_MODEL selecciona el modelo de redacción (por defecto Haiku 4.5 mediante el cliente Bedrock existente). No incluyas claves en los manuales.
 
-Los Markdown de los artefactos aprobados (README, CONTRIBUTING y otros manuales) aparecen renderizados: encabezados, listas, tablas, enlaces y bloques de código. **Ver Markdown original** permite consultar la fuente; los archivos originales se conservan sin cambios en `documentation/repository/`. El renderizado desactiva HTML ejecutable y protocolos de enlace peligrosos.
+## Generar y revisar
 
-**Descargar MkDocs** genera un ZIP con `documentation/mkdocs.yml`, cinco páginas, documentos originales, infografía SVG por roles, fuentes de diagramas, estilos de impresión y manifiesto SHA-256. Generar o descargar no publica en GitHub. También se incluyen las fuentes documentales al generar un paquete final de entrega nuevo.
+1. Elige una licencia (MIT, Apache 2.0, propietaria, conservar existente o decidir después). Para asignar una licencia, escribe el titular.
+2. Opcionalmente activa videos y el recorrido de la aplicación en Docker. El arranque necesita una entrega aprobada. Se reutiliza el servicio de ejecución local; no se detienen aplicaciones existentes.
+3. Opcionalmente activa IA. La primera llamada propone secciones con referencias; la segunda revisa cada afirmación. Las referencias inexistentes y las secciones no sustentadas se descartan. Los fallos conservan las plantillas. Las secciones aceptadas se etiquetan y su revisión se guarda en revision-ia.json. Esta revisión asistida no certifica veracidad ni exhaustividad.
+4. Pulsa **Generar documentación**. La cola del servidor conserva estado, fuentes y versiones. Cerrar la página no cancela el trabajo. Un reinicio marca los trabajos incompletos como interrumpidos; genera una nueva versión.
+5. Revisa las cinco pestañas y los avisos. Descarga el ZIP, los manuales en PDF o el informe final. El selector permite volver a una versión anterior.
 
-La opción de imágenes utiliza el servidor PlantUML del visor. Si no está disponible, se conserva la fuente y se informa del fallo.
+La grabación real recorre pantallas de la aplicación levantada en Docker. El acceso automático disponible corresponde al administrador de la entrega; para roles sin acceso confirmado se graban sus mockups y se etiqueta el origen. No se presenta un recorrido de mockups como prueba de ejecución. Los videos son opcionales y se producen en el servidor, con rótulos por rol y pantalla.
 
-## Flujos separados por rol
+## Contenido del ZIP
 
-Cada recorrido utiliza los actores de los requisitos, los permisos aprobados y los actores de las operaciones confirmadas. Las funciones se agrupan por responsable; una función compartida aparece en los recorridos de los roles correspondientes. Se incluyen todos los RF aprobados, sin limitar el flujo a los primeros cuatro.
+- README.md, CONTRIBUTING.md, ARCHITECTURE.md, CHANGELOG.md y LICENSE.md en la raíz. Se conservan las instrucciones originales y se agrega la información de la entrega.
+- documentation/docs/*.md: las cinco páginas y el inicio, sin un manual HTML editorial paralelo.
+- Cuatro infografías SVG: flujo por rol, módulos y pantallas, modelo de datos y arquitectura. Los diagramas aprobados se guardan como SVG y fuentes editables; no se incrustan como base64.
+- Capturas PNG de todos los mockups aprobados y videos WebM opcionales por rol.
+- documentation/site/: sitio Material con búsqueda, modo oscuro, navegación por pestañas y soporte Mermaid; print_page.html y documentacion.pdf se derivan de las mismas páginas.
+- informe-final.md, informe-final.html e informe-final.pdf: reporte desde los datos aprobados, capturado e impreso en el servidor con CSS de impresión.
+- documentation/documentation-manifest.json: versiones de origen, avisos, medios y huellas SHA-256. Las imágenes fallidas se señalan; se conserva la fuente del diagrama.
 
-Cada paso muestra requisito, descripción, acciones autorizadas cuando se especifican, precondiciones y resultado esperado. Las funciones sin responsable confirmado aparecen bajo **Rol por confirmar**. El orden es una guía de consulta: no inventa dependencias operativas que no estén documentadas. La infografía exportada conserva esta separación.
+Instalación y mantenimiento describen los servicios, puertos, healthchecks y dependencias de Compose, variables de .env.example (sin secretos), semillas, scripts de package.json y endpoints/modelos de OpenAPI. Un dato ausente se señala como pendiente.
 
-## Guías animadas
+## HTML, PDF y GitHub Actions
 
-En **Guías animadas**, elige un rol y pulsa **Crear y reproducir guía**. Puedes verla dentro del panel y descargar el WebM individual. **ZIP con guías** incluye los cinco manuales y los videos de la selección actual; **Todos los roles** incluye todas las guías disponibles.
+Dentro de la carpeta documentation del ZIP:
 
-Cada clip usa el estilo visual de la herramienta, un índice de pasos, requisito de origen, progreso animado y tres momentos: preparar, ejecutar y comprobar. Los recorridos largos se dividen en clips de hasta cuatro funciones; ninguna función desaparece por el límite de un clip. La guía de mantenimiento se distingue de los roles de negocio.
-
-Los videos son guías narrativas sin audio, no grabaciones de la aplicación ni evidencia de pruebas funcionales. Mantén la pestaña visible durante la captura. Son compatibles con navegadores Chromium que soporten MediaRecorder, como Chrome, Brave y Edge. Para demostrar interacciones reales, el equipo debe grabarlas sobre una entrega ejecutable y revisada.
-
-## Construir HTML y PDF
-
-Extrae el ZIP y ejecuta desde `documentation/`:
-
-```sh
+```powershell
 python -m pip install -r requirements.txt
 python -m playwright install chromium
 python -m mkdocs serve
-```
-
-Para construir los archivos HTML y el PDF completo:
-
-```sh
-python -m mkdocs build --strict
 python tools/export_pdf.py
 ```
 
-El script imprime `site/manual-completo.html` con Chromium y guarda `site/documentacion.pdf`. Conserva la misma composición y abre los bloques de fuentes para que no se omitan al imprimir. La variable opcional `DOCUMENTATION_BROWSER_CHANNEL=chrome` permite usar Chrome ya instalado para la revisión local; por defecto usa Chromium de Playwright.
+El exportador construye con MkDocs en modo estricto, comprueba enlaces y anclas locales e imprime site/print_page.html. No existe manual-completo.html escrito a mano. Los enlaces externos no se sondean automáticamente.
 
-## GitHub Actions opcional
+El workflow se ejecuta manualmente y al cambiar documentation/** (push/pull request). Construye HTML/PDF y guarda el resultado como artefacto. Publicar en Pages requiere seleccionar publicar en una ejecución manual o habilitar DOCUMENTATION_PUBLISH=true como variable del repositorio para push. Configura Pages con GitHub Actions y revisa los permisos antes de habilitar la publicación. Generar y descargar no publica.
 
-Marca **Incluir GitHub Actions** antes de generar. El ZIP incluye `.github/workflows/documentation.yml` en la raíz de la entrega. El workflow solo tiene disparador manual: construye HTML/PDF y guarda un artefacto descargable. Para publicar, activa Pages con fuente GitHub Actions y ejecuta el workflow con `publicar=true`; el valor por defecto es `false`.
+## Entrega y conservación
 
-No sube archivos a GitHub ni despliega al generar o descargar la documentación.
+Antes de crear el paquete final, genera una documentación terminada de las fuentes aprobadas actuales. La entrega fija su versión de documentación y combina sus medios al descargar. Cambiar fuentes obliga a generar una nueva versión. Respalda la carpeta ICASE_DOCUMENTATION_DIR junto con la base: contiene fuentes, PDF, capturas y grabaciones. No hay borrado automático de versiones.
 
-## Informe final
+## API autenticada por proyecto
 
-El visor PDF continúa párrafos y filas extensas entre páginas, ajusta títulos y etiquetas de tablas, repite encabezados de tabla y reserva espacio para imágenes y firmas. El estado de auditoría se muestra según los datos del proyecto; no se afirma una aprobación inexistente. Los requisitos se conservan aunque su texto contenga referencias a correcciones o revisión experta.
+- POST /proyectos/:id/codificacion/documentacion: fuentes y vista Markdown de compatibilidad.
+- POST /proyectos/:id/codificacion/documentacion/versiones: inicia trabajo; responde 202.
+- GET /proyectos/:id/codificacion/documentacion/versiones: historial.
+- GET /proyectos/:id/codificacion/documentacion/versiones/:version: progreso y resultado.
+- GET /proyectos/:id/codificacion/documentacion/versiones/:version/archivo?ruta=...: archivo de una versión terminada, con sesión y propiedad del proyecto. Sin ruta descarga el ZIP.
 
-## Validación local
+## Verificación
 
-En `icase-backend/`:
-
-```sh
-npm test -- --runInBand tests/project-documentation.test.js tests/pdf-presentation.test.js tests/generated-summary-component.test.js
-node scripts/preview-documentation.cjs RUTA_DE_SALIDA
+```powershell
+node node_modules/jest/bin/jest.js --runInBand tests/project-documentation.test.js
+node scripts/verify-documentation-ui.cjs --output verification-results/documentation-48 --videos
+node scripts/verify-documentation-ui.cjs --output verification-results/documentation-real --project ID_PROYECTO
 ```
 
-Con el frontend disponible en `http://127.0.0.1:5180` y Chrome instalado:
-
-```sh
-node scripts/verify-documentation-ui.cjs RUTA_DE_SALIDA
-```
-
-Esta comprobación utiliza datos sintéticos y una API simulada; exporta videos, capturas móvil/escritorio y un PDF con textos largos sin modificar proyectos ni usar credenciales.
+El caso amplio tiene 48 pantallas sintéticas y se etiqueta como tal. El modo --project lee el proyecto real sin modificar sus fuentes o aprobaciones. DOCS_TEST_URL=http://127.0.0.1:5188 agrega comprobaciones de la interfaz con Vite activo: Markdown renderizado, imágenes, descarga de PDF y ancho móvil. Las evidencias incluyen ZIP, PDF, capturas y resultado.json.

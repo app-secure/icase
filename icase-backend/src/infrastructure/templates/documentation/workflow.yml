@@ -1,5 +1,12 @@
 name: Documentación HTML y PDF
 on:
+  push:
+    paths:
+      - 'documentation/**'
+      - '.github/workflows/documentation.yml'
+  pull_request:
+    paths:
+      - 'documentation/**'
   workflow_dispatch:
     inputs:
       publicar:
@@ -27,13 +34,13 @@ jobs:
           name: documentacion-html-pdf
           path: documentation/site/
       - uses: actions/configure-pages@v5
-        if: inputs.publicar
+        if: (github.event_name == 'workflow_dispatch' && inputs.publicar) || (github.event_name == 'push' && vars.DOCUMENTATION_PUBLISH == 'true')
       - uses: actions/upload-pages-artifact@v4
-        if: inputs.publicar
+        if: (github.event_name == 'workflow_dispatch' && inputs.publicar) || (github.event_name == 'push' && vars.DOCUMENTATION_PUBLISH == 'true')
         with:
           path: documentation/site/
   deploy:
-    if: inputs.publicar
+    if: (github.event_name == 'workflow_dispatch' && inputs.publicar) || (github.event_name == 'push' && vars.DOCUMENTATION_PUBLISH == 'true')
     needs: build
     runs-on: ubuntu-latest
     permissions:

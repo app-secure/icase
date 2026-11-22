@@ -96,3 +96,7 @@ El formato habitual es `{"error":"Descripción"}`. Actualmente los controladores
 | 503 | Sugerencia de paleta sin servicio disponible |
 
 Un fallo 429 del proveedor puede convertirse en error de generación, en vez de propagarse como 429. El límite de Multer puede producir una respuesta de error fuera del JSON habitual. Guarda código HTTP y cuerpo real para diagnóstico.
+
+## Documentación versionada
+
+La generación HTML/PDF y los medios se ejecutan en segundo plano. Inicia con `POST /proyectos/:id/codificacion/documentacion/versiones`, consulta el historial y el progreso por `GET` y descarga los archivos de una versión terminada. Todas estas rutas exigen sesión y propiedad del proyecto. Consulta opciones, conservación de versiones y ejemplos en [Documentación del proyecto generado](../desarrollo/documentacion-generada.md).
