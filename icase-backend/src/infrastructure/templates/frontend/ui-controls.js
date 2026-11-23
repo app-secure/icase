@@ -4,7 +4,7 @@
 import { fillFields } from './mockupActions';
 
 const plain = (value) => String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const PREFIX = /^(?:pantalla de |listado de |lista de |catalogo de |historial de |gestion de |detalle de |formulario de (?:registro|creacion|alta|edicion|modificacion) de |formulario de |registro de |edicion de |mis |nuevo |nueva |editar |ver )+/;
+const PREFIX = /^(?:pantalla de |listado de |lista de |catalogo de |historial de |gestion de |consulta de |consultar |reporte de |alertas de |detalle de |formulario de (?:registro|creacion|alta|edicion|modificacion) de |formulario de |registro de |edicion de |mis |nuevo |nueva |editar |ver )+/;
 const singular = (word) => word.replace(/([lrndzj])es$/, '$1').replace(/s$/, '');
 /** Dato principal de una pantalla o de un botón: «Listado de clientes» y «Nuevo cliente» → «cliente». */
 export const nounOf = (name) => singular(plain(name).replace(PREFIX, '').split(' ')[0] || '');
@@ -36,6 +36,9 @@ export function uiTarget(control, { views, current, search = '' }) {
     return { back: true, fallback: list && list.route !== current ? list.route : null };
   }
   if (/^limpiar\b/.test(label)) return { reset: true };
+  // «Quitar» una línea que el diseño dibujó dentro de un formulario (no un registro guardado): se retira del borrador.
+  if (/^(?:quitar|remover|retirar|eliminar|borrar|x)$/.test(label) && control.closest('form') && control.closest('tr, li') && !control.closest('[data-id]')) return { removeRow: true };
+  if (/^(?:actualizar|refrescar|recargar)(?: .*)?$/.test(label) && !control.closest('form')) return { reload: true };
   if (/^(?:\+ )?(?:nuevo|nueva|registrar|crear|agregar|anadir)\b/.test(label)) { const target = find(views, 'crear', noun) || find(views, 'crear', pageNoun); return target && target.route !== current ? { to: target.route } : null; }
   if (/^(?:editar|modificar)\b/.test(label)) { const target = find(views, 'editar', noun) || find(views, 'editar', pageNoun); return target && id ? { to: withId(target) } : null; }
   if (/^(?:ver|detalle|abrir)\b/.test(label)) { const target = find(views, 'detalle', noun) || find(views, 'detalle', pageNoun); return target && id ? { to: withId(target) } : null; }
@@ -70,7 +73,31 @@ export function handleUiClick(event, { views, current, search, navigate }) {
     }
     const search = Array.from(scope.querySelectorAll('button')).find((button) => button !== control && /^(buscar|filtrar|aplicar|consultar)/.test(labelOf(button)));
     if (search) search.click();
+  } else if (target.removeRow) {
+    const row = control.closest('tr, li');
+    if (row) row.remove();
+  } else if (target.reload) {
+    globalThis.location.reload();
   } else if (target.to) navigate(target.to);
+}
+
+/**
+ * «Nuevo» o «Agregar» en un reporte o una consulta que no tiene su formulario de alta: no lleva a ninguna parte y un botón que no hace nada
+ * confunde más que ayudar. Se oculta al abrir la pantalla; los demás controles de interfaz conservan su comportamiento.
+ */
+export function pruneDeadControls(root, { views, current, search = '' }) {
+  if (!root) return 0;
+  let hidden = 0;
+  for (const control of root.querySelectorAll('button, a')) {
+    const declared = (control.getAttribute('data-accion') || '').trim().toLowerCase();
+    if (declared && declared !== 'ui') continue;
+    if (control.tagName === 'A' && !/^(#.*)?$/.test(control.getAttribute('href') || '')) continue;
+    if (!/^(?:\+ )?(?:nuevo|nueva|registrar|crear|agregar|anadir)\b/.test(labelOf(control)) || control.closest('form')) continue;
+    if (uiTarget(control, { views, current, search })) continue;
+    control.style.display = 'none';
+    hidden += 1;
+  }
+  return hidden;
 }
 
 /**

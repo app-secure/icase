@@ -398,7 +398,7 @@ class GenericFrontendGenerator {
   _appWithAuth(proyecto, views, imports, routes, standalone = [], consoleOps = [], uiControls = false) {
     return `import React, { useState${uiControls ? ', useEffect' : ''} } from 'react';
 import { Link, Navigate, Route, Routes, useLocation${uiControls ? ', useNavigate' : ''} } from 'react-router-dom';
-import { useSession } from './session';${uiControls ? "\nimport { handleUiClick, handleRowClick, hydrateRecord } from './uiControls';\nimport { bindDashboard } from './dashboard';" : ''}
+import { useSession } from './session';${uiControls ? "\nimport { handleUiClick, handleRowClick, hydrateRecord, pruneDeadControls } from './uiControls';\nimport { bindDashboard } from './dashboard';" : ''}
 import LoginScreen from './LoginScreen';
 import UsersScreen from './UsersScreen';
 ${consoleOps.length ? "import DataConsole from './DataConsole';\nimport RegistryScreen from './RegistryScreen';" : ''}
@@ -438,6 +438,12 @@ export default function App() {
     document.addEventListener('click', onRow, true);
     return () => { document.removeEventListener('click', onClick); document.removeEventListener('click', onRow, true); };
   }, [location.pathname, location.search, navigate]);
+  // Los «Nuevo» sin formulario de alta al que ir se ocultan al abrir la pantalla (esperan a que el contenido del diseño esté montado).
+  useEffect(() => {
+    if (!user) return undefined;
+    const timers = [200, 900].map((delay) => setTimeout(() => pruneDeadControls(document.querySelector('.app-main .mockup-content'), { views, current: location.pathname, search: location.search }), delay));
+    return () => timers.forEach(clearTimeout);
+  }, [location.pathname, location.search, user]);
   // Detalle o edición abierta con ?id=: se carga ese registro (las opciones de los selects llegan después, por eso dos intentos).
   useEffect(() => {
     if (!user || !location.search) return undefined;

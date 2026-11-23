@@ -158,3 +158,27 @@ describe('un solo «Formulario de X» para alta y edición', () => {
     expect(ui.uiTarget(doc.querySelector('button'), { views: generic, current: '/detalle-de-producto', search: '?id=7' })).toEqual({ to: '/formulario-de-producto?id=7' });
   });
 });
+
+describe('controles sin destino', () => {
+  const generic = [
+    { route: '/reporte-de-ventas', name: 'Reporte de Ventas' },
+    { route: '/consulta-de-mis-ventas', name: 'Consulta de mis ventas' },
+    { route: '/formulario-de-venta', name: 'Formulario de Venta' }
+  ];
+  test('«Nuevo» en la consulta de ventas abre el formulario de venta; en un reporte sin formulario se oculta', () => {
+    const consulta = dom('<button>Nuevo</button>');
+    expect(ui.uiTarget(consulta.querySelector('button'), { views: generic, current: '/consulta-de-mis-ventas', search: '' })).toEqual({ to: '/formulario-de-venta' });
+    const reporte = dom('<button>Nuevo</button><button>Exportar</button>');
+    expect(ui.pruneDeadControls(reporte.querySelector('.mockup-content'), { views: [{ route: '/reporte-de-clientes', name: 'Reporte de Clientes' }], current: '/reporte-de-clientes' })).toBe(1);
+    expect(reporte.querySelectorAll('button')[0].style.display).toBe('none');
+    expect(reporte.querySelectorAll('button')[1].style.display).toBe('');
+  });
+  test('«Quitar» una línea de un formulario retira la fila; «Actualizar» recarga', () => {
+    const doc = dom('<form><table><tbody><tr><td>Mouse</td><td><button type="button" data-accion="ui">Quitar</button></td></tr></tbody></table></form><button>Actualizar</button>');
+    const quitar = doc.querySelector('form button');
+    expect(ui.uiTarget(quitar, { views: generic, current: '/formulario-de-venta', search: '' })).toEqual({ removeRow: true });
+    ui.handleUiClick({ target: quitar, defaultPrevented: false, button: 0, preventDefault() {} }, { views: generic, current: '/formulario-de-venta', search: '', navigate: jest.fn() });
+    expect(doc.querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(ui.uiTarget(doc.querySelector('.mockup-content > button'), { views: generic, current: '/reporte-de-ventas', search: '' })).toEqual({ reload: true });
+  });
+});
