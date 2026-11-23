@@ -13,6 +13,14 @@ ANÁLISIS: ${JSON.stringify(require('../../infrastructure/services/ApprovedRequi
   const validate = (result, data = base) => result && typeof result.completa === 'boolean' && Array.isArray(result.elementos_revisados) && (!result.completa || [...data.inventario, ...data.actores].every(n => result.elementos_revisados.includes(n.id))) && Array.isArray(result.hallazgos) && result.hallazgos.every(h => codes.includes(h.codigo) && Array.isArray(h.elementos) && h.elementos.every(id => id === 'sintesis' || [...data.inventario, ...data.actores].some(n => n.id === id)) && typeof h.descripcion === 'string' && h.descripcion.trim() && typeof h.accion === 'string' && h.accion.trim() && inspectEvidence(h, input).valido);
   let first;
   try { first = await request('revision_analisis_inicial', prompt(base)); } catch { /* conservar borrador */ }
+  // El modelo escribe variantes del código («OMISION_FUNCIONAL», «AGRUPACION INDEBIDA»): se reconducen al código base en vez de descartar el hallazgo.
+  if (Array.isArray(first?.hallazgos)) {
+    first = { ...first, hallazgos: first.hallazgos.map(h => {
+      const raw = typeof h?.codigo === 'string' ? h.codigo.trim().toUpperCase().replace(/[\s-]+/g, '_') : '';
+      const base = codes.includes(raw) ? raw : codes.find(code => raw.startsWith(code + '_'));
+      return base ? { ...h, codigo: base } : h;
+    }) };
+  }
   const justified = result => signals.every(signal => result?.evaluaciones?.some(e => e.id === signal.elementos[0] && ['mismo_resultado', 'resultados_independientes', 'incierto'].includes(e.independencia) && typeof e.justificacion === 'string' && e.justificacion.trim() && (e.independencia !== 'resultados_independientes' || result.hallazgos?.some(h => h.codigo === 'AGRUPACION' && h.elementos?.includes(e.id)))));
   if (!validate(first) || !justified(first)) {
     const causes = [];
@@ -22,12 +30,27 @@ ANÁLISIS: ${JSON.stringify(require('../../infrastructure/services/ApprovedRequi
     if (missing.length) causes.push(`Elementos sin revisión declarada: ${missing.join(', ')}.`);
     if (!Array.isArray(first?.hallazgos)) causes.push('Falta la lista de hallazgos.');
     const retained = [];
+    const discarded = [];
+    const known = new Set([...inventory, ...actors].map(n => n.id));
+    // Por qué se descartó un hallazgo: sin esto solo se sabe que «es inválido» y no se puede corregir el prompt ni el modelo.
+    const reasonOf = finding => {
+      if (!finding || !codes.includes(finding.codigo)) return 'código de hallazgo desconocido';
+      if (!Array.isArray(finding.elementos) || finding.elementos.some(id => id !== 'sintesis' && !known.has(id))) return 'cita elementos que no existen en el análisis';
+      if (typeof finding.descripcion !== 'string' || !finding.descripcion.trim() || typeof finding.accion !== 'string' || !finding.accion.trim()) return 'sin descripción o sin acción';
+      return 'la cita no aparece literal en el insumo';
+    };
     for (const [index, finding] of (Array.isArray(first?.hallazgos) ? first.hallazgos : []).entries()) {
       if (validate({ completa: false, elementos_revisados: [], hallazgos: [finding] })) retained.push(finding);
-      else causes.push(`Hallazgo ${index + 1}: estructura, referencias o evidencia inválida.`);
+      else discarded.push({ indice: index + 1, codigo: finding?.codigo || null, elementos: Array.isArray(finding?.elementos) ? finding.elementos : [], motivo: reasonOf(finding) });
+    }
+    // Una sola línea por motivo («Hallazgos 6, 7 y 9: la cita no aparece literal…») en vez de una por hallazgo.
+    const byReason = new Map();
+    for (const item of discarded) byReason.set(item.motivo, [...(byReason.get(item.motivo) || []), item.indice]);
+    for (const [motivo, indices] of byReason) {
+      causes.push(`${indices.length === 1 ? `Hallazgo ${indices[0]}` : `Hallazgos ${indices.slice(0, 6).join(', ')}${indices.length > 6 ? ` y ${indices.length - 6} más` : ''}`} descartado${indices.length === 1 ? '' : 's'}: ${motivo}.`);
     }
     if (!justified(first)) causes.push('Faltan evaluaciones justificadas de agrupación o su hallazgo correspondiente.');
-    return { ...base, diagnostic: { ...diagnostic, hallazgos: retained, estado: 'parcial', causas: causes, motivo: causes.join(' ') || 'Contrato de revisión inválido; no acredita ausencia de problemas.' } };
+    return { ...base, diagnostic: { ...diagnostic, hallazgos: retained, ...(discarded.length ? { descartados: discarded } : {}), estado: 'parcial', causas: causes, motivo: causes.join(' ') || 'Contrato de revisión inválido; no acredita ausencia de problemas.' } };
   }
   await Execution.confirm('revision_analisis_inicial');
   Object.assign(diagnostic, { estado: first.completa ? 'completa' : 'parcial', hallazgos: first.hallazgos, evaluaciones: first.evaluaciones || [], revisiones_completadas: 1 });

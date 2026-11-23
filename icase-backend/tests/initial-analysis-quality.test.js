@@ -52,3 +52,20 @@ test('las señales no se limitan a los primeros cinco ni confunden estados visib
   expect(candidates([...items, { id: 'N-17', tipo: 'RNF', necesidad: 'Seguridad y usabilidad como criterios base' }])).toHaveLength(9);
   expect(candidates([{ tipo: 'RF', necesidad: 'Ver menú con disponibilidad actualizada' }, { tipo: 'RF', necesidad: 'Visualizar comandas y tiempo desde la toma' }])).toHaveLength(0);
 });
+test('agrupa los hallazgos descartados por motivo y los guarda con su causa', async () => {
+  const bad = (n) => ({ codigo: 'OMISION', elementos: ['N-01'], descripcion: `Falta ${n}`, accion: 'Añadir', evidencia: `Cita inventada ${n}` });
+  const result = await review({ inventory, actors: [], summary: {}, input, inspect,
+    request: jest.fn().mockResolvedValue({ completa: true, elementos_revisados: ['N-01'], hallazgos: [bad(1), bad(2), bad(3), { codigo: 'OMISION', elementos: ['N-99'], descripcion: 'x', accion: 'y', evidencia: input }, { codigo: 'RARO' }] }) });
+  expect(result.diagnostic.estado).toBe('parcial');
+  expect(result.diagnostic.causas).toContain('Hallazgos 1, 2, 3 descartados: la cita no aparece literal en el insumo.');
+  expect(result.diagnostic.causas).toContain('Hallazgo 4 descartado: cita elementos que no existen en el análisis.');
+  expect(result.diagnostic.causas.filter(c => /^Hallazgo/.test(c))).toHaveLength(3);
+  expect(result.diagnostic.descartados.map(d => d.indice)).toEqual([1, 2, 3, 4, 5]);
+});
+test('reconduce variantes del código («OMISION_FUNCIONAL») al código base', async () => {
+  const finding = { codigo: 'omision_funcional', elementos: ['N-01'], descripcion: 'Falta conservar filtros', accion: 'Conservar filtros', evidencia: input };
+  const result = await review({ inventory, actors: [], summary: {}, input, inspect,
+    request: jest.fn().mockResolvedValue({ completa: true, elementos_revisados: ['N-01'], hallazgos: [finding] }) });
+  expect(result.diagnostic.hallazgos[0].codigo).toBe('OMISION');
+  expect(result.diagnostic.descartados).toBeUndefined();
+});

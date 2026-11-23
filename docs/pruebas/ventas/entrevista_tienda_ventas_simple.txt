@@ -1,0 +1,49 @@
+Reunión inicial — Sistema de ventas para una tienda
+
+Dueña:
+Tengo una tienda de abarrotes y hoy llevo las ventas en un cuaderno y las facturas en Word. Me equivoco con los precios y no sé cuánto stock me queda. Quiero un sistema sencillo para registrar ventas, emitir facturas y ver reportes.
+
+Analista:
+Entendido. Será una aplicación web, usada desde computadora en el mostrador. No habrá aplicación móvil. ¿Quiénes la usarán?
+
+Dueña:
+Yo, como administradora, y dos vendedores. Nadie más; los clientes no usan el sistema, solo los atendemos en el mostrador.
+
+Analista:
+Entonces habrá dos roles: administrador y vendedor. ¿Qué hace cada uno?
+
+Dueña:
+El vendedor registra ventas, emite facturas y consulta sus propias ventas; no ve las de otros. El administrador hace todo lo del vendedor y además gestiona los productos, los clientes y los usuarios, anula ventas y revisa los reportes.
+
+Analista:
+Los productos tienen código, nombre, precio de venta en soles y stock. Los clientes tienen nombre y número de documento. ¿Cómo es una venta?
+
+Dueña:
+El vendedor elige un cliente, agrega varios productos con su cantidad y el sistema calcula el total y registra la venta. No se puede vender un producto sin stock suficiente. Al registrar la venta, el stock baja automáticamente.
+
+Analista:
+¿Y la factura?
+
+Dueña:
+Después de registrar la venta, el vendedor emite la factura. El sistema genera un número correlativo (F001-00001, F001-00002...), el detalle de los productos, el subtotal, el IGV del 18 % y el total. Una venta solo puede tener una factura. Por ahora solo una factura interna, sin conexión con la SUNAT.
+
+Analista:
+¿Y si se equivoca en una venta?
+
+Dueña:
+Solo la administradora puede anular una venta, indicando el motivo. Al anularla, el stock vuelve a subir y la factura queda anulada.
+
+Analista:
+¿Algún aviso de stock y qué reportes?
+
+Dueña:
+Quiero ver los productos con menos de 5 unidades para saber qué reponer; eso lo ve solo la administradora. Y dos reportes, solo para la administradora: las ventas por rango de fechas con el total vendido, y los productos más vendidos en un rango de fechas.
+
+Analista:
+Recapitulo los diez requisitos funcionales: gestionar productos, gestionar clientes, gestionar usuarios, registrar una venta, emitir factura, anular venta, consultar mis ventas, ver productos con stock bajo, reporte de ventas por fechas y productos más vendidos. ¿Falta algo?
+
+Dueña:
+No, eso es todo.
+
+Analista:
+Lo técnico: Node.js con Express, PostgreSQL y React con Tailwind CSS, autenticación con JWT y contraseñas cifradas. Un solo servidor pequeño, sin servicios externos. Fuera de alcance: pagos en línea, varias sucursales y facturación electrónica con la SUNAT. Como criterio no funcional, registrar una venta debe tardar menos de dos segundos con diez personas conectadas.

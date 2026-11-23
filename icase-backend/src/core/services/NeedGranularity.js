@@ -160,8 +160,12 @@ function splitItem(item, identifiers) {
     return clauses.map((text, index) => index === 0 ? { ...item, necesidad: text } : { ...item, id: identifiers.next('N'), objetivo_id: identifiers.next('O'), necesidad: text });
   }
   if (item.tipo !== 'RF') return [item];
+  // «Gestionar X permitiendo crear, consultar, actualizar y eliminar»: la gestión de una entidad es una sola función; partirla
+  // deja «…permitiendo crear» y fragmentos sueltos («consultar, actualizar y eliminar registros») sin objeto propio.
+  if (/^(?:gestionar|administrar|mantener)\b/i.test(clean(item.necesidad))) return [item];
   const parts = partition(item.necesidad);
   if (parts.operations.length < 2 && !parts.rules.length) return [item];
+  if (parts.operations.slice(1).some(operation => clean(operation.text).split(/\s+/).length <= 5 && !/\b(?:el|la|los|las|un|una)\s+\p{L}{4,}/iu.test(operation.text) && /^(?:consultar|actualizar|eliminar|crear|editar|modificar|listar|ver)\b/i.test(clean(operation.text)))) return [item];
   const goals = [];
   const parentPrefix = (/^((?:El|La|Los|Las)\s+\S+\s+(?:debe(?:n)? poder|puede|pueden|podrán|podrá)\s+)/i.exec(item.necesidad) || [])[1] || '';
   const functional = (parts.operations.length ? parts.operations : [{ text: item.necesidad }]).map((operation, index) => {
@@ -472,7 +476,7 @@ function polish(inventory, input, identifiers) {
   return aligned;
 }
 const ACTION = [
-  ['ver', /\b(?:ver|visualizar|visualizan?|consultar|consultan|revisar|revisan?)\b/],
+  ['ver', /\b(?:ver|visualizar|visualizan?|consult(?:ar|an|a|e|en)|revisar|revisan?)\b/],
   ['reservar', /\breserv/],
   ['comprar', /\bcompr/],
   ['acumular', /\bacumul/],
@@ -481,13 +485,16 @@ const ACTION = [
   ['cobrar', /\bcobr|\bpago\b|\bpagar\b/],
   ['cerrar', /\bcerr/],
   ['marcar', /\bmarc/],
-  ['cambiar', /\bcambi|\bmodific/],
+  ['cambiar', /\bcambi|\bmodific|\bedit|\bactualiz/],
   ['gestionar', /\bgestion/],
   ['validar', /\bvalid|\bescane/],
   ['autenticar', /\bautentic/],
   ['reasignar', /\breasign/],
   ['reflejar', /\breflej/],
-  ['respaldar', /\brespald|\brecuper|\bcopias? de seguridad/]
+  ['respaldar', /\brespald|\brecuper|\bcopias? de seguridad/],
+  // Vender: el verbo, o registrar/emitir/realizar una venta. «precio de venta» es un dato, no la acción.
+  ['vender', /\bvend(?:er|e|en)\b|\b(?:permitir|impedir|evitar|bloquear|rechazar)\s+(?:la\s+|una\s+)?venta\b|\b(?:registr\w+|emitir|realizar)\s+(?:una?\s+|la\s+)?venta\b/],
+  ['anular', /\banul/]
 ];
 function actionOf(text) {
   const value = normalize(text);
@@ -514,8 +521,10 @@ function preconditionAction(text) {
   return actionOf(match[1]) || (/cobro|pago/.test(match[1]) ? 'cobrar' : '');
 }
 function constraintClause(text) {
-  return /no\b|salvo|imped|restring|unicamente|solamente|antes de/.test(normalize(text));
+  return /no\b|\bsolo\b|salvo|imped|restring|unicamente|solamente|antes de/.test(normalize(text));
 }
+// Raíces de rol («vendedor» → «vende», «administrador» → «admin»): nombran quién, no sobre qué objeto actúa la regla.
+const ROLE_STEM = /^(?:vende|admin|duena|cajer|gerent)$/;
 function clauseApplies(clause, need) {
   const target = preconditionAction(clause);
   const needActions = actionsOf(need.necesidad);
@@ -526,8 +535,15 @@ function clauseApplies(clause, need) {
   if (clauseActor && needActor && clauseActor !== needActor && !needActor.startsWith(clauseActor) && !clauseActor.startsWith(needActor)) return false;
   const clauseActions = actionsOf(clause);
   if (/solamente|unicamente/.test(normalize(clause)) && !clauseActions.length) return false;
-  if (clauseActions.length && needActions.length && !clauseActions.some(action => needActions.includes(action))) return false;
-  return objectStems(need.necesidad).some(token => objectStems(clause).includes(token));
+  // Una regla que habla de una acción (vender, anular…) solo aplica a una necesidad que la comparte: si la necesidad
+  // no tiene ninguna acción reconocida, compartir una palabra suelta («vendedor» ~ «vender») no basta.
+  if (clauseActions.length && !clauseActions.some(action => needActions.includes(action))) return false;
+  const roleless = text => objectStems(text).filter(token => !ROLE_STEM.test(token));
+  const clauseObjects = roleless(clause);
+  const needObjects = roleless(need.necesidad);
+  // Sin una acción reconocible en la regla, una sola palabra compartida («venta», «acceso») no basta: se piden dos.
+  if (!clauseActions.length) return needObjects.filter(token => clauseObjects.includes(token)).length >= 2;
+  return needObjects.some(token => clauseObjects.includes(token));
 }
 function redundantNeed(item, inventory) {
   if (item?.tipo !== 'RF') return false;
@@ -540,7 +556,11 @@ function redundantNeed(item, inventory) {
 }
 function applicableClause(rule, need) {
   const sentences = String(rule?.necesidad || '').split(/(?<=[.;])\s+/).map(part => part.trim()).filter(Boolean);
-  const sentence = sentences.find(part => clauseApplies(part, need)) || '';
+  // Las frases que solo repiten la restricción sin nombrar una acción («no tiene acceso a las ventas de otros») no deciden por sí
+  // solas: si la regla tiene alguna frase con acción, se evalúan esas.
+  const withAction = sentences.filter(part => actionsOf(part).length);
+  const candidates = withAction.length ? withAction : sentences;
+  const sentence = candidates.find(part => clauseApplies(part, need)) || '';
   if (!sentence) return '';
   const parts = sentence.split(/\s*,\s*|\s+\by\b\s+/iu).map(part => part.trim()).filter(Boolean);
   const listed = parts.length > 1 && parts.filter(part => actionsOf(part).length).length >= 2 && !parts.slice(1).some(part => /^(?:salvo|pero|aunque)\b/i.test(part));
@@ -611,7 +631,8 @@ function align(inventory, identifiers) {
   }
   const rules = prepared.filter(item => item.tipo === 'regla_negocio');
   return prepared.map(item => {
-    if (!['RF', 'RNF'].includes(item.tipo)) return item;
+    // Las reglas de negocio acotan funciones; una cualidad («menos de 2 s al registrar una venta») no las hereda.
+    if (item.tipo !== 'RF') return item;
     const reglas = rules.filter(rule => ruleApplies(rule, item)).map(rule => rule.id);
     const next = { ...item };
     if (reglas.length) next.reglas_ids = [...new Set(reglas)];
@@ -647,10 +668,40 @@ function dataDetailAsRule(item) {
   const { objetivo_id, actor_id, ...rest } = item;
   return { ...rest, tipo: 'regla_negocio', ...(objetivo_id ? { objetivos_relacionados: [objetivo_id] } : {}) };
 }
+/**
+ * Un solo formato de objetivo («O-01»): la IA escribe «O001» y el generador «O-01», y la pantalla solo reconoce el segundo,
+ * así que los objetivos de la IA no aparecían en el resumen y los nuevos podían chocar con ellos. «O001» pasa a «O-01»
+ * (mismo número) y, si ese número ya lo usa otro objetivo distinto, toma el siguiente libre. Los demás objetivos y las
+ * referencias de las reglas se reescriben con la misma correspondencia.
+ */
+function canonicalGoals(inventory) {
+  const items = Array.isArray(inventory) ? inventory : [];
+  const goalOf = value => (typeof value === 'string' ? value : '');
+  const isCanonical = id => /^O-\d+$/.test(id);
+  const used = new Set();
+  for (const item of items) for (const id of [goalOf(item?.objetivo_id), ...(Array.isArray(item?.objetivos_relacionados) ? item.objetivos_relacionados.map(goalOf) : [])]) if (isCanonical(id)) used.add(id);
+  const map = new Map();
+  const nextFree = () => { let n = 1; while (used.has(`O-${String(n).padStart(2, '0')}`)) n += 1; const id = `O-${String(n).padStart(2, '0')}`; used.add(id); return id; };
+  const convert = id => {
+    if (!id || isCanonical(id) || !/^O0*\d+$/i.test(id)) return id;
+    if (!map.has(id)) {
+      const wanted = `O-${String(Number(id.slice(1))).padStart(2, '0')}`;
+      if (!used.has(wanted)) { used.add(wanted); map.set(id, wanted); } else map.set(id, nextFree());
+    }
+    return map.get(id);
+  };
+  return items.map(item => {
+    if (!item || typeof item !== 'object') return item;
+    const next = { ...item };
+    if (goalOf(item.objetivo_id)) next.objetivo_id = convert(item.objetivo_id);
+    if (Array.isArray(item.objetivos_relacionados)) next.objetivos_relacionados = item.objetivos_relacionados.map(id => convert(goalOf(id)) || id);
+    return next;
+  });
+}
 function refine(inventory, input, identifiers, actors) {
   const current = [];
   for (const item of (inventory || []).map(dataDetailAsRule)) current.push(...splitItem(item, identifiers).map(part => ensureSubject(part === item ? item : withEvidence(part, item.evidencia), input)));
   const recovered = clarifyQuestions(current.concat(recover(input, current, identifiers).map(item => ensureSubject(item, input))));
-  return linkActors(polish(recovered, input, identifiers), actors);
+  return canonicalGoals(linkActors(polish(recovered, input, identifiers), actors));
 }
-module.exports = { refine, align, partition, familyOf, linkActors, ruleApplies, applicableClause, preconditionAction, actionOf, actionsOf, tidyNeed, redundantNeed };
+module.exports = { canonicalGoals, refine, align, partition, familyOf, linkActors, ruleApplies, applicableClause, preconditionAction, actionOf, actionsOf, tidyNeed, redundantNeed };

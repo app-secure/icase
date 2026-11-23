@@ -2,15 +2,20 @@
 module.exports = function analysisIdentifiers(contents) {
   const reserved = new Set();
   const visit = value => {
-    if (typeof value === 'string' && /^(N|O|ACT)-[\w-]+$/.test(value)) reserved.add(value);
+    if (typeof value === 'string' && /^(?:(?:N|O|ACT)-[\w-]+|(?:N|O|ACT)\d+)$/.test(value)) reserved.add(value);
     else if (Array.isArray(value)) value.forEach(visit);
     else if (value && typeof value === 'object') Object.values(value).forEach(visit);
   };
   visit(contents);
+  // Los nuevos IDs siguen el estilo de los existentes: si la IA escribió «N001», el siguiente es «N018» y no «N-18».
+  const numberOf = (id, prefix) => { const match = new RegExp('^' + prefix + '-?(\\d+)$').exec(id); return match ? Number(match[1]) : 0; };
   return { next(prefix) {
-    let number = Math.max(0, ...[...reserved].filter(id => id.startsWith(prefix + '-')).map(id => Number(id.slice(prefix.length + 1)) || 0)) + 1;
+    const own = [...reserved].filter(id => numberOf(id, prefix));
+    const plain = own.filter(id => !id.startsWith(prefix + '-'));
+    const flat = plain.length > own.length - plain.length;
+    let number = Math.max(0, ...own.map(id => numberOf(id, prefix))) + 1;
     let id;
-    do { id = `${prefix}-${String(number++).padStart(2, '0')}`; } while (reserved.has(id));
+    do { id = flat ? `${prefix}${String(number++).padStart(3, '0')}` : `${prefix}-${String(number++).padStart(2, '0')}`; } while (reserved.has(id));
     reserved.add(id); return id;
   } };
 };
