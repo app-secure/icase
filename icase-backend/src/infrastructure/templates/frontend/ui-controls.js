@@ -14,10 +14,13 @@ export function kindOf(name) {
   if (/^(?:formulario de )?(?:edicion|editar|modificar|modificacion)\b/.test(text)) return 'editar';
   if (/^(?:formulario de )?(?:registro|creacion|alta|nuevo|nueva|registrar|crear)\b/.test(text)) return 'crear';
   if (/^detalle\b/.test(text)) return 'detalle';
+  // «Formulario de Producto» sin «registro/edición»: un solo formulario sirve para el alta y, con ?id=, para la edición.
+  if (/^formulario de\b/.test(text)) return 'formulario';
   if (/^(?:listado|lista|catalogo|historial|gestion)\b/.test(text)) return 'lista';
   return 'otra';
 }
-const find = (views, kind, noun) => (noun ? views.find((view) => kindOf(view.name) === kind && nounOf(view.name) === noun) : null);
+const find = (views, kind, noun) => (noun ? views.find((view) => kindOf(view.name) === kind && nounOf(view.name) === noun)
+  || (['crear', 'editar'].includes(kind) ? views.find((view) => kindOf(view.name) === 'formulario' && nounOf(view.name) === noun) : null) : null);
 const labelOf = (control) => plain(control.textContent) || plain(control.getAttribute('aria-label') || control.getAttribute('title') || '');
 
 /** Adónde lleva un control de interfaz, o null si no se reconoce. */
@@ -129,13 +132,13 @@ async function loadRecord(api, operations, id) {
 export async function hydrateRecord(root, { api, views, current, search, registries = [] }) {
   const id = new URLSearchParams(search || '').get('id');
   const view = views.find((item) => item.route === current);
-  if (!root || !id || !view || !['detalle', 'editar'].includes(kindOf(view.name))) return null;
+  if (!root || !id || !view || !['detalle', 'editar', 'formulario'].includes(kindOf(view.name))) return null;
   const noun = nounOf(view.name);
   const operations = registries.filter((item) => item.entity && singular(item.entity) === noun.replace(/ /g, '')).map((item) => item.key);
   const record = await loadRecord(api, operations, id);
   if (!record || !root.isConnected) return null;
   const form = root.querySelector('form');
-  if (kindOf(view.name) === 'editar' && form) { fillFields(form, record); return record; }
+  if (['editar', 'formulario'].includes(kindOf(view.name)) && form) { fillFields(form, record); return record; }
   const currency = /S\/\s?\d/.test(root.textContent) ? 'S/ ' : '';
   // Referencias con su nombre (cliente_id → «Ana Ríos», usuario_id → la cuenta) leyendo el dato referenciado, si el rol puede.
   const lists = new Map();

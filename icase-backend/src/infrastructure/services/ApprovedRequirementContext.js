@@ -32,10 +32,20 @@ function draft(batch, inventory, actors, instruction = '') {
 function evidence(inventory) {
   return JSON.stringify(inventory.map(n => ({ id: n.id, evidencias: n.evidencias?.length ? n.evidencias.map(({ texto, fuente }) => ({ texto, fuente })) : [{ texto: n.evidencia, fuente: n.fuente }] })));
 }
+const plain = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+// «administrador» y «administradora», «vendedor» y «vendedora» son el mismo rol: una sola forma en todo el proyecto.
+const roleKey = value => plain(value).trim().split(/\s+/).pop().replace(/dora$/, 'dor').replace(/(?:es|s)$/, '');
+const GENERIC_ACTOR = /^(?:usuarios?|personas?|usuario del sistema|usuarios del sistema)$/;
+const AUTH = /autentic|iniciar sesi|inicio de sesi|acceso seg[uú]n (?:el )?rol/i;
 function normalizeActors(req, batch, actors) {
+  const people = actors.filter(actor => actor.tipo !== 'sistema_externo' && actor.estado !== 'rechazado' && actor.nombre);
   const byId = new Map(actors.map(actor => [actor.id, actor.nombre]));
+  const canonical = name => (people.find(actor => roleKey(actor.nombre) === roleKey(name)) || {}).nombre || name;
   const names = (Array.isArray(req.actores) ? req.actores : []).map(name => byId.get(name) || name)
-    .filter(name => !/^sistema$/i.test(name) || actors.some(a => a.nombre?.toLowerCase() === String(name).toLowerCase()));
+    .filter(name => !/^sistema$/i.test(name) || actors.some(a => a.nombre?.toLowerCase() === String(name).toLowerCase()))
+    .map(canonical)
+    // «Usuario» a secas, cuando el proyecto ya nombra a sus personas, no es un rol más.
+    .filter(name => !(GENERIC_ACTOR.test(plain(name).trim()) && people.length && !people.some(actor => roleKey(actor.nombre) === roleKey(name))));
   if (!names.length && req.tipo === 'RF') {
     for (const need of batch.filter(n => (req.necesidades_origen || []).includes(n.id))) {
       if (byId.has(need.actor_id)) names.push(byId.get(need.actor_id));
@@ -43,8 +53,19 @@ function normalizeActors(req, batch, actors) {
   }
   // El acceso con usuario y contraseña lo usan todas las personas del sistema: un RF de autenticación sin actor
   // dejaría el inicio de sesión fuera de los permisos y de la navegación de cada rol.
-  if (!names.length && req.tipo === 'RF' && /autentic|iniciar sesi|inicio de sesi|acceso seg[uú]n (?:el )?rol/i.test(`${req.nombre || ''} ${req.descripcion || ''}`)) {
-    names.push(...actors.filter(actor => actor.tipo !== 'sistema_externo' && actor.estado !== 'rechazado' && actor.nombre).map(actor => actor.nombre));
+  if (req.tipo === 'RF' && AUTH.test(`${req.nombre || ''} ${req.descripcion || ''}`) && (!names.length || names.every(name => GENERIC_ACTOR.test(plain(name).trim())))) {
+    names.length = 0;
+    names.push(...people.map(actor => actor.nombre));
+  }
+  // Sin actor en el RF ni en su necesidad: el actor cuya descripción dice esa misma función («emite facturas» para «Emitir factura»).
+  if (!names.length && req.tipo === 'RF') {
+    const words = plain(req.nombre).match(/[a-z]{4,}/g) || [];
+    const verb = (words[0] || '').slice(0, 4);
+    const object = (words.slice(1).find(word => !/^(?:con|para|por|del|las|los|una|uno|sus|sin)$/.test(word) && word.length >= 5) || '').slice(0, 5);
+    if (verb && object) {
+      const owners = people.filter(actor => { const description = plain(actor.descripcion); return new RegExp('\\b' + verb).test(description) && description.includes(object); });
+      if (owners.length === 1) names.push(owners[0].nombre);
+    }
   }
   return { ...req, actores: [...new Set(names)] };
 }

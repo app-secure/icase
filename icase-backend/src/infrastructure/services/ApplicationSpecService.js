@@ -134,8 +134,15 @@ class ApplicationSpecService {
     });
   }
 
+  /** «Administrador» y «Administradora», «vendedores» y «Vendedor»: el nombre con que los requisitos aprobados llaman a ese actor. */
+  _actorConocido(nombre) {
+    const clave = (value) => strip(value).trim().split(/\s+/).pop().replace(/dora$/, 'dor').replace(/(?:es|s)$/, '');
+    return (this._conocidos || []).find((conocido) => clave(conocido) === clave(nombre)) || nombre;
+  }
+
   /** Conserva lo válido, descarta el resto explicando por qué y completa con derivación determinista los RF sin operación. */
   depurar(propuesta, { modelo, rf, pantallas = [] }) {
+    this._conocidos = [...new Set(rf.flatMap((item) => list(item.actores).map(text).filter(Boolean)))];
     const advertencias = [];
     const entidades = new Map(modelo.entities.map((entity) => [entity.name, entity]));
     const rfIds = new Set(rf.map((item) => String(item.identificador).toUpperCase()));
@@ -216,6 +223,7 @@ class ApplicationSpecService {
    * de cada operación; devuelve `errores` si alguna dejó de ser válida (el dominio o los RF cambiaron).
    */
   validar(guardada, { modelo, rf, pantallas = [], cablear = true, verbosPorRf = null }) {
+    this._conocidos = [...new Set(rf.flatMap((item) => list(item.actores).map(text).filter(Boolean)))];
     const entidades = new Map(modelo.entities.map((entity) => [entity.name, entity]));
     const rfIds = new Set(rf.map((item) => String(item.identificador).toUpperCase()));
     const errores = [];
@@ -373,7 +381,7 @@ class ApplicationSpecService {
     }
     const operacion = {
       nombre, rf, tipo, entidad: entidad.name, entidadClave: entidad.key,
-      actores: list(candidata.actores).map(text).filter(Boolean),
+      actores: list(candidata.actores).map(text).filter(Boolean).map((actor) => this._actorConocido(actor)),
       filtros, entradas: entradas.valores, salida: salida.valores, ...(transicion ? { transicion } : {}),
       ...(relacionadas.length && tipo === 'consulta' ? { relacionadas } : {}), ...(sobre && tipo === 'transicion' ? { sobre } : {}),
       ...(vincula ? { vincula } : {}),

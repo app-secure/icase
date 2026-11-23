@@ -15,12 +15,15 @@ const SYSTEM_ACTOR = /^(?:sistema|system|api|servicio|servidor|pasarela|gateway|
 const slug = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
   .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
+// El rol del actor: «Administradora» es el rol administrador del sistema y «Vendedora», el vendedor (una sola forma por rol).
+const roleId = (value) => slug(value).replace(/dora$/, 'dor');
+
 const operationKey = (identificador) => slug(identificador);
 
 const METHOD_OF_VERB = Object.freeze({ consultar: 'GET', crear: 'POST', editar: 'PATCH', eliminar: 'DELETE' });
 const plain = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 // La autenticación la resuelve el inicio de sesión de la aplicación: no es una operación de datos con permisos por rol.
-const LOGIN = /autenticaci|inicio de sesion|iniciar sesion|\blogin\b/;
+const LOGIN = /autenticaci|autenticar|inicio de sesion|iniciar sesion|\blogin\b/;
 const CREATES = /\b(?:registr\w*|cre[ao]\w*|compr\w*|reserv\w*|canje\w*|cierre|apertura|agreg\w*|anad\w*|solicit\w*|enviar|emit\w*)\b/;
 const EDITS = /\b(?:actualiz\w*|modific\w*|edit\w*|marc\w*|reasign\w*|cambi\w*|configur\w*|confirm\w*|valid\w*)\b/;
 const DELETES = /\b(?:elimin\w*|cancel\w*|anul\w*|borr\w*|quit\w*|retir\w*)\b/;
@@ -98,9 +101,11 @@ class AccessControlService {
     for (const requisito of rf) {
       const actores = (Array.isArray(requisito.actores) ? requisito.actores : [requisito.actores]).map((item) => String(item || '').trim()).filter(Boolean);
       for (const actor of actores) {
-        const id = slug(actor);
+        const id = roleId(actor);
         if (!id) continue;
         if (id === ADMIN_ROLE) { adminMencionado = true; continue; }
+        // «Usuario» a secas en el RF de acceso es cualquier persona que entra, no un rol más.
+        if (esAcceso(requisito) && /^usuarios?$/.test(id)) continue;
         if (!roles.has(id)) roles.set(id, { id, nombre: actor, incluir: !SYSTEM_ACTOR.test(actor), autoregistro: false });
         if (esAcceso(requisito)) continue;
         const metodos = metodosConEvidencia(requisito, actor, metodosDe(requisito, verbosPorRf));
@@ -154,7 +159,7 @@ class AccessControlService {
     if (listaRoles.length > 30) errores.push('No se admiten más de 30 roles.');
     listaRoles.forEach((rol, index) => {
       const nombre = String(rol?.nombre || '').trim();
-      const id = slug(rol?.id || nombre);
+      const id = roleId(rol?.id || nombre);
       if (!nombre || nombre.length > 60 || !id) { errores.push(`El rol #${index + 1} necesita un nombre de hasta 60 caracteres.`); return; }
       if (id === ADMIN_ROLE) { errores.push('El rol «administrador» está reservado: existe siempre y no se declara.'); return; }
       if (vistos.has(id)) { errores.push(`El rol «${id}» está repetido.`); return; }
@@ -169,7 +174,7 @@ class AccessControlService {
     listaPermisos.forEach((permiso, index) => {
       const etiqueta = `Permiso #${index + 1}`;
       const operacion = String(permiso?.operacion || '').toUpperCase();
-      const rol = slug(permiso?.rol);
+      const rol = roleId(permiso?.rol);
       const metodos = [...new Set((Array.isArray(permiso?.metodos) ? permiso.metodos : []).map((item) => String(item).toUpperCase()))];
       const alcance = permiso?.alcance === undefined || permiso?.alcance === null || permiso?.alcance === '' ? 'todos' : String(permiso.alcance);
       if (!conocidas.has(operacion)) { errores.push(`${etiqueta}: la operación «${permiso?.operacion}» no corresponde a un RF aprobado.`); return; }

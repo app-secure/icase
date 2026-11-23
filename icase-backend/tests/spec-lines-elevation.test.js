@@ -80,3 +80,14 @@ describe('alta suelta de la línea', () => {
     expect(altas).not.toContain('crearDetalleVenta');
   });
 });
+
+describe('actores de las operaciones', () => {
+  test('«Administrador» (de la IA) se escribe como lo llaman los requisitos: «Administradora»', () => {
+    const rfs = [{ aprobado: true, tipo: 'RF', identificador: 'RF-03', nombre: 'Gestionar productos', descripcion: '', actores: ['Administradora'] }];
+    const modeloP = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: '@startuml\nclass Producto {\n  +String nombre\n  +int stock\n}\n@enduml' }]);
+    const { especificacion } = new ApplicationSpecService({}).depurar({
+      operaciones: [{ nombre: 'crearProducto', rf: 'RF-03', tipo: 'crear', entidad: 'Producto', actores: ['Administrador'], entradas: ['nombre', 'stock'] }]
+    }, { modelo: modeloP, rf: rfs, pantallas: [] });
+    expect(especificacion.operaciones.find((op) => op.nombre === 'crearProducto').actores).toEqual(['Administradora']);
+  });
+});

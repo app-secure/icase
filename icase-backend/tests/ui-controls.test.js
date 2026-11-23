@@ -142,3 +142,19 @@ describe('detalle de venta con sus datos reales', () => {
     expect(root.textContent).toContain('La factura asociada quedará anulada.');
   });
 });
+
+describe('un solo «Formulario de X» para alta y edición', () => {
+  const generic = [
+    { route: '/productos', name: 'Productos' },
+    { route: '/detalle-de-producto', name: 'Detalle de Producto' },
+    { route: '/formulario-de-producto', name: 'Formulario de Producto' }
+  ];
+  test('«Nuevo» abre el formulario y «Editar» lo abre con el id del registro', () => {
+    expect(ui.kindOf('Formulario de Producto')).toBe('formulario');
+    const nuevo = dom('<button>Nuevo</button>').querySelector('button');
+    expect(ui.uiTarget(nuevo, { views: generic, current: '/productos', search: '' })).toEqual({ to: '/formulario-de-producto' });
+    const doc = dom('<button>Editar</button>');
+    doc.querySelector('button').setAttribute('data-id', '7');
+    expect(ui.uiTarget(doc.querySelector('button'), { views: generic, current: '/detalle-de-producto', search: '?id=7' })).toEqual({ to: '/formulario-de-producto?id=7' });
+  });
+});

@@ -195,3 +195,15 @@ describe('actores que el insumo declara ajenos al sistema', () => {
     expect(out[0].actor_id).toBeUndefined();
   });
 });
+
+describe('actor nombrado en la propia necesidad', () => {
+  const { linkActors } = require('../src/core/services/NeedGranularity');
+  const actors = [{ id: 'A1', nombre: 'Administradora', alias: ['Administrador'] }, { id: 'A2', nombre: 'Vendedor' }];
+  test('«Permitir a la administradora…» y «…a cada vendedor…» enlazan a su actor', () => {
+    const out = linkActors([
+      { id: 'N3', tipo: 'RF', necesidad: 'Permitir a la administradora anular una venta', evidencia: 'x' },
+      { id: 'N7', tipo: 'RF', necesidad: 'Permitir a cada vendedor consultar sus ventas', evidencia: 'x' }
+    ], actors);
+    expect(out.map((item) => item.actor_id)).toEqual(['A1', 'A2']);
+  });
+});

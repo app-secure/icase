@@ -27,3 +27,17 @@ test('sin reserva expresa, los verbos de los mockups se conservan (clientes)', (
   expect(de('RF-07').metodos).toEqual(['GET', 'POST', 'PATCH', 'DELETE']);
   expect(de('RF-07').alcance).toBe('todos');
 });
+
+describe('roles con una sola forma', () => {
+  const AccessControlService = require('../src/core/services/AccessControlService');
+  const rf = (identificador, nombre, actores) => ({ aprobado: true, tipo: 'RF', identificador, nombre, descripcion: nombre, actores });
+  test('«Administradora» es el rol administrador y «Usuario» en el acceso no crea un rol', () => {
+    const { valor } = new AccessControlService().proponer({ requerimientos: [
+      rf('RF-01', 'Registrar venta', ['Vendedor']),
+      rf('RF-02', 'Anular venta', ['Administradora']),
+      rf('RF-03', 'Autenticar usuarios mediante JWT', ['Usuario'])
+    ] });
+    expect(valor.roles.map((rol) => rol.id)).toEqual(['vendedor']);
+    expect(valor.roles.some((rol) => /administrador|usuario/.test(rol.id))).toBe(false);
+  });
+});

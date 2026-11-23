@@ -656,12 +656,18 @@ function linkActors(inventory, actors) {
   if (!people.length) return inventory;
   const namesOf = candidate => [candidate.nombre, ...(candidate.alias || [])].map(name => normalize(name).split(/\s+/).pop()).filter(word => word && word.length >= 4);
   // El actor cuenta si la cita lo nombra antes del verbo del propio RF («…el vendedor emite la factura» para «Emitir factura»).
-  const mentions = (candidate, text, verb) => namesOf(candidate).some(word => new RegExp('(?:^|[^a-z])(?:el|la|los|las)\\s+' + word.slice(0, Math.max(5, word.length - 2)) + '\\w*[^.]{0,80}\\b' + verb, 'i').test(text));
+  const mentions = (candidate, text, verb) => namesOf(candidate).some(word => new RegExp('(?:^|[^a-z])(?:el|la|los|las)\\s+' + word.slice(0, Math.max(5, word.length - 2)) + '\\w*[^.]{0,140}\\b' + verb, 'i').test(text));
   return (inventory || []).map(item => {
     if (item?.tipo !== 'RF') return item;
     const subject = (/^(?:el|la|los|las)\s+(\p{L}+)/iu.exec(item.necesidad) || [])[1] || '';
     const noun = normalize(subject);
     let actor = subject && noun !== 'sistema' ? people.find(candidate => namesOf(candidate).some(word => word === noun || word.startsWith(noun) || noun.startsWith(word))) : null;
+    // «Permitir a la administradora anular…», «…para cada vendedor»: un único actor nombrado en la propia necesidad.
+    if (!actor && !item.actor_id) {
+      const own = normalize(item.necesidad);
+      const named = people.filter(candidate => namesOf(candidate).some(word => new RegExp('(?:^|[^a-z])(?:a|de|para|por|del|al|el|la|los|las|cada)\\s+(?:el\\s+|la\\s+)?' + word.slice(0, Math.max(5, word.length - 2)), 'i').test(own)));
+      if (named.length === 1) actor = named[0];
+    }
     // Sin sujeto en la frase («Emitir factura…»), el actor es el único que la cita nombra («…el vendedor emite la factura»).
     if (!actor && !item.actor_id) {
       const quote = normalize([item.evidencia, ...(Array.isArray(item.evidencias) ? item.evidencias.map(entry => (typeof entry === 'string' ? entry : entry?.texto)) : [])].filter(Boolean).join(' '));
