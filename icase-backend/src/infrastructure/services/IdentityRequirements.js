@@ -6,7 +6,8 @@ const strip = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g
 
 // Nombres de campo que guardan un secreto (se comparan sin tildes, mayúsculas ni separadores).
 const SENSITIVE_FIELD = /^(?:password|passwd|pwd|pass|contrasena|clave|secret|secreto|apikey|token|(?:password|passwd|pass|contrasena|clave)hash|hash(?:password|contrasena|clave)?|salt)$/;
-const LOGIN = /\b(?:autenticar|autenticacion|autenticarse|inicio de sesion|iniciar sesion|login|jwt|control de acceso)\b/;
+// Autorizar acciones según el rol también es acceso: lo resuelven la sesión y la matriz de permisos, no una tabla de datos.
+const LOGIN = /\b(?:autenticar|autenticacion|autenticarse|inicio de sesion|iniciar sesion|login|jwt|control de acceso)\b|\bautoriz\w*\b.*\brol(?:es)?\b/;
 const USERS = /\busuarios?\b/;
 
 const isSensitiveField = (name) => SENSITIVE_FIELD.test(strip(name).replace(/[^a-z0-9]/g, ''));

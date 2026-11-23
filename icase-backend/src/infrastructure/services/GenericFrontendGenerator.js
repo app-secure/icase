@@ -151,7 +151,12 @@ class GenericFrontendGenerator {
       const jsxBody = analysis ? analysis.jsx : '';
       // Una pantalla de mockup sin vista en la especificación, pero que guarda una operación con líneas o lee datos, también se enlaza.
       const wired = jsxBody.includes('handleAction(');
-      const live = specFound || (wired && analysis && spec?.acciones?.length ? { blocks: [], actions: {} } : null);
+      // «Listado de usuarios» con identidad: las cuentas viven en /api/users, no en una operación de la especificación. Sin esto la
+      // tabla mostraba los usuarios de ejemplo del diseño y su «Buscar» no hacía nada.
+      const cuentas = !specFound && auth && identity.usuarios.length && analysis && /^(?:pantalla de )?(?:listado|lista|gestion|administracion) de usuarios\b/.test(String(view.name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase())
+        ? { blocks: [{ tipo: 'tabla', operacion: 'cuentasDeUsuario', campos: ['nombre', 'email', 'rol', 'activo'] }], actions: { cuentasDeUsuario: { name: 'cuentasDeUsuario', type: 'consulta', method: 'GET', path: '/api/users', capability: slug(identity.usuarios[0]), entity: 'usuario', filters: [], fields: { activo: { type: 'boolean' } }, inputs: [], output: ['nombre', 'email', 'rol', 'activo'] } } }
+        : null;
+      const live = specFound || cuentas || (wired && analysis && spec?.acciones?.length ? { blocks: [], actions: {} } : null);
       if (live && !specFound) anyLive = true;
       const specActionMap = live ? this._specActionMap(live.actions, spec) : null;
       anyWired = anyWired || wired;

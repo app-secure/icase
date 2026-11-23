@@ -302,3 +302,89 @@ test('cada reporte va a su propia pantalla aunque la trazabilidad cite ambos RF 
   expect(de('reporte-de-ventas-por-fechas')).toEqual(['RF-10']);
   expect(de('reporte-de-productos-mas-vendidos')).toEqual(['RF-11']);
 });
+
+describe('regeneración: «Anular factura y restaurar stock» y operaciones que el sistema ya hace', () => {
+  const rfR = [
+    { aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Registrar venta con cliente y productos', actores: ['Vendedor'] },
+    { aprobado: true, tipo: 'RF', identificador: 'RF-02', nombre: 'Emitir factura interna', actores: ['Vendedor'] },
+    { aprobado: true, tipo: 'RF', identificador: 'RF-07', nombre: 'Anular factura y restaurar stock', actores: ['Administrador'] },
+    { aprobado: true, tipo: 'RF', identificador: 'RF-11', nombre: 'Autenticar usuario con nombre de usuario y contraseña cifrada', actores: ['Vendedor'] },
+    { aprobado: true, tipo: 'RF', identificador: 'RF-13', nombre: 'Autorizar acciones según rol asignado', actores: ['Administrador'] }
+  ];
+  const MODEL_R = PLANTUML.replace('+String estado\n  +Decimal total\n}', '+String estado\n  +Decimal total\n  +Boolean modificable\n}') + '\n';
+  const modeloR = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: MODEL_R.replace('@enduml', 'class Usuario {\n  +String id\n  +String nombre\n  +String correo\n  +String passwordHash\n}\n@enduml') }]);
+  const specR = new ApplicationSpecService({}).validar({ operaciones: [
+    { nombre: 'crearVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['medioPago'] },
+    { nombre: 'decrementarStockProducto', rf: 'RF-01', tipo: 'actualizar', entidad: 'Producto', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['stock'] },
+    { nombre: 'crearFactura', rf: 'RF-02', tipo: 'crear', entidad: 'Factura', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['venta_id'] },
+    { nombre: 'anularFactura', rf: 'RF-07', tipo: 'transicion', entidad: 'Factura', actores: ['Administrador'], estado_decision: 'confirmado', origen: 'ia', entradas: [], transicion: { campo: 'estado', de: ['emitida'], a: 'anulada' } },
+    { nombre: 'restaurarStockProducto', rf: 'RF-07', tipo: 'actualizar', entidad: 'Producto', actores: ['Administrador'], estado_decision: 'confirmado', origen: 'ia', entradas: ['stock'] },
+    { nombre: 'marcarVentaNoModificable', rf: 'RF-07', tipo: 'actualizar', entidad: 'Venta', actores: ['Administrador'], estado_decision: 'confirmado', origen: 'ia', entradas: ['modificable'] },
+    { nombre: 'autenticarUsuario', rf: 'RF-11', tipo: 'consulta', entidad: 'Usuario', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', salida: ['nombre'] },
+    { nombre: 'registrarUsuario', rf: 'RF-13', tipo: 'crear', entidad: 'Usuario', actores: ['Administrador'], estado_decision: 'confirmado', origen: 'derivado', entradas: ['nombre', 'correo', 'passwordHash'] }
+  ], pantallas: [] }, { modelo: modeloR, rf: rfR, cablear: false });
+  const nombres = specR.operaciones.map((item) => item.nombre);
+
+  test('quedan la venta, la factura y su anulación; se quitan el stock manual, el marcado manual, el acceso y la autorización', () => {
+    expect(nombres.sort()).toEqual(['anularFactura', 'crearFactura', 'crearVenta']);
+    expect(specR.avisos.join(' ')).toContain('decrementarStockProducto');
+  });
+
+  test('anular la factura anula su venta y repone su stock (cascada)', async () => {
+    const anularF = specR.operaciones.find((item) => item.nombre === 'anularFactura');
+    expect(anularF.cascada).toMatchObject({ entidad: 'Venta', campo: 'factura_id', estado: 'estado', valor: 'anulada', reponer: { stock: 'stock' } });
+    const lineasR = { ...specR.operaciones.find((item) => item.nombre === 'crearVenta').lineas, capability: 'op-lineaventa', destinoCapability: 'rf-05' };
+    const defs = {
+      venta: { name: 'crearVenta', type: 'crear', capability: 'rf-01', inputs: ['medioPago'], autoInputs: [{ campo: 'total', valor: 'lineas' }], lineas: lineasR },
+      anular: { name: 'anularFactura', type: 'transicion', capability: 'rf-02', byId: true, transition: anularF.transicion, cascada: { ...anularF.cascada, capability: 'rf-01', reponer: { ...anularF.cascada.reponer, capability: 'op-lineaventa', destinoCapability: 'rf-05' } } }
+    };
+    const rt = load(Object.values(defs));
+    const store = memoryStore({ 'rf-05': [{ id: 'p1', nombre: 'Arroz', precioVenta: 4.5, stock: 10, estado: 'activo' }], 'rf-02': [{ id: 'f1', numero: 'F001-00001', estado: 'emitida' }] });
+    const venta = await rt.run(store, defs.venta, { body: { medioPago: 'efectivo', lineas: [{ producto_id: 'p1', cantidad: 3 }] } });
+    await store.update('rf-01', venta.id, { factura_id: 'f1' });
+    expect(store.tables.get('rf-05').get('p1').data.stock).toBe(7);
+    await rt.run(store, defs.anular, { id: 'f1', body: {} });
+    expect(store.tables.get('rf-02').get('f1').data.estado).toBe('anulada');
+    expect(store.tables.get('rf-01').get(venta.id).data.estado).toBe('anulada');
+    expect(store.tables.get('rf-05').get('p1').data.stock).toBe(10);
+  });
+});
+
+describe('regeneración: venta sin estado (solo «modificable»)', () => {
+  test('anular la factura deja la venta no modificable y repone su stock', () => {
+    const MODEL_M = PLANTUML.replace('+String medioPago\n  +String estado\n  +Decimal total', '+String medioPago\n  +Decimal total\n  +Boolean modificable');
+    const modeloM = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: MODEL_M }]);
+    const specM = new ApplicationSpecService({}).validar({ operaciones: [
+      { nombre: 'crearVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['medioPago'] },
+      { nombre: 'crearFactura', rf: 'RF-03', tipo: 'crear', entidad: 'Factura', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['venta_id'] },
+      { nombre: 'anularFactura', rf: 'RF-08', tipo: 'transicion', entidad: 'Factura', actores: ['Administrador'], estado_decision: 'confirmado', origen: 'ia', entradas: [], transicion: { campo: 'estado', de: ['emitida'], a: 'anulada' } }
+    ], pantallas: [] }, { modelo: modeloM, rf, cablear: false });
+    expect(specM.operaciones.find((item) => item.nombre === 'anularFactura').cascada).toMatchObject({ entidad: 'Venta', campo: 'factura_id', estado: 'modificable', valor: false, reponer: { stock: 'stock' } });
+  });
+});
+
+describe('regeneración: estado inicial desde la transición', () => {
+  test('la factura nace en el estado que exige su anulación (texto sin valores en el modelo)', () => {
+    const MODEL_T = PLANTUML.replace('+Decimal total\n  +String estado\n}', '+Decimal total\n  +String estado\n}');
+    const modeloT = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: MODEL_T }]);
+    const specT = new ApplicationSpecService({}).validar({ operaciones: [
+      { nombre: 'crearVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['medioPago'] },
+      { nombre: 'crearFactura', rf: 'RF-03', tipo: 'crear', entidad: 'Factura', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['venta_id'] },
+      { nombre: 'anularFactura', rf: 'RF-08', tipo: 'transicion', entidad: 'Factura', actores: ['Administrador'], estado_decision: 'confirmado', origen: 'ia', entradas: [], transicion: { campo: 'estado', de: ['activa'], a: 'anulada' } }
+    ], pantallas: [] }, { modelo: modeloT, rf, cablear: false });
+    expect(specT.operaciones.find((item) => item.nombre === 'crearFactura').autoEntradas).toEqual(expect.arrayContaining([{ campo: 'estado', valor: 'inicial', opciones: ['activa'] }]));
+  });
+});
+
+describe('regeneración: reportes sin estado en la venta', () => {
+  test('«más vendidos» excluye las ventas bloqueadas (modificable = false) si la venta no tiene estado', () => {
+    const MODEL_M = PLANTUML.replace('+String medioPago\n  +String estado\n  +Decimal total', '+String medioPago\n  +Decimal total\n  +Boolean modificable');
+    const modeloM = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: MODEL_M }]);
+    const specM = new ApplicationSpecService({}).validar({ operaciones: [
+      { nombre: 'crearVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], estado_decision: 'confirmado', origen: 'ia', entradas: ['medioPago'] },
+      { nombre: 'masVendidos', rf: 'RF-03', tipo: 'resumen', entidad: 'LineaVenta', actores: ['Administrador'], estado_decision: 'confirmado', origen: 'derivado', entradas: [], salida: ['producto_id', 'cantidadVendida'],
+        resumen: { agruparPor: 'producto_id', medidas: [{ funcion: 'sumar', campo: 'cantidad', nombre: 'cantidadVendida' }], via: { entidad: 'Venta', campo: 'venta_id' }, orden: 'desc' } }
+    ], pantallas: [] }, { modelo: modeloM, rf, cablear: false });
+    expect(specM.operaciones.find((item) => item.nombre === 'masVendidos').resumen.excluir).toEqual({ campo: 'modificable', patron: '^false$', en: 'via' });
+  });
+});

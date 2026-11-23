@@ -41,3 +41,10 @@ test('un RF que solo menciona al «vendedor autenticado» no es el RF de inicio 
   expect(isLoginRequirement({ nombre: 'Autenticar usuarios mediante usuario y contraseña' })).toBe(true);
   expect(isLoginRequirement({ nombre: 'Autenticación con JWT' })).toBe(true);
 });
+
+test('autorizar acciones según el rol es acceso (lo resuelven la sesión y los permisos), no una operación de datos', () => {
+  const { isLoginRequirement } = require('../src/infrastructure/services/IdentityRequirements');
+  expect(isLoginRequirement({ nombre: 'Autorizar acciones según rol asignado' })).toBe(true);
+  expect(isLoginRequirement({ nombre: 'Autorizar pagos' })).toBe(false);
+  expect(isLoginRequirement({ nombre: 'Gestionar usuarios y roles' })).toBe(false);
+});

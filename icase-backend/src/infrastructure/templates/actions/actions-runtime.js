@@ -345,6 +345,18 @@ async function run(store, def, ctx = {}) {
         const lines = (Array.isArray(found) ? found : found?.data || []).map(flat);
         await adjustStock(store, def.reponer, lines, +1);
       }
+      // Anular un documento vinculado (la factura de una venta): su cabecera también queda anulada y devuelve el stock de sus líneas.
+      if (def.cascada) {
+        const found = await store.list(def.cascada.capability, { [def.cascada.campo]: targetId }, null);
+        for (const owner of (Array.isArray(found) ? found : found?.data || []).map(flat)) {
+          if (owner[def.cascada.estado] === def.cascada.valor) continue;
+          await store.update(def.cascada.capability, owner.id, { [def.cascada.estado]: def.cascada.valor }, null);
+          if (def.cascada.reponer?.stock) {
+            const listed = await store.list(def.cascada.reponer.capability, { [def.cascada.reponer.fk]: owner.id }, null);
+            await adjustStock(store, def.cascada.reponer, (Array.isArray(listed) ? listed : listed?.data || []).map(flat), +1);
+          }
+        }
+      }
       return updated;
     }
     default:

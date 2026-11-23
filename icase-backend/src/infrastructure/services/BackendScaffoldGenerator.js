@@ -113,7 +113,10 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     if (errores.length) throw new Error(`Las reglas de negocio aprobadas ya no son coherentes con el modelo de dominio: ${errores.join(' ')} Vuelve a revisar la etapa de reglas de negocio.`);
     const pendientes = service.pendientes(reglas);
     if (pendientes.length) throw new Error(`Hay reglas de negocio pendientes de decisión: ${pendientes.join(', ')}.`);
-    const confirmadas = service.confirmadas(reglas);
+    // Reglas aprobadas antes de que se dedujera el impuesto («total = subtotal + igv» sin cálculo del IGV): se completan con el
+    // porcentaje que dicen los requisitos, o la factura saldría sin IGV ni total.
+    const BusinessRuleInferenceService = require('./BusinessRuleInferenceService');
+    const confirmadas = new BusinessRuleInferenceService({}).completarImpuestos(service.confirmadas(reglas), { modelo: domainModel, rf, confirmar: true }).reglas;
     // «Obligatorio» se infiere de que el atributo no es opcional en el diagrama, pero muchos se rellenan después (la hora a la que
     // se sirve un pedido, la liberación de una reserva) o los completa el sistema. Si la especificación define cómo se crea una
     // entidad, al crearla solo se exigen los datos que esa operación aporta: lo contrario haría fallar siempre el alta.
@@ -130,7 +133,7 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
       omitidas.push(regla.id);
       return false;
     });
-    return { reglas: vigentes, descartadas: reglas.length - confirmadas.length, omitidas };
+    return { reglas: vigentes, descartadas: Math.max(0, reglas.length - service.confirmadas(reglas).length), omitidas };
   }
 
   _modelWarnings(archivos) {

@@ -72,6 +72,9 @@ class BusinessRuleInferenceService {
       if (resultado.errores.length) advertencias.push(`Se descartó la propuesta #${index + 1} (${candidata?.tipo || 'sin tipo'} en ${candidata?.entidad || '?'}): ${resultado.errores.join(' ')}`);
       else aceptadas.push(regla);
     });
+    const conImpuestos = this.completarImpuestos(aceptadas, { modelo, rf });
+    aceptadas.splice(0, aceptadas.length, ...conImpuestos.reglas);
+    advertencias.push(...conImpuestos.advertencias);
     const { reglas, advertencias: avisos } = this.ruleService.validar(aceptadas, contexto);
     advertencias.push(...avisos);
     return {
@@ -80,5 +83,60 @@ class BusinessRuleInferenceService {
     };
   }
 }
+
+/**
+ * «total = subtotal + igv» sin una regla que calcule el IGV deja la factura sin IGV ni total. Si un requisito dice el porcentaje
+ * («aplicar IGV del 18%»), el impuesto es ese porcentaje de la base (subtotal), con la frase del requisito como evidencia literal.
+ */
+BusinessRuleInferenceService.prototype._impuestosDelRequisito = function _impuestosDelRequisito(reglas, { modelo, rf }) {
+  const operandos = (nodo) => (!nodo || typeof nodo !== 'object' ? [] : nodo.campo ? [nodo.campo] : [...operandos(nodo.izquierda), ...operandos(nodo.derecha)]);
+  const calculados = new Set(reglas.filter((regla) => regla.tipo === 'calculo').map((regla) => `${regla.entidad}.${regla.campo}`));
+  const derivadas = [];
+  for (const regla of reglas.filter((item) => item.tipo === 'calculo')) {
+    const entidad = modelo.entities.find((item) => item.name === regla.entidad);
+    const props = entidad?.schema?.properties || {};
+    for (const campo of operandos(regla.expresion)) {
+      if (!/^(igv|iva|impuesto|isv|itbis)$/i.test(campo) || calculados.has(`${regla.entidad}.${campo}`)) continue;
+      const base = Object.keys(props).find((nombre) => /^(subtotal|baseimponible|base_imponible|valorventa|valor_venta)$/i.test(nombre));
+      if (!base) continue;
+      for (const requisito of rf) {
+        const texto = String(requisito.descripcion || requisito.nombre || '');
+        const encontrado = new RegExp(`[^.;]{0,40}\\b${campo}\\b[^.;%]{0,25}?(\\d{1,2}(?:[.,]\\d+)?)\\s*%`, 'i').exec(texto);
+        if (!encontrado) continue;
+        const porcentaje = Number(encontrado[1].replace(',', '.'));
+        derivadas.push({
+          tipo: 'calculo', entidad: regla.entidad, campo, decimales: 2,
+          expresion: { op: '*', izquierda: { campo: base }, derecha: porcentaje / 100 },
+          mensaje: `El ${campo.toUpperCase()} es el ${porcentaje}% del ${base}.`, rf: [requisito.identificador],
+          origen: 'explicito', evidencia: encontrado[0].trim(), estado_decision: 'pendiente'
+        });
+        calculados.add(`${regla.entidad}.${campo}`);
+        break;
+      }
+    }
+  }
+  return derivadas;
+};
+
+/**
+ * Añade el cálculo del impuesto que dicen los requisitos y lo sustituye dentro de las demás fórmulas (las reglas de cálculo no
+ * dependen de otro campo calculado): «total = subtotal + igv» pasa a «total = subtotal + subtotal × 0,18». Sirve al proponer las
+ * reglas y al generar con reglas ya aprobadas. `confirmar` marca la regla deducida como confirmada (evidencia literal del requisito).
+ */
+BusinessRuleInferenceService.prototype.completarImpuestos = function completarImpuestos(reglas, { modelo, rf, confirmar = false }) {
+  const contexto = { entidades: modelo.entities, requerimientos: rf };
+  let actuales = [...reglas];
+  const advertencias = [];
+  for (const derivada of this._impuestosDelRequisito(actuales, { modelo, rf })) {
+    const sustituir = (nodo) => (!nodo || typeof nodo !== 'object' ? nodo : nodo.campo === derivada.campo ? derivada.expresion
+      : nodo.op ? { ...nodo, izquierda: sustituir(nodo.izquierda), derecha: sustituir(nodo.derecha) } : nodo);
+    const ajustadas = actuales.map((regla) => (regla.tipo === 'calculo' && regla.entidad === derivada.entidad ? { ...regla, expresion: sustituir(regla.expresion) } : regla));
+    const regla = { ...derivada, id: `RN-${String(actuales.length + 1).padStart(2, '0')}`, ...(confirmar ? { estado_decision: 'confirmado' } : {}) };
+    if (this.ruleService.validar([...ajustadas, regla], contexto).errores.length) continue;
+    actuales = [...ajustadas, regla];
+    advertencias.push(`${regla.id}: «${regla.mensaje}» se dedujo del requisito («${regla.evidencia}»).`);
+  }
+  return { reglas: actuales, advertencias };
+};
 
 module.exports = BusinessRuleInferenceService;

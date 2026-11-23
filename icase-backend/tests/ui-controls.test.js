@@ -182,3 +182,34 @@ describe('controles sin destino', () => {
     expect(ui.uiTarget(doc.querySelector('.mockup-content > button'), { views: generic, current: '/reporte-de-ventas', search: '' })).toEqual({ reload: true });
   });
 });
+
+describe('regeneración de Ventas: paginación y buscador del diseño', () => {
+  const live = load('frontend/live-tables.js', () => actions);
+  const rows = Array.from({ length: 6 }, (_, index) => ({ id: String(index + 1), nombre: index % 2 ? 'Vendedor ' + index : 'Admin ' + index, rol: index % 2 ? 'vendedor' : 'administrador' }));
+
+  test('el pie con las cifras en <span> («Mostrando <span>1 a 4</span> de <span>18</span>») pagina los registros reales', async () => {
+    const document = dom(`<table><thead><tr><th>Nombre</th><th>Rol</th></tr></thead><tbody>${'<tr><td>Ana</td><td>vendedor</td></tr>'.repeat(4)}</tbody></table>
+      <div><p>Mostrando <span>1 a 4</span> de <span>18</span> usuarios</p><nav><button disabled>Anterior</button><button class="text-white">1</button><button>2</button><button>3</button><button>Siguiente</button></nav></div>`);
+    const root = document.querySelector('.mockup-content');
+    await live.bindLiveTables({ root, blocks: [{ tipo: 'tabla', operacion: 'consultarUsuarios', campos: ['nombre', 'rol'] }], actions: { consultarUsuarios: { type: 'consulta', capability: 'rf-12', path: '/api/actions/consultar-usuarios', output: ['nombre', 'rol'] } }, api: async () => rows });
+    expect(root.querySelector('p').textContent).toBe('Mostrando 4 de 6 usuarios');
+    expect([...root.querySelectorAll('nav button')].map((button) => button.textContent)).toEqual(['Anterior', '1', '2', 'Siguiente']);
+    [...root.querySelectorAll('nav button')].find((button) => button.textContent === 'Siguiente').click();
+    expect(root.querySelector('p').textContent).toBe('Mostrando 2 de 6 usuarios');
+  });
+
+  test('«Buscar» de un formulario solo de interfaz filtra la tabla real por lo escrito', async () => {
+    const document = dom(`<form data-accion="ui"><input id="busqueda" type="text"><select id="rol"><option>Todos</option><option value="vendedor">Vendedor</option></select><button type="submit" data-accion="ui">Buscar</button></form>
+      <table><thead><tr><th>Nombre</th><th>Rol</th></tr></thead><tbody><tr><td>Ana</td><td>vendedor</td></tr></tbody></table>`);
+    const root = document.querySelector('.mockup-content');
+    await live.bindLiveTables({ root, blocks: [{ tipo: 'tabla', operacion: 'consultarUsuarios', campos: ['nombre', 'rol'] }], actions: { consultarUsuarios: { type: 'consulta', capability: 'rf-12', path: '/x', output: ['nombre', 'rol'] } }, api: async () => rows });
+    expect(root.querySelectorAll('tbody tr[data-id]')).toHaveLength(6);
+    root.querySelector('#rol').value = 'vendedor';
+    const button = root.querySelector('button');
+    const event = new document.defaultView.MouseEvent('click', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'target', { value: button });
+    ui.handleUiClick(event, { views, current: '/listado-de-usuarios', navigate: jest.fn() });
+    expect(root.querySelectorAll('tbody tr[data-id]')).toHaveLength(3);
+    expect(root.querySelector('[data-icase-filtro]').textContent).toMatch(/^3 resultados · /);
+  });
+});

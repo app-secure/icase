@@ -132,7 +132,14 @@ class TestSuiteGenerator extends IGeneradorArtefacto {
       // La consulta de los productos en el formulario de una venta con líneas se muestra en el selector de cada línea, no en una tabla.
       const forms = (screen.especificacion?.bloques || []).map((block) => actions.get(block.operacion)).filter((action) => action?.lineas);
       const options = Boolean(first && forms.some((action) => action.lineas.destinoCapability === first.capability || action.lineas.destino === first.entityName));
-      return { id: screen.id, route: screen.route || screen.ruta, name: screen.name, path: first?.path || null, action: first?.name || null, single: lists.length === 1, ...(options ? { options: true } : {}) };
+      // La consulta se hace con un rol que puede leerla: el de la pantalla si su permiso lo incluye; si no, el administrador
+      // («Detalle de factura» del vendedor puede traer una lista de gestión de productos que solo el administrador lee: un 403 es lo correcto).
+      const route = screen.route || screen.ruta;
+      const role = (this._rolesByRoute || {})[route];
+      const key = first && String(first.permission || first.permiso || first.capability || '').toLowerCase();
+      const entry = key && role && auth?.operaciones?.[key]?.[role];
+      const reads = !role || role === 'administrador' || (Array.isArray(entry) ? entry : entry?.metodos || []).includes('GET');
+      return { id: screen.id, route, name: screen.name, path: first?.path || null, action: first?.name || null, single: lists.length === 1, ...(options ? { options: true } : {}), ...(first && !reads ? { readAs: 'administrador' } : {}) };
     });
     if (!cases.length) return '';
     const session = auth.habilitada ? this._e2eSession(auth) : "const apiBase = process.env.BASE_API_URL || 'http://localhost:3000';\nconst token = '';\n";
@@ -145,7 +152,8 @@ for (const item of cases) {
     let rows = null;
     if (item.path) {
       // Con la sesión de quien abre la pantalla (su rol): una consulta de «mis mesas» no devuelve lo mismo al administrador.
-      const session = typeof tokenFor === 'function' ? await tokenFor(rolesByRoute[item.route]) : token;
+      // Si el rol de la pantalla no puede leer la operación (un 403 correcto), la consulta se hace como administrador.
+      const session = typeof tokenFor === 'function' ? await tokenFor(item.readAs || rolesByRoute[item.route]) : token;
       const response = await fetch(apiBase + item.path, { headers: session ? { Authorization: 'Bearer ' + session } : {} });
       expect(response.status, 'la operación ' + item.action + ' debe responder 200').toBe(200);
       rows = await response.json();
@@ -157,6 +165,8 @@ for (const item of cases) {
     const operaciones = page.getByRole('button', { name: /Operaciones|datos reales/i });
     if (await operaciones.count()) await operaciones.first().click();
     await expect(page.locator('[data-screen="' + item.id + '"] .error')).toHaveCount(0);
+    // Leída como administrador, la operación devuelve más que lo que la pantalla del rol muestra: no se comparan las filas.
+    if (item.readAs) return;
     if (rows && item.options) {
       // Un selector de línea ofrece exactamente los registros reales (más «Selecciona…»), no las opciones de ejemplo del diseño.
       await expect.poll(() => page.locator('[data-screen="' + item.id + '"] select').evaluateAll((selects, total) => selects.some((select) => select.options.length === total + 1), rows.length)).toBe(true);

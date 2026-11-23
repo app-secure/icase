@@ -403,6 +403,8 @@ ${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/opera
       ...(action.type === 'transicion' && action.sobre ? { sobre: action.sobre } : {}),
       // Anular una venta devuelve al producto el stock que sus líneas descontaron.
       ...(action.type === 'transicion' && action.reponer?.capability && action.reponer?.stock ? { reponer: action.reponer } : {}),
+      // Anular la factura anula su venta y devuelve el stock de sus líneas.
+      ...(action.type === 'transicion' && action.cascada?.capability ? { cascada: action.cascada } : {}),
       // Emitir la factura de una venta: recibe el id de la venta, toma su total y la deja vinculada (una sola vez).
       ...(action.type === 'crear' && action.vincula?.capability ? { vincula: action.vincula } : {}),
       // Anular con motivo: la venta pasa a anulada, devuelve stock y su factura queda anulada.

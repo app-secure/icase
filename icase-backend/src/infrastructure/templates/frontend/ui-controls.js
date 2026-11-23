@@ -36,6 +36,8 @@ export function uiTarget(control, { views, current, search = '' }) {
     return { back: true, fallback: list && list.route !== current ? list.route : null };
   }
   if (/^limpiar\b/.test(label)) return { reset: true };
+  // «Buscar» o «Filtrar» sin operación propia: filtra en su lugar las tablas reales de la pantalla con lo escrito en los campos.
+  if (/^(?:buscar|filtrar|aplicar)\b/.test(label) && control.closest('.mockup-content')?.__filter) return { filter: true };
   // «Quitar» una línea que el diseño dibujó dentro de un formulario (no un registro guardado): se retira del borrador.
   if (/^(?:quitar|remover|retirar|eliminar|borrar|x)$/.test(label) && control.closest('form') && control.closest('tr, li') && !control.closest('[data-id]')) return { removeRow: true };
   if (/^(?:actualizar|refrescar|recargar)(?: .*)?$/.test(label) && !control.closest('form')) return { reload: true };
@@ -73,6 +75,30 @@ export function handleUiClick(event, { views, current, search, navigate }) {
     }
     const search = Array.from(scope.querySelectorAll('button')).find((button) => button !== control && /^(buscar|filtrar|aplicar|consultar)/.test(labelOf(button)));
     if (search) search.click();
+  } else if (target.filter) {
+    // Los campos del bloque del buscador, por su name o, si el diseño no lo puso, por su id («busqueda», «rol», «estado»).
+    let scope = control.parentElement;
+    while (scope && !scope.classList.contains('mockup-content') && !scope.querySelector('input, select')) scope = scope.parentElement;
+    const fields = {};
+    for (const field of (scope || control).querySelectorAll('input, select')) {
+      const key = field.getAttribute('name') || field.id;
+      if (!key || ['button', 'submit', 'reset', 'hidden', 'checkbox', 'radio'].includes(field.type)) continue;
+      const value = field.tagName === 'SELECT' && field.selectedIndex <= 0 ? '' : field.value;
+      if (String(value).trim()) fields[key] = value;
+    }
+    const content = control.closest('.mockup-content');
+    content.__filter(fields);
+    // Aviso de resultado junto al buscador: con los campos vacíos la lista no cambia, y sin aviso no se sabe si buscó.
+    const total = content.querySelectorAll('tbody tr[data-id]').length;
+    let status = (scope || control.parentElement).querySelector('[data-icase-filtro]');
+    if (!status) {
+      status = control.ownerDocument.createElement('p');
+      status.setAttribute('data-icase-filtro', '');
+      status.setAttribute('role', 'status');
+      status.style.cssText = 'margin:0.5rem 0 0;font-size:0.8rem;color:#475569';
+      (scope || control.parentElement).append(status);
+    }
+    status.textContent = `${total} ${total === 1 ? 'resultado' : 'resultados'}${Object.keys(fields).length ? '' : ' (sin filtros)'} · ${new Date().toLocaleTimeString('es')}`;
   } else if (target.removeRow) {
     const row = control.closest('tr, li');
     if (row) row.remove();

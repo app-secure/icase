@@ -223,6 +223,9 @@ class ApplicationSpecService {
       }
     }
 
+    const propias = this._sinOperacionesDeSistema(operaciones, rf, advertencias);
+    for (const op of operaciones) if (!propias.includes(op) && !propias.some((otra) => otra.nombre === op.nombre)) nombres.delete(op.nombre);
+    operaciones.splice(0, operaciones.length, ...propias);
     const gestion = this._completarGestion(operaciones, { rf, entidades, nombres, advertencias });
     for (const { listar, actualizar } of gestion) operaciones.push(listar, actualizar);
     const porNombre = new Map(operaciones.map((operacion) => [operacion.nombre, operacion]));
@@ -267,6 +270,8 @@ class ApplicationSpecService {
       const relacionadas = this._completarRelacionadas(operaciones.filter((op) => op.estado_decision !== 'rechazado'), vistas, { entidades, verbosPorRf, avisos, nombres: new Set(operaciones.map((op) => op.nombre)) });
       for (const operacion of relacionadas) operaciones.push({ ...operacion, id: `OP-${String(operaciones.length + 1).padStart(2, '0')}` });
     }
+    // También al generar con una especificación ya aprobada: lo que el sistema hace solo no se genera como operación aparte.
+    operaciones.splice(0, operaciones.length, ...this._sinOperacionesDeSistema(operaciones, rf, avisos));
     this._reponerAlAnular(operaciones, entidades);
     return { operaciones, pantallas: vistas, errores, avisos };
   }
@@ -276,6 +281,15 @@ class ApplicationSpecService {
    * lleva las líneas del alta para reponer el stock de cada producto.
    */
   _reponerAlAnular(operaciones, entidades = null) {
+    // Un registro nace en el estado desde el que sus transiciones parten: «anular factura» exige «activa», así que la factura se crea
+    // «activa». Con un «estado» de texto sin valores en el modelo nadie lo fijaba y la anulación nunca podía hacerse (409).
+    for (const transicion of operaciones.filter((op) => op.tipo === 'transicion' && list(op.transicion?.de).length)) {
+      const { campo, de } = transicion.transicion;
+      for (const alta of operaciones.filter((op) => op.tipo === 'crear' && op.entidad === transicion.entidad && op.estado_decision !== 'rechazado')) {
+        if ([...list(alta.entradas), ...list(alta.autoEntradas).map((item) => item.campo), ...list(alta.sesionEntradas).map((item) => item.campo)].includes(campo)) continue;
+        alta.autoEntradas = [...list(alta.autoEntradas), { campo, valor: 'inicial', opciones: [de[0]] }];
+      }
+    }
     for (const transicion of operaciones.filter((op) => op.tipo === 'transicion' && op.transicion && /^(anul|cancel|devuel|revert|rechaz)/i.test(String(op.transicion.a || '')))) {
       const alta = operaciones.find((op) => op.tipo === 'crear' && op.entidad === transicion.entidad && op.lineas?.stock && op.estado_decision !== 'rechazado');
       if (alta) transicion.reponer = { ...alta.lineas };
@@ -299,7 +313,49 @@ class ApplicationSpecService {
         .filter((doc) => /factura|boleta|recibo|comprobante|ticket/i.test(doc.entidad));
       alta.anula = { estado, valor: anulado, ...(lineasDueño ? { reponer: { ...lineasDueño } } : {}), ...(documentos.length ? { documentos } : {}) };
     }
+    // «Anular factura y restaurar stock»: anular un documento vinculado a una cabecera con líneas (la factura de una venta) anula también
+    // esa cabecera y devuelve el stock de sus líneas. Sin esto, la IA lo reparte en operaciones manuales («restaurarStockProducto»).
+    for (const transicion of operaciones.filter((op) => op.tipo === 'transicion' && op.transicion && /^(anul|cancel)/i.test(String(op.transicion.a || '')))) {
+      const emision = operaciones.find((op) => op.tipo === 'crear' && op.entidad === transicion.entidad && op.vincula && op.estado_decision !== 'rechazado');
+      if (!emision || emision.vincula.entidad === transicion.entidad) continue;
+      const cabecera = entidades?.get(emision.vincula.entidad);
+      const props = cabecera?.schema?.properties || {};
+      // La cabecera pasa a «anulada»; si el modelo no le dio estado (solo «modificable»), queda bloqueada con ese sí/no en falso.
+      const estado = Object.keys(props).find((campo) => /^estado$/i.test(campo));
+      const bloqueo = !estado && Object.keys(props).find((campo) => props[campo]?.type === 'boolean' && /^(modificable|editable|activ[oa]|vigente|habilitad[oa])$/i.test(campo));
+      if (!estado && !bloqueo) continue;
+      const lineasCabecera = operaciones.find((op) => op.tipo === 'crear' && op.entidad === cabecera.name && op.lineas?.stock && op.estado_decision !== 'rechazado')?.lineas;
+      transicion.cascada = {
+        entidad: cabecera.name, entidadClave: cabecera.key, campo: emision.vincula.campo, estado: estado || bloqueo,
+        valor: estado ? ((props[estado].enum || []).find((valor) => /^(anul|cancel)/i.test(valor)) || 'anulada') : false,
+        ...(lineasCabecera ? { reponer: { ...lineasCabecera } } : {})
+      };
+    }
     return operaciones;
+  }
+
+  /**
+   * Operaciones que el sistema ya hace solo, o que no son de datos, y que la IA propone igual:
+   * - ajustar a mano el stock que mueven las ventas («decrementarStockProducto», «restaurarStockProducto»);
+   * - en un RF que anula, marcar a mano lo que la anulación ya deja hecho («marcarVentaNoModificable»);
+   * - las del inicio de sesión y de la autorización por rol (las resuelven la sesión y los permisos).
+   * La contraseña sí se pide en la gestión de usuarios: ese formulario va a la cuenta de acceso (/api/users), que la cifra.
+   */
+  _sinOperacionesDeSistema(operaciones, rf, advertencias) {
+    const { isLoginRequirement } = require('./IdentityRequirements');
+    const nombreRf = new Map(rf.map((item) => [String(item.identificador).toUpperCase(), item]));
+    const deAcceso = (op) => { const req = nombreRf.get(String(op.rf).toUpperCase()); return Boolean(req && isLoginRequirement(req)); };
+    const stocks = new Set(operaciones.filter((op) => op.tipo === 'crear' && op.lineas?.stock).map((op) => `${op.lineas.destino}.${op.lineas.stock}`));
+    const anula = new Set(operaciones.filter((op) => op.tipo === 'transicion' && /^(anul|cancel)/i.test(String(op.transicion?.a || ''))).map((op) => op.rf));
+    const quitar = (op, motivo) => { advertencias.push(`Se quitó «${op.nombre}»: ${motivo}`); return false; };
+    return operaciones
+      .filter((op) => {
+        if (deAcceso(op)) return quitar(op, 'el inicio de sesión y los permisos por rol los resuelven la sesión y la matriz de accesos, no una operación de datos.');
+        const entradas = list(op.entradas);
+        if (op.tipo === 'actualizar' && entradas.length && entradas.every((campo) => stocks.has(`${op.entidad}.${campo}`))) return quitar(op, 'el stock lo descuentan las ventas y lo devuelven sus anulaciones.');
+        if (op.tipo === 'actualizar' && anula.has(op.rf) && entradas.length === 1 && /modific|editable|bloque/i.test(entradas[0])) return quitar(op, 'la anulación ya deja el registro sin cambios posteriores.');
+        return true;
+      });
   }
 
   _operacion(candidata, { entidades, rfIds, nombres }) {
@@ -435,7 +491,13 @@ class ApplicationSpecService {
       if (!cabecera || props[campo]?.['x-references'] !== cabecera.name) return { error: 'la cabecera del resumen no corresponde a una referencia del registro.' };
       via = { entidad: cabecera.name, entidadClave: cabecera.key, campo };
     }
-    const excluir = candidato?.excluir && text(candidato.excluir.campo) ? { campo: text(candidato.excluir.campo), patron: text(candidato.excluir.patron) || '^(anul|cancel)', ...(candidato.excluir.en === 'via' && via ? { en: 'via' } : {}) } : null;
+    // Sin exclusión indicada, una venta sin «estado» (el modelo solo le dio «modificable») se excluye por ese bloqueo: anular su
+    // factura la deja en falso, y una venta anulada no cuenta en los reportes.
+    const origen = via ? entidades.get(via.entidad)?.schema?.properties || {} : props;
+    const bloqueo = !Object.keys(origen).some((campo) => /^estado$/i.test(campo)) && Object.keys(origen).find((campo) => origen[campo]?.type === 'boolean' && /^(modificable|editable|vigente)$/i.test(campo));
+    const excluir = candidato?.excluir && text(candidato.excluir.campo) && origen[text(candidato.excluir.campo)]
+      ? { campo: text(candidato.excluir.campo), patron: text(candidato.excluir.patron) || '^(anul|cancel)', ...(candidato.excluir.en === 'via' && via ? { en: 'via' } : {}) }
+      : bloqueo ? { campo: bloqueo, patron: '^false$', ...(via ? { en: 'via' } : {}) } : null;
     return { ...(agruparPor ? { agruparPor } : {}), medidas, ...(via ? { via } : {}), ...(excluir ? { excluir } : {}), orden: candidato?.orden === 'asc' ? 'asc' : 'desc', ...(Number.isInteger(candidato?.limite) && candidato.limite > 0 ? { limite: Math.min(candidato.limite, 100) } : {}) };
   }
 

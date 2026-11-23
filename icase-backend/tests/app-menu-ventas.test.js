@@ -54,3 +54,19 @@ describe('menú de la aplicación generada (caso Ventas)', () => {
     expect(() => transformSync(app, { loader: 'jsx' })).not.toThrow();
   });
 });
+
+describe('regeneración: listado de usuarios diseñado con identidad', () => {
+  test('la tabla del diseño se llena con las cuentas reales (/api/users)', () => {
+    const generated = new GenericFrontendGenerator().generate({
+      proyecto: { nombre: 'Ventas' },
+      screens: [{ nombre: 'Listado de usuarios', slug: 'listado-de-usuarios', plataforma: 'web', roles: ['Administrador'], rf_trazabilidad: ['RF-12'], mockup: { preview_code: '<main><form data-accion="ui"><input id="busqueda"><button type="submit" data-accion="ui">Buscar</button></form><table><thead><tr><th>Nombre</th><th>Correo</th></tr></thead><tbody><tr><td>Ana</td><td>ana@x.pe</td></tr></tbody></table></main>' } }],
+      requerimientos: [{ aprobado: true, tipo: 'RF', identificador: 'RF-12', nombre: 'Crear usuario con datos básicos' }],
+      identidad: { login: [], usuarios: ['RF-12'] },
+      decisiones: { stack_tecnologico: { plataformas: ['web'] }, control_acceso: { autenticacion: { metodo: 'jwt' }, roles: [{ id: 'vendedor', nombre: 'Vendedor', incluir: true }] } }
+    });
+    const page = generated.find((file) => file.ruta === 'frontend/src/pages/listado-de-usuarios.jsx').contenido;
+    expect(page).toContain('"path":"/api/users"');
+    expect(page).toContain('bindLiveTables(');
+    expect(() => transformSync(page, { loader: 'jsx' })).not.toThrow();
+  });
+});

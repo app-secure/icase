@@ -14,6 +14,8 @@ export function matchField(header, fields, entity, types = {}) {
   const candidates = fields.map((name) => ({ name, key: plain(name.replace(/_id$/, '')).replace(/ /g, '') }));
   const exact = candidates.find((item) => item.key === compact);
   if (exact) return exact.name;
+  // «Correo» o «Correo electrónico» ↔ email (las cuentas de acceso lo llaman email).
+  if (/^(correo|correoelectronico|email|mail)$/.test(compact)) { const mail = fields.find((name) => /^(email|correo|mail)$/i.test(name)); if (mail) return mail; }
   // «Estado» de algo que solo tiene un campo sí/no (disponible, activo): es ese campo.
   if (/^(estado|situacion)$/.test(compact)) {
     const flag = fields.find((name) => types[name] === 'boolean' || /^(disponible|activ[oa]|habilitad[oa])$/.test(plain(name).replace(/ /g, '')));
@@ -167,7 +169,11 @@ export function filterLive(root, given = {}) {
 function findPager(table, size) {
   let scope = table.parentElement;
   for (let depth = 0; scope && depth < 4; depth += 1, scope = scope.parentElement) {
-    const info = Array.from(scope.querySelectorAll('p, span, div')).find((element) => !element.children.length && !table.contains(element) && /mostrando\s+\d+(?:\s*(?:[-–]|al?)\s*\d+)?\s+de\s+\d+/i.test(element.textContent)); // «1–4 de 18» o «1 a 4 de 18»
+    // «1–4 de 18» o «1 a 4 de 18», también con las cifras en su propio <span> («Mostrando <span>1 a 4</span> de <span>18</span>»):
+    // el elemento más pequeño que contiene el texto completo, sin bloques dentro.
+    const info = Array.from(scope.querySelectorAll('p, span, div')).filter((element) => !table.contains(element) && !element.querySelector('p, div, table, button')
+      && /mostrando\s+\d+(?:\s*(?:[-–]|al?)\s*\d+)?\s+de\s+\d+/i.test(element.textContent.replace(/\s+/g, ' ')))
+      .sort((a, b) => a.textContent.length - b.textContent.length)[0];
     if (!info) continue;
     const buttons = Array.from(scope.querySelectorAll('button')).filter((button) => !table.contains(button));
     const prev = buttons.find((button) => plain(button.textContent) === 'anterior');
@@ -176,7 +182,7 @@ function findPager(table, size) {
     const active = numbers.find((button) => /text-white/.test(button.className)) || numbers[0];
     const inactive = numbers.find((button) => button !== active) || active;
     const bar = (next || prev || active)?.parentElement || null;
-    const template = info.textContent;
+    const template = info.textContent.replace(/\s+/g, ' ').trim();
     const document = table.ownerDocument;
     return {
       // Se pagina con el tamaño del diseño, salvo que traiga una sola fila de ejemplo: eso no es una página real (un cliente por página).
@@ -504,6 +510,8 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
   const tables = Array.from(root.querySelectorAll('table')).filter((table) => table.tBodies[0]?.rows.length);
   const live = [];
   root.__live = live;
+  // Un buscador del diseño sin operación propia («Buscar» en un formulario solo de interfaz) filtra las tablas reales de la pantalla.
+  root.__filter = (fields) => filterLive(root, fields);
   let bound = 0;
   let boundTables = 0;
   for (let index = 0; index < Math.min(lists.length, tables.length); index += 1) {

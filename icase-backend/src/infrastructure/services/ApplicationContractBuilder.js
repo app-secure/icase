@@ -201,6 +201,7 @@ class ApplicationContractBuilder {
       ...(op.autoEntradas?.length ? { autoInputs: op.autoEntradas } : {}),
       ...(op.lineas ? { lineas: op.lineas } : {}),
       ...(op.reponer ? { reponer: op.reponer } : {}),
+      ...(op.cascada ? { cascada: op.cascada } : {}),
       ...(op.vincula ? { vincula: op.vincula } : {}),
       ...(op.anula ? { anula: op.anula } : {}),
       ...(op.resumen ? { resumen: op.resumen } : {}),
@@ -253,6 +254,18 @@ class ApplicationContractBuilder {
       const destino = operationOf.get(action.reponer.destinoClave);
       if (hijo && destino) reponer = { ...action.reponer, capability: hijo, destinoCapability: destino };
     }
+    // Anular la factura anula su venta y devuelve el stock de las líneas de esa venta.
+    let cascada;
+    if (action.cascada) {
+      const cabecera = operationOf.get(action.cascada.entidadClave);
+      const lineasCabecera = action.cascada.reponer;
+      const hijo = lineasCabecera && operationOf.get(lineasCabecera.entidadClave);
+      const destino = lineasCabecera && operationOf.get(lineasCabecera.destinoClave);
+      const { reponer: omitida, ...resto } = action.cascada;
+      if (cabecera) cascada = { ...resto, capability: cabecera, ...(hijo && destino ? { reponer: { ...lineasCabecera, capability: hijo, destinoCapability: destino } } : {}) };
+      else warnings.push(`«${action.name}»: no se pudo anular en cascada ${action.cascada.entidad} (sin almacén en el contrato).`);
+      void omitida;
+    }
     // Datos del registro relacionado que acompañan a las filas: sus almacenes y el de cada referencia (para mostrar nombres y no ids).
     let relacionadas;
     if (action.relacionadas?.length) {
@@ -290,7 +303,7 @@ class ApplicationContractBuilder {
         ...(objetivo && operationOf.get(objetivo.key) ? { agrupadoCapability: operationOf.get(objetivo.key) } : {})
       };
     }
-    return { ...action, capability, filters, fields, lineas, relacionadas, ...(reponer ? { reponer } : {}), ...(vincula ? { vincula } : {}), ...(anula ? { anula } : {}), ...(resumen ? { resumen } : {}) };
+    return { ...action, capability, filters, fields, lineas, relacionadas, ...(reponer ? { reponer } : {}), ...(cascada ? { cascada } : {}), ...(vincula ? { vincula } : {}), ...(anula ? { anula } : {}), ...(resumen ? { resumen } : {}) };
   }
 
   /** GET más los métodos de los verbos válidos declarados, en orden canónico; sin verbos, CRUD completo. */
