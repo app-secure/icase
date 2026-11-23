@@ -155,7 +155,7 @@ const commands = {
     const orden = claves.length ? claves : ['backend', 'frontend', 'pruebas', 'infraestructura', 'pipeline', 'paquete'];
     for (const clave of orden) {
       if (!state[`art_${clave}`] || process.argv.includes('--nuevo')) await commands.pieza(clave);
-      if (clave !== 'paquete') await commands.verificar(clave);
+      await commands.verificar(clave);
       await commands.aprobar(clave);
     }
   },
@@ -171,6 +171,17 @@ const commands = {
     await call('POST', `/proyectos/${state.proyecto}/codificacion/un-clic`, {});
     console.log('plan de codificación aprobado');
     await commands.codigo();
+  },
+  async desde_codigo() {
+    await call('POST', `/proyectos/${state.proyecto}/codificacion/un-clic`, {});
+    console.log('plan de codificación aprobado');
+    await commands.codigo();
+  },
+  async resto(...diagramas) {
+    await commands.diagramas(...diagramas);
+    await commands.mockups();
+    await commands.fase('mockups');
+    await commands.desde_codigo();
   },
   async requisitos() {
     const list = await call('GET', `/requerimientos/proyecto/${state.proyecto}`).catch(() => null);
