@@ -102,6 +102,13 @@ class BusinessRuleService {
         advertencias.push(`${regla.id}: la evidencia no aparece literalmente en los RF citados; se clasifica como inferida.`);
       }
 
+      // «El motivo es obligatorio cuando se anula una venta»: un dato que solo se pide en una transición no es obligatorio al crear el
+      // registro; como regla de «requerido» bloquearía todas las altas. La transición lo pide (y el sistema lo guarda) por su cuenta.
+      if (regla.tipo === 'requerido' && /\b(?:cuando|si|al)\s+(?:se\s+)?(?:anul|cancel|elimin|rechaz|cierr|cerr|devuelv|desactiv)/.test(strip(regla.mensaje)) && regla.estado_decision !== 'rechazado') {
+        regla.estado_decision = 'rechazado';
+        regla.observaciones = 'Condicional: solo se pide al ejecutar esa transición, no al crear el registro.';
+        advertencias.push(`${regla.id}: es una condición de una transición (${regla.mensaje}); no se exige al crear el registro.`);
+      }
       if (entidad && RULE_TYPES.includes(regla.tipo)) this._parametros(regla, entidad, fail, machines);
       if (fallos.length) errores.push(...fallos);
       else normalizadas.push(regla);

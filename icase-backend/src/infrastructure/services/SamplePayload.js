@@ -40,7 +40,7 @@ function samplePayload(schema, rules, salt) {
     const format = ruleFor('formato', name);
     let value;
     if (machine) value = machine.inicial;
-    else if (property.enum && property.enum.length) value = property.enum[0];
+    else if (property.enum && property.enum.length) value = property.enum.find((item) => !/^(?:anul|cancel|elimin|inactiv|rechaz|cerrad|finaliz)/i.test(String(item).normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) ?? property.enum[0]; // un registro nuevo no nace anulado ni cerrado
     else if (property.type === 'integer' || property.type === 'number') {
       const low = range && range.min !== undefined ? range.min : undefined;
       const high = range && range.max !== undefined ? range.max : undefined;
