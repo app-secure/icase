@@ -36,6 +36,10 @@
 .initial-analysis__notice { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; padding: 12px 14px; border: 1px solid #fde68a; border-radius: 10px; background: #fffbeb; color: #92400e; font-size: 12px; overflow-wrap: anywhere; }
 .initial-analysis__notice > svg { flex-shrink: 0; margin-top: 2px; }
 .initial-analysis__notice p { margin-top: 3px; }
+.initial-analysis__notice-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; flex-shrink: 0; min-width: 118px; }
+.initial-analysis__notice-actions button { padding: 4px 10px; font-size: 11px; line-height: 1.3; white-space: nowrap; }
+.initial-analysis__quiet { opacity: .75; }
+@media (max-width: 640px) { .initial-analysis__notice { flex-wrap: wrap; } .initial-analysis__notice-actions { flex-direction: row; flex-wrap: wrap; min-width: 0; } }
 .initial-analysis__notice--error { border-color: #fecdd3; background: #fff1f2; color: #9f1239; }
 .initial-analysis__empty { margin: 16px 0 4px; font-size: 13px; color: #94a3b8; }
 .initial-analysis__editor { scroll-margin-top: 20px; border: 1px solid #c4b5fd; box-shadow: 0 0 0 3px #f5f3ff; }
