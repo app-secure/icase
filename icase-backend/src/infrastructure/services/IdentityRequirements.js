@@ -6,7 +6,7 @@ const strip = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g
 
 // Nombres de campo que guardan un secreto (se comparan sin tildes, mayúsculas ni separadores).
 const SENSITIVE_FIELD = /^(?:password|passwd|pwd|pass|contrasena|clave|secret|secreto|apikey|token|(?:password|passwd|pass|contrasena|clave)hash|hash(?:password|contrasena|clave)?|salt)$/;
-const LOGIN = /\b(?:autentic\w*|inicio de sesion|iniciar sesion|login|jwt|control de acceso)\b/;
+const LOGIN = /\b(?:autenticar|autenticacion|autenticarse|inicio de sesion|iniciar sesion|login|jwt|control de acceso)\b/;
 const USERS = /\busuarios?\b/;
 
 const isSensitiveField = (name) => SENSITIVE_FIELD.test(strip(name).replace(/[^a-z0-9]/g, ''));

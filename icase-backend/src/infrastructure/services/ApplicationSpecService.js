@@ -140,6 +140,18 @@ class ApplicationSpecService {
     return (this._conocidos || []).find((conocido) => clave(conocido) === clave(nombre)) || nombre;
   }
 
+  /**
+   * «Anular venta» llega como «actualizar» o «eliminar»: una anulación no borra ni reescribe la venta, la pasa a «anulada» (y devuelve el
+   * stock y anula su factura). Como transición sobre el estado, el servidor hace todo eso; como actualización genérica no hacía nada de eso.
+   */
+  _anulacionComoTransicion(candidata, entidades) {
+    if (!candidata || !['actualizar', 'eliminar'].includes(strip(candidata.tipo)) || !/^(?:anul|cancel)/.test(strip(candidata.nombre))) return candidata;
+    const entidad = entidades.get(text(candidata.entidad));
+    const campo = Object.keys(entidad?.schema?.properties || {}).find((item) => /^estado$/i.test(item));
+    if (!campo) return candidata;
+    return { ...candidata, tipo: 'transicion', transicion: { campo }, entradas: [], filtros: list(candidata.filtros).length ? candidata.filtros : [{ campo: 'id', operador: '==', origen: 'parametro', valor: `${String(entidad.key || entidad.name).toLowerCase()}_id` }] };
+  }
+
   /** Conserva lo válido, descarta el resto explicando por qué y completa con derivación determinista los RF sin operación. */
   depurar(propuesta, { modelo, rf, pantallas = [] }) {
     this._conocidos = [...new Set(rf.flatMap((item) => list(item.actores).map(text).filter(Boolean)))];
@@ -149,7 +161,7 @@ class ApplicationSpecService {
     const operaciones = [];
     const nombres = new Set();
 
-    const candidatas = this._elevarLineas(list(propuesta?.operaciones).slice(0, MAX_OPERACIONES), entidades, advertencias);
+    const candidatas = this._elevarLineas(list(propuesta?.operaciones).slice(0, MAX_OPERACIONES), entidades, advertencias).map((candidata) => this._anulacionComoTransicion(candidata, entidades));
     if (list(propuesta?.operaciones).length > MAX_OPERACIONES) advertencias.push(`La IA propuso ${propuesta.operaciones.length} operaciones; se conservaron las primeras ${MAX_OPERACIONES}.`);
     candidatas.forEach((candidata, index) => {
       const { operacion, error } = this._operacion(candidata, { entidades, rfIds, nombres });

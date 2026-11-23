@@ -34,3 +34,10 @@ describe('actores de un RF: una sola forma de cada rol', () => {
     expect(actorsOf({ nombre: 'Gestionar clientes', actores: [] })).toEqual([]);
   });
 });
+
+test('un RF que solo menciona al «vendedor autenticado» no es el RF de inicio de sesión', () => {
+  const { isLoginRequirement } = require('../src/infrastructure/services/IdentityRequirements');
+  expect(isLoginRequirement({ nombre: 'Consultar ventas propias del vendedor autenticado' })).toBe(false);
+  expect(isLoginRequirement({ nombre: 'Autenticar usuarios mediante usuario y contraseña' })).toBe(true);
+  expect(isLoginRequirement({ nombre: 'Autenticación con JWT' })).toBe(true);
+});

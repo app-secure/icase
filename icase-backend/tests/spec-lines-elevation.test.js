@@ -108,3 +108,18 @@ describe('reporte agregado frente al listado plano', () => {
     expect(delReporte.map((op) => op.tipo)).toEqual(['resumen']);
   });
 });
+
+describe('anulación propuesta como actualización', () => {
+  test('«anularVenta» de tipo actualizar pasa a transición a «anulada» con reposición de stock', () => {
+    const { especificacion } = new ApplicationSpecService({}).depurar({
+      operaciones: [
+        { nombre: 'registrarVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], entradas: ['cliente_id'] },
+        { nombre: 'anularVenta', rf: 'RF-06', tipo: 'actualizar', entidad: 'Venta', actores: ['Administrador'], entradas: ['estado'] }
+      ]
+    }, { modelo, rf, pantallas: [] });
+    const anular = especificacion.operaciones.find((op) => op.nombre === 'anularVenta');
+    expect(anular.tipo).toBe('transicion');
+    expect(anular.transicion).toMatchObject({ campo: 'estado', a: expect.stringMatching(/^anulad/) });
+    expect(anular.reponer).toMatchObject({ stock: 'stock' });
+  });
+});
