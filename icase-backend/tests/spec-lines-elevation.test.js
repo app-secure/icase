@@ -123,3 +123,51 @@ describe('anulación propuesta como actualización', () => {
     expect(anular.reponer).toMatchObject({ stock: 'stock' });
   });
 });
+
+describe('valores que pone el sistema al crear', () => {
+  const dominio = `@startuml
+class Producto {
+  +String codigo
+  +String nombre
+  +int stock
+  +boolean activo
+}
+class Venta {
+  +String id
+  +DateTime fecha
+  +Enum estado
+  +Decimal total
+}
+class Factura {
+  +String id
+  +String numero_correlativo
+  +Decimal subtotal
+  +Venta venta
+}
+enum EstadoVenta {
+  ANULADA
+  REGISTRADA
+}
+Venta --> EstadoVenta : tiene
+Venta "1" -- "1" Factura : genera
+@enduml`;
+  const modeloS = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: dominio }]);
+  const rfS = [
+    { aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Gestionar productos', descripcion: '', actores: ['Administrador'] },
+    { aprobado: true, tipo: 'RF', identificador: 'RF-02', nombre: 'Emitir factura', descripcion: '', actores: ['Vendedor'] }
+  ];
+  const { especificacion } = new ApplicationSpecService({}).depurar({
+    operaciones: [
+      { nombre: 'crearProducto', rf: 'RF-01', tipo: 'crear', entidad: 'Producto', actores: ['Administrador'], entradas: ['codigo', 'nombre', 'stock'] },
+      { nombre: 'emitirFactura', rf: 'RF-02', tipo: 'crear', entidad: 'Factura', actores: ['Vendedor'], entradas: ['venta_id'] }
+    ]
+  }, { modelo: modeloS, rf: rfS, pantallas: [] });
+  const op = (nombre) => especificacion.operaciones.find((item) => item.nombre === nombre);
+
+  test('un producto nuevo nace activo: sin eso no aparecería en los listados que filtran los activos', () => {
+    expect(op('crearProducto').autoEntradas).toEqual(expect.arrayContaining([{ campo: 'activo', valor: 'inicial', opciones: [true] }]));
+  });
+  test('«numero_correlativo» de una factura es F001-00001, no un código al azar', () => {
+    expect(op('emitirFactura').autoEntradas).toEqual(expect.arrayContaining([expect.objectContaining({ campo: 'numero_correlativo', valor: 'correlativo', prefijo: 'F001-' })]));
+  });
+});

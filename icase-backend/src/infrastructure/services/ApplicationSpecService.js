@@ -37,6 +37,10 @@ const list = (value) => (Array.isArray(value) ? value : []);
 const text = (value) => String(value ?? '').trim();
 
 // Verbo del nombre del RF -> tipo de operación (solo se usa cuando la IA no responde o no cubre un RF).
+// «numero», «nro», «numero_correlativo», «numero_factura», «correlativo»: el número de un documento lo pone el sistema.
+const NUMERO_DOCUMENTO = /^(?:numero|nro|num|correlativo)(?:correlativo|factura|boleta|recibo|comprobante|documento|doc|serie)?$/;
+// Un estado inicial nunca es uno terminal: «ANULADA» puede venir primero en el enum del diagrama.
+const ordenInicial = (valores) => [...valores].sort((a, b) => Number(/^(?:anul|cancel|elimin|inactiv|rechaz|cerrad|finaliz)/i.test(String(a).normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) - Number(/^(?:anul|cancel|elimin|inactiv|rechaz|cerrad|finaliz)/i.test(String(b).normalize('NFD').replace(/[\u0300-\u036f]/g, ''))));
 const VERBOS = [
   [/\b(?:anular|cancelar)\b/, 'transicion'],
   [/\b(?:eliminar|borrar|dar de baja)\b/, 'eliminar'],
@@ -726,7 +730,7 @@ class ApplicationSpecService {
         auto.push({ campo, valor: propiedades[campo]?.format === 'date' ? 'hoy' : 'ahora' });
       } else if (systemManaged(campo, propiedades[campo]) === 'empieza en su estado inicial' && propiedades[campo]?.enum?.length) {
         // El estado inicial lo fija el servidor (el primero del dominio): sin él, las reglas que exigen el estado rechazarían el alta.
-        auto.push({ campo, valor: 'inicial', opciones: propiedades[campo].enum });
+        auto.push({ campo, valor: 'inicial', opciones: ordenInicial(propiedades[campo].enum) });
       } else if (systemManaged(campo, propiedades[campo]) === 'lo genera el sistema' && propiedades[campo]?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) {
         // Códigos que genera el sistema (el QR de una reserva): el servidor los crea; la persona no los inventa.
         auto.push({ campo, valor: 'generado' });
@@ -742,20 +746,22 @@ class ApplicationSpecService {
       const razon = systemManaged(campo, definicion);
       // Quién lo registra (la venta y su vendedor) sale de la sesión: el formulario no lo pide y la regla «obligatorio» lo exige.
       if (/^usuarios?$/i.test(String(definicion?.['x-references'] || '')) && entidad.key !== 'usuario') sesion.push({ campo, valor: 'usuario.id' });
-      else if (razon === 'empieza en su estado inicial' && definicion?.enum?.length) auto.push({ campo, valor: 'inicial', opciones: definicion.enum });
+      else if (razon === 'empieza en su estado inicial' && definicion?.enum?.length) auto.push({ campo, valor: 'inicial', opciones: ordenInicial(definicion.enum) });
       else if (razon === 'lo genera el sistema' && definicion?.type === 'string' && !(entidad.key === 'usuario' && /^password/i.test(campo))) auto.push({ campo, valor: 'generado' });
       // La «fecha» a secas que el formulario no pide es la del propio registro (venta, factura, anulación).
       else if ((MARCA_DE_REGISTRO.test(compacto(campo)) || /^(fecha|fechahora)$/.test(compacto(campo))) && definicion?.type === 'string') auto.push({ campo, valor: definicion?.format === 'date' ? 'hoy' : 'ahora' });
       else if (lineas?.total === campo) auto.push({ campo, valor: 'lineas' });
+      // Un registro nuevo está activo: los listados y las ventas solo ofrecen los activos, y sin este valor el producto recién creado no aparecería.
+      else if (definicion?.type === 'boolean' && /^(?:activo|activa|habilitado|habilitada|disponible|vigente)$/.test(compacto(campo))) auto.push({ campo, valor: 'inicial', opciones: [true] });
     }
     // Documentos numerados (F001-00001): el «numero» de una factura, boleta o recibo lo pone el sistema, correlativo con serie
     // (no un código aleatorio ni algo que la persona escriba). En otras entidades («Mesa.numero») sí lo escribe la persona.
     if (/factura|boleta|recibo|comprobante|ticket|nota ?de ?credito/i.test(String(entidad.name || ''))) {
-      const numero = Object.keys(propiedades).find((campo) => /^(numero|nro|correlativo)$/i.test(campo) && propiedades[campo]?.type === 'string');
+      const numero = Object.keys(propiedades).find((campo) => NUMERO_DOCUMENTO.test(compacto(campo)) && propiedades[campo]?.type === 'string');
       if (numero && !auto.some((item) => item.campo === numero)) auto.push({ campo: numero, valor: 'generado' });
     }
     for (const item of auto) {
-      if (item.valor === 'generado' && /^(numero|nro|correlativo|num_?documento)$/i.test(item.campo)) {
+      if (item.valor === 'generado' && NUMERO_DOCUMENTO.test(compacto(item.campo))) {
         Object.assign(item, { valor: 'correlativo', prefijo: `${String(entidad.name || 'D').charAt(0).toUpperCase()}001-`, digitos: 5 });
       }
     }
