@@ -732,7 +732,7 @@ function canonicalGoals(inventory) {
  */
 function ensureAuthentication(inventory, identifiers) {
   const items = Array.isArray(inventory) ? inventory : [];
-  if (items.some(item => item?.tipo === 'RF' && /(?:autentic|inicio de sesion|iniciar sesion|login|acceso al sistema|validar acceso)/.test(normalize(item.necesidad)))) return items;
+  if (items.some(item => item?.tipo === 'RF' && /(?:autenticar|autenticacion|inicio de sesion|iniciar sesion|login|acceso al sistema|validar acceso)/.test(normalize(item.necesidad)))) return items;
   const source = items.find(item => item && item.tipo !== 'RF' && item.tipo !== 'pregunta' && /\b(?:jwt|autenticacion|inicio de sesion|usuario y contrasena|acceso con usuario)\b/.test(normalize(`${item.necesidad} ${item.evidencia || ''}`)) && !/\b(?:no habra|sin)\b.*\b(?:login|autenticacion)\b/.test(normalize(item.necesidad)));
   if (!source || !(source.evidencia || (source.evidencias || []).length)) return items;
   return [...items, {

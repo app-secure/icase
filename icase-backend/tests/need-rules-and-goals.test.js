@@ -168,3 +168,12 @@ describe('inicio de sesión', () => {
     expect(out.filter(item => /utentic/.test(item.necesidad))).toHaveLength(0);
   });
 });
+
+test('«vendedor autenticado» no cuenta como función de inicio de sesión', () => {
+  const { refine } = require('../src/core/services/NeedGranularity');
+  const ids = require('../src/core/services/AnalysisIdentifiers');
+  const propias = { id: 'N6', tipo: 'RF', objetivo_id: 'O-04', necesidad: 'Consultar las ventas registradas por el vendedor autenticado, sin acceso a ventas de otros vendedores.', estado: 'confirmado', evidencia: 'Solo ve las ventas que él mismo registró.' };
+  const jwt = { id: 'N20', tipo: 'restriccion_tecnica', necesidad: 'Usar JWT.', estado: 'confirmado', evidencia: 'La autenticación será con JWT.' };
+  const out = refine([propias, jwt], 'La autenticación será con JWT.', ids([[propias, jwt]]), []);
+  expect(out.filter(item => item.tipo === 'RF' && /^Autenticar/.test(item.necesidad))).toHaveLength(1);
+});
