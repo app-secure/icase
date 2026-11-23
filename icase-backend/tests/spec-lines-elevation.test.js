@@ -66,3 +66,17 @@ describe('la venta se registra con sus líneas', () => {
     expect(op('eliminarVenta')).toBeUndefined();
   });
 });
+
+describe('alta suelta de la línea', () => {
+  test('si la IA propone «crearVenta» y «crearDetalleVenta», solo queda la venta con sus líneas', () => {
+    const { especificacion } = new ApplicationSpecService({}).depurar({
+      operaciones: [
+        { nombre: 'crearVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], entradas: ['cliente_id'] },
+        { nombre: 'crearDetalleVenta', rf: 'RF-01', tipo: 'crear', entidad: 'DetalleVenta', actores: ['Vendedor'], entradas: ['producto_id', 'cantidad'] }
+      ]
+    }, { modelo, rf, pantallas: [] });
+    const altas = especificacion.operaciones.filter((item) => item.tipo === 'crear').map((item) => item.nombre);
+    expect(altas).toContain('crearVenta');
+    expect(altas).not.toContain('crearDetalleVenta');
+  });
+});

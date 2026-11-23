@@ -152,6 +152,17 @@ class ApplicationSpecService {
       operaciones.push({ ...corregida, origen: 'ia' });
     });
 
+    // Las líneas se guardan con su cabecera: una alta suelta de la línea («crearDetalleVenta») junto a «crearVenta» sobra y generaría
+    // una pantalla que crea líneas sin venta.
+    const entidadesLinea = new Set(operaciones.filter((op) => op.tipo === 'crear' && op.lineas).map((op) => op.lineas.entidad));
+    for (let i = operaciones.length - 1; i >= 0; i -= 1) {
+      if (operaciones[i].tipo === 'crear' && entidadesLinea.has(operaciones[i].entidad)) {
+        advertencias.push(`Se quitó «${operaciones[i].nombre}»: las líneas de ${operaciones[i].entidad} se guardan al registrar su cabecera.`);
+        nombres.delete(operaciones[i].nombre);
+        operaciones.splice(i, 1);
+      }
+    }
+
     // Los RF de reporte («más vendidos», «reporte de ventas por fechas») necesitan agregados: se derivan como resumen aunque la
     // IA haya propuesto una consulta plana (que solo listaría registros) o nada.
     for (const requisito of rf) {
