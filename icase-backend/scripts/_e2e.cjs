@@ -87,6 +87,28 @@ const commands = {
     console.log('revisión', c.revision_inventario?.estado, (c.revision_inventario?.causas || []).join(' | ').slice(0, 300));
     console.log('métricas', JSON.stringify((c.auditoria_requisitos?.metricas_ejecucion?.etapas || []).map((e) => `${e.etapa}:${Math.round(e.duracion_ms / 1000)}s`)));
   },
+  async fase(fase, tipo) {
+    const r = await call('POST', `/proyectos/${state.proyecto}/aprobar-fase`, { fase, aprobar_todos: true, ...(tipo ? { tipo_diagrama: tipo } : {}) });
+    console.log('fase', fase, tipo || '', '->', r.estado_fase || r.mensaje || 'ok');
+  },
+  async diagrama(tipo) {
+    const job = await call('POST', `/proyectos/${state.proyecto}/trabajos-diagramas`, { tipo_diagrama: tipo, insumo_bruto: state.insumo });
+    const id = job.trabajo?.id || job.id || job._id;
+    const t0 = Date.now();
+    const done = await poll(async () => {
+      const r = await call('GET', `/proyectos/trabajos-diagramas/${id}`);
+      const j = r.trabajo || r;
+      process.stdout.write(`  ${tipo} ${j.estado} ${(j.mensaje || '').slice(0, 60)}  `);
+      return ['completado', 'fallido', 'cancelado'].includes(j.estado) ? { done: true, value: j } : { done: false };
+    }, { label: 'diagrama ' + tipo });
+    console.log(`
+  -> ${done.estado} en ${Math.round((Date.now() - t0) / 1000)} s`, done.error || '');
+    if (done.estado !== 'completado') throw new Error(done.error || done.mensaje || 'diagrama fallido');
+  },
+  async diagramas(...tipos) {
+    const todos = tipos.length ? tipos : ['casos_de_uso', 'clases_dominio', 'arquitectura_software', 'arquitectura_sistema', 'clases_diseno', 'arbol_navegacion'];
+    for (const tipo of todos) { await commands.diagrama(tipo); await commands.fase('diagrama', tipo); }
+  },
   async requisitos() {
     const list = await call('GET', `/requerimientos/proyecto/${state.proyecto}`).catch(() => null);
     const p = await call('GET', `/proyectos/${state.proyecto}`);

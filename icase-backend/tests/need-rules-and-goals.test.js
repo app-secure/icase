@@ -131,3 +131,16 @@ describe('referencias a objetivos', () => {
     expect(out[1].objetivos_relacionados).toEqual(['O-02']);
   });
 });
+
+describe('actor de un RF sin sujeto', () => {
+  const { linkActors } = require('../src/core/services/NeedGranularity');
+  const actors = [{ id: 'ACT1', nombre: 'Administrador', alias: ['Dueña', 'Administradora'] }, { id: 'ACT2', nombre: 'Vendedor', alias: ['Vendedora'] }];
+  test('toma al único actor que nombra la cita; con dos, no adivina', () => {
+    const out = linkActors([
+      { id: 'N2', tipo: 'RF', necesidad: 'Emitir una factura después de registrar una venta', evidencia: 'Después de registrar la venta, el vendedor emite la factura.' },
+      { id: 'N3', tipo: 'RF', necesidad: 'Gestionar productos', evidencia: 'el administrador gestiona los productos y el vendedor los consulta' }
+    ], actors);
+    expect(out[0].actor_id).toBe('ACT2');
+    expect(out[1].actor_id).toBeUndefined();
+  });
+});

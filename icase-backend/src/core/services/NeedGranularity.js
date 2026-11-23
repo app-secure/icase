@@ -654,15 +654,19 @@ function align(inventory, identifiers) {
 function linkActors(inventory, actors) {
   const people = (actors || []).filter(actor => actor?.id && actor.estado !== 'rechazado');
   if (!people.length) return inventory;
+  const namesOf = candidate => [candidate.nombre, ...(candidate.alias || [])].map(name => normalize(name).split(/\s+/).pop()).filter(word => word && word.length >= 4);
+  const mentions = (candidate, text) => namesOf(candidate).some(word => new RegExp('(?:^|[^a-z])(?:el|la|los|las)\\s+' + word.slice(0, Math.max(5, word.length - 2)), 'i').test(text));
   return (inventory || []).map(item => {
     if (item?.tipo !== 'RF') return item;
     const subject = (/^(?:el|la|los|las)\s+(\p{L}+)/iu.exec(item.necesidad) || [])[1] || '';
-    if (!subject || normalize(subject) === 'sistema') return item;
     const noun = normalize(subject);
-    const actor = people.find(candidate => [candidate.nombre, ...(candidate.alias || [])].some(name => {
-      const word = normalize(name).split(/\s+/).pop();
-      return word && (word === noun || word.startsWith(noun) || noun.startsWith(word));
-    }));
+    let actor = subject && noun !== 'sistema' ? people.find(candidate => namesOf(candidate).some(word => word === noun || word.startsWith(noun) || noun.startsWith(word))) : null;
+    // Sin sujeto en la frase («Emitir factura…»), el actor es el único que la cita nombra («…el vendedor emite la factura»).
+    if (!actor && !item.actor_id) {
+      const quote = normalize([item.evidencia, ...(Array.isArray(item.evidencias) ? item.evidencias.map(entry => (typeof entry === 'string' ? entry : entry?.texto)) : [])].filter(Boolean).join(' '));
+      const named = people.filter(candidate => mentions(candidate, quote));
+      if (named.length === 1) actor = named[0];
+    }
     return actor ? { ...item, actor_id: actor.id } : item;
   });
 }
