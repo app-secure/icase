@@ -365,13 +365,13 @@ class GestionarPlanCodificacion {
     await this.revisar({ proyectoId, etapa: 'control_acceso', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
     etapasAprobadas.push('control_acceso');
 
-    // 6b. Comportamiento: se confirman las operaciones propuestas con IA; las derivadas sin IA quedan fuera y se reportan.
+    // 6b. Comportamiento: se confirman las operaciones propuestas con IA y las derivadas de un RF aprobado (reportes, anulaciones); quedan avisadas.
     const sugEspec = await this.sugerir({ proyectoId, etapa: 'especificacion_aplicacion' });
     const operacionesEspec = sugEspec.propuesta?.operaciones || [];
     if (operacionesEspec.length) {
       dudas.push(...(sugEspec.advertencias || []).map((adv) => ({ etapa: 'especificacion_aplicacion', tipo: 'advertencia', detalle: adv })));
-      const decididas = operacionesEspec.map((op) => ({ ...op, estado_decision: op.origen === 'ia' ? 'confirmado' : 'rechazado' }));
-      await this.proponer({ proyectoId, etapa: 'especificacion_aplicacion', propuesta: { ...sugEspec.propuesta, operaciones: decididas }, observaciones: 'Operaciones con IA confirmadas en modo un clic; las derivadas quedaron fuera.' });
+      const decididas = operacionesEspec.map((op) => ({ ...op, estado_decision: 'confirmado' }));
+      await this.proponer({ proyectoId, etapa: 'especificacion_aplicacion', propuesta: { ...sugEspec.propuesta, operaciones: decididas }, observaciones: 'Operaciones con IA y derivadas de los RF confirmadas en modo un clic.' });
       await this.revisar({ proyectoId, etapa: 'especificacion_aplicacion', decision: 'aprobar', observaciones: 'Aprobada automáticamente en modo un clic.', aprobadoPor, compilarContexto: false });
       etapasAprobadas.push('especificacion_aplicacion');
     }

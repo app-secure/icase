@@ -61,7 +61,8 @@ class SandboxRuntimeVerifier {
             }
           }
         } finally {
-          try { await this.run('docker', [...compose, 'down', '-v', '--rmi', 'local', '--remove-orphans'], { cwd: temporary, timeout: 120000 }); }
+          // ICASE_KEEP_VERIFY=1 deja la pila levantada y la carpeta para depurar una verificación fallida a mano.
+          if (!process.env.ICASE_KEEP_VERIFY) try { await this.run('docker', [...compose, 'down', '-v', '--rmi', 'local', '--remove-orphans'], { cwd: temporary, timeout: 120000 }); }
           catch { /* El directorio temporal y el nombre de proyecto son exclusivos de esta verificación. */ }
         }
         if (artefacto.tipo === 'paquete_entrega') {
@@ -97,7 +98,8 @@ class SandboxRuntimeVerifier {
       catch { /* Imagen de esta verificación inexistente o ya eliminada. */ }
       try { await this.run('docker', ['image', 'rm', `${project}-mobile`], { cwd: temporary, timeout: 30000 }); }
       catch { /* Imagen de esta verificación inexistente o ya eliminada. */ }
-      try { await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); }
+      if (process.env.ICASE_KEEP_VERIFY) console.log(`[SandboxRuntimeVerifier] Verificación conservada en ${temporary} (proyecto ${project})`);
+      else try { await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); }
       catch { /* Un proceso de Docker cancelado puede liberar archivos unos segundos después; no ocultar el resultado. */ }
     }
   }

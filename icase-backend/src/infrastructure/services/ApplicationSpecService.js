@@ -38,7 +38,8 @@ const text = (value) => String(value ?? '').trim();
 
 // Verbo del nombre del RF -> tipo de operación (solo se usa cuando la IA no responde o no cubre un RF).
 const VERBOS = [
-  [/\b(?:eliminar|borrar|dar de baja|anular)\b/, 'eliminar'],
+  [/\b(?:anular|cancelar)\b/, 'transicion'],
+  [/\b(?:eliminar|borrar|dar de baja)\b/, 'eliminar'],
   [/\b(?:consult\w*|visualiz\w*|list\w*|ver|revis\w*|mostrar|buscar)\b/, 'consulta'],
   [/\b(?:modific\w*|actualiz\w*|reasign\w*|editar|configur\w*|cerrar|marcar|cambiar|canje\w*)\b/, 'actualizar'],
   [/\b(?:registr\w*|crear|compra\w*|reserv\w*|acumul\w*|agregar|solicitar|asign\w*)\b/, 'crear']
@@ -112,6 +113,27 @@ class ApplicationSpecService {
     ].filter(Boolean).join('\n\n');
   }
 
+  /**
+   * «Registrar venta» llega a veces como «crear DetalleVenta»: la IA toma la línea por la operación. Una venta se registra con sus
+   * líneas en una sola operación sobre la cabecera (Venta); sin esto la pantalla no puede agregar ni quitar productos, ni descontar
+   * stock. Si la entidad de la operación es la línea de otra entidad y nadie crea esa cabecera, la operación pasa a la cabecera.
+   */
+  _elevarLineas(candidatas, entidades, advertencias) {
+    return candidatas.map(candidata => {
+      if (!candidata || strip(candidata.tipo) !== 'crear') return candidata;
+      const hijo = entidades.get(text(candidata.entidad));
+      if (!hijo) return candidata;
+      const cabecera = [...entidades.values()].find(entidad => entidad.name !== hijo.name && this._lineasDe({ tipo: 'crear' }, entidad, entidades)?.entidad === hijo.name);
+      if (!cabecera || candidatas.some(otra => otra !== candidata && strip(otra?.tipo) === 'crear' && text(otra.entidad) === cabecera.name)) return candidata;
+      const props = cabecera.schema.properties;
+      // Lo que no pide la persona: identificador, importes calculados, estado, fecha y vendedor (el sistema los completa).
+      const entradas = Object.keys(props).filter(campo => !/^(id|total|subtotal|igv|estado|fecha|fechahora|creado|actualizado)/i.test(campo) && !props[campo].readOnly
+        && !(props[campo]['x-references'] && /usuario|vendedor|cuenta|empleado/i.test(props[campo]['x-references'])));
+      advertencias.push(`La operación «${candidata.nombre}» se aplicó a ${cabecera.name} con sus líneas de ${hijo.name}: una venta se registra de una vez.`);
+      return { ...candidata, nombre: text(candidata.nombre).replace(new RegExp(hijo.name, 'i'), cabecera.name), entidad: cabecera.name, entidadClave: cabecera.key, entradas, salida: [] };
+    });
+  }
+
   /** Conserva lo válido, descarta el resto explicando por qué y completa con derivación determinista los RF sin operación. */
   depurar(propuesta, { modelo, rf, pantallas = [] }) {
     const advertencias = [];
@@ -120,7 +142,7 @@ class ApplicationSpecService {
     const operaciones = [];
     const nombres = new Set();
 
-    const candidatas = list(propuesta?.operaciones).slice(0, MAX_OPERACIONES);
+    const candidatas = this._elevarLineas(list(propuesta?.operaciones).slice(0, MAX_OPERACIONES), entidades, advertencias);
     if (list(propuesta?.operaciones).length > MAX_OPERACIONES) advertencias.push(`La IA propuso ${propuesta.operaciones.length} operaciones; se conservaron las primeras ${MAX_OPERACIONES}.`);
     candidatas.forEach((candidata, index) => {
       const { operacion, error } = this._operacion(candidata, { entidades, rfIds, nombres });
@@ -147,7 +169,13 @@ class ApplicationSpecService {
     for (const requisito of rf) {
       const id = String(requisito.identificador).toUpperCase();
       if (operaciones.some((operacion) => operacion.rf === id)) continue;
-      const derivada = this._derivar(requisito, { modelo, nombres });
+      let derivada = this._derivar(requisito, { modelo, nombres });
+      // La transición (anular, cancelar) necesita su campo de estado y sus estados validados contra el dominio.
+      if (derivada?.tipo === 'transicion') {
+        const validada = this._operacion(derivada, { entidades, rfIds, nombres });
+        if (validada.error) { advertencias.push(`${id}: no se pudo derivar «${derivada.nombre}» (${validada.error}).`); derivada = null; }
+        else derivada = { ...validada.operacion, origen: 'derivado' };
+      }
       if (derivada) {
         nombres.add(derivada.nombre);
         operaciones.push(derivada);
@@ -764,7 +792,7 @@ class ApplicationSpecService {
     const tipo = (VERBOS.find(([patron]) => patron.test(nombreRf)) || [null, 'consulta'])[1];
     const entidad = match.primary;
     const campos = Object.keys(entidad.schema.properties).filter((campo) => campo !== 'id' && !entidad.schema.properties[campo].readOnly);
-    let base = `${{ consulta: 'consultar', crear: 'registrar', actualizar: 'actualizar', eliminar: 'eliminar' }[tipo]}${entidad.name}`;
+    let base = `${{ consulta: 'consultar', crear: 'registrar', actualizar: 'actualizar', eliminar: 'eliminar', transicion: /^cancel/.test(nombreRf) ? 'cancelar' : 'anular' }[tipo]}${entidad.name}`;
     base = camel(base.replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
     let nombre = base;
     for (let n = 2; nombres.has(nombre); n += 1) nombre = `${base}${n}`;
@@ -772,6 +800,7 @@ class ApplicationSpecService {
       nombre, rf: String(requisito.identificador).toUpperCase(), tipo, entidad: entidad.name, entidadClave: entidad.key,
       actores: list(requisito.actores).map(text).filter(Boolean), filtros: [],
       entradas: ['crear', 'actualizar'].includes(tipo) ? campos : [], salida: tipo === 'consulta' ? campos : [],
+      ...(tipo === 'transicion' ? { transicion: { campo: 'estado' } } : {}),
       descripcion: text(requisito.nombre), estado_decision: 'pendiente', origen: 'derivado'
     }, entidad);
   }

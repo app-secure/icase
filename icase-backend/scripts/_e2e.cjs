@@ -123,6 +123,42 @@ const commands = {
   -> ${done.estado} en ${Math.round((Date.now() - t0) / 1000)} s`, done.error || '');
     if (done.estado !== 'completado') throw new Error(done.error || done.mensaje || 'mockups fallidos');
   },
+  async plan() {
+    const r = await call('GET', `/proyectos/${state.proyecto}/codificacion`);
+    const plan = r.plan || r;
+    console.log('stack', JSON.stringify(plan.stack_objetivo));
+    for (const e of plan.etapas || []) console.log(String(e.orden).padStart(3), e.id.padEnd(28), e.estado.padEnd(12), e.habilitada === false ? 'bloqueada' : '', (e.observaciones || '').slice(0, 70));
+  },
+  async pieza(clave) {
+    const rutas = { backend: 'backend', frontend: 'frontend', pruebas: 'pruebas', infraestructura: 'infraestructura', pipeline: 'ci-cd', paquete: 'paquete' };
+    const ruta = rutas[clave];
+    const t0 = Date.now();
+    const g = await call('POST', `/proyectos/${state.proyecto}/codificacion/${ruta}/generar`, clave === 'frontend' ? { plataforma: 'web' } : {});
+    const art = g.artefacto || g;
+    const id = art.id || art._id;
+    console.log(`  ${clave} generado en ${Math.round((Date.now() - t0) / 1000)} s · estado ${art.estado || ''} · verificación ${JSON.stringify(art.verificacion?.estado || art.verificacion || '').slice(0, 120)}`);
+    state[`art_${clave}`] = id; save();
+    return art;
+  },
+  async verificar(clave) {
+    const id = state[`art_${clave}`];
+    const t0 = Date.now();
+    const r = await call('POST', `/proyectos/${state.proyecto}/artefactos/${id}/verificar`, {});
+    console.log(`  verificación ${clave}: ${Math.round((Date.now() - t0) / 1000)} s`, JSON.stringify(r.verificacion || r).slice(0, 1500));
+  },
+  async aprobar(clave) {
+    const rutas = { backend: 'backend', frontend: 'frontend', pruebas: 'pruebas', infraestructura: 'infraestructura', pipeline: 'ci-cd', paquete: 'paquete' };
+    const r = await call('POST', `/proyectos/${state.proyecto}/codificacion/${rutas[clave]}/${state[`art_${clave}`]}/revision`, { decision: 'aprobar', observaciones: '', modo_permisivo: process.argv.includes('--permisivo') });
+    console.log('  aprobado', clave, r.aprobado ?? r.estado ?? 'ok');
+  },
+  async codigo(...claves) {
+    const orden = claves.length ? claves : ['backend', 'frontend', 'pruebas', 'infraestructura', 'pipeline', 'paquete'];
+    for (const clave of orden) {
+      if (!state[`art_${clave}`] || process.argv.includes('--nuevo')) await commands.pieza(clave);
+      if (clave !== 'paquete') await commands.verificar(clave);
+      await commands.aprobar(clave);
+    }
+  },
   async requisitos() {
     const list = await call('GET', `/requerimientos/proyecto/${state.proyecto}`).catch(() => null);
     const p = await call('GET', `/proyectos/${state.proyecto}`);
