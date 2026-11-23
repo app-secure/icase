@@ -27,12 +27,22 @@ function roleNameFor(item, input) {
   if (role && mentioned(role[1])) return role[1].charAt(0).toUpperCase() + role[1].slice(1).toLowerCase();
   return '';
 }
+/** «Los clientes no usan el sistema, solo los atendemos»: quien el insumo declara ajeno al sistema no es un actor. */
+function declaredOutsideSystem(name, input) {
+  const strip = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const stem = strip(name).trim().split(/\s+/).pop();
+  if (stem.length < 4) return false;
+  const root = stem.slice(0, Math.max(4, stem.length - 2));
+  return strip(input).split(/[.;\n]/).some(sentence => new RegExp('\\b' + root + '\\w*', 'i').test(sentence)
+    && /\bno\s+(?:usan|usara?n?|utilizan|utilizara?n?|acceden|accedera?n?|interactuan|interactuara?n?|tienen acceso|entran)\b/.test(sentence));
+}
 function normalizeActors(candidates, input) {
   const actors = [];
   for (const item of Array.isArray(candidates) ? candidates : []) {
     let nombre = String(item?.nombre || '').trim();
     if (nombre && interviewSpeakerOnly(nombre, input)) nombre = roleNameFor(item, input);
     if (!nombre) continue;
+    if (declaredOutsideSystem(nombre, input)) continue;
     const evidence = inspectEvidence(item, input);
     const existing = actors.find(actor => key(actor.nombre) === key(nombre));
     if (existing) {

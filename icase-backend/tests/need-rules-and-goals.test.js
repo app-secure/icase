@@ -135,13 +135,13 @@ describe('referencias a objetivos', () => {
 describe('actor de un RF sin sujeto', () => {
   const { linkActors } = require('../src/core/services/NeedGranularity');
   const actors = [{ id: 'ACT1', nombre: 'Administrador', alias: ['Dueña', 'Administradora'] }, { id: 'ACT2', nombre: 'Vendedor', alias: ['Vendedora'] }];
-  test('toma al único actor que nombra la cita; con dos, no adivina', () => {
+  test('toma al actor que la cita nombra antes del verbo del RF', () => {
     const out = linkActors([
       { id: 'N2', tipo: 'RF', necesidad: 'Emitir una factura después de registrar una venta', evidencia: 'Después de registrar la venta, el vendedor emite la factura.' },
       { id: 'N3', tipo: 'RF', necesidad: 'Gestionar productos', evidencia: 'el administrador gestiona los productos y el vendedor los consulta' }
     ], actors);
     expect(out[0].actor_id).toBe('ACT2');
-    expect(out[1].actor_id).toBeUndefined();
+    expect(out[1].actor_id).toBe('ACT1'); // «el administrador gestiona los productos»: el vendedor solo los consulta
   });
 });
 
@@ -176,4 +176,22 @@ test('«vendedor autenticado» no cuenta como función de inicio de sesión', ()
   const jwt = { id: 'N20', tipo: 'restriccion_tecnica', necesidad: 'Usar JWT.', estado: 'confirmado', evidencia: 'La autenticación será con JWT.' };
   const out = refine([propias, jwt], 'La autenticación será con JWT.', ids([[propias, jwt]]), []);
   expect(out.filter(item => item.tipo === 'RF' && /^Autenticar/.test(item.necesidad))).toHaveLength(1);
+});
+
+describe('actores que el insumo declara ajenos al sistema', () => {
+  const { normalizeActors } = require('../src/core/services/RequirementActors');
+  test('«los clientes no usan el sistema» descarta al actor Cliente y conserva al resto', () => {
+    const input = 'Yo y dos vendedores. Nadie más; los clientes no usan el sistema, solo los atendemos.';
+    const nombres = normalizeActors([
+      { nombre: 'Cliente', descripcion: 'x', evidencias: [{ texto: 'los clientes no usan el sistema', fuente: 'insumo_directo' }] },
+      { nombre: 'Vendedor', evidencias: [{ texto: 'dos vendedores', fuente: 'insumo_directo' }] }
+    ], input).map((actor) => actor.nombre);
+    expect(nombres).toEqual(['Vendedor']);
+  });
+  test('el enlace por cita no toma al actor que solo aparece como dato («los clientes tienen nombre…»)', () => {
+    const { linkActors } = require('../src/core/services/NeedGranularity');
+    const actors = [{ id: 'A1', nombre: 'Vendedor' }, { id: 'A2', nombre: 'Cliente' }];
+    const out = linkActors([{ id: 'N9', tipo: 'RF', necesidad: 'Gestionar clientes', evidencia: 'Los clientes tienen nombre y número de documento.' }], actors);
+    expect(out[0].actor_id).toBeUndefined();
+  });
 });

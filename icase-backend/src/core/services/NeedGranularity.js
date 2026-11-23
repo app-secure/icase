@@ -655,7 +655,8 @@ function linkActors(inventory, actors) {
   const people = (actors || []).filter(actor => actor?.id && actor.estado !== 'rechazado');
   if (!people.length) return inventory;
   const namesOf = candidate => [candidate.nombre, ...(candidate.alias || [])].map(name => normalize(name).split(/\s+/).pop()).filter(word => word && word.length >= 4);
-  const mentions = (candidate, text) => namesOf(candidate).some(word => new RegExp('(?:^|[^a-z])(?:el|la|los|las)\\s+' + word.slice(0, Math.max(5, word.length - 2)), 'i').test(text));
+  // El actor cuenta si la cita lo nombra antes del verbo del propio RF («…el vendedor emite la factura» para «Emitir factura»).
+  const mentions = (candidate, text, verb) => namesOf(candidate).some(word => new RegExp('(?:^|[^a-z])(?:el|la|los|las)\\s+' + word.slice(0, Math.max(5, word.length - 2)) + '\\w*[^.]{0,80}\\b' + verb, 'i').test(text));
   return (inventory || []).map(item => {
     if (item?.tipo !== 'RF') return item;
     const subject = (/^(?:el|la|los|las)\s+(\p{L}+)/iu.exec(item.necesidad) || [])[1] || '';
@@ -664,7 +665,8 @@ function linkActors(inventory, actors) {
     // Sin sujeto en la frase («Emitir factura…»), el actor es el único que la cita nombra («…el vendedor emite la factura»).
     if (!actor && !item.actor_id) {
       const quote = normalize([item.evidencia, ...(Array.isArray(item.evidencias) ? item.evidencias.map(entry => (typeof entry === 'string' ? entry : entry?.texto)) : [])].filter(Boolean).join(' '));
-      const named = people.filter(candidate => mentions(candidate, quote));
+      const verb = normalize((String(item.necesidad || '').match(/^[\p{L}]+/u) || [''])[0]).slice(0, 4);
+      const named = verb.length >= 4 ? people.filter(candidate => mentions(candidate, quote, verb)) : [];
       if (named.length === 1) actor = named[0];
     }
     return actor ? { ...item, actor_id: actor.id } : item;
