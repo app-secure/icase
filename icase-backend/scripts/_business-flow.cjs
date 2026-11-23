@@ -31,10 +31,10 @@ const idOf = (r) => r.data.id || (r.data.data && r.data.data.id);
     crearCliente: path('post', /actions\/crear-cliente$/),
     crearVenta: path('post', /actions\/crear-venta$/),
     emitir: path('post', /actions\/emitir-factura$/),
-    anular: path('patch', /actions\/anular-venta/),
-    productos: path('get', /actions\/listar-productos$/),
+    anular: path('patch', /actions\/anular-venta/) || path('post', /actions\/anular-venta/),
+    productos: path('get', /actions\/(?:listar-productos|consultar-producto)$/),
     stockBajo: path('get', /stock-bajo$/),
-    ventasVend: path('get', /listar-(?:mis-)?ventas/),
+    ventasVend: path('get', /listar-(?:mis-|propios-)?ventas/),
     reporteFechas: path('get', /reporte-de-ventas/),
     masVendidos: path('get', /mas-vendidos/)
   };
@@ -92,9 +92,10 @@ const idOf = (r) => r.data.id || (r.data.data && r.data.data.id);
   }
   if (ops.anular) {
     const url = ops.anular.replace('{id}', ventaId);
-    const a1 = await call(vend, 'PATCH', url, { motivo_anulacion: 'prueba' });
+    const metodo = doc.paths[ops.anular].patch ? 'PATCH' : 'POST';
+    const a1 = await call(vend, metodo, url, { motivo_anulacion: 'prueba' });
     check([401, 403].includes(a1.status), 'el vendedor NO puede anular', a1.status);
-    const a2 = await call(admin, 'PATCH', url, { motivo_anulacion: 'Error de digitacion', motivo: 'Error de digitacion' });
+    const a2 = await call(admin, metodo, url, { motivo_anulacion: 'Error de digitacion', motivo: 'Error de digitacion' });
     check(a2.status === 200, 'el administrador anula la venta', JSON.stringify(a2.data));
     check((await stockOf()) === 10, 'al anular, el stock vuelve a 10', 'stock=' + (await stockOf()));
   }
