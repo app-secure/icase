@@ -221,6 +221,15 @@ function removeRedundantScreens(codigo) {
     const exists = (leaf.parent?.children || []).some(sibling => sibling !== leaf && !sibling.remove && !strip(sibling.name).startsWith('formulario') && strip(sibling.name).startsWith(form[1]));
     if (exists) { leaf.remove = true; quitadas.push(leaf.name); }
   }
+  // «Formulario de Venta» junto a «Registro de Venta»: dos pantallas para crear lo mismo. Se conserva la de registro.
+  const stemOf = (value) => strip(value).replace(/^(?:formulario|registro|alta|creacion)\s+(?:de\s+)?(?:(?:una?|la|el|los|las)\s+)?/, '').split(/\s+/)[0].slice(0, 5);
+  for (const leaf of leaves) {
+    if (leaf.remove || !/^formulario de\b/.test(strip(leaf.name)) || FILTER_FORM.test(strip(leaf.name))) continue;
+    const stem = stemOf(leaf.name);
+    if (stem.length < 4) continue;
+    const twin = leaves.find((other) => other !== leaf && !other.remove && appOf(other) === appOf(leaf) && /^(?:registro|alta|creacion) de\b/.test(strip(other.name)) && stemOf(other.name) === stem);
+    if (twin) { leaf.remove = true; quitadas.push(leaf.name); }
+  }
   if (!quitadas.length) return { codigo, quitadas };
   // Un módulo que se queda sin pantallas tampoco es navegable.
   let changed = true;

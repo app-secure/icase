@@ -25,3 +25,9 @@ test('un árbol sin repetidos no cambia', () => {
   const code = tree(['* Sistema', '** Aplicación Web', '*** Ventas', '**** Registro de Venta', '**** Ventas']);
   expect(removeRedundantScreens(code)).toEqual({ codigo: code, quitadas: [] });
 });
+
+test('«Formulario de Venta» junto a «Registro de Venta» sobra; «Formulario de Producto» sin registro se conserva', () => {
+  const out = removeRedundantScreens(tree(['* Sistema', '** Aplicación Web', '*** Ventas', '**** Registro de Venta', '**** Formulario de Venta', '*** Catálogo', '**** Productos', '**** Formulario de Producto']));
+  expect(out.quitadas).toEqual(['Formulario de Venta']);
+  expect(out.codigo).toContain('Formulario de Producto');
+});

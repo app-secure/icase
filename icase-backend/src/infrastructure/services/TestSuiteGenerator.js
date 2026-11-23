@@ -495,7 +495,7 @@ if (auth.habilitada) {
         const id = `${operation.id}.${action.verbo}`;
         if (cases.some((item) => item.route === screen.route && item.action === id)) continue;
         // El alta con líneas (una venta con sus productos): la operación y el registro que ofrecen sus líneas, para tener uno al abrir la pantalla.
-        const conLineas = operations.flatMap((candidate) => candidate.actions || []).find((candidate) => candidate.lineas && [candidate.permiso, candidate.permission, candidate.capability].includes(operation.key));
+        const conLineas = operations.flatMap((candidate) => candidate.actions || []).find((candidate) => candidate.lineas && candidate.type === 'crear' && [candidate.permission, candidate.capability, candidate.permiso].includes(operation.key) || candidate.lineas && candidate.type === 'crear' && String(candidate.permission || '').toLowerCase() === String(operation.key || '').toLowerCase());
         cases.push({ route: screen.route, name: screen.name || screen.nombre || screen.id, verb: action.verbo, action: id, operation: operation.key, ...(conLineas?.lineas?.destinoCapability ? { lineasDestino: conLineas.lineas.destinoCapability } : {}) });
       }
     }
