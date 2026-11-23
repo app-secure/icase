@@ -183,3 +183,25 @@ describe('número y fecha de una venta', () => {
     expect(auto).toEqual(expect.arrayContaining([expect.objectContaining({ campo: 'numero_venta', valor: 'correlativo', prefijo: 'V001-' }), { campo: 'fecha_venta', valor: 'ahora' }]));
   });
 });
+
+describe('estado declarado con «Enum» genérico', () => {
+  test('anular una venta cuyo estado es «+Enum estado» (EstadoVenta aparte) pasa a una transición válida con reposición de stock', () => {
+    const nl = String.fromCharCode(10);
+    const code = ['@startuml', 'class Producto {', '  +String nombre', '  +Decimal precioVenta', '  +int stock', '}', 'class Venta {', '  +Decimal total', '  +Enum estado', '}', 'class DetalleVenta {', '  +int cantidad', '  +Producto producto', '  +Venta venta', '}', 'enum EstadoVenta {', '  REGISTRADA', '  ANULADA', '}', 'Venta "1" -- "*" DetalleVenta : contiene', '@enduml'].join(nl);
+    const m = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: code }]);
+    const rfs = [
+      { aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Registrar venta', descripcion: '', actores: ['Vendedor'] },
+      { aprobado: true, tipo: 'RF', identificador: 'RF-03', nombre: 'Anular venta', descripcion: '', actores: ['Administrador'] }
+    ];
+    const { especificacion } = new ApplicationSpecService({}).depurar({
+      operaciones: [
+        { nombre: 'registrarVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], entradas: ['total'] },
+        { nombre: 'anularVenta', rf: 'RF-03', tipo: 'actualizar', entidad: 'Venta', actores: ['Administrador'], entradas: ['estado'] }
+      ]
+    }, { modelo: m, rf: rfs, pantallas: [] });
+    const anular = especificacion.operaciones.find((op) => op.nombre === 'anularVenta');
+    expect(anular.tipo).toBe('transicion');
+    expect(anular.transicion).toMatchObject({ campo: 'estado', a: 'ANULADA', de: ['REGISTRADA'] });
+    expect(anular.reponer).toMatchObject({ stock: 'stock' });
+  });
+});

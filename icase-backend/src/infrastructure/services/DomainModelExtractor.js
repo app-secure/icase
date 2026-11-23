@@ -65,9 +65,28 @@ class DomainModelExtractor {
     for (const line of item.body) {
       if (line.includes('(')) continue; // métodos
       const attribute = this._attribute(line, enums);
-      if (attribute) attributes.push(attribute);
+      if (attribute) attributes.push(this._enumGenerico(attribute, item.name, enums));
     }
     return { name: item.name, key: slug(item.name), attributes, references: [] };
+  }
+
+  /**
+   * «+Enum estado» con el enum declarado aparte (EstadoVenta): el tipo genérico «Enum» no nombra cuál. Se toma el enum cuyo nombre junta el
+   * del atributo y el de la entidad (EstadoVenta, VentaEstado) o, si solo uno contiene el atributo, ese. Sin esto el atributo se tomaba por
+   * una referencia, desaparecía del modelo y la entidad se quedaba sin estado (no se podía anular una venta).
+   */
+  _enumGenerico(attribute, entityName, enums) {
+    if (attribute.referencia === undefined || !/^enum(?:erado)?$/i.test(attribute.referencia)) return attribute;
+    const norm = (value) => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const attr = norm(attribute.name);
+    const entity = norm(entityName);
+    const names = [...enums.keys()];
+    const found = names.find((name) => norm(name) === attr + entity || norm(name) === entity + attr)
+      || names.find((name) => norm(name).includes(attr) && norm(name).includes(entity))
+      || (names.filter((name) => norm(name).includes(attr)).length === 1 ? names.find((name) => norm(name).includes(attr)) : null);
+    if (!found) return { ...attribute, type: 'string', referencia: undefined };
+    const { referencia, ...rest } = attribute;
+    return { ...rest, type: 'string', enum: enums.get(found), dominio: found };
   }
 
   _attribute(line, enums) {

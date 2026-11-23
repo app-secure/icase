@@ -388,7 +388,12 @@ class ApplicationSpecService {
       if (campos[campo] && inferido && !text(candidata.transicion?.a)) {
         const valoresEnum = campos[campo].enum;
         const ajustar = (valor) => (valoresEnum ? valoresEnum.find((item) => strip(item).startsWith(strip(valor).slice(0, 5))) || valor : valor);
-        candidata = { ...candidata, transicion: { campo, de: inferido.de.map(ajustar), a: ajustar(inferido.a) } };
+        const destinoInferido = ajustar(inferido.a);
+        // Los estados de origen que el enum no tiene («activa» frente a REGISTRADA) se sustituyen por cualquier otro estado: se puede anular
+        // lo que no está ya anulado.
+        let origenes = inferido.de.map(ajustar).filter((valor) => !valoresEnum || valoresEnum.includes(valor));
+        if (valoresEnum && !origenes.length) origenes = valoresEnum.filter((valor) => valor !== destinoInferido);
+        candidata = { ...candidata, transicion: { campo, de: origenes, a: destinoInferido } };
       }
       // Un «estado» de texto (sin enum en el diagrama) admite los estados que la propia transición declara.
       const declarados = [...list(candidata.transicion?.de).map(text), text(candidata.transicion?.a)].filter(Boolean);

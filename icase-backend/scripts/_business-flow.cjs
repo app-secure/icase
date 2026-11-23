@@ -34,7 +34,7 @@ const idOf = (r) => r.data.id || (r.data.data && r.data.data.id);
     anular: path('patch', /actions\/anular-venta/),
     productos: path('get', /actions\/listar-productos$/),
     stockBajo: path('get', /stock-bajo$/),
-    ventasVend: path('get', /listar-ventas/),
+    ventasVend: path('get', /listar-(?:mis-)?ventas/),
     reporteFechas: path('get', /reporte-de-ventas/),
     masVendidos: path('get', /mas-vendidos/)
   };
