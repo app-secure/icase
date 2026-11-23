@@ -48,8 +48,11 @@ class RequirementApprovalService {
         const related = expected.filter((need) => refs.includes(need.id));
         if (new Set(related.map(objectiveOf)).size > 1) add('OBJETIVOS_INDEPENDIENTES', `${req.identificador}: combina objetivos independientes.`);
         if (related.some((need) => need.tipo !== req.tipo)) add('CLASIFICACION_INCONSISTENTE', `${req.identificador}: el tipo no coincide con las necesidades referenciadas.`);
+        // Un criterio puede citar, además de las necesidades del RF, las reglas de negocio ligadas a él («no vender un producto
+        // desactivado» es una regla de «Registrar venta»): son suyas, no ajenas.
+        const rules = new Set([...refs, ...(Array.isArray(req.reglas_relacionadas) ? req.reglas_relacionadas : []).filter((id) => inventory.some((need) => need.id === id && need.tipo === 'regla_negocio'))]);
         for (const criterion of criteriaOf(req)) {
-          if (!criterion || !String(criterion.descripcion || '').trim() || !refsOf(criterion).length || refsOf(criterion).some((id) => !refs.includes(id))) {
+          if (!criterion || !String(criterion.descripcion || '').trim() || !refsOf(criterion).length || refsOf(criterion).some((id) => !rules.has(id))) {
             add('CRITERIO_INVALIDO', `${req.identificador}: un criterio está vacío o referencia necesidades ajenas.`);
           }
         }

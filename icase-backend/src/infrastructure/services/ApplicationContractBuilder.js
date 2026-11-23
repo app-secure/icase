@@ -1,4 +1,4 @@
-const { isLoginRequirement, isUsersRequirement, hasCredentials } = require('./IdentityRequirements');
+const { isLoginRequirement, isUsersRequirement, hasCredentials, isSensitiveField } = require('./IdentityRequirements');
 const { SYNONYMS } = require('./DomainSynonyms');
 const slug = (value) => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -37,13 +37,17 @@ class ApplicationContractBuilder {
     // Una regla «X es obligatorio» sobre un dato que el alta no pide ni el sistema completa (el motivo de anulación al registrar una venta,
     // el subtotal que nadie calcula, la factura que se emite después) impediría crear cualquier registro: no se aplica al alta.
     const norm = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/_id$/, '').replace(/[^a-z0-9]/g, '');
+    // La entidad de la regla: la suya o, si solo trae su RF, la de las operaciones de ese RF.
+    const entidadDe = (rule) => rule.entidad || (spec?.operaciones || []).find((op) => (Array.isArray(rule.rf) ? rule.rf : [rule.rf]).map((id) => String(id || '').toUpperCase()).includes(String(op.rf || '').toUpperCase()))?.entidad;
     rules = (rules || []).filter((rule) => {
+      // La contraseña (o su hash) la guarda la cuenta de acceso (/api/users), nunca una operación de datos: una regla sobre ella no se puede cumplir.
+      if (rule.campo && isSensitiveField(rule.campo)) { warnings.push(`${rule.id}: «${rule.mensaje}» la cumple la cuenta de acceso (contraseña cifrada), no las operaciones de datos.`); return false; }
       if (rule.tipo !== 'requerido' || rule.estado_decision === 'rechazado') return true;
-      const altas = (spec?.operaciones || []).filter((op) => op.tipo === 'crear' && op.entidad === rule.entidad && op.estado_decision !== 'rechazado');
+      const altas = (spec?.operaciones || []).filter((op) => op.tipo === 'crear' && op.entidad === entidadDe(rule) && op.estado_decision !== 'rechazado');
       if (!altas.length) return true;
       const provee = (op) => [...(op.entradas || []), ...(op.autoEntradas || []).map((item) => item.campo), ...(op.sesionEntradas || []).map((item) => item.campo), op.lineas?.total].filter(Boolean).some((campo) => norm(campo) === norm(rule.campo));
       if (altas.some(provee)) return true;
-      warnings.push(`${rule.id}: «${rule.mensaje}» no se aplica al alta de ${rule.entidad}: el dato no se pide ni lo completa el sistema.`);
+      warnings.push(`${rule.id}: «${rule.mensaje}» no se aplica al alta de ${entidadDe(rule)}: el dato no se pide ni lo completa el sistema.`);
       return false;
     });
     if ((domainModel?.relations || []).some((r) => r.cardinalidad === 'muchos_a_muchos')) warnings.push('Relaciones N:M: API y panel web generados; MongoDB requiere replica set transaccional. Requiere verificación integral con base real antes de certificar la entrega completa.');

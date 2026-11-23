@@ -55,3 +55,16 @@ test('la API devuelve el diagnóstico estructurado para mostrarlo en la interfaz
   expect(res.status).toHaveBeenCalledWith(400);
   expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ codigo: 'REQUIREMENTS_COVERAGE_BLOCKED', control_requisitos: control }));
 });
+
+test('un criterio puede citar las reglas de negocio ligadas a su RF, pero no las de otro (caso Ventas)', () => {
+  const ventas = [
+    { id: 'N001', objetivo_id: 'O-01', tipo: 'RF', necesidad: 'Registrar una venta', estado: 'confirmado' },
+    { id: 'N018', tipo: 'regla_negocio', necesidad: 'No permitir vender un producto desactivado.', estado: 'confirmado' },
+    { id: 'N030', tipo: 'regla_negocio', necesidad: 'Solo el administrador anula ventas.', estado: 'confirmado' }
+  ];
+  const rf = { identificador: 'RF-01', tipo: 'RF', nombre: 'Registrar venta', descripcion: 'Registrar una venta.', necesidades_origen: ['N001'], reglas_relacionadas: ['N018'],
+    criterios_aceptacion: [{ descripcion: 'Vender un producto desactivado se rechaza.', necesidades_origen: ['N001', 'N018'] }] };
+  const invalid = (req) => new Approval().evaluate([req], { version: 2, inventario: ventas }).errores_criticos.filter((item) => item.codigo === 'CRITERIO_INVALIDO');
+  expect(invalid(rf)).toEqual([]);
+  expect(invalid({ ...rf, criterios_aceptacion: [{ descripcion: 'Solo el administrador anula.', necesidades_origen: ['N001', 'N030'] }] })).toHaveLength(1);
+});

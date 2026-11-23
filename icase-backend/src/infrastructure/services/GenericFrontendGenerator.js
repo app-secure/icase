@@ -150,11 +150,10 @@ class GenericFrontendGenerator {
       const analysis = mockupCode ? HtmlToJsxTransformer.analyze(mockupCode, { operaciones: allowedOperations, routes: routeSet, referencias: referencias || {} }) : null;
       const jsxBody = analysis ? analysis.jsx : '';
       // Una pantalla de mockup sin vista en la especificación, pero que guarda una operación con líneas o lee datos, también se enlaza.
-      const wired0 = jsxBody.includes('handleAction(');
-      const live = specFound || (wired0 && analysis && spec?.acciones?.length ? { blocks: [], actions: {} } : null);
+      const wired = jsxBody.includes('handleAction(');
+      const live = specFound || (wired && analysis && spec?.acciones?.length ? { blocks: [], actions: {} } : null);
       if (live && !specFound) anyLive = true;
       const specActionMap = live ? this._specActionMap(live.actions, spec) : null;
-      const wired = jsxBody.includes('handleAction(');
       anyWired = anyWired || wired;
       const usesLink = jsxBody.includes('<Link ');
       const usesReferences = jsxBody.includes('<ReferenceOptions');
