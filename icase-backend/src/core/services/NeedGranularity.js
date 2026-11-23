@@ -701,13 +701,25 @@ function canonicalGoals(inventory) {
     }
     return map.get(id);
   };
-  return items.map(item => {
-    if (!item || typeof item !== 'object') return item;
-    const next = { ...item };
-    if (goalOf(item.objetivo_id)) next.objetivo_id = convert(item.objetivo_id);
-    if (Array.isArray(item.objetivos_relacionados)) next.objetivos_relacionados = item.objetivos_relacionados.map(id => convert(goalOf(id)) || id);
-    return next;
-  });
+  // Los objetivos propios se convierten primero; las referencias («objetivos_relacionados») apuntan a un objetivo que ya
+  // existe, nunca crean uno nuevo: «O2» es el objetivo «O-02», no uno distinto.
+  const own = items.map(item => (item && typeof item === 'object' && goalOf(item.objetivo_id) ? { ...item, objetivo_id: convert(item.objetivo_id) } : item));
+  const numberOf = id => (/^O-?0*(\d+)$/i.exec(id) || [])[1];
+  const byNumber = new Map();
+  for (const item of own) {
+    const id = item?.objetivo_id;
+    const key = numberOf(id);
+    if (id && key && !byNumber.has(String(Number(key)))) byNumber.set(String(Number(key)), id);
+  }
+  const reference = id => {
+    if (!id) return id;
+    if (map.has(id)) return map.get(id);
+    const key = numberOf(id);
+    return (key && byNumber.get(String(Number(key)))) || id;
+  };
+  return own.map(item => (item && typeof item === 'object' && Array.isArray(item.objetivos_relacionados)
+    ? { ...item, objetivos_relacionados: [...new Set(item.objetivos_relacionados.map(id => reference(goalOf(id)) || id))] }
+    : item));
 }
 function refine(inventory, input, identifiers, actors) {
   const current = [];

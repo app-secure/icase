@@ -113,3 +113,21 @@ describe('reglas del análisis simple de Ventas', () => {
     for (const clave of ['registrar', 'stock', 'factura', 'propias', 'login']) expect(reporte).not.toContain(clave);
   });
 });
+
+describe('referencias a objetivos', () => {
+  test('«O2» en una regla apunta al objetivo «O-02» que ya existe, no a uno nuevo', () => {
+    const out = canonicalGoals([
+      { id: 'N2', tipo: 'RF', objetivo_id: 'O-02' },
+      { id: 'N23', tipo: 'regla_negocio', objetivos_relacionados: ['O2'] }
+    ]);
+    expect(out[1].objetivos_relacionados).toEqual(['O-02']);
+  });
+  test('si el objetivo está en formato de la IA, la referencia sigue al convertido', () => {
+    const out = canonicalGoals([
+      { id: 'N2', tipo: 'RF', objetivo_id: 'O2' },
+      { id: 'N23', tipo: 'regla_negocio', objetivos_relacionados: ['O2', 'O002'] }
+    ]);
+    expect(out[0].objetivo_id).toBe('O-02');
+    expect(out[1].objetivos_relacionados).toEqual(['O-02']);
+  });
+});
