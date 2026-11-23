@@ -622,6 +622,13 @@ for (const item of cases.filter((entry) => entry.verb === 'crear')) {
         const control = scope.locator('[name="' + name + '"]').first();
         if (await control.count()) await fillDesigned(control, value);
       }
+      // Un alta con líneas (una venta con sus productos): el formulario trae un select de producto que no es campo de la operación; se elige el primero real.
+      for (const select of await scope.locator('select').all()) {
+        const name = await select.getAttribute('name');
+        if ((name && Object.prototype.hasOwnProperty.call(body, name)) || await select.isDisabled() || !(await select.isVisible())) continue;
+        await select.locator('option:not([value=""])').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => {});
+        if (!(await select.inputValue()) && await select.locator('option:not([value=""])').count()) await select.selectOption({ index: 1 });
+      }
       await trigger.click();
       const banner = page.locator('[data-icase-result]');
       await expect(banner).toBeVisible();
