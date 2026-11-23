@@ -144,3 +144,27 @@ describe('actor de un RF sin sujeto', () => {
     expect(out[1].actor_id).toBeUndefined();
   });
 });
+
+describe('inicio de sesión', () => {
+  const { refine } = require('../src/core/services/NeedGranularity');
+  const ids = require('../src/core/services/AnalysisIdentifiers');
+  const input = 'La autenticación será con JWT y el acceso por roles. Las contraseñas se guardarán cifradas.';
+  const stack = { id: 'N20', tipo: 'restriccion_tecnica', necesidad: 'Usar JWT para la autenticación.', estado: 'confirmado', evidencia: 'La autenticación será con JWT y el acceso por roles.' };
+  const venta = { id: 'N1', tipo: 'RF', objetivo_id: 'O-01', necesidad: 'Registrar una venta con varios productos', estado: 'confirmado', evidencia: 'Registrar una venta con varios productos' };
+  test('si solo hay mención técnica, se añade el RF de autenticación con esa evidencia', () => {
+    const out = refine([venta, stack], input, ids([[venta, stack]]), []);
+    const auth = out.filter(item => item.tipo === 'RF' && /Autenticar/.test(item.necesidad));
+    expect(auth).toHaveLength(1);
+    expect(auth[0].evidencia).toBe(stack.evidencia);
+    expect(auth[0].objetivo_id).toMatch(/^O-\d+$/);
+  });
+  test('si ya existe un RF de acceso, no añade otro', () => {
+    const login = { id: 'N2', tipo: 'RF', objetivo_id: 'O-02', necesidad: 'Autenticar usuarios con credenciales', estado: 'confirmado', evidencia: 'x' };
+    const out = refine([venta, stack, login], input, ids([[venta, stack, login]]), []);
+    expect(out.filter(item => item.tipo === 'RF' && /utentic/.test(item.necesidad))).toHaveLength(1);
+  });
+  test('sin ninguna mención de acceso, no inventa el RF', () => {
+    const out = refine([venta], 'Registrar una venta con varios productos', ids([[venta]]), []);
+    expect(out.filter(item => /utentic/.test(item.necesidad))).toHaveLength(0);
+  });
+});

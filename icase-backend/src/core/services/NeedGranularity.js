@@ -725,10 +725,25 @@ function canonicalGoals(inventory) {
     ? { ...item, objetivos_relacionados: [...new Set(item.objetivos_relacionados.map(id => reference(goalOf(id)) || id))] }
     : item));
 }
+/**
+ * Una aplicación con acceso por usuario y contraseña (JWT, roles, cuentas) necesita su función de inicio de sesión: si el insumo solo
+ * la menciona como tecnología o restricción («autenticación con JWT»), no queda ningún RF que la pida y el sistema generado no tiene
+ * pantalla de acceso ni cuentas reales. Se añade ese RF con la evidencia de la mención.
+ */
+function ensureAuthentication(inventory, identifiers) {
+  const items = Array.isArray(inventory) ? inventory : [];
+  if (items.some(item => item?.tipo === 'RF' && /(?:autentic|inicio de sesion|iniciar sesion|login|acceso al sistema|validar acceso)/.test(normalize(item.necesidad)))) return items;
+  const source = items.find(item => item && item.tipo !== 'RF' && item.tipo !== 'pregunta' && /\b(?:jwt|autenticacion|inicio de sesion|usuario y contrasena|acceso con usuario)\b/.test(normalize(`${item.necesidad} ${item.evidencia || ''}`)) && !/\b(?:no habra|sin)\b.*\b(?:login|autenticacion)\b/.test(normalize(item.necesidad)));
+  if (!source || !(source.evidencia || (source.evidencias || []).length)) return items;
+  return [...items, {
+    id: identifiers.next('N'), tipo: 'RF', objetivo_id: identifiers.next('O'), necesidad: 'Autenticar usuarios mediante usuario y contraseña para acceder al sistema según su rol.',
+    estado: 'confirmado', evidencia: source.evidencia, ...(source.evidencias ? { evidencias: source.evidencias } : {})
+  }];
+}
 function refine(inventory, input, identifiers, actors) {
   const current = [];
   for (const item of (inventory || []).map(dataDetailAsRule)) current.push(...splitItem(item, identifiers).map(part => ensureSubject(part === item ? item : withEvidence(part, item.evidencia), input)));
   const recovered = clarifyQuestions(current.concat(recover(input, current, identifiers).map(item => ensureSubject(item, input))));
-  return canonicalGoals(linkActors(polish(recovered, input, identifiers), actors));
+  return canonicalGoals(ensureAuthentication(linkActors(polish(recovered, input, identifiers), actors), identifiers));
 }
 module.exports = { canonicalGoals, refine, align, partition, familyOf, linkActors, ruleApplies, applicableClause, preconditionAction, actionOf, actionsOf, tidyNeed, redundantNeed };

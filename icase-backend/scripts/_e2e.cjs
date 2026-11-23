@@ -159,6 +159,19 @@ const commands = {
       await commands.aprobar(clave);
     }
   },
+  async completo(insumoFile, nombre = 'Ventas simple E2E') {
+    await commands.proyecto(insumoFile, nombre);
+    await commands.analisis();
+    await commands.resumen();
+    await commands['aprobar-analisis']();
+    await commands.fase('analisis');
+    await commands.diagramas();
+    await commands.mockups();
+    await commands.fase('mockups');
+    await call('POST', `/proyectos/${state.proyecto}/codificacion/un-clic`, {});
+    console.log('plan de codificación aprobado');
+    await commands.codigo();
+  },
   async requisitos() {
     const list = await call('GET', `/requerimientos/proyecto/${state.proyecto}`).catch(() => null);
     const p = await call('GET', `/proyectos/${state.proyecto}`);
