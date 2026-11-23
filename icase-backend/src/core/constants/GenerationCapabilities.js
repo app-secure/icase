@@ -80,15 +80,21 @@ const CAPABILITIES = Object.freeze([
 ]);
 
 /** Límites que valen para todo proyecto generado, sin depender de lo que digan los RF. Algunos dependen de los módulos activos. */
-function generalLimits({ formulariosTipados = false, paginacion = false, seed = false } = {}) {
+function generalLimits({ formulariosTipados = false, paginacion = false, seed = false, disenada = false } = {}) {
   return [
-    formulariosTipados
+    disenada
+      ? 'La interfaz web reproduce los mockups aprobados: sus formularios, tablas y botones trabajan con los datos reales. Lo que el diseño dibuja sin una operación detrás (un reporte sin consulta, un botón sin pantalla de destino) se oculta o se avisa en la propia pantalla; la app móvil, si existe, sigue su propio diseño.'
+      : formulariosTipados
       ? 'La interfaz web muestra un formulario por campo y una tabla derivados del esquema de cada entidad, pero no reproduce el diseño de los mockups; una operación sin campos declarados se edita como JSON. La app móvil sigue usando JSON.'
       : 'La interfaz es genérica: cada requisito tiene una pantalla donde el registro se escribe como JSON en un cuadro de texto y las listas muestran el JSON; no hay formularios por campo ni tablas, ni se reproduce el diseño del mockup.',
-    paginacion
+    disenada
+      ? 'Los listados diseñados se paginan con el tamaño del diseño y filtran por los campos que el mockup dibuja; el resto de listas de la API devuelven todos los registros.'
+      : paginacion
       ? 'Las listas en la API y en la interfaz soportan paginación (parámetros page y limit), búsqueda textual (parámetro search) y filtros por campo.'
       : 'Las listas devuelven todos los registros: no hay paginación, filtros ni búsqueda.',
-    seed
+    disenada && !seed
+      ? 'No se cargan datos de ejemplo del negocio. Solo el usuario administrador y, si SEED_DEMO_USERS está en true, una cuenta de ejemplo por rol: ponlo en false antes de publicar.'
+      : seed
       ? 'Se generan datos iniciales (seed) deterministas derivados del esquema del modelo de dominio para pruebas de arranque.'
       : 'No se cargan datos iniciales (seed) salvo el usuario administrador.',
     'Los permisos son por rol y operación. El alcance «propios» es opt-in en la política de acceso: sin esa marca el rol ve todos los registros de su operación; con ella solo los que creó.',

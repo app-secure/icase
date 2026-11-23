@@ -111,7 +111,8 @@ class GenerationReportService {
       limites_generales: generalLimits({
         formulariosTipados: Boolean(modulos?.opcionales?.some((item) => item.id === 'formularios_tipados' && item.activo)),
         paginacion: Boolean(modulos?.opcionales?.some((item) => item.id === 'paginacion_busqueda' && item.activo)),
-        seed: Boolean(modulos?.opcionales?.some((item) => item.id === 'datos_iniciales' && item.activo))
+        seed: Boolean(modulos?.opcionales?.some((item) => item.id === 'datos_iniciales' && item.activo)),
+        disenada: Array.isArray(contrato?.views) && contrato.views.length > 0
       })
     };
   }
