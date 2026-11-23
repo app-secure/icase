@@ -42,7 +42,10 @@ class CodePlanningProposalService {
     const analysisDecisions = [...analysis.restricciones_tecnicas, ...analysis.reglas_negocio, ...analysis.decisiones, ...analysis.contexto]
       .filter((item) => item.estado === 'confirmado');
     const texto = [this._textoDe(requisitosAprobados, diagramasAprobados), ...analysisDecisions.map((item) => `${item.necesidad}\n${item.evidencia || ''}`)].join('\n');
-    const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto, diseno, inicial, analisis: analysis };
+    // Las plataformas se deciden con lo que el insumo y los requisitos dicen, no con el código de los diagramas: la IA dibuja
+    // a veces un «Dispositivo Móvil» en la arquitectura aunque el insumo diga «no habrá aplicación móvil».
+    const textoPlataforma = [this._textoDe(requisitosAprobados, []), ...analysisDecisions.map((item) => `${item.necesidad}\n${item.evidencia || ''}`)].join(String.fromCharCode(10));
+    const contexto = { proyecto, requisitosAprobados, diagramasAprobados, plan, texto, textoPlataforma, diseno, inicial, analisis: analysis };
     const propuesta = this[`_${etapa}`](contexto);
     const construir = (resultado) => ({
       etapa,
@@ -148,7 +151,8 @@ class CodePlanningProposalService {
     };
   }
 
-  _alcance_plataforma({ texto, diseno }) {
+  _alcance_plataforma({ texto, textoPlataforma, diseno }) {
+    texto = textoPlataforma ?? texto;
     const plataformas = [];
     // «No se desarrollará aplicación móvil» o «queda fuera de alcance la app móvil» no piden esa plataforma:
     // solo cuentan las frases que la mencionan sin negarla ni excluirla.
@@ -166,11 +170,11 @@ class CodePlanningProposalService {
       advertencias: plataformas.length ? [] : ['Se propone web porque el análisis no especifica plataforma.'] };
   }
 
-  _stack_tecnologico({ texto, analisis, plan }) {
+  _stack_tecnologico({ texto, textoPlataforma, analisis, plan }) {
     const restricciones = analisis.restricciones_tecnicas.filter(item => item.estado === 'confirmado');
     const confirmado = restricciones.map(item => item.necesidad).join(' ');
     const plataformas = plan?.etapas?.find(item => item.etapa === 'alcance_plataforma')?.propuesta?.plataformas
-      || this._alcance_plataforma({ texto }).valor.plataformas;
+      || this._alcance_plataforma({ texto, textoPlataforma }).valor.plataformas;
     texto = confirmado;
     const advertencias = [];
     const conSpring = /spring|\bjava\b/i.test(texto);
