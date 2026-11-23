@@ -49,7 +49,7 @@ const STATUS_STYLE = {
   bloqueada: 'border-slate-200 bg-slate-50 text-slate-400'
 };
 
-export default function CodePlanningView({ projectId, projectName, onBackToDiagrams, onOpenDocument }) {
+export default function CodePlanningView({ projectId, projectName, onBackToDiagrams, onOpenDocument, onExit }) {
   const [stepsCollapsed, setStepsCollapsed] = useState(false);
   const [plan, setPlan] = useState(null);
   const [selected, setSelected] = useState('alcance_plataforma');
@@ -379,7 +379,7 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-white">
-      <StepSidebar title="Codificación" ariaLabel="Pasos de la codificación" steps={codingSteps} currentKey={selected}
+      <StepSidebar onExit={onExit} title="Codificación" ariaLabel="Pasos de la codificación" steps={codingSteps} currentKey={selected}
         collapsed={stepsCollapsed} onToggleCollapsed={() => setStepsCollapsed((value) => !value)}
         onSelect={(key) => { setSelected(key); setSuggestionMeta(null); }} />
 

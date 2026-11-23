@@ -379,6 +379,11 @@ export default function ProjectWorkspace({
   const [initialBusy, setInitialBusy] = useState(false);
   const [initialDirty, setInitialDirty] = useState(false);
   const canLeaveInitial = () => !showInitial || !initialDirty || window.confirm('Hay cambios del análisis sin guardar. ¿Salir sin guardarlos?');
+  // Paso anterior a los requisitos: vuelve al análisis inicial desde la vista de requisitos.
+  const goToInitialAnalysis = () => {
+    if (!canLeaveInitial()) return;
+    loadInitial().then(() => { setShowInitial(true); setIsManagingSources(false); setIsReviewingRequirements(false); }).catch(error => setAlertModal({ title: 'Análisis inicial', message: error.message }));
+  };
   React.useEffect(() => {
     if (!initialDirty) return;
     const warn = event => { event.preventDefault(); event.returnValue = ''; };
@@ -1423,7 +1428,7 @@ export default function ProjectWorkspace({
           }} />}
         <RequirementJobStatus key={requirementJob?.id} job={requirementJob} onResume={resumeRequirements} onCancel={async () => { const next = await cancelRequirementJobApi(requirementJob.id); setRequirementJob(next); }} />
         <div className="flex min-h-0 flex-1 overflow-hidden">
-        {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <StepSidebar
+        {projectBackendId && (project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements) && <StepSidebar onExit={onBackToDashboard}
           title="Análisis del proyecto" ariaLabel="Pasos del análisis" collapsed={stepsCollapsed} onToggleCollapsed={() => setStepsCollapsed(value => !value)}
           currentKey={showInitial ? 'analysis' : isManagingSources || !project.isProcessed ? 'sources' : project.currentPhase > 1 && !isReviewingRequirements ? null : 'requirements'}
           steps={[
@@ -1523,11 +1528,13 @@ export default function ProjectWorkspace({
             onReview={handleRequirementReview}
             isApproved={project.isAnalysisApproved}
             readOnly
+            onBackToInitial={goToInitialAnalysis}
             onBackToDesign={() => setIsReviewingRequirements(false)}
           />
         ) : project.currentPhase === 1 ? (
           /* FASE 1: Análisis (Requerimientos en texto estructurado limpio) */
           <RequirementsView
+            onBackToInitial={goToInitialAnalysis}
             requirements={project.requirements}
             audit={project.requirementAudit}
             onReview={handleRequirementReview}
@@ -1639,6 +1646,7 @@ export default function ProjectWorkspace({
             diagramFlow={project.diagramFlow}
             isGeneratingDiagram={isGeneratingDiagrams}
             diagramJob={diagramJob}
+            onExit={onBackToDashboard}
             onBackToAnalysis={() => {
               setIsReviewingRequirements(true);
             }}
@@ -1651,6 +1659,7 @@ export default function ProjectWorkspace({
           <CodePlanningView
             projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}
             projectName={project.name}
+            onExit={onBackToDashboard}
             onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 2 })}
             onOpenDocument={() => onUpdateProject({ ...project, currentPhase: 4 })}
           />

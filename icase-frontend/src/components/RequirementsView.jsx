@@ -28,7 +28,7 @@ const nextId = (items, prefix) => {
 
 export default function RequirementsView({
   requirements, onApprovePhase, isApproved, onApplyAiCorrection, onUpdateRequirements,
-  readOnly = false, onBackToDesign, audit = null, onReview, onRegenerate, regenerating = false
+  readOnly = false, onBackToDesign, onBackToInitial, audit = null, onReview, onRegenerate, regenerating = false
 }) {
   const [prompt, setPrompt] = useState("");
   const [isFixing, setIsFixing] = useState(false);
@@ -334,15 +334,17 @@ export default function RequirementsView({
 
       {readOnly ? (
         <div className="z-10 w-full shrink-0 border-t border-slate-200 bg-white px-6 py-3.5 md:px-12">
-          <div className="mx-auto flex w-full max-w-5xl justify-end">
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3">
+            {onBackToInitial ? <button type="button" onClick={onBackToInitial} className="rounded-full border border-slate-300 bg-white px-5 py-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50">← Fase anterior: Análisis inicial</button> : <span />}
             <button type="button" onClick={onBackToDesign} className="rounded-full bg-[#7C3AED] px-5 py-2.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-[#6D28D9]">
-              Volver a diagramas
+              Fase siguiente: Modelamiento →
             </button>
           </div>
         </div>
       ) : <div className="z-10 w-full shrink-0 border-t border-slate-200 bg-white px-6 py-3.5 md:px-12">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-2">
           <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
+            {onBackToInitial && <button type="button" onClick={onBackToInitial} className="shrink-0 rounded-full border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50">← Análisis inicial</button>}
             <form onSubmit={handleSendCorrection} className="flex w-full min-w-0 items-center rounded-full border border-slate-300 bg-slate-50 px-3 py-1.5 shadow-2xs transition-all hover:bg-slate-100/60 focus-within:border-[#7C3AED] focus-within:bg-white md:flex-1">
               <BrainGearsIcon size={16} className="mr-2 shrink-0 text-[#7C3AED]" />
               <span className="mr-2 hidden shrink-0 rounded-full border border-[#DDD2F5] bg-[#F2EDFF] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[#6D28D9] sm:inline">Requisitos ISO 29148</span>

@@ -39,6 +39,7 @@ export default function DiagramsView({
   onApproveMockups,
   isDiagramsApproved = false,
   onBackToAnalysis,
+  onExit,
   onApplyAiCorrection,
   projectId,
   requirements = null,
@@ -505,7 +506,7 @@ export default function DiagramsView({
 
   return (
     <div className="flex h-full w-full min-h-0 bg-white">
-      <StepSidebar title="Modelamiento" ariaLabel="Pasos del modelamiento" steps={designSteps} currentKey={selectedKey}
+      <StepSidebar onExit={onExit} title="Modelamiento" ariaLabel="Pasos del modelamiento" steps={designSteps} currentKey={selectedKey}
         collapsed={stepsCollapsed} onToggleCollapsed={() => setStepsCollapsed((value) => !value)}
         onSelect={(key) => { setSelectedKey(key); setShowVersionHistory(false); setStepsCollapsed(key === "mockups"); }} />
     <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-white">

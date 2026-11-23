@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, ChevronsLeft, ChevronsRight, LockKeyhole, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Check, ChevronsLeft, ChevronsRight, LockKeyhole, RefreshCw } from 'lucide-react';
 
 /**
  * Avance de la fase actual, a la izquierda y con el mismo aspecto en todas las fases (análisis, modelamiento, codificación):
@@ -7,7 +7,7 @@ import { Check, ChevronsLeft, ChevronsRight, LockKeyhole, RefreshCw } from 'luci
  *
  * `steps`: [{ key, label, state: 'done' | 'pending' | 'blocked' | 'stale', hint?, title? }]. El paso actual lo marca `currentKey`.
  */
-export default function StepSidebar({ title, steps, currentKey, onSelect, collapsed = false, onToggleCollapsed = null, footer = null, ariaLabel }) {
+export default function StepSidebar({ title, steps, currentKey, onSelect, collapsed = false, onToggleCollapsed = null, footer = null, onExit = null, ariaLabel }) {
   return (
     <aside aria-label={ariaLabel || title} className={`${collapsed ? 'w-14' : 'w-64'} flex shrink-0 select-none flex-col overflow-y-auto border-r border-slate-100 bg-white transition-[width] duration-150 motion-reduce:transition-none`}>
       <div className={`flex items-center ${collapsed ? 'justify-center px-2' : 'justify-between px-5'} pt-5 pb-3`}>
@@ -55,6 +55,14 @@ export default function StepSidebar({ title, steps, currentKey, onSelect, collap
         })}
       </nav>
       {footer && !collapsed && <div className="border-t border-slate-100 p-3">{footer}</div>}
+      {onExit && (
+        <div className="border-t border-slate-100 p-2">
+          <button type="button" onClick={onExit} title="Volver a la lista de proyectos" aria-label="Volver a la lista de proyectos"
+            className={`flex w-full cursor-pointer items-center ${collapsed ? 'justify-center' : 'gap-2 px-3'} rounded-lg py-2 text-[12px] font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800`}>
+            <ArrowLeft size={15} className="shrink-0" />{!collapsed && <span className="truncate">Mis proyectos</span>}
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
