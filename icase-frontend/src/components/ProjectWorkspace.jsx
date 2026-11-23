@@ -1411,7 +1411,7 @@ export default function ProjectWorkspace({
         <RequirementsReferencePanel open={isRequirementsSidebarOpen} onToggle={() => setIsRequirementsSidebarOpen(open => !open)} side={project.currentPhase === 3 && !isReviewingRequirements ? 'right' : 'left'} requirements={project.requirements} audit={project.requirementAudit} />
       )}
       <main className="flex-1 overflow-hidden bg-white flex flex-col min-h-0 min-w-0">
-        {projectBackendId && project.isProcessed && !isProcessing && <PhaseBar
+        {projectBackendId && <PhaseBar
           project={project}
           disabled={isProcessing}
           sourcesAvailable={project.currentPhase <= 1 || showInitial || isManagingSources || isReviewingRequirements}
