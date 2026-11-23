@@ -16,7 +16,7 @@ const MAX_OPERACIONES = 120;
 const NO_SE_PIDE = new Set(['empieza en su estado inicial', 'se calcula', 'lo genera el sistema', 'solo lectura']);
 // Solo la marca de tiempo del propio registro la pone el servidor. Una vigencia («finVigencia») o una apertura dependen
 // del negocio (¿7 días?): no son «ahora», así que se piden o se calculan con una regla, nunca se rellenan con la fecha de hoy.
-const MARCA_DE_REGISTRO = /^(?:fecha|fechahora|hora)(?:de)?(?:adquisicion|compra|creacion|registro|alta|emision|cierre|pago|confirmacion|canje)$/;
+const MARCA_DE_REGISTRO = /^(?:fecha|fechahora|hora)(?:de)?(?:adquisicion|compra|venta|pedido|orden|creacion|registro|alta|emision|cierre|pago|confirmacion|canje)$/;
 // Cantidades que elige la persona aunque el nombre parezca «derivado» (el tamaño del paquete).
 const LA_ELIGE_LA_PERSONA = /^usostotales$/;
 const compacto = (campo) => strip(campo).replace(/[^a-z0-9]/g, '');
@@ -38,7 +38,7 @@ const text = (value) => String(value ?? '').trim();
 
 // Verbo del nombre del RF -> tipo de operación (solo se usa cuando la IA no responde o no cubre un RF).
 // «numero», «nro», «numero_correlativo», «numero_factura», «correlativo»: el número de un documento lo pone el sistema.
-const NUMERO_DOCUMENTO = /^(?:numero|nro|num|correlativo)(?:correlativo|factura|boleta|recibo|comprobante|documento|doc|serie)?$/;
+const NUMERO_DOCUMENTO = /^(?:numero|nro|num|correlativo)(?:correlativo|factura|boleta|recibo|comprobante|documento|doc|serie|venta|pedido|orden|compra)?$/;
 // Un estado inicial nunca es uno terminal: «ANULADA» puede venir primero en el enum del diagrama.
 const ordenInicial = (valores) => [...valores].sort((a, b) => Number(/^(?:anul|cancel|elimin|inactiv|rechaz|cerrad|finaliz)/i.test(String(a).normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) - Number(/^(?:anul|cancel|elimin|inactiv|rechaz|cerrad|finaliz)/i.test(String(b).normalize('NFD').replace(/[\u0300-\u036f]/g, ''))));
 const VERBOS = [
@@ -756,7 +756,8 @@ class ApplicationSpecService {
     }
     // Documentos numerados (F001-00001): el «numero» de una factura, boleta o recibo lo pone el sistema, correlativo con serie
     // (no un código aleatorio ni algo que la persona escriba). En otras entidades («Mesa.numero») sí lo escribe la persona.
-    if (/factura|boleta|recibo|comprobante|ticket|nota ?de ?credito/i.test(String(entidad.name || ''))) {
+    // También el de una venta, un pedido o una orden: «Venta.numero_venta» no lo escribe quien vende.
+    if (/factura|boleta|recibo|comprobante|ticket|nota ?de ?credito|venta|pedido|orden|compra/i.test(String(entidad.name || ''))) {
       const numero = Object.keys(propiedades).find((campo) => NUMERO_DOCUMENTO.test(compacto(campo)) && propiedades[campo]?.type === 'string');
       if (numero && !auto.some((item) => item.campo === numero)) auto.push({ campo: numero, valor: 'generado' });
     }

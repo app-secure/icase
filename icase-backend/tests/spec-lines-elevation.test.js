@@ -171,3 +171,15 @@ Venta "1" -- "1" Factura : genera
     expect(op('emitirFactura').autoEntradas).toEqual(expect.arrayContaining([expect.objectContaining({ campo: 'numero_correlativo', valor: 'correlativo', prefijo: 'F001-' })]));
   });
 });
+
+describe('número y fecha de una venta', () => {
+  test('«numero_venta» lo genera el sistema y «fecha_venta» es la del propio registro', () => {
+    const dominio = '@startuml\nclass Cliente {\n  +String nombre\n}\nclass Venta {\n  +String numero_venta\n  +DateTime fecha_venta\n  +Decimal total\n  +Cliente cliente\n}\n@enduml';
+    const m = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: dominio }]);
+    const { especificacion } = new ApplicationSpecService({}).depurar({
+      operaciones: [{ nombre: 'crearVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], entradas: ['cliente_id'] }]
+    }, { modelo: m, rf: [{ aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Registrar venta', descripcion: '', actores: ['Vendedor'] }], pantallas: [] });
+    const auto = especificacion.operaciones.find((op) => op.nombre === 'crearVenta').autoEntradas;
+    expect(auto).toEqual(expect.arrayContaining([expect.objectContaining({ campo: 'numero_venta', valor: 'correlativo', prefijo: 'V001-' }), { campo: 'fecha_venta', valor: 'ahora' }]));
+  });
+});
