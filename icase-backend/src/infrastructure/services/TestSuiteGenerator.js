@@ -494,7 +494,9 @@ if (auth.habilitada) {
         if (action.verbo === 'crear' && operation.methods && !operation.methods.includes('POST')) continue;
         const id = `${operation.id}.${action.verbo}`;
         if (cases.some((item) => item.route === screen.route && item.action === id)) continue;
-        cases.push({ route: screen.route, name: screen.name || screen.nombre || screen.id, verb: action.verbo, action: id, operation: operation.key });
+        // El alta con líneas (una venta con sus productos): la operación y el registro que ofrecen sus líneas, para tener uno al abrir la pantalla.
+        const conLineas = operations.flatMap((candidate) => candidate.actions || []).find((candidate) => candidate.lineas && [candidate.permiso, candidate.permission, candidate.capability].includes(operation.key));
+        cases.push({ route: screen.route, name: screen.name || screen.nombre || screen.id, verb: action.verbo, action: id, operation: operation.key, ...(conLineas?.lineas?.destinoCapability ? { lineasDestino: conLineas.lineas.destinoCapability } : {}) });
       }
     }
     if (!cases.length) return '';
@@ -588,6 +590,11 @@ for (const item of cases.filter((entry) => entry.verb === 'crear')) {
     const sample = samplePayload(operation.schema, operation.rules, salted());
     const body = { ...sample.payload };
     try {
+      // Con líneas: un registro real de lo que se vende, creado antes de abrir la pantalla (el selector de producto se llena al abrirla).
+      if (item.lineasDestino) {
+        const destino = operations.find((candidate) => candidate.key === item.lineasDestino);
+        if (destino) await createValidRecord(api, operations, destino, cleanups, 0);
+      }
       await page.goto(item.route);
       await expect(page.locator('.mockup-content')).toBeVisible();
       let trigger = await actionTrigger(page, item.action);
