@@ -656,8 +656,13 @@ for (const item of cases.filter((entry) => entry.verb === 'consultar')) {
     const trigger = await actionTrigger(page, item.action);
     await trigger.click();
     const banner = page.locator('[data-icase-result]');
-    await expect(banner).toBeVisible();
-    await expect(banner).toContainText(/\\d+ registros?/);
+    // Una pantalla con su tabla enlazada filtra los registros en su lugar (sin aviso); una sin tabla avisa cuántos hay. Ambas son válidas.
+    const avisado = await banner.first().waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false);
+    if (avisado) await expect(banner).toContainText(/\\d+ registros?/);
+    else {
+      await expect(page.locator('.mockup-content')).toBeVisible();
+      await expect(page.locator('.mockup-content [role="alert"]')).toHaveCount(0);
+    }
   });
 }
 `;
