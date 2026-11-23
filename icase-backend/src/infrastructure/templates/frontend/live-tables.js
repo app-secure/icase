@@ -320,6 +320,45 @@ async function bindLinked(form, named, api) {
   form.prepend(wrapper);
 }
 
+/**
+ * El diseño dibuja las líneas de la venta como una tabla ya llena (producto, cantidad, precio, importe y «Quitar»), sin ningún campo que
+ * se pueda editar. Se convierte la primera fila en una línea editable (un select de producto y una cantidad) y se retiran las demás: el
+ * resto de la lógica de líneas (productos reales, precio, stock, importe, agregar y quitar) trabaja sobre esa estructura.
+ */
+function prepareStaticLines(form) {
+  const document = form.ownerDocument;
+  for (const table of form.querySelectorAll('table')) {
+    const body = table.tBodies[0];
+    const rows = body ? Array.from(body.rows) : [];
+    if (!rows.length || rows.some((row) => row.querySelector('select, input, textarea'))) continue;
+    const remove = (row) => Array.from(row.querySelectorAll('button, a')).find((control) => /^(?:quitar|remover|retirar|eliminar|borrar|x)$/.test(plain(control.textContent)));
+    if (!rows.every((row) => remove(row)) || (rows[0].cells.length || 0) < 3) continue;
+    const add = Array.from(form.querySelectorAll('button')).find((button) => /^(?:\+ )?(?:agregar|anadir|otro|nuevo)/.test(plain(button.textContent)));
+    if (!add) continue;
+    const row = rows[0];
+    const quantityCell = Array.from(row.cells).find((cell, index) => index > 0 && /^\d+$/.test(cell.textContent.trim()));
+    if (!quantityCell) continue;
+    const sampleSelect = form.querySelector('select');
+    const sampleInput = form.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])');
+    const select = document.createElement('select');
+    select.className = sampleSelect ? sampleSelect.className : '';
+    select.append(Object.assign(document.createElement('option'), { value: '', textContent: 'Selecciona…' }));
+    const quantity = document.createElement('input');
+    quantity.type = 'number';
+    quantity.min = '1';
+    quantity.value = '1';
+    quantity.className = sampleInput ? sampleInput.className : '';
+    quantity.style.width = '6rem';
+    row.cells[0].textContent = '';
+    row.cells[0].append(select);
+    quantityCell.textContent = '';
+    quantityCell.append(quantity);
+    for (const other of rows.slice(1)) other.remove();
+    return true;
+  }
+  return false;
+}
+
 export async function bindLines({ root, specMap, api }) {
   for (const form of root.querySelectorAll('form')) {
     const linkedAction = (form.getAttribute('data-accion') || '').toLowerCase();
@@ -329,6 +368,7 @@ export async function bindLines({ root, specMap, api }) {
     const declared = (form.getAttribute('data-accion') || form.querySelector('[data-accion]:not([data-accion="ui"])')?.getAttribute('data-accion') || '').toLowerCase();
     const named = specMap && specMap[declared];
     if (!named || !named.lineas) continue;
+    if (!lineRows(form, named.inputs).length) prepareStaticLines(form);
     const rows = lineRows(form, named.inputs);
     if (!rows.length) continue;
     form.__lines = true; // antes de esperar: dos montajes seguidos no deben duplicar las opciones

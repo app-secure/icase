@@ -207,3 +207,32 @@ describe('venta con líneas: precios, stock y total con datos reales (caso Venta
     expect(actions.collectLines(form, named)).toEqual([{ producto_id: '1', cantidad: 2 }]);
   });
 });
+
+describe('venta cuyo diseño dibuja las líneas como tabla ya llena', () => {
+  const actions = load('frontend/mockup-actions.js');
+  const live = load('frontend/live-tables.js', () => actions);
+  const named = { inputs: ['cliente_id'], lineas: { referencia: 'producto_id', cantidad: 'cantidad', precio: 'precioVenta', stock: 'stock' }, path: '/api/actions/crear-venta' };
+  const html = `<form data-accion="RF-01.crear"><select name="cliente_id"><option value="1">C</option></select>
+    <table><thead><tr><th>Producto</th><th>Cantidad</th><th>Precio</th><th>Subtotal</th><th>Acción</th></tr></thead><tbody>
+    <tr><td>Laptop Dell XPS 13</td><td>1</td><td>3500.00</td><td>3500.00</td><td><button type="button" data-accion="ui">Quitar</button></td></tr>
+    <tr><td>Mouse Logitech</td><td>2</td><td>85.00</td><td>170.00</td><td><button type="button" data-accion="ui">Quitar</button></td></tr></tbody></table>
+    <button type="button" data-accion="ui">+ Agregar producto</button><button type="submit">Registrar venta</button></form>`;
+  const api = jest.fn().mockResolvedValue([{ id: 1, nombre: 'Polo', precioVenta: 50, stock: 3 }, { id: 2, nombre: 'Gorra', precioVenta: 20, stock: 10 }]);
+
+  test('las filas de ejemplo se sustituyen por una línea editable con los productos reales', async () => {
+    const document = new JSDOM(`<body>${html}</body>`).window.document;
+    const form = document.querySelector('form');
+    await live.bindLines({ root: document.body, specMap: { 'rf-01.crear': named }, api });
+    expect(form.textContent).not.toContain('Laptop Dell');
+    expect(form.textContent).not.toContain('3500');
+    const rows = () => form.querySelectorAll('tbody tr');
+    expect(rows()).toHaveLength(1);
+    const select = rows()[0].querySelector('select');
+    expect([...select.options].map((option) => option.textContent)).toEqual(expect.arrayContaining(['Polo', 'Gorra']));
+    select.value = '1';
+    rows()[0].querySelector('input').value = '2';
+    expect(actions.collectLines(form, named)).toEqual([{ producto_id: '1', cantidad: 2 }]);
+    [...form.querySelectorAll('button')].find((button) => /Agregar/.test(button.textContent)).dispatchEvent(new document.defaultView.MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(rows()).toHaveLength(2);
+  });
+});
