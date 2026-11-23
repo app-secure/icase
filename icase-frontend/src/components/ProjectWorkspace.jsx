@@ -3,6 +3,8 @@ import { ArrowLeft, Files, FileText, Pencil } from "lucide-react";
 import { RequirementsReferencePanel } from "./ApprovedRequirementsSidebar";
 import PhaseBar from "./PhaseBar";
 import StepSidebar from "./StepSidebar";
+import PhaseFooter from "./PhaseFooter";
+import { phasesOf } from "./PhaseNav";
 import RbixLogo from "./RbixLogo";
 import SourcesPanel from "./SourcesPanel";
 import SourcesDrawer from "./SourcesDrawer";
@@ -379,6 +381,7 @@ export default function ProjectWorkspace({
   const [initialBusy, setInitialBusy] = useState(false);
   const [initialDirty, setInitialDirty] = useState(false);
   const canLeaveInitial = () => !showInitial || !initialDirty || window.confirm('Hay cambios del análisis sin guardar. ¿Salir sin guardarlos?');
+  const [codeApproved, setCodeApproved] = useState(false);
   // Paso anterior a los requisitos: vuelve al análisis inicial desde la vista de requisitos.
   const goToInitialAnalysis = () => {
     if (!canLeaveInitial()) return;
@@ -1660,6 +1663,7 @@ export default function ProjectWorkspace({
             projectId={project.backendId || (project.id && project.id.length === 24 ? project.id : null)}
             projectName={project.name}
             onExit={onBackToDashboard}
+            onApprovalChange={setCodeApproved}
             onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 2 })}
             onOpenDocument={() => onUpdateProject({ ...project, currentPhase: 4 })}
           />
@@ -1670,6 +1674,14 @@ export default function ProjectWorkspace({
             onBackToDiagrams={() => onUpdateProject({ ...project, currentPhase: 3 })}
           />
         )}
+        {project.currentPhase >= 2 && !showInitial && !isManagingSources && !isReviewingRequirements && (() => {
+          const phases = phasesOf(project);
+          const goTo = (phase) => () => { if (phase === 1) { setIsReviewingRequirements(true); } else if (project.currentPhase !== phase) onUpdateProject({ ...project, currentPhase: phase }); };
+          const prevLabel = { 2: 'Fase anterior: Requisitos', 3: 'Fase anterior: Modelamiento', 4: 'Fase anterior: Codificación' }[project.currentPhase];
+          const approved = project.currentPhase === 2 ? phases[1].done : project.currentPhase === 3 ? codeApproved : false;
+          const nextLabel = { 2: 'Fase siguiente: Codificación', 3: 'Fase siguiente: Documento' }[project.currentPhase];
+          return <PhaseFooter prev={{ label: prevLabel, onClick: goTo(project.currentPhase - 1) }} next={approved && nextLabel ? { label: nextLabel, onClick: goTo(project.currentPhase + 1) } : null} />;
+        })()}
         </div>
         </div>
       </main>

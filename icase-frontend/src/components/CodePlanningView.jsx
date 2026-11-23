@@ -49,7 +49,7 @@ const STATUS_STYLE = {
   bloqueada: 'border-slate-200 bg-slate-50 text-slate-400'
 };
 
-export default function CodePlanningView({ projectId, projectName, onBackToDiagrams, onOpenDocument, onExit }) {
+export default function CodePlanningView({ projectId, projectName, onBackToDiagrams, onOpenDocument, onExit, onApprovalChange }) {
   const [stepsCollapsed, setStepsCollapsed] = useState(false);
   const [plan, setPlan] = useState(null);
   const [selected, setSelected] = useState('alcance_plataforma');
@@ -377,6 +377,8 @@ export default function CodePlanningView({ projectId, projectName, onBackToDiagr
       : `${item.titulo} (${String(item.estado || '').replace('_', ' ')})`
   }));
 
+  const codeApproved = Boolean(deliveryArtifact?.aprobado);
+  React.useEffect(() => { onApprovalChange?.(codeApproved); }, [codeApproved]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden bg-white">
       <StepSidebar onExit={onExit} title="Codificación" ariaLabel="Pasos de la codificación" steps={codingSteps} currentKey={selected}
