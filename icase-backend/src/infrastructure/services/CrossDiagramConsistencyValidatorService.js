@@ -125,8 +125,12 @@ class CrossDiagramConsistencyValidatorService {
     const origen = latest(diagramas, DIAGRAM_TYPES.SOFTWARE_ARCHITECTURE);
     if (!origen?.codigo_plantuml) return this.sinOrigen('arquitectura_software');
 
-    const contenedores = [...origen.codigo_plantuml.matchAll(/^\s*Container(?:Db)?\s*\(\s*[^,]+,\s*"([^"]+)"/gim)]
+    const todos = [...origen.codigo_plantuml.matchAll(/^\s*Container(?:Db)?\s*\(\s*[^,]+,\s*"([^"]+)"/gim)]
       .map((match) => match[1]);
+    // «Servicio de Catálogo», «Módulo de Ventas»: partes lógicas del backend, no unidades que se desplieguen aparte. Se exigen las
+    // unidades reales (interfaz, API, base de datos); si no hay ninguna distinta de esas partes, se comparan todas como antes.
+    const unidades = todos.filter((nombre) => !/^(?:servicio|modulo|módulo|componente|service|module)\s+(?:de|del|para)?\s*/i.test(nombre.trim()));
+    const contenedores = unidades.length >= 2 ? unidades : todos;
     const elementosDespliegue = [...String(codigo || '').matchAll(/"([^"]+)"/g)].map((match) => match[1]);
     return this.resultadoCobertura({
       elementos: contenedores,
