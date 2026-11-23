@@ -5,6 +5,7 @@ class CodificacionController {
     this.gestionarArtefactosCodigo = gestionarArtefactosCodigo;
     this.zipArchiveService = zipArchiveService;
     this.trabajoGeneracionRepository = trabajoGeneracionRepository;
+    this.documentationJobs = new (require('../../infrastructure/services/DocumentationJobs'))();
   }
 
   async obtenerPlan(req, res) {
@@ -305,6 +306,61 @@ class CodificacionController {
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }
   }
 
+  async generarDocumentacion(req, res) {
+    try {
+      const documentacion = await this.gestionarArtefactosCodigo.generarDocumentacion(req.params.id, req.body || {});
+      res.json(documentacion);
+    } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async iniciarDocumentacion(req, res) {
+    try {
+      const opciones = req.body || {};
+      const bundle = await this.gestionarArtefactosCodigo.generarDocumentacion(req.params.id, opciones);
+      const runtime = async () => {
+        const service = this.gestionarArtefactosCodigo.localRunService;
+        if (!service) throw new Error('Servicio de ejecución local no configurado.');
+        let state = await service.estado(req.params.id);
+        if (state.estado !== 'activo') {
+          const delivery = await this.artefactoRepository.obtenerUltimoAprobado(req.params.id, 'paquete_entrega');
+          if (!delivery) throw new Error('Se requiere una entrega aprobada para el video real.');
+          await service.iniciar({ proyectoId: req.params.id, archivos: delivery.archivos, version: delivery.version });
+          const deadline = Date.now() + 12 * 60 * 1000;
+          do {
+            await new Promise(resolve => setTimeout(resolve, 2000)); state = await service.estado(req.params.id);
+            if (state.estado === 'error') throw new Error(state.error);
+          } while (state.estado !== 'activo' && Date.now() < deadline);
+        }
+        if (state.estado !== 'activo' || !state.accesos?.web?.disponible) throw new Error('La aplicación web no está disponible.');
+        return { url: state.accesos.web.url, credentials: state.credenciales_admin };
+      };
+      res.status(202).json(await this.documentationJobs.start(req.params.id, bundle, { ia: opciones.ia === true, videos: opciones.videos === true, videoReal: opciones.videoReal === true }, runtime));
+    } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async listarDocumentaciones(req, res) {
+    try { res.json(await this.documentationJobs.list(req.params.id)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async estadoDocumentacion(req, res) {
+    try { res.json(await this.documentationJobs.status(req.params.id, req.params.documentacionId)); }
+    catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
+  async archivoDocumentacion(req, res) {
+    try {
+      const relative = String(req.query.ruta || 'documentacion.zip');
+      const file = await this.documentationJobs.file(req.params.id, req.params.documentacionId, relative);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (relative.endsWith('.html')) res.setHeader('Content-Security-Policy', "sandbox allow-scripts; default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'");
+      if (relative.endsWith('.svg')) res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'");
+      if (req.query.descargar === 'true' || relative.endsWith('.zip')) res.attachment(require('node:path').basename(relative));
+      res.sendFile(file);
+    } catch (error) { res.status(this._status(error)).json({ error: error.message }); }
+  }
+
   async generarPaquete(req, res) {
     try { res.status(201).json(await this.gestionarArtefactosCodigo.generarPaquete(req.params.id)); }
     catch (error) { res.status(this._status(error)).json({ error: error.message }); }
@@ -342,7 +398,9 @@ class CodificacionController {
       if (!artefacto || String(artefacto.proyecto_id) !== String(req.params.id) || artefacto.tipo !== 'paquete_entrega') throw new Error('Paquete de entrega no encontrado para este proyecto.');
       if (!artefacto.aprobado || artefacto.estado !== 'aprobado') throw new Error('El paquete debe aprobarse antes de descargarlo.');
       this.gestionarArtefactosCodigo.asegurarPaqueteEjecutable(artefacto);
-      const zip = this.zipArchiveService.crear(artefacto.archivos || []);
+      const entries = new Map((artefacto.archivos || []).map(file => [file.ruta, file]));
+      if (artefacto.modulos?.documentacion_version) for (const file of await this.documentationJobs.deliveryAssets(req.params.id, artefacto.modulos.documentacion_version)) entries.set(file.ruta, file);
+      const zip = this.zipArchiveService.crear([...entries.values()]);
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="icase-entrega-v${artefacto.version}.zip"`);
       res.setHeader('Content-Length', zip.length);

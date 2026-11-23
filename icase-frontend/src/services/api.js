@@ -929,3 +929,19 @@ async function saveZip(res) {
 }
 
 
+export async function generateProjectDocumentationApi(projectId, options = {}) {
+  const response = await fetch(`${API_URL}/proyectos/${projectId}/codificacion/documentacion`, {
+    method: 'POST', headers: getAuthHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(options)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'No se pudo generar la documentación.');
+  return data;
+}
+
+export async function documentationRequest(projectId, suffix = '', options = {}) {
+  const response = await apiFetch(`${API_URL}/proyectos/${projectId}/codificacion/documentacion/versiones${suffix}`, {
+    ...options, headers: getAuthHeaders({ ...(options.body ? { 'Content-Type': 'application/json' } : {}) })
+  });
+  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'No se pudo acceder a la documentación.'); }
+  return options.binary ? response.blob() : response.json();
+}

@@ -3,7 +3,7 @@
   "info": {
     "title": "I-CASE · API del backend",
     "version": "1.0.0-docs",
-    "description": "Backend Express revisado el 20/10/2026. Ejemplos ficticios. Las rutas de codificación exigen JWT; otras rutas aplican seguridad según el router. Los esquemas admiten campos adicionales. El PDF se genera en el navegador."
+    "description": "Backend Express revisado el 20/10/2026. Ejemplos ficticios. Las rutas de codificación exigen JWT; otras rutas aplican seguridad según el router. Los esquemas admiten campos adicionales. La documentación y el informe PDF se generan en el servidor."
   },
   "servers": [
     {
@@ -38,6 +38,333 @@
     }
   ],
   "paths": {
+    "/proyectos/{id}/codificacion/documentacion": {
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Generar los cinco manuales MkDocs del proyecto sin publicarlos",
+        "description": "Devuelve las fuentes Markdown de compatibilidad. Para PDF, capturas, videos y versiones persistentes utiliza POST documentacion/versiones. Requiere JWT y propiedad del proyecto.",
+        "operationId": "post_proyectos_id_codificacion_documentacion",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "githubActions": {
+                    "type": "boolean"
+                  },
+                  "licencia": {
+                    "type": "string",
+                    "enum": [
+                      "MIT",
+                      "Apache-2.0",
+                      "propietaria",
+                      "conservar",
+                      "pendiente"
+                    ]
+                  },
+                  "titular": {
+                    "type": "string"
+                  },
+                  "videos": {
+                    "type": "boolean"
+                  },
+                  "videoReal": {
+                    "type": "boolean"
+                  },
+                  "ia": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fuentes, HTML, categorías, advertencias, diagramas y guiones",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No se pudo generar la documentación"
+          },
+          "401": {
+            "description": "Sesión no válida"
+          },
+          "404": {
+            "description": "Proyecto inexistente o ajeno"
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/documentacion/versiones": {
+      "get": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Listar versiones de documentación",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listar versiones de documentación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida o versión incompleta"
+          },
+          "401": {
+            "description": "Sesión inválida"
+          },
+          "404": {
+            "description": "Proyecto o versión no encontrado para este usuario"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Iniciar documentación versionada en segundo plano",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Iniciar documentación versionada en segundo plano",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida o versión incompleta"
+          },
+          "401": {
+            "description": "Sesión inválida"
+          },
+          "404": {
+            "description": "Proyecto o versión no encontrado para este usuario"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "githubActions": {
+                    "type": "boolean"
+                  },
+                  "licencia": {
+                    "type": "string",
+                    "enum": [
+                      "MIT",
+                      "Apache-2.0",
+                      "propietaria",
+                      "conservar",
+                      "pendiente"
+                    ]
+                  },
+                  "titular": {
+                    "type": "string"
+                  },
+                  "videos": {
+                    "type": "boolean"
+                  },
+                  "videoReal": {
+                    "type": "boolean"
+                  },
+                  "ia": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/documentacion/versiones/{documentacionId}": {
+      "get": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Consultar progreso y resultado documental",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentacionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consultar progreso y resultado documental",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida o versión incompleta"
+          },
+          "401": {
+            "description": "Sesión inválida"
+          },
+          "404": {
+            "description": "Proyecto o versión no encontrado para este usuario"
+          }
+        }
+      }
+    },
+    "/proyectos/{id}/codificacion/documentacion/versiones/{documentacionId}/archivo": {
+      "get": {
+        "tags": [
+          "Codificación"
+        ],
+        "summary": "Descargar archivo de una versión documental terminada",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentacionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ruta",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Ruta del manifiesto; sin ruta devuelve documentacion.zip."
+          },
+          {
+            "name": "descargar",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Descargar archivo de una versión documental terminada",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Entrada inválida o versión incompleta"
+          },
+          "401": {
+            "description": "Sesión inválida"
+          },
+          "404": {
+            "description": "Proyecto o versión no encontrado para este usuario"
+          }
+        }
+      }
+    },
     "/proyectos/{id}/transferencia/exportar": {
       "get": {
         "tags": ["Proyectos"], "summary": "Exportar proyecto portable con originales e informe SHA-256",

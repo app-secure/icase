@@ -812,10 +812,8 @@ class ProcesarConIA {
 
         if (tipoDiagramaNormalizado && normalizeDiagramType(tipo) !== tipoDiagramaNormalizado) continue;
 
-        // Si el LLM devolvió el código vacío, proveer un diagrama base válido por defecto
-        if (!cleanMermaid) {
-          cleanMermaid = `graph TD\n    A[Inicio: ${diagData.titulo || 'Proceso'}] --> B[Ejecución de Módulo]\n    B --> C[Fin]`;
-        }
+        // Si la respuesta solo trae PlantUML, Mermaid queda vacío.
+        // No inventar un flujo genérico que pueda confundirse con el diagrama real.
 
         const versionesMismoTipo = diagramasPrevios
           .filter((diagram) => normalizeDiagramType(diagram.tipo) === normalizeDiagramType(tipo))

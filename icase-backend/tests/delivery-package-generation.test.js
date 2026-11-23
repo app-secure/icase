@@ -42,6 +42,21 @@ describe('paquete final de entrega', () => {
     })).rejects.toThrow('Conflicto en el paquete final');
   });
 
+  test('incluye MkDocs y sus advertencias en el paquete final sin reemplazar código', async () => {
+    const Generator = require('../src/infrastructure/services/ProjectDocumentationGenerator');
+    const backend = artifact('codigo_backend', 1, 'backend/app.js', 'backend');
+    const contract = { entities: [], operations: [] };
+    backend.archivos.push({ ruta: 'backend/icase.manifest.json', contenido: JSON.stringify(contract) }, {
+      ruta: 'backend/GENERATION-REPORT.json', contenido: JSON.stringify({ fuente_cobertura: { requisitos: [], contrato: contract, declaracion: { modo_entrega: 'parcial', aceptar_pendientes: true } } })
+    });
+    const documentacion = new Generator().generar({ proyecto: { nombre: 'Demo' } });
+    const result = await new DeliveryPackageGenerator().generar({ proyecto: { nombre: 'Demo' }, versionesOrigen: {}, insumos: { artefactos: [backend], documentacion } });
+    expect(result.archivos.find(file => file.ruta === 'backend/app.js').contenido).toBe('backend');
+    expect(result.archivos.some(file => file.ruta === 'documentation/mkdocs.yml')).toBe(true);
+    expect(result.archivos.some(file => file.ruta === 'documentation/tools/export_pdf.py')).toBe(true);
+    expect(result.advertencias).toEqual(documentacion.advertencias);
+  });
+
   test('crea un ZIP válido con nombres UTF-8 y bloquea path traversal', () => {
     const service = new ZipArchiveService();
     const zip = service.crear([{ ruta: 'documentación/inicio.txt', contenido: 'hola' }]);

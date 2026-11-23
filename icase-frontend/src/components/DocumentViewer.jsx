@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ChevronLeft, CheckCircle2, FileText, AlertTriangle, ShieldAlert } from "lucide-react";
 import StaticDiagram from "./StaticDiagram";
 import PdfPreviewModal from "./PdfPreviewModal";
+import ProjectDocumentationPanel from "./ProjectDocumentationPanel";
 
 const formatScreenName = (str) => {
   if (!str) return "";
@@ -42,20 +43,13 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
   const introduccionTexto = project.introduccion ||
     `En el entorno operacional contemporáneo, la ausencia de una adecuada especificación formal suele traducirse en sobrecostos, retrasos e inconsistencias operativas. El presente documento técnico estructura los requerimientos a partir de los insumos provistos por los interesados del dominio, asegurando consistencia, trazabilidad y cumplimiento de estándares de calidad para ${project.name || "el sistema"}.`;
 
-  const cleanFunctional = (project.requirements?.functional || []).filter(
-    (rf) => !rf.name?.includes("Ajuste Validado por Experto")
-  );
-
-  const cleanNonFunctional = (project.requirements?.nonFunctional || []).filter(
-    (rnf) =>
-      !rnf.category?.includes("Ajuste Validado por Experto") &&
-      !rnf.description?.includes("Requisito incorporado por corrección")
-  );
+  const cleanFunctional = project.requirements?.functional || [];
+  const cleanNonFunctional = project.requirements?.nonFunctional || [];
 
   const palabrasClave = (
     project.palabras_clave && project.palabras_clave.length > 0
       ? project.palabras_clave
-      : cleanFunctional.slice(0, 7).map((rf) => rf.name.replace(/^(Gestión de|Control de|Registro de|Módulo de)\s*/i, ""))
+      : cleanFunctional.slice(0, 7).map((rf) => String(rf.name || rf.identificador || rf.id || "Requisito").replace(/^(Gestión de|Control de|Registro de|Módulo de)\s*/i, ""))
   ).filter((k) => !/case|plantuml|mermaid|uml|clean architecture|upper/i.test(k));
 
   const renderDiagramExplanation = (diag, defaultTitle = "Diagrama") => {
@@ -143,8 +137,9 @@ export default function DocumentViewer({ project, onBackToDiagrams }) {
             </div>
           )}
 
+          <ProjectDocumentationPanel key={project.id} projectId={project.id} />
           {/* Main Document Body */}
-          <div className="space-y-8 text-slate-800 text-[15px] leading-relaxed">
+          <div className="space-y-8 text-slate-800 text-[15px] leading-relaxed [&_td]:[overflow-wrap:anywhere] [&_table]:table-fixed">
             {/* Cover & Title */}
             <div className="border-b border-slate-200 pb-6">
               <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-2">

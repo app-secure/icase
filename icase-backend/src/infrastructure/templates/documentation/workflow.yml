@@ -1,0 +1,54 @@
+name: Documentación HTML y PDF
+on:
+  push:
+    paths:
+      - 'documentation/**'
+      - '.github/workflows/documentation.yml'
+  pull_request:
+    paths:
+      - 'documentation/**'
+  workflow_dispatch:
+    inputs:
+      publicar:
+        description: Publicar en GitHub Pages después de revisar
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: documentation-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r documentation/requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python documentation/tools/export_pdf.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: documentacion-html-pdf
+          path: documentation/site/
+      - uses: actions/configure-pages@v5
+        if: (github.event_name == 'workflow_dispatch' && inputs.publicar) || (github.event_name == 'push' && vars.DOCUMENTATION_PUBLISH == 'true')
+      - uses: actions/upload-pages-artifact@v4
+        if: (github.event_name == 'workflow_dispatch' && inputs.publicar) || (github.event_name == 'push' && vars.DOCUMENTATION_PUBLISH == 'true')
+        with:
+          path: documentation/site/
+  deploy:
+    if: (github.event_name == 'workflow_dispatch' && inputs.publicar) || (github.event_name == 'push' && vars.DOCUMENTATION_PUBLISH == 'true')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

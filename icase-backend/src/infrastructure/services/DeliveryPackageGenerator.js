@@ -15,6 +15,11 @@ class DeliveryPackageGenerator extends IGeneradorArtefacto {
         byPath.set(file.ruta, { ...file });
       }
     }
+    for (const file of insumos.documentacion?.archivos || []) {
+      const rootDocumentation = ['README.md', 'CONTRIBUTING.md', 'ARCHITECTURE.md', 'CHANGELOG.md', 'LICENSE.md'].includes(file.ruta) || /^licen[cs]e(?:\.txt)?$/i.test(file.ruta);
+      if (!rootDocumentation && byPath.has(file.ruta) && byPath.get(file.ruta).contenido !== file.contenido) throw new Error(`Conflicto en documentación: ${file.ruta}`);
+      byPath.set(file.ruta, { ...file });
+    }
     const cobertura = new GenerationCoverageService().exigirEntrega({ archivos: [...byPath.values()] });
     if(!byPath.has('.gitignore'))byPath.set('.gitignore',{ruta:'.gitignore',lenguaje:'gitignore',contenido:'**/node_modules/\n**/app-data/\n**/.env\n**/.env.*\n!**/.env.example\n.icase/backups/\n**/test-results/\n**/playwright-report/\n'});
     const fs=require('node:fs'),tp=require('node:path');
@@ -27,6 +32,7 @@ class DeliveryPackageGenerator extends IGeneradorArtefacto {
     const manifest = {
       alcance: cobertura,
       proyecto: proyecto.nombre,
+      documentacion: insumos.documentacion?.versionId ? { id: insumos.documentacion.versionId, version: insumos.documentacion.version, manifiesto: 'documentation/documentation-manifest.json' } : null,
       generado_en: new Date().toISOString(),
       artefactos: artifacts.map((item) => ({ tipo: item.tipo, version: item.version, huella_entrada: item.huella_entrada,
         verificacion: item.verificacion ? { estado: item.verificacion.estado, nivel: item.verificacion.nivel, huella: item.verificacion.huella,
@@ -43,7 +49,7 @@ class DeliveryPackageGenerator extends IGeneradorArtefacto {
       archivos: files,
       dependencias: artifacts.map((item) => ({ tipo: item.tipo, version: item.version })),
       trazabilidad_rf: [...new Set(artifacts.flatMap((item) => item.trazabilidad_rf || []))],
-      advertencias: [], versiones_origen: versionesOrigen,
+      advertencias: insumos.documentacion?.advertencias || [], versiones_origen: versionesOrigen,
       generado_por: 'generador_paquete_entrega_determinista_v1'
     };
   }

@@ -1,0 +1,4 @@
+mkdocs==1.6.1
+mkdocs-material==9.7.0
+mkdocs-print-site-plugin==2.8
+playwright==1.65.0

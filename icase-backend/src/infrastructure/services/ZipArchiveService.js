@@ -6,7 +6,7 @@ class ZipArchiveService {
     for (const archivo of archivos) {
       const name = this._safePath(archivo.ruta);
       const nameBuffer = Buffer.from(name, 'utf8');
-      const data = Buffer.from(String(archivo.contenido || ''), 'utf8');
+      const data = Buffer.isBuffer(archivo.contenido) ? archivo.contenido : Buffer.from(String(archivo.contenido || ''), 'utf8');
       const crc = this._crc32(data);
       const local = Buffer.alloc(30);
       local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
