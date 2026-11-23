@@ -181,4 +181,57 @@ function removeUnrequested(codigo, textoRequisitos) {
   return { codigo: out.join('\n'), quitadas };
 }
 
-module.exports = { review, parse, mergeSamePlatformApps, removeUnrequested };
+/**
+ * Pantallas repetidas y formularios que sobran. El modelo repite «Productos» / «Detalle de Producto» en cada módulo que los
+ * menciona y añade «Formulario de Reporte de Ventas» junto al propio reporte: cada una genera su mockup, su ruta y su botón.
+ * - Una pantalla con el mismo nombre dentro de la misma aplicación se conserva una vez, en el módulo con más pantallas.
+ * - «Formulario de Reporte/Anulación/Consulta/Búsqueda X» se quita si ya existe esa pantalla: el filtro o el motivo viven en ella.
+ */
+const FILTER_FORM = /^formulario de (reporte|anulacion|consulta|busqueda|filtro)\b/;
+function removeRedundantScreens(codigo) {
+  const lines = String(codigo || '').split(/\r?\n/);
+  const nodes = [];
+  const stack = [];
+  lines.forEach((line, index) => {
+    const match = /^(\*+)\s*(.+?)\s*$/.exec(line);
+    if (!match) return;
+    const node = { index, level: match[1].length, name: match[2], parent: null, children: [], remove: false };
+    while (stack.length && stack[stack.length - 1].level >= node.level) stack.pop();
+    node.parent = stack[stack.length - 1] || null;
+    if (node.parent) node.parent.children.push(node);
+    stack.push(node);
+    nodes.push(node);
+  });
+  const quitadas = [];
+  const appOf = node => { let current = node; while (current.parent && current.level > 2) current = current.parent; return current; };
+  const leaves = nodes.filter(node => node.level >= 3 && !node.children.length);
+  const groups = new Map();
+  for (const leaf of leaves) {
+    const key = `${appOf(leaf).index}|${strip(leaf.name)}`;
+    groups.set(key, [...(groups.get(key) || []), leaf]);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const keep = [...group].sort((a, b) => (b.parent?.children.length || 0) - (a.parent?.children.length || 0))[0];
+    for (const leaf of group) if (leaf !== keep) { leaf.remove = true; quitadas.push(leaf.name); }
+  }
+  for (const leaf of leaves) {
+    const form = FILTER_FORM.exec(strip(leaf.name));
+    if (!form || leaf.remove) continue;
+    const exists = (leaf.parent?.children || []).some(sibling => sibling !== leaf && !sibling.remove && !strip(sibling.name).startsWith('formulario') && strip(sibling.name).startsWith(form[1]));
+    if (exists) { leaf.remove = true; quitadas.push(leaf.name); }
+  }
+  if (!quitadas.length) return { codigo, quitadas };
+  // Un módulo que se queda sin pantallas tampoco es navegable.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of nodes) {
+      if (!node.remove && node.level >= 3 && node.children.length && node.children.every(child => child.remove)) { node.remove = true; changed = true; }
+    }
+  }
+  const drop = new Set(nodes.filter(node => node.remove).map(node => node.index));
+  return { codigo: lines.filter((line, index) => !drop.has(index)).join(String.fromCharCode(10)), quitadas };
+}
+
+module.exports = { review, parse, mergeSamePlatformApps, removeUnrequested, removeRedundantScreens };

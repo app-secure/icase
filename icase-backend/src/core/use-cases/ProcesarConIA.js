@@ -87,6 +87,11 @@ function unirAplicacionesArbol(diagramas, requerimientos = []) {
     arbol.codigo_plantuml = codigo;
     console.warn(`[ProcesarConIA] Árbol: se unieron aplicaciones o módulos separados por rol: ${unidas.join(', ')}`);
   }
+  const repetidas = review.removeRedundantScreens(arbol.codigo_plantuml);
+  if (repetidas.quitadas.length) {
+    arbol.codigo_plantuml = repetidas.codigo;
+    console.warn(`[ProcesarConIA] Árbol: se quitaron pantallas repetidas o formularios que sobran: ${repetidas.quitadas.join(', ')}`);
+  }
   const texto = (requerimientos || []).map((r) => [r.nombre, r.descripcion].join(' ')).join(' ');
   if (texto.trim()) {
     const limpio = review.removeUnrequested(arbol.codigo_plantuml, texto);
