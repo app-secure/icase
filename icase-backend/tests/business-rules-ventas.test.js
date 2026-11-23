@@ -49,3 +49,19 @@ describe('reglas «requerido» que son condicionales', () => {
     expect(reglas[0].estado_decision).toBe('confirmado');
   });
 });
+
+describe('reglas «requerido» imposibles de cumplir en el alta', () => {
+  const ApplicationContractBuilder = require('../src/infrastructure/services/ApplicationContractBuilder');
+  test('un dato que el alta no pide ni el sistema completa no se exige al crear el registro', () => {
+    const modelo = new DomainModelExtractor().extract('@startuml\nclass Venta {\n  +String id\n  +Decimal subtotal\n  +String motivo_anulacion\n  +DateTime fecha\n  +Decimal total\n}\n@enduml');
+    const reglas = [
+      { id: 'RN-07', tipo: 'requerido', entidad: 'Venta', campo: 'subtotal', mensaje: 'El subtotal es obligatorio.', estado_decision: 'confirmado', rf: ['RF-01'] },
+      { id: 'RN-21', tipo: 'requerido', entidad: 'Venta', campo: 'motivo_anulacion', mensaje: 'Debe indicarse el motivo.', estado_decision: 'confirmado', rf: ['RF-01'] },
+      { id: 'RN-09', tipo: 'requerido', entidad: 'Venta', campo: 'fecha', mensaje: 'La fecha es obligatoria.', estado_decision: 'confirmado', rf: ['RF-01'] }
+    ];
+    const spec = { operaciones: [{ nombre: 'crearVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', estado_decision: 'confirmado', entradas: ['subtotal'], autoEntradas: [{ campo: 'fecha', valor: 'ahora' }] }] };
+    const contrato = new ApplicationContractBuilder().build({ proyecto: { nombre: 'P' }, requerimientos: [{ aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Registrar venta' }], domainModel: modelo, rules: reglas, spec });
+    expect(contrato.rules.map((regla) => regla.id)).toEqual(['RN-07', 'RN-09']);
+    expect(contrato.warnings.join(' ')).toMatch(/RN-21/);
+  });
+});

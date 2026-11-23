@@ -34,6 +34,18 @@ class ApplicationContractBuilder {
     const approved = requerimientos.filter((item) => item.aprobado === true && item.tipo === 'RF');
     const entities = domainModel?.entities || [];
     const warnings = [];
+    // Una regla «X es obligatorio» sobre un dato que el alta no pide ni el sistema completa (el motivo de anulación al registrar una venta,
+    // el subtotal que nadie calcula, la factura que se emite después) impediría crear cualquier registro: no se aplica al alta.
+    const norm = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/_id$/, '').replace(/[^a-z0-9]/g, '');
+    rules = (rules || []).filter((rule) => {
+      if (rule.tipo !== 'requerido' || rule.estado_decision === 'rechazado') return true;
+      const altas = (spec?.operaciones || []).filter((op) => op.tipo === 'crear' && op.entidad === rule.entidad && op.estado_decision !== 'rechazado');
+      if (!altas.length) return true;
+      const provee = (op) => [...(op.entradas || []), ...(op.autoEntradas || []).map((item) => item.campo), ...(op.sesionEntradas || []).map((item) => item.campo), op.lineas?.total].filter(Boolean).some((campo) => norm(campo) === norm(rule.campo));
+      if (altas.some(provee)) return true;
+      warnings.push(`${rule.id}: «${rule.mensaje}» no se aplica al alta de ${rule.entidad}: el dato no se pide ni lo completa el sistema.`);
+      return false;
+    });
     if ((domainModel?.relations || []).some((r) => r.cardinalidad === 'muchos_a_muchos')) warnings.push('Relaciones N:M: API y panel web generados; MongoDB requiere replica set transaccional. Requiere verificación integral con base real antes de certificar la entrega completa.');
     const operations = approved.map((item, index) => {
       const key = this._uniqueKey(slug(item.identificador || item.nombre), approved, index);
