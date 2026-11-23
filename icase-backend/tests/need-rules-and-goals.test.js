@@ -86,3 +86,30 @@ describe('insumo simple de Ventas', () => {
     }
   });
 });
+
+describe('reglas del análisis simple de Ventas', () => {
+  const needs = {
+    registrar: 'Registrar una venta seleccionando cliente, agregando múltiples productos con cantidades, validando stock disponible para cada producto, calculando automáticamente subtotal e IGV al 18%, y guardando la venta con estado registrada.',
+    stock: 'Decrementar automáticamente el stock de cada producto al registrar la venta según la cantidad vendida.',
+    factura: 'Emitir factura después de registrar una venta con número correlativo automático, detalle de productos vendidos, subtotal, IGV calculado al 18% y total.',
+    anular: 'Permitir que la administradora anule una venta registrada indicando el motivo, revirtiendo el stock y marcando la factura asociada como anulada.',
+    propias: 'Permitir que un vendedor consulte el historial de sus propias ventas registradas sin acceso a ventas de otros vendedores.',
+    alerta: 'Mostrar alerta a la administradora identificando productos con stock inferior a 5 unidades para facilitar decisiones de reposición.',
+    reporteVentas: 'Generar reporte de ventas totales por rango de fechas seleccionado, visible solo para la administradora, mostrando monto total vendido en el período.',
+    login: 'Autenticar usuarios mediante nombre de usuario y contraseña antes de acceder al sistema.'
+  };
+  const aplica = texto => Object.entries(needs).filter(([, necesidad]) => ruleApplies({ necesidad: texto }, { necesidad })).map(([clave]) => clave);
+  test('stock insuficiente: solo al registrar la venta', () => {
+    expect(aplica('No permitir la venta de un producto si la cantidad solicitada excede el stock disponible.')).toEqual(['registrar']);
+  });
+  test('una venta, una factura: a emitir y anular, no a registrar ni a consultar', () => {
+    expect(aplica('Una venta solo puede tener una factura asociada.')).toEqual(['factura', 'anular']);
+  });
+  test('solo la administradora anula / ve el stock bajo / ve el reporte de ventas', () => {
+    expect(aplica('Solo la administradora puede anular ventas; los vendedores no tienen permiso para esta operación.')).toEqual(['anular']);
+    expect(aplica('Solo la administradora puede ver productos con stock bajo (menos de 5 unidades); los vendedores no tienen acceso a esta información.')).toEqual(['alerta']);
+    const reporte = aplica('Solo la administradora puede acceder al reporte de ventas por rango de fechas; los vendedores no tienen acceso.');
+    expect(reporte).toContain('reporteVentas');
+    for (const clave of ['registrar', 'stock', 'factura', 'propias', 'login']) expect(reporte).not.toContain(clave);
+  });
+});

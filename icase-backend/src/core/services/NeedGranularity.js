@@ -476,7 +476,7 @@ function polish(inventory, input, identifiers) {
   return aligned;
 }
 const ACTION = [
-  ['ver', /\b(?:ver|visualizar|visualizan?|consult(?:ar|an|a|e|en)|revisar|revisan?)\b/],
+  ['ver', /\b(?:ver|visualizar|visualizan?|consult(?:ar|an|a|e|en)|revisar|revisan?|mostrar|muestra|muestran|listar|lista|listan)\b/],
   ['reservar', /\breserv/],
   ['comprar', /\bcompr/],
   ['acumular', /\bacumul/],
@@ -525,9 +525,16 @@ function constraintClause(text) {
 }
 // Raíces de rol («vendedor» → «vende», «administrador» → «admin»): nombran quién, no sobre qué objeto actúa la regla.
 const ROLE_STEM = /^(?:vende|admin|duena|cajer|gerent)$/;
+// Raíces del texto tal cual (sin las equivalencias «ventas ~ reportes»), sin roles ni palabras de relleno de una restricción.
+const PLAIN_STOP = new Set(['debe', 'deben', 'poder', 'puede', 'pueden', 'podra', 'podran', 'sistema', 'solo', 'solamente', 'unicamente', 'otro', 'otra', 'otros', 'otras', 'para', 'como', 'esta', 'este', 'cuando', 'antes', 'sobre', 'tiene', 'tienen', 'tener', 'acceso', 'acceder', 'permiso', 'operacion', 'informacion', 'mediante']);
+function plainStems(text) {
+  return new Set(normalize(text).split(/[^a-z0-9]+/).filter(token => token.length > 4 && !PLAIN_STOP.has(token)).map(token => token.slice(0, 5)).filter(token => !ROLE_STEM.test(token)));
+}
 function clauseApplies(clause, need) {
   const target = preconditionAction(clause);
-  const needActions = actionsOf(need.necesidad);
+  // «Emitir factura después de registrar una venta» emite, no vende: lo que va tras «después de / tras / al / cuando» es contexto.
+  const mainClause = String(need.necesidad || '').replace(/\b(?:despu[eé]s de|tras|luego de|al|cuando)\b[^,.;]*/giu, ' ');
+  const needActions = actionsOf(mainClause);
   if (target) return needActions.includes(target);
   if (!constraintClause(clause)) return false;
   const clauseActor = leadingActor(clause);
@@ -542,7 +549,11 @@ function clauseApplies(clause, need) {
   const clauseObjects = roleless(clause);
   const needObjects = roleless(need.necesidad);
   // Sin una acción reconocible en la regla, una sola palabra compartida («venta», «acceso») no basta: se piden dos.
-  if (!clauseActions.length) return needObjects.filter(token => clauseObjects.includes(token)).length >= 2;
+  if (!clauseActions.length) {
+    const own = plainStems(clause);
+    const shared = [...plainStems(need.necesidad)].filter(token => own.has(token)).length;
+    return shared >= 2 && shared / own.size >= 2 / 3;
+  }
   return needObjects.some(token => clauseObjects.includes(token));
 }
 function redundantNeed(item, inventory) {
