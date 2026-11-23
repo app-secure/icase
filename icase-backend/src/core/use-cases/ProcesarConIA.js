@@ -104,6 +104,32 @@ function unirAplicacionesArbol(diagramas, requerimientos = []) {
 }
 
 /**
+ * Asociaciones de dominio que no son datos: «Usuario gestiona Producto» (un permiso, no una referencia) y «Producto *–* Venta : incluye»
+ * cuando ya existe la clase intermedia (DetalleVenta) que une a ambos. Cada una crearía un campo o una tabla N:M sin sentido.
+ */
+function limpiarAsociacionesDominio(diagramas) {
+  for (const diagrama of diagramas || []) {
+    if (normalizeDiagramType(diagrama.tipo) !== 'clases_dominio' || !diagrama.codigo_plantuml) continue;
+    const lineas = String(diagrama.codigo_plantuml).split(/\r?\n/);
+    const asociacion = /^\s*([A-Za-z_][\w]*)\s+(?:"[^"]*"\s+)?(?:--|-|\.\.|<\|--|\*--|o--)\s*(?:"[^"]*"\s+)?([A-Za-z_][\w]*)\s*(?::\s*(.*))?$/;
+    const parsed = lineas.map((linea) => { const m = asociacion.exec(linea); return m && !/^\s*(class|interface|enum|abstract|package|\\)/.test(linea) ? { a: m[1], b: m[2], etiqueta: (m[3] || '').trim().toLowerCase(), linea } : null; });
+    const pares = parsed.filter(Boolean);
+    const unidas = (x, y) => pares.some((p) => (p.a === x || p.b === x) && pares.some((q) => q !== p && (q.a === y || q.b === y) && ((p.a === x ? p.b : p.a) === (q.a === y ? q.b : q.a))));
+    const quitar = new Set();
+    parsed.forEach((p, index) => {
+      if (!p) return;
+      const permiso = /^(?:gestiona|administra|opera|maneja|configura|controla)\b/.test(p.etiqueta) && /^(?:usuario|cuenta|usuarios)$/i.test(p.a);
+      const muchos = /"\*"\s*(?:--|-)\s*"\*"/.test(p.linea) || /"0\.\.\*"\s*(?:--|-)\s*"0\.\.\*"/.test(p.linea);
+      if (permiso || (muchos && unidas(p.a, p.b))) quitar.add(index);
+    });
+    if (!quitar.size) continue;
+    diagrama.codigo_plantuml = lineas.filter((_, index) => !quitar.has(index)).join(String.fromCharCode(10));
+    console.warn(`[ProcesarConIA] Dominio: se quitaron asociaciones que no son datos: ${[...quitar].map((index) => lineas[index].trim()).join(' | ')}`);
+  }
+  return diagramas;
+}
+
+/**
  * Si un RF aprobado pide iniciar sesión, la entidad de cuentas del dominio (Usuario, Cuenta) debe tener con qué entrar: correo y
  * contraseña. Sin ellos la gestión de usuarios crea registros que no pueden iniciar sesión y una venta no puede apuntar a su vendedor.
  */
@@ -139,6 +165,7 @@ function asegurarCredencialesUsuario(diagramas, requerimientos) {
 }
 
 function asegurarActoresCasosUso(diagramas, requerimientos) {
+  limpiarAsociacionesDominio(diagramas);
   asegurarCredencialesUsuario(diagramas, requerimientos);
   asegurarAsociacionesCasosUso(diagramas, requerimientos);
   unirAplicacionesArbol(diagramas, requerimientos);
@@ -928,3 +955,4 @@ module.exports = ProcesarConIA;
 module.exports.asegurarAsociacionesCasosUso = asegurarAsociacionesCasosUso;
 module.exports.esNombreProvisional = esNombreProvisional;
 module.exports.asegurarCredencialesUsuario = asegurarCredencialesUsuario;
+module.exports.limpiarAsociacionesDominio = limpiarAsociacionesDominio;

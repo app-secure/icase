@@ -126,3 +126,16 @@ describe('paginación del diseño con el total real', () => {
     expect(view.root.querySelector('button').parentElement.style.display).toBe('none');
   });
 });
+
+describe('paginación de una tabla que no se llenó con datos reales', () => {
+  test('sin listado real, el pie de paginación del diseño se oculta: sus botones no harían nada', async () => {
+    const html = '<main><table><thead><tr><th>Factura</th></tr></thead><tbody><tr><td>F001-00001</td></tr><tr><td>F001-00002</td></tr></tbody></table>'
+      + '<div><span>Mostrando 1 a 4 de 42 facturas</span><div><button type="button" disabled>Anterior</button><button type="button">Siguiente</button></div></div></main>';
+    const document = new JSDOM(html).window.document;
+    const root = document.querySelector('main');
+    await live.bindLiveTables({ root, blocks: [], actions: {}, api: async () => [], can: () => true, onAction: () => {}, onShowOperations: () => {} });
+    expect(root.querySelector('span').style.display).toBe('none');
+    const siguiente = [...root.querySelectorAll('button')].find((button) => button.textContent === 'Siguiente');
+    expect(siguiente.parentElement.style.display).toBe('none');
+  });
+});

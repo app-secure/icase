@@ -91,3 +91,20 @@ describe('actores de las operaciones', () => {
     expect(especificacion.operaciones.find((op) => op.nombre === 'crearProducto').actores).toEqual(['Administradora']);
   });
 });
+
+describe('reporte agregado frente al listado plano', () => {
+  test('el resumen derivado reemplaza a la consulta plana que la IA propuso para el mismo RF', () => {
+    const rfs = [
+      { aprobado: true, tipo: 'RF', identificador: 'RF-01', nombre: 'Registrar venta con selección de cliente, productos y cálculo automático', descripcion: '', actores: ['Vendedor'] },
+      { aprobado: true, tipo: 'RF', identificador: 'RF-09', nombre: 'Generar reporte de ventas por rango de fechas', descripcion: '', actores: ['Administrador'] }
+    ];
+    const { especificacion } = new ApplicationSpecService({}).depurar({
+      operaciones: [
+        { nombre: 'registrarVenta', rf: 'RF-01', tipo: 'crear', entidad: 'Venta', actores: ['Vendedor'], entradas: ['cliente_id'] },
+        { nombre: 'reporteVentas', rf: 'RF-09', tipo: 'consulta', entidad: 'Venta', actores: ['Administrador'], salida: ['fecha', 'total'], filtros: [] }
+      ]
+    }, { modelo, rf: rfs, pantallas: [] });
+    const delReporte = especificacion.operaciones.filter((op) => op.rf === 'RF-09');
+    expect(delReporte.map((op) => op.tipo)).toEqual(['resumen']);
+  });
+});

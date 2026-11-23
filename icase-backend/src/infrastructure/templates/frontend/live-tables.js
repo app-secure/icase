@@ -181,6 +181,8 @@ function findPager(table, size) {
     return {
       // Se pagina con el tamaño del diseño, salvo que traiga una sola fila de ejemplo: eso no es una página real (un cliente por página).
       size: size <= 1 ? 10 : size,
+      // Una tabla que no se llenó con datos reales no pagina nada: sus botones de página del diseño quedarían sin efecto.
+      hide() { info.style.display = 'none'; if (bar) bar.style.display = 'none'; },
       update({ total, shown, page, pages, go }) {
         info.textContent = template.replace(/(mostrando\s+)\d+(?:\s*(?:[-–]|al?)\s*\d+)?(\s+de\s+)\d+/i, `$1${shown}$2${total}`);
         if (!bar) return;
@@ -549,6 +551,7 @@ export async function bindLiveTables({ root, blocks, actions, api, can, onAction
     boundCards += 1;
   }
   if (live.length) cleanFilters(root, live[0]);
+  for (const table of tables) if (!table.__bound) { const pager = findPager(table, 1); if (pager) pager.hide(); }
   // Solo se avisa de lo que quedó con datos de ejemplo: tablas o rejillas del diseño sin llenar (una lista sin su tabla en el diseño no muestra nada de ejemplo).
   notifySamples(root, Math.max(0, tables.length - boundTables) + Math.max(0, Math.min(leftover.length, grids.length) - boundCards), onShowOperations);
 }

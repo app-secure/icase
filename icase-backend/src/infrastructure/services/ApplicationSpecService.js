@@ -180,6 +180,10 @@ class ApplicationSpecService {
       const validado = this._operacion(resumen, { entidades, rfIds, nombres });
       if (validado.error) { advertencias.push(`${id}: no se pudo derivar el reporte (${validado.error}).`); continue; }
       nombres.add(validado.operacion.nombre);
+      // El reporte agregado reemplaza al listado plano que la IA propuso para el mismo RF: dos tablas en la pantalla repetirían las filas.
+      for (let i = operaciones.length - 1; i >= 0; i -= 1) {
+        if (operaciones[i].rf === id && operaciones[i].tipo === 'consulta') { nombres.delete(operaciones[i].nombre); operaciones.splice(i, 1); }
+      }
       operaciones.push({ ...validado.operacion, origen: 'derivado' });
       advertencias.push(`${id}: reporte derivado «${validado.operacion.nombre}» (${validado.operacion.resumen.medidas.map((medida) => medida.nombre).join(', ')}). Revísalo.`);
     }

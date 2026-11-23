@@ -207,3 +207,18 @@ describe('actor nombrado en la propia necesidad', () => {
     expect(out.map((item) => item.actor_id)).toEqual(['A1', 'A2']);
   });
 });
+
+describe('asociaciones del dominio que no son datos', () => {
+  const { limpiarAsociacionesDominio } = require('../src/core/use-cases/ProcesarConIA');
+  test('quita «Usuario gestiona X» y la N:M redundante con su clase intermedia; conserva lo demás', () => {
+    const nl = String.fromCharCode(10);
+    const code = ['@startuml', 'class Usuario {', '}', 'class Producto {', '}', 'class Venta {', '}', 'class DetalleVenta {', '}',
+      'Usuario "1" -- "*" Venta : registra', 'Usuario "1" -- "0..*" Producto : gestiona', 'Producto "*" -- "*" Venta : incluye',
+      'Producto "1" -- "*" DetalleVenta : detalla', 'Venta "1" -- "*" DetalleVenta : contiene', '@enduml'].join(nl);
+    const diagramas = [{ tipo: 'clases_dominio', codigo_plantuml: code }];
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    limpiarAsociacionesDominio(diagramas);
+    const lineas = diagramas[0].codigo_plantuml.split(nl).filter((linea) => /--/.test(linea));
+    expect(lineas).toEqual(['Usuario "1" -- "*" Venta : registra', 'Producto "1" -- "*" DetalleVenta : detalla', 'Venta "1" -- "*" DetalleVenta : contiene']);
+  });
+});
