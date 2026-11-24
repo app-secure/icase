@@ -53,3 +53,35 @@ describe('papel de la pantalla', () => {
     }
   });
 });
+
+describe('menú lateral por rol', () => {
+  const mk = (slug, nombre, roles) => ({ slug, nombre, shell: 'operaciones-web', plataforma: 'web', roles });
+  const manifest = [mk('ventas', 'Ventas', ['Vendedor', 'Administrador']), mk('facturas', 'Facturas', ['Administrador']), mk('reporte', 'Reporte de ventas', ['Administrador'])];
+  const nav = (html) => [...html.matchAll(/<a href="#(\w+)"[^>]*data-roles="[^"]*"([^>]*)>/g)].map((m) => ({ slug: m[1], hidden: /\shidden/.test(m[2]) }));
+
+  test('en una pantalla de varios roles, el menú inicial es el del primer rol y hay selector de rol', () => {
+    const html = compose('<main><h1>Ventas</h1><p>x</p></main>', { screen: manifest[0], manifest, name: 'App' });
+    expect(nav(html)).toEqual([{ slug: 'ventas', hidden: false }, { slug: 'facturas', hidden: true }, { slug: 'reporte', hidden: true }]);
+    expect(html).toContain('data-icase-role');
+  });
+
+  test('en una pantalla de un solo rol no hay selector y lista lo de ese rol', () => {
+    const html = compose('<main><h1>Facturas</h1><p>x</p></main>', { screen: manifest[1], manifest, name: 'App' });
+    expect(nav(html).map((item) => item.slug)).toEqual(['ventas', 'facturas', 'reporte']);
+    expect(html).not.toContain('data-icase-role');
+  });
+
+  test('al elegir Administrador en el selector aparecen sus entradas y la elección se recuerda', () => {
+    const { JSDOM } = require('jsdom');
+    const html = compose('<main><h1>Ventas</h1><p>x</p></main>', { screen: manifest[0], manifest, name: 'App' });
+    const dom = new JSDOM(html.replace(/<script src="https:[^>]*><\/script>/, ''), { runScripts: 'dangerously', url: 'http://localhost/' });
+    const { document } = dom.window;
+    const visibles = () => [...document.querySelectorAll('.icase-nav a')].filter((a) => !a.hidden).map((a) => a.textContent);
+    expect(visibles()).toEqual(['Ventas']);
+    const select = document.querySelector('select[data-icase-role]');
+    select.value = 'administrador';
+    select.dispatchEvent(new dom.window.Event('change'));
+    expect(visibles()).toEqual(['Ventas', 'Facturas', 'Reporte de ventas']);
+    expect(dom.window.localStorage.getItem('icase-role')).toBe('administrador');
+  });
+});

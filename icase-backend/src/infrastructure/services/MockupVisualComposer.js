@@ -277,6 +277,7 @@ const STYLE = `
   .icase-content form{max-width:100%}.icase-content .h-screen,.icase-content .min-h-screen{height:auto!important;min-height:0!important}.icase-content .w-screen{width:100%!important}
   .icase-content .fixed{position:sticky!important}
   .modal-hidden,.hidden-modal{display:none!important}
+  .icase-role{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:13px;color:#475569}.icase-role select{border:1px solid #cbd5e1;border-radius:8px;padding:4px 8px;background:#fff;font-size:13px}.icase-nav a[hidden]{display:none}
   .icase-auth .icase-content{display:grid;place-items:center;padding:24px}.icase-auth .icase-content>main{width:100%!important;max-width:440px}
   .icase-mobile{max-width:430px;margin:0 auto;border-inline:1px solid #e2e8f0;background:var(--icase-bg,#f8fafc)}.icase-mobile .icase-content{padding:16px}
   .icase-mobile .icase-content .grid{grid-template-columns:minmax(0,1fr)!important}.icase-mobile .icase-content [class*="col-span"]{grid-column:auto!important}
@@ -288,7 +289,17 @@ const STYLE = `
   .icase-back{font-size:22px;line-height:1;text-decoration:none;padding:2px 10px 2px 0;color:var(--icase-primary,#0b57d0)}
 `;
 
-const link = (item, current) => `<a href="#${escape(item.slug)}" data-accion="ui" ${item.slug === current ? 'aria-current="page"' : ''}>${escape(cleanLabel(item.nombre))}</a>`;
+const link = (item, current, hidden = false) => `<a href="#${escape(item.slug)}" data-accion="ui" data-roles="${Compatibility.rolesOf(item).join('|')}" ${item.slug === current ? 'aria-current="page"' : ''}${hidden ? ' hidden' : ''}>${escape(cleanLabel(item.nombre))}</a>`;
+
+/** ¿Puede este rol (nombre canónico) usar la pantalla? Sin roles conocidos no se restringe. */
+const accessibleBy = (item, role) => { const roles = Compatibility.rolesOf(item); return !roles.length || !role || roles.includes(role); };
+
+/** Selector de rol y su script: oculta del menú lo que el rol elegido no usa y recuerda la elección entre pantallas. */
+const ROLE_SCRIPT = `(function(){var s=document.querySelector('select[data-icase-role]');if(!s)return;
+function apply(r){document.querySelectorAll('.icase-nav a[data-roles]').forEach(function(a){var rs=a.getAttribute('data-roles');a.hidden=!!rs&&rs.split('|').indexOf(r)<0;});}
+try{var k=localStorage.getItem('icase-role');if(k&&[].some.call(s.options,function(o){return o.value===k;}))s.value=k;}catch(e){}
+apply(s.value);
+s.addEventListener('change',function(){try{localStorage.setItem('icase-role',s.value);}catch(e){}apply(s.value);});})();`;
 
 /**
  * Hasta cinco pestañas: solo los destinos de primer nivel del flujo. El resto de pantallas se alcanza desde botones
@@ -350,7 +361,11 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   collect(document);
   const siblings = manifest.filter(item => sameNavigation(item, screen) && kindOf(item) !== 'auth');
   // El menú lateral lista los destinos de primer nivel; formularios y detalles se alcanzan desde botones 
-  const menuItems = siblings.filter(item => !MENU_SECONDARY.test(plain(item.nombre)));
+  const screenRoles = [...new Map((Array.isArray(screen.roles) ? screen.roles : []).map(label => [Compatibility.canonicalRole(label), String(label)]).filter(([key]) => key && key !== 'usuario')).entries()];
+  const defaultRole = screenRoles.length ? screenRoles[0][0] : '';
+  const multiRole = screenRoles.length > 1 && (kind === 'web' || kind === 'tablet');
+  // Una pantalla de un solo rol solo lista lo que ese rol usa; con varios, la lista completa y el selector oculta lo que el rol elegido no usa.
+  const menuItems = siblings.filter(item => !MENU_SECONDARY.test(plain(item.nombre)) && (multiRole || accessibleBy(item, defaultRole)));
   // En un formulario o detalle se resalta la entrada de primer nivel de la que se llega (la anterior en el flujo), sin añadir la pantalla al menú.
   const posicion = siblings.findIndex(item => item.slug === screen.slug);
   const anteriores = siblings.slice(0, posicion < 0 ? 0 : posicion).filter(item => menuItems.includes(item));
@@ -360,14 +375,17 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   // En móvil, las pantallas de segundo nivel traen un botón «volver» al destino anterior del flujo.
   const back = kind === 'mobile' && !isPrimary(screen) ? backTarget(siblings, screen.slug) : null;
   const backLink = back ? `<a class="icase-back" href="#${escape(back.slug)}" data-accion="ui" aria-label="Volver">‹</a>` : '';
-  const header = `<header>${backLink}${logo}<strong>${brand}</strong></header>`;
+  const selector = multiRole
+    ? `<label class="icase-role">Ver como<select data-icase-role>${screenRoles.map(([key, label]) => `<option value="${escape(key)}">${escape(label)}</option>`).join('')}</select></label>`
+    : '';
+  const header = `<header>${backLink}${logo}<strong>${brand}</strong>${selector}</header>`;
   const body = {
     auth: `${header}<main class="icase-content">${fragment}</main>`,
     mobile: `${header}<main class="icase-content">${fragment}</main><nav class="icase-tabbar" aria-label="Navegación principal">${tabs(siblings, screen.slug)}</nav>`,
-    tablet: `${header}<details class="icase-menu"><summary>Menú</summary><nav class="icase-nav">${menuItems.map(item => link(item, activeSlug)).join('')}</nav></details><div class="icase-layout"><main class="icase-content">${fragment}</main></div>`,
-    web: `${header}<div class="icase-layout"><nav class="icase-nav">${menuItems.map(item => link(item, activeSlug)).join('')}</nav><main class="icase-content">${fragment}</main></div>`
+    tablet: `${header}<details class="icase-menu"><summary>Menú</summary><nav class="icase-nav">${menuItems.map(item => link(item, activeSlug, multiRole && !accessibleBy(item, defaultRole))).join('')}</nav></details><div class="icase-layout"><main class="icase-content">${fragment}</main></div>`,
+    web: `${header}<div class="icase-layout"><nav class="icase-nav">${menuItems.map(item => link(item, activeSlug, multiRole && !accessibleBy(item, defaultRole))).join('')}</nav><main class="icase-content">${fragment}</main></div>`
   }[kind];
-  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script><style>${styles.join('\n')}</style><style data-icase-shell>${STYLE}</style></head><body><div class="icase-shell${kind === 'auth' ? ' icase-auth' : kind === 'mobile' ? ' icase-mobile' : ''}" data-icase-shell-version="${SHELL_VERSION}" data-icase-kind="${kind}">${body}</div></body></html>
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script><style>${styles.join('\n')}</style><style data-icase-shell>${STYLE}</style></head><body><div class="icase-shell${kind === 'auth' ? ' icase-auth' : kind === 'mobile' ? ' icase-mobile' : ''}" data-icase-shell-version="${SHELL_VERSION}" data-icase-kind="${kind}">${body}</div>${multiRole ? `<script id="icase-role-menu">${ROLE_SCRIPT}</script>` : ''}</body></html>
 `;
 };
 
