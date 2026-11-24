@@ -354,6 +354,9 @@ class ModelosIaService {
       }
     }
 
+    if (objetivo === 'diagramas' && tipoDiagrama === 'arquitectura_software') {
+      contextoActualTexto += require('../../core/services/ArchitectureStyle').instruction([insumo, payload.contexto_proyecto?.analisis_requisitos, reqsContexto, insumoAdicional]);
+    }
     if (objetivo === 'diagramas' && tipoDiagrama === 'casos_de_uso') {
       const limits = require('../../core/constants/UseCaseDiagramPolicy').useCaseLimits(reqsContexto);
       contextoActualTexto += `\nCASOS DE USO: alcance de ${limits.rf} RF, límite de ${limits.min} a ${limits.max} casos. No elimines funciones para cumplir una cuota menor. En vistas extensas usa paquetes por capacidades dentro del límite del sistema, con actores fuera. Nombra cada caso con verbo en infinitivo y objeto. Conserva casos, alias, asociaciones y trazabilidad RF visible; la agrupación no reduce cobertura ni cambia el significado de las operaciones.`;
