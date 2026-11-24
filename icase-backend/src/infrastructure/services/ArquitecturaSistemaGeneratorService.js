@@ -36,7 +36,7 @@ class ArquitecturaSistemaGeneratorService {
     const rnfs = requerimientos.filter((item) => String(item.tipo || '').toUpperCase() === 'RNF');
     const hasHA = this.solicitaAltaDisponibilidad(rnfs);
     const hasMobile = this.detectaComponenteMovil(requerimientos);
-    const hostingWebAparte = /cdn|hosting|alojamiento (?:web|est[aá]tico)|netlify|vercel|s3|nginx|apache/i.test(text);
+    const hostingWebAparte = /\b(?:cdn|hosting|netlify|vercel|s3|nginx|apache)\b|alojamiento (?:web|est[aá]tico) aparte/i.test(textOf(requerimientos));
     const hasWeb = /\bweb\b|navegador|spa|react|vue|angular|tailwind/i.test(text);
     const needsData = /base de datos|persist|almacen|guardar|registr|historial|conservar|transacci/i.test(text);
     // El monitoreo cuenta si el propio requisito lo pide (nombre o descripción), no si su métrica menciona «herramientas de monitoreo».
