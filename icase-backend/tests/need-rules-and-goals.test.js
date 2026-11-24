@@ -222,3 +222,25 @@ describe('asociaciones del dominio que no son datos', () => {
     expect(lineas).toEqual(['Usuario "1" -- "*" Venta : registra', 'Producto "1" -- "*" DetalleVenta : detalla', 'Venta "1" -- "*" DetalleVenta : contiene']);
   });
 });
+
+describe('dominio con informes, alertas y enum en línea', () => {
+  const { limpiarAsociacionesDominio } = require('../src/core/use-cases/ProcesarConIA');
+  const DomainModelExtractor = require('../src/infrastructure/services/DomainModelExtractor');
+  const nl = String.fromCharCode(10);
+  const code = ['@startuml', 'class Venta {', '  +String id', '  +Enum estado {REGISTRADA, ANULADA}', '}', 'class DetalleVenta {', '  +Integer cantidad', '}',
+    'class AlertaInventario {', '  +String producto_id', '}', 'class ReporteProductosVendidos {', '  +generar(): List<ProductoVendido>', '}', 'class ProductoVendido {', '  +String nombre', '}',
+    'Venta "1" -- "*" DetalleVenta : contiene', 'Usuario : vendedor_id', 'ReporteProductosVendidos "*" -- "*" DetalleVenta : analiza', 'note on link Venta : Estado', '@enduml'].join(nl);
+  test('quita informes, alertas y lo que solo ellos usan; la nota inválida y el miembro suelto desaparecen', () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const d = [{ tipo: 'clases_dominio', codigo_plantuml: code }];
+    limpiarAsociacionesDominio(d);
+    const clases = d[0].codigo_plantuml.split(nl).filter((l) => /^class /.test(l.trim())).map((l) => l.trim());
+    expect(clases).toEqual(['class Venta {', 'class DetalleVenta {']);
+    expect(d[0].codigo_plantuml).not.toMatch(/note on link|Usuario : vendedor_id/);
+    expect(d[0].codigo_plantuml).toContain('note right of Venta');
+  });
+  test('«+Enum estado {A, B}» queda como un atributo con sus valores', () => {
+    const m = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: code }]);
+    expect(m.entities.find((e) => e.name === 'Venta').schema.properties.estado.enum).toEqual(['REGISTRADA', 'ANULADA']);
+  });
+});

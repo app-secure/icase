@@ -92,6 +92,12 @@ class DomainModelExtractor {
   _attribute(line, enums) {
     const cleaned = line.replace(/\{(?:static|abstract|field)\}/gi, '').replace(/^[+\-#~]\s*/, '').trim();
     if (!cleaned) return null;
+    // «+Enum estado {REGISTRADA, ANULADA}»: el enum viene en la propia línea.
+    const inline = cleaned.match(/^enum(?:erado)?\s+(\w+)\s*\{([^}]*)\}\s*$/i);
+    if (inline) {
+      const values = inline[2].split(/[,;\s]+/).map((item) => item.trim()).filter(Boolean);
+      if (values.length) return { name: inline[1], type: 'string', enum: values, nullable: false };
+    }
     let name; let type;
     const colon = cleaned.match(/^(\w+)\s*:\s*(.+)$/);
     if (colon) { name = colon[1]; type = colon[2]; }

@@ -110,7 +110,36 @@ function unirAplicacionesArbol(diagramas, requerimientos = []) {
 function limpiarAsociacionesDominio(diagramas) {
   for (const diagrama of diagramas || []) {
     if (normalizeDiagramType(diagrama.tipo) !== 'clases_dominio' || !diagrama.codigo_plantuml) continue;
-    const lineas = String(diagrama.codigo_plantuml).split(/\r?\n/);
+    let lineas = String(diagrama.codigo_plantuml).split(/\r?\n/);
+    // Notas «note on link X : …» (sintaxis no válida: la nota va junto a una clase) y miembros sueltos («Usuario : vendedor_id»).
+    lineas = lineas.map((linea) => { const nota = /^\s*note on link\s+(\w+)\s*:\s*(.*)$/i.exec(linea); return nota ? `note right of ${nota[1]} : ${nota[2]}` : linea; })
+      .filter((linea) => !/^\s*\w+\s*:\s*\w+\s*$/.test(linea) || /^\s*(?:note|skinparam)\b/i.test(linea));
+    // Informes y alertas no son entidades de datos (se calculan al consultar): se quitan sus clases y sus relaciones, y las clases que solo ellas usan.
+    const ESCALA = /^(?:Reporte|Informe|Alerta|Dashboard|Panel)/;
+    const clases = [];
+    for (let i = 0; i < lineas.length; i += 1) {
+      const m = /^\s*class\s+"?(\w+)"?\s*\{?\s*$/.exec(lineas[i]);
+      if (!m) continue;
+      let fin = i;
+      if (/\{\s*$/.test(lineas[i])) { while (fin < lineas.length && !/^\s*\}\s*$/.test(lineas[fin])) fin += 1; }
+      clases.push({ name: m[1], from: i, to: fin });
+    }
+    const quitarClase = new Set(clases.filter((c) => ESCALA.test(c.name)).map((c) => c.name));
+    const textoQuitado = clases.filter((c) => quitarClase.has(c.name)).map((c) => lineas.slice(c.from, c.to + 1).join(' ')).join(' ');
+    for (const c of clases) {
+      if (quitarClase.has(c.name)) continue;
+      const usadaFuera = lineas.some((linea, index) => !(clases.some((o) => quitarClase.has(o.name) && index >= o.from && index <= o.to)) && !(index >= c.from && index <= c.to) && new RegExp('\\b' + c.name + '\\b').test(linea) && !/^\s*(?:'|note)/.test(linea));
+      if (!usadaFuera && new RegExp('\\b' + c.name + '\\b').test(textoQuitado)) quitarClase.add(c.name);
+    }
+    if (quitarClase.size) {
+      const dentro = (index) => clases.some((c) => quitarClase.has(c.name) && index >= c.from && index <= c.to);
+      const nombres = [...quitarClase];
+      const antes = lineas.length;
+      const BS = String.fromCharCode(92);
+      const toca = (linea) => nombres.some((n) => new RegExp('(^|[^' + BS + 'w])' + n + '([^' + BS + 'w]|$)').test(linea) && (/--|->|<-/.test(linea) || /^\s*note\b/i.test(linea)));
+      lineas = lineas.filter((linea, index) => !dentro(index) && !toca(linea));
+      if (lineas.length < antes) console.warn(`[ProcesarConIA] Dominio: se quitaron clases que no son datos (${nombres.join(', ')}).`);
+    }
     const asociacion = /^\s*([A-Za-z_][\w]*)\s+(?:"[^"]*"\s+)?(?:--|-|\.\.|<\|--|\*--|o--)\s*(?:"[^"]*"\s+)?([A-Za-z_][\w]*)\s*(?::\s*(.*))?$/;
     const parsed = lineas.map((linea) => { const m = asociacion.exec(linea); return m && !/^\s*(class|interface|enum|abstract|package|\\)/.test(linea) ? { a: m[1], b: m[2], etiqueta: (m[3] || '').trim().toLowerCase(), linea } : null; });
     const pares = parsed.filter(Boolean);
@@ -122,7 +151,8 @@ function limpiarAsociacionesDominio(diagramas) {
       const muchos = /"\*"\s*(?:--|-)\s*"\*"/.test(p.linea) || /"0\.\.\*"\s*(?:--|-)\s*"0\.\.\*"/.test(p.linea);
       if (permiso || (muchos && unidas(p.a, p.b))) quitar.add(index);
     });
-    if (!quitar.size) continue;
+    const limpio = lineas.filter((_, index) => !quitar.has(index)).join(String.fromCharCode(10));
+    if (!quitar.size && limpio === String(diagrama.codigo_plantuml).split(String.fromCharCode(13)).join('')) continue;
     diagrama.codigo_plantuml = lineas.filter((_, index) => !quitar.has(index)).join(String.fromCharCode(10));
     console.warn(`[ProcesarConIA] Dominio: se quitaron asociaciones que no son datos: ${[...quitar].map((index) => lineas[index].trim()).join(' | ')}`);
   }
