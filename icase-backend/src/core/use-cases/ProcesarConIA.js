@@ -843,7 +843,8 @@ class ProcesarConIA {
           tipo,
           titulo: diagData.titulo || `Diagrama de ${tipo}`,
           descripcion: diagData.descripcion || '',
-          codigo_mermaid: cleanMermaid,
+          // El diagrama es PlantUML: si el modelo solo devolvió ese campo, el campo heredado «mermaid» (obligatorio) lleva el mismo código.
+          codigo_mermaid: cleanMermaid || diagData.codigo_plantuml || diagData.codigo_puml || '',
           codigo_plantuml: diagData.codigo_plantuml || diagData.codigo_puml || '',
           trazabilidad_rnf: Array.isArray(diagData.trazabilidad_rnf) ? diagData.trazabilidad_rnf : [],
           requisitos_relacionados: Array.isArray(diagData.requisitos_relacionados) ? diagData.requisitos_relacionados : [],
