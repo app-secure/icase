@@ -756,7 +756,9 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
       session,
       samplePayload.runtimeSource(),
       '',
-      'const route = ' + JSON.stringify(screen.route) + ';',
+      // Las pantallas con diseño aprobado muestran su propia interfaz, no el formulario genérico: con sesión, el formulario por campo se
+      // prueba en la consola de datos del administrador, que siempre lo muestra. Sin sesión se usa la pantalla de la operación.
+      'const route = ' + JSON.stringify(auth.habilitada ? '/datos/' + operation.key : screen.route) + ';',
       'const operation = ' + JSON.stringify(operation) + ';',
       'const operations = ' + JSON.stringify(operations) + ';',
       "const properties = operation.schema.properties || {};",
@@ -828,7 +830,7 @@ test('una pantalla ejecuta una operación declarada en el contrato', async ({ pa
       '});',
       '',
       "// La pantalla de error es la primera cuya operación visible por defecto tiene un campo obligatorio.",
-      'const strict = ' + JSON.stringify(strict ? { route: strict.route, operation: strict.operation } : null) + ';',
+      'const strict = ' + JSON.stringify(strict ? { route: auth.habilitada ? '/datos/' + strict.operation.key : strict.route, operation: strict.operation } : null) + ';',
       "test('una regla incumplida se marca junto a su campo', async ({ page }) => {",
       "  test.skip(!strict, 'ninguna pantalla tiene campos obligatorios');",
       "  const required = strict.operation.rules.find((rule) => rule.tipo === 'requerido' && strict.operation.schema.properties[rule.campo]);",
