@@ -28,7 +28,7 @@ function detect(texts = []) {
 /** Texto para el prompt de la arquitectura de software. */
 function instruction(texts) {
   const style = detect(texts);
-  return `\n\nESTILO ARQUITECTÓNICO DEL BACKEND: ${style.etiqueta} (${style.origen}). ${style.directriz} Usa solo este estilo para organizar el backend; no cambia el stack ni el resto de los contenedores.`;
+  return `\n\nESTILO ARQUITECTÓNICO DEL BACKEND: ${style.etiqueta} (${style.origen}). ${style.directriz} Usa solo este estilo para organizar el backend; no cambia el stack ni el resto de los contenedores. FORMA: la descripción del Container del backend es UNA sola línea (tecnología y rol). La organización interna va en una nota «note right of <alias del backend>» ... «end note» con una viñeta por parte (por ejemplo «• Módulo de Ventas: RF-01, RF-02…», «• Capa de datos común: validaciones, cálculos y reglas», «• Seguridad y autenticación: JWT y roles»). No metas la lista de módulos dentro de la descripción del Container. Una sola relación por interacción (no dibujes la flecha de ida y la de vuelta).`;
 }
 
 module.exports = { detect, instruction };
