@@ -244,3 +244,16 @@ describe('dominio con informes, alertas y enum en línea', () => {
     expect(m.entities.find((e) => e.name === 'Venta').schema.properties.estado.enum).toEqual(['REGISTRADA', 'ANULADA']);
   });
 });
+
+describe('documentos emitidos después de la operación', () => {
+  const { limpiarAsociacionesDominio } = require('../src/core/use-cases/ProcesarConIA');
+  test('«Venta 1 .. 1 Factura» queda «1 -- 0..1»; una relación entre no documentos no se toca', () => {
+    const nl = String.fromCharCode(10);
+    const code = ['@startuml', 'class Venta {', '}', 'class Factura {', '}', 'class Cliente {', '}',
+      'Venta "1" .. "1" Factura : genera', 'Cliente "1" -- "1" Venta : tiene', '@enduml'].join(nl);
+    const d = [{ tipo: 'clases_dominio', codigo_plantuml: code }];
+    limpiarAsociacionesDominio(d);
+    expect(d[0].codigo_plantuml).toContain('Venta "1" -- "0..1" Factura : genera');
+    expect(d[0].codigo_plantuml).toContain('Cliente "1" -- "1" Venta : tiene');
+  });
+});

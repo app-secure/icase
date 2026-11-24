@@ -114,6 +114,18 @@ function limpiarAsociacionesDominio(diagramas) {
     // Notas «note on link X : …» (sintaxis no válida: la nota va junto a una clase) y miembros sueltos («Usuario : vendedor_id»).
     lineas = lineas.map((linea) => { const nota = /^\s*note on link\s+(\w+)\s*:\s*(.*)$/i.exec(linea); return nota ? `note right of ${nota[1]} : ${nota[2]}` : linea; })
       .filter((linea) => !/^\s*\w+\s*:\s*\w+\s*$/.test(linea) || /^\s*(?:note|skinparam)\b/i.test(linea));
+    // Un documento que se emite después de la operación (factura, boleta, comprobante…) puede no existir aún: «1 – 1» pasa a «1 – 0..1»
+    // y la flecha es una asociación continua (la punteada es dependencia).
+    const DOCUMENTO = /^(?:Factura|Boleta|Comprobante|Recibo|Ticket|GuiaRemision|NotaCredito|NotaDebito)/;
+    const unoAUno = /^(\s*)([A-Za-z_]\w*)\s+"1"\s+(?:--|\.\.)\s+"1"\s+([A-Za-z_]\w*)(\s*:.*)?$/;
+    lineas = lineas.map((linea) => {
+      const m = unoAUno.exec(linea);
+      if (!m) return linea;
+      const [, sangria, a, b, resto = ''] = m;
+      if (DOCUMENTO.test(b) && !DOCUMENTO.test(a)) return sangria + a + ' "1" -- "0..1" ' + b + resto;
+      if (DOCUMENTO.test(a) && !DOCUMENTO.test(b)) return sangria + a + ' "0..1" -- "1" ' + b + resto;
+      return linea;
+    });
     // Informes y alertas no son entidades de datos (se calculan al consultar): se quitan sus clases y sus relaciones, y las clases que solo ellas usan.
     const ESCALA = /^(?:Reporte|Informe|Alerta|Dashboard|Panel)/;
     const clases = [];
