@@ -810,7 +810,8 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     // «Registro de pedido» no es un acceso: solo lo son el inicio de sesión, la contraseña y el alta de cuenta o usuario.
     if (/acceso|sesion|contrasena|autentic|login|registro de (?:usuario|cuenta|cliente)|registrarse|crear cuenta/.test(texto)) return `auth-${plataforma}`;
     if (/cocina|kds/.test(texto)) return 'kds-web';
-    if (/admin|configuracion|usuarios|roles|reportes/.test(texto)) return 'admin-web';
+    // Los reportes son operaciones de un rol, no otra aplicación: dentro del mismo menú (el menú ya separa por rol).
+    if (/admin|configuracion|usuarios|roles/.test(texto)) return 'admin-web';
     if (plataforma === 'mobile') return 'cliente-mobile';
     if (plataforma === 'tablet') return 'mesero-tablet';
     return 'operaciones-web';

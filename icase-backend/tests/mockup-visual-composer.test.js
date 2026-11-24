@@ -26,3 +26,18 @@ describe('Estructura visual común de mockups', () => {
     expect(interfaceContext([req], { roles: ['Cliente'] })).toBe('');
   });
 });
+
+describe('menú lateral web', () => {
+  test('lista los destinos de primer nivel (sin formularios ni detalles) y la pantalla actual aparece siempre', () => {
+    const mk = (slug, nombre) => ({ slug, nombre, shell: 'operaciones-web', plataforma: 'web', roles: ['Administrador'] });
+    const manifest = [mk('ventas', 'Ventas'), mk('formulario-de-venta', 'Formulario de venta'), mk('detalle-de-venta', 'Detalle de venta'), mk('reporte', 'Reporte de ventas')];
+    const enLista = compose('<main><h1>Ventas</h1><p>x</p></main>', { screen: manifest[0], manifest, name: 'App' });
+    expect(enLista).toContain('>Ventas</a>');
+    expect(enLista).toContain('>Reporte de ventas</a>');
+    expect(enLista).not.toContain('>Formulario de venta</a>');
+    expect(enLista).not.toContain('>Detalle de venta</a>');
+    const enDetalle = compose('<main><h1>Detalle</h1><p>x</p></main>', { screen: manifest[2], manifest, name: 'App' });
+    expect(enDetalle).toContain('>Detalle de venta</a>');
+    expect(enDetalle).not.toContain('>Formulario de venta</a>');
+  });
+});

@@ -233,6 +233,8 @@ function dropOwnBack(root) {
 
 // Pantallas de segundo nivel: se llega a ellas desde otra y no son un destino de la barra inferior.
 const SECONDARY = /\b(?:detalle|formulario|confirmacion|confirmar|editar|edicion|nuevo|nueva|crear|registro de)\b/;
+// Pantallas que nunca son una entrada del menú lateral: se llega a ellas desde otra (más estricto que SECONDARY, que también cubre «registro de…»).
+const MENU_SECONDARY = /\b(?:detalle|formulario|editar|edicion)\b/;
 const isPrimary = (item) => !SECONDARY.test(plain(item.nombre));
 
 /** Nombre de la pantalla sin el prefijo de tipo: «Pantalla de mesas asignadas» → «Mesas asignadas»; «Pantalla KDS de comandas» → «KDS de comandas». */
@@ -346,6 +348,8 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   function collect(node) { if (node.tagName === 'style' && !(node.attrs || []).some(attr => attr.name === 'data-icase-shell')) styles.push(serialize(node)); (node.childNodes || []).forEach(collect); }
   collect(document);
   const siblings = manifest.filter(item => sameNavigation(item, screen) && kindOf(item) !== 'auth');
+  // El menú lateral lista los destinos de primer nivel; formularios y detalles se alcanzan desde botones (la pantalla actual siempre aparece).
+  const menuItems = siblings.filter(item => !MENU_SECONDARY.test(plain(item.nombre)) || item.slug === screen.slug);
   const brand = escape(identity.nombre_aplicacion || name);
   const logo = identity.logo ? `<img src="${escape(identity.logo)}" alt="" width="32" height="32">` : '';
   // En móvil, las pantallas de segundo nivel traen un botón «volver» al destino anterior del flujo.
@@ -355,8 +359,8 @@ exports.compose = function(html, { screen = {}, manifest = [], identity = {}, na
   const body = {
     auth: `${header}<main class="icase-content">${fragment}</main>`,
     mobile: `${header}<main class="icase-content">${fragment}</main><nav class="icase-tabbar" aria-label="Navegación principal">${tabs(siblings, screen.slug)}</nav>`,
-    tablet: `${header}<details class="icase-menu"><summary>Menú</summary><nav class="icase-nav">${siblings.map(item => link(item, screen.slug)).join('')}</nav></details><div class="icase-layout"><main class="icase-content">${fragment}</main></div>`,
-    web: `${header}<div class="icase-layout"><nav class="icase-nav">${siblings.map(item => link(item, screen.slug)).join('')}</nav><main class="icase-content">${fragment}</main></div>`
+    tablet: `${header}<details class="icase-menu"><summary>Menú</summary><nav class="icase-nav">${menuItems.map(item => link(item, screen.slug)).join('')}</nav></details><div class="icase-layout"><main class="icase-content">${fragment}</main></div>`,
+    web: `${header}<div class="icase-layout"><nav class="icase-nav">${menuItems.map(item => link(item, screen.slug)).join('')}</nav><main class="icase-content">${fragment}</main></div>`
   }[kind];
   return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script><style>${styles.join('\n')}</style><style data-icase-shell>${STYLE}</style></head><body><div class="icase-shell${kind === 'auth' ? ' icase-auth' : kind === 'mobile' ? ' icase-mobile' : ''}" data-icase-shell-version="${SHELL_VERSION}" data-icase-kind="${kind}">${body}</div></body></html>
 `;
