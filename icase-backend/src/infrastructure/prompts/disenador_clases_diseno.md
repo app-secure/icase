@@ -61,6 +61,12 @@ Para cada módulo incluye las piezas necesarias para sus operaciones aprobadas. 
 - Reduce explicaciones y notas repetidas para ahorrar tokens, nunca entidades, atributos, relaciones ni operaciones aprobadas. Las consultas, transacciones, reportes y operaciones operativas también forman parte del alcance cuando están aprobadas.
 - En reparaciones, amplía el diagrama recibido: no reemplaces módulos ya presentes por un subconjunto más simple. Conserva nombres y operaciones existentes salvo que el error concreto exija cambiarlos.
 
+## CIERRE DE ALCANCE Y SOBRIEDAD (se aplica a cualquier proyecto):
+- Lista mentalmente todos los RF aprobados y comprueba que cada uno tenga una operación de entrada y un caso de uso. La gestión de usuarios, roles o cuentas (crear, editar, desactivar, asignar rol) es un RF como cualquier otro: si está aprobada, necesita su controlador, sus casos de uso y su puerto; autenticar no la reemplaza.
+- No introduzcas atributos, estados, enumeraciones ni datos que no estén en el dominio aprobado ni en los requisitos (por ejemplo medios de pago, categorías, tipos de documento, correos o teléfonos que nadie pidió). Si el dominio los trae, consérvalos; si no, no los añadas en entidades ni en DTO.
+- Usa la cardinalidad del dominio. Una relación donde el segundo objeto se crea después (por ejemplo, un documento que se emite tras registrar la operación) es 0..1 en el lado que puede no existir aún, no 1.
+- Mantén el diseño proporcional al sistema: si la arquitectura es de un solo servidor pequeño, comparte puertos y repositorios por agregado. Las líneas de detalle se persisten con su agregado y no necesitan repositorio, caso de uso ni controlador propios. Evita una pareja puerto/adaptador por cada entidad cuando un repositorio por agregado basta.
+
 COBERTURA OBLIGATORIA:
 - Antes de responder, recorre todos los RF, casos de uso y criterios aprobados: identifica la operación de entrada o aplicación que realiza cada resultado funcional (consultas, comandos y eventos si corresponden). Un módulo puede realizar varios RF y compartir casos de uso. No basta con dibujar una entidad o citar un RF en una nota. Si falta una decisión para una firma o regla, identifícala como pendiente sin inventarla.
 - Los campos de entrada deben conservar la estructura del dominio: si una operación necesita detalles con cantidades u observaciones, usa DTO de detalle tipados y no List<String> como sustituto de objetos conocidos. No expongas hashes, secretos ni campos internos en DTO de respuesta.
