@@ -1445,7 +1445,7 @@ export default function ProjectWorkspace({
             setShowInitial(false); setIsManagingSources(key === 'sources');
             if (key === 'requirements') { if (project.isAnalysisApproved) setIsReviewingRequirements(true); else onUpdateProject({ ...project, currentPhase: 1 }); }
           }} />}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {isProcessing ? (
           /* Barra Dinámica Minimalista con Porcentaje */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8 max-w-md mx-auto">
@@ -1680,7 +1680,7 @@ export default function ProjectWorkspace({
           const prevLabel = { 2: 'Fase anterior: Requisitos', 3: 'Fase anterior: Modelamiento', 4: 'Fase anterior: Codificación' }[project.currentPhase];
           const approved = project.currentPhase === 2 ? phases[1].done : project.currentPhase === 3 ? codeApproved : false;
           const nextLabel = { 2: 'Fase siguiente: Codificación', 3: 'Fase siguiente: Documento' }[project.currentPhase];
-          return <PhaseFooter prev={{ label: prevLabel, onClick: goTo(project.currentPhase - 1) }} next={approved && nextLabel ? { label: nextLabel, onClick: goTo(project.currentPhase + 1) } : null} />;
+          return <PhaseFooter overlay={project.currentPhase === 2} prev={{ label: prevLabel, onClick: goTo(project.currentPhase - 1) }} next={approved && nextLabel ? { label: nextLabel, onClick: goTo(project.currentPhase + 1) } : null} />;
         })()}
         </div>
         </div>
