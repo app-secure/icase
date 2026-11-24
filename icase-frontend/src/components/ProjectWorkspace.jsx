@@ -1680,7 +1680,7 @@ export default function ProjectWorkspace({
           const prevLabel = { 2: 'Fase anterior: Requisitos', 3: 'Fase anterior: Modelamiento', 4: 'Fase anterior: Codificación' }[project.currentPhase];
           const approved = project.currentPhase === 2 ? phases[1].done : project.currentPhase === 3 ? codeApproved : false;
           const nextLabel = { 2: 'Fase siguiente: Codificación', 3: 'Fase siguiente: Documento' }[project.currentPhase];
-          return <PhaseFooter overlay={project.currentPhase === 2} prev={{ label: prevLabel, onClick: goTo(project.currentPhase - 1) }} next={approved && nextLabel ? { label: nextLabel, onClick: goTo(project.currentPhase + 1) } : null} />;
+          return <PhaseFooter overlay prev={{ label: prevLabel, onClick: goTo(project.currentPhase - 1) }} next={approved && nextLabel ? { label: nextLabel, onClick: goTo(project.currentPhase + 1) } : null} />;
         })()}
         </div>
         </div>
