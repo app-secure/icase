@@ -36,6 +36,7 @@ class ArquitecturaSistemaGeneratorService {
     const rnfs = requerimientos.filter((item) => String(item.tipo || '').toUpperCase() === 'RNF');
     const hasHA = this.solicitaAltaDisponibilidad(rnfs);
     const hasMobile = this.detectaComponenteMovil(requerimientos);
+    const hostingWebAparte = /cdn|hosting|alojamiento (?:web|est[aá]tico)|netlify|vercel|s3|nginx|apache/i.test(text);
     const hasWeb = /\bweb\b|navegador|spa|react|vue|angular|tailwind/i.test(text);
     const needsData = /base de datos|persist|almacen|guardar|registr|historial|conservar|transacci/i.test(text);
     // El monitoreo cuenta si el propio requisito lo pide (nombre o descripción), no si su métrica menciona «herramientas de monitoreo».
@@ -90,8 +91,11 @@ class ArquitecturaSistemaGeneratorService {
     if (hasWeb) {
       lines.push(`Deployment_Node(webDevice, "Dispositivo Web", "Plataforma por definir") {`,
         `  Container(webArtifact, "Aplicación Web", "${webTech}", "Artefacto cliente")`, '}');
-      lines.push('Deployment_Node(webHosting, "Alojamiento Web", "Alojamiento web por definir") {',
-        `  Container(webDistribution, "Aplicación Web", "${webTech}", "Distribución de los recursos estáticos a navegadores")`, '}');
+      // Alojamiento aparte solo si el contexto lo menciona; con un servidor único la web se sirve desde el nodo de aplicación.
+      if (hostingWebAparte) {
+        lines.push('Deployment_Node(webHosting, "Alojamiento Web", "Alojamiento web por definir") {',
+          `  Container(webDistribution, "Aplicación Web", "${webTech}", "Distribución de los recursos estáticos a navegadores")`, '}');
+      }
     }
     if (!hasMobile && !hasWeb) {
       lines.push('Deployment_Node(userDevice, "Dispositivo de Usuario", "Plataforma por definir") {',
@@ -136,7 +140,7 @@ class ArquitecturaSistemaGeneratorService {
       ? [['mobileArtifact', hasMobile], ['webArtifact', hasWeb]].filter(([, enabled]) => enabled).map(([alias]) => alias)
       : ['clientArtifact'];
     const entry = hasHA ? 'trafficManager' : 'appInstance';
-    if (hasWeb) lines.push('Rel(webDistribution, webArtifact, "Entrega recursos web", "Canal por definir")');
+    if (hasWeb && hostingWebAparte) lines.push('Rel(webDistribution, webArtifact, "Entrega recursos web", "Canal por definir")');
     clients.forEach((client) => lines.push(`Rel(${client}, ${entry}, "Accede", "${externalProtocol}")`));
     if (hasHA) {
       lines.push('Rel(trafficManager, appInstance1, "Distribuye", "Canal por definir")',

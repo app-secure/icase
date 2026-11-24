@@ -22,3 +22,12 @@ test('toma el stack del contexto técnico cuando los requisitos no lo nombran', 
   expect(codigo).toMatch(/PostgreSQL/);
   expect(codigo).toMatch(/React/);
 });
+
+test('con un servidor único no duplica la aplicación web en un alojamiento aparte', () => {
+  const codigo = new Servicio().generar({
+    nombreProyecto: 'Ventas',
+    requerimientos: [{ tipo: 'RNF', nombre: 'Plataforma', descripcion: 'Aplicación web con React y Express. Un solo servidor.' }]
+  }).codigo_plantuml;
+  expect(codigo).not.toMatch(/webHosting|webDistribution/);
+  expect(codigo).toMatch(/Rel\(webArtifact, appInstance/);
+});

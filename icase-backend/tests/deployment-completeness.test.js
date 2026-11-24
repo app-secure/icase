@@ -52,7 +52,7 @@ test('las decisiones confirmadas llegan al validador y las propuestas de cloud n
   expect(review('confirmado').advertencias.join(' ')).not.toContain('proveedor');
 });
 test('el generador legado ya incluye distribución web y tarea de respaldo con restauración', () => {
-  const generated = new Generator().generar({ requerimientos: [...requisitos, { tipo: 'RF', nombre: 'Registrar datos desde aplicación web React' }] });
+  const generated = new Generator().generar({ requerimientos: [...requisitos, { tipo: 'RF', nombre: 'Registrar datos desde aplicación web React con alojamiento web aparte' }] });
   expect(generated.codigo_plantuml).toContain('webDistribution');
   expect(generated.codigo_plantuml).toContain('backupTask');
   expect(generated.codigo_plantuml).toContain('Restaura copia seleccionada');
