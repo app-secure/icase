@@ -24,7 +24,9 @@ class ArquitecturaSistemaGeneratorService {
   }
 
   detectaComponenteMovil(requerimientos = []) {
-    return /m[oó]vil|smartphone|android|ios|react native|flutter/i.test(textOf(requerimientos));
+    // Palabras completas («ios» no es «usuarios») y sin las frases que lo excluyen («no habrá aplicación móvil»).
+    const negada = /\b(?:no|sin|ni|excluy\w*|fuera del? alcance|descart\w*)\b/i;
+    return textOf(requerimientos).split(/(?<=[.;\n])\s+/).some((frase) => /\bm[oó]vil(?:es)?\b|\bsmartphone\b|\bandroid\b|\bios\b|react native|flutter/i.test(frase) && !negada.test(frase));
   }
 
   generar({ nombreProyecto = 'Sistema', requerimientos = [] } = {}) {
@@ -35,7 +37,8 @@ class ArquitecturaSistemaGeneratorService {
     const hasMobile = this.detectaComponenteMovil(requerimientos);
     const hasWeb = /\bweb\b|navegador|spa|react|vue|angular|tailwind/i.test(text);
     const needsData = /base de datos|persist|almacen|guardar|registr|historial|conservar|transacci/i.test(text);
-    const monitoringRnf = rnfs.find((item) => /monitor|observabilidad|telemetr|m[eé]tricas de salud|health check/i.test(textOf([item])));
+    // El monitoreo cuenta si el propio requisito lo pide (nombre o descripción), no si su métrica menciona «herramientas de monitoreo».
+    const monitoringRnf = rnfs.find((item) => /monitor|observabilidad|telemetr|m[eé]tricas de salud|health check/i.test([item.nombre, item.descripcion].filter(Boolean).join(' ')));
     const haRnf = rnfs.find((item) => this.solicitaAltaDisponibilidad([item]));
     const backupRnf = rnfs.find((item) => /respaldo|backup|recuperaci[oó]n|restauraci[oó]n|rpo|rto/i.test(textOf([item]))
       && !this.requirementSemantics.hasExcluded(item, /respaldo|backup|recuperaci[oó]n|restauraci[oó]n/i));
