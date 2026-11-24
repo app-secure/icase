@@ -230,6 +230,9 @@ export default function RequirementsView({
             <div className="initial-analysis__metadata"><span>{functional.length} RF · {nonFunctional.length} RNF</span><span>{isApproved ? 'Aprobados' : readOnly ? 'Solo lectura' : 'En revisión'}</span>{audit?.referencia_analisis_inicial && <span>Base: análisis v{audit.referencia_analisis_inicial.version}</span>}</div>
           </header>
             <div className="mb-5 flex flex-wrap items-center justify-end gap-2">
+              {onReview && !isApproved && !readOnly && <button type="button" title="Vuelve a comprobar los requisitos guardados (criterios, referencias, actores y cobertura) sin llamar a la IA" disabled={regenerating || isFixing || isReviewing || Boolean(editing)}
+                onClick={async () => { setIsReviewing(true); try { await onReview({ accion: 'validar' }); addToast({ type: 'success', message: 'Requisitos comprobados de nuevo.' }); } catch (error) { addToast({ type: 'error', message: error.message || 'No se pudo comprobar.' }); } finally { setIsReviewing(false); } }}
+                className="rounded-full border border-slate-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40">{isReviewing ? 'Comprobando…' : 'Comprobar requisitos'}</button>}
               {onRegenerate && !isApproved && !readOnly && <button type="button" onClick={onRegenerate} disabled={regenerating || isFixing || isReviewing || Boolean(editing)} className="rounded-full border border-[#CFC0F1] bg-[#F2EDFF] px-3.5 py-1.5 text-xs font-semibold text-[#6D28D9] transition-colors hover:bg-[#E9DDFE] disabled:opacity-40">{regenerating ? "Regenerando…" : "Regenerar desde el análisis"}</button>}
               {isApproved && <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={13} />Fase Aprobada</span>}
             </div>
