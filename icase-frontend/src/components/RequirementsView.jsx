@@ -305,7 +305,11 @@ export default function RequirementsView({
                 <p className="font-semibold">Borrador generado: cobertura pendiente de revisión</p>
                 <p>La revisión detectó incidencias y no puede acreditar la cobertura completa. Esto no significa que todos los requisitos sean incorrectos. Revisa las causas siguientes antes de aprobar.</p>
                 {!audit.advertencias?.length && <p className="mt-2">Esta generación no guardó el detalle de la causa. No es posible determinarla desde este resultado; no se considera una comprobación satisfactoria.</p>}
-                <ul className="mt-2 list-disc pl-5">{(audit.advertencias || []).map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+                <ul className="mt-2 list-disc pl-5">{(audit.advertencias || []).map((warning, index) => {
+                  const target = String(warning).match(/^(R?NF-\d+|RF-\d+)/)?.[1];
+                  const exists = target && [...functional, ...nonFunctional].some(item => (item.identificador || item.id) === target);
+                  return <li key={index}>{warning}{exists && !readOnly && !isApproved && <button type="button" onClick={() => openRequirement(target)} className="ml-2 rounded-full bg-amber-800 px-2.5 py-0.5 text-[11px] font-semibold text-white">Corregir {target}</button>}</li>;
+                })}</ul>
                 {audit.diagnostico_inventario?.errores_pendientes?.length > 0 && <details className="mt-3">
                   <summary className="cursor-pointer font-semibold">Ver evidencias rechazadas y diagnóstico técnico</summary>
                   {audit.diagnostico_inventario.errores_pendientes.map((item, index) => <div key={index} className="mt-2 border-t border-amber-200 pt-2">
