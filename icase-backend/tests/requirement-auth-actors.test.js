@@ -48,3 +48,20 @@ test('autorizar acciones según el rol es acceso (lo resuelven la sesión y los 
   expect(isLoginRequirement({ nombre: 'Autorizar pagos' })).toBe(false);
   expect(isLoginRequirement({ nombre: 'Gestionar usuarios y roles' })).toBe(false);
 });
+
+describe('RF sin actor: el que mejor coincide con su descripción', () => {
+  const people = [
+    { id: 'A1', nombre: 'Administrador', tipo: 'persona', estado: 'confirmado', descripcion: 'Gestiona productos, usuarios y roles; registra y consulta ventas; anula ventas; revisa reportes de ventas y productos más vendidos; visualiza stock bajo.' },
+    { id: 'A2', nombre: 'Vendedor', tipo: 'persona', estado: 'confirmado', descripcion: 'Registra ventas en el mostrador, atiende clientes, emite facturas, consulta productos para vender, registra y edita clientes.' }
+  ];
+  const actorsOf = (nombre) => normalizeActors({ tipo: 'RF', necesidades_origen: [], actores: [], nombre }, [], people).actores;
+  test('stock bajo y reportes son del administrador; emitir factura, del vendedor', () => {
+    expect(actorsOf('Visualizar lista de productos con stock bajo')).toEqual(['Administrador']);
+    expect(actorsOf('Generar reporte de ventas por rango de fechas')).toEqual(['Administrador']);
+    expect(actorsOf('Generar reporte de productos más vendidos por rango de fechas')).toEqual(['Administrador']);
+    expect(actorsOf('Emitir factura con numeración correlativa')).toEqual(['Vendedor']);
+  });
+  test('si nada coincide con claridad, queda sin actor', () => {
+    expect(actorsOf('Gestionar clientes')).toEqual([]);
+  });
+});

@@ -57,8 +57,11 @@ function normalizeActors(req, batch, actors) {
     names.length = 0;
     names.push(...people.map(actor => actor.nombre));
   }
-  // Sin actor en el RF ni en su necesidad: el actor cuya descripción dice esa misma función («emite facturas» para «Emitir factura»).
+  // Sin actor en el RF ni en su necesidad: el actor cuya descripción mejor coincide con lo que hace el RF («revisa reportes de ventas» para
+  // «Generar reporte de ventas»). Se comparan las raíces de las palabras del nombre con la descripción; gana el actor con más coincidencias
+  // (al menos dos y estrictamente más que los demás). Si hay empate, el RF queda sin actor y se decide a mano.
   if (!names.length && req.tipo === 'RF') {
+    // Primero el verbo y el objeto del nombre («Emitir factura» ↔ «emite facturas»).
     const words = plain(req.nombre).match(/[a-z]{4,}/g) || [];
     const verb = (words[0] || '').slice(0, 4);
     const object = (words.slice(1).find(word => !/^(?:con|para|por|del|las|los|una|uno|sus|sin)$/.test(word) && word.length >= 5) || '').slice(0, 5);
@@ -66,6 +69,11 @@ function normalizeActors(req, batch, actors) {
       const owners = people.filter(actor => { const description = plain(actor.descripcion); return new RegExp('\\b' + verb).test(description) && description.includes(object); });
       if (owners.length === 1) names.push(owners[0].nombre);
     }
+    if (names.length) return { ...req, actores: [...new Set(names)] };
+    const stop = /^(?:con|para|por|del|las|los|una|uno|sus|sin|desde|cuando|entre|sobre|seg[uú]n)$/;
+    const stems = [...new Set((plain(req.nombre).match(/[a-z]{4,}/g) || []).filter(word => !stop.test(word)).map(word => word.slice(0, 5)))];
+    const scored = people.map(actor => { const description = plain(actor.descripcion); return { actor, score: stems.filter(stem => description.includes(stem)).length }; }).sort((a, b) => b.score - a.score);
+    if (scored[0] && scored[0].score >= 2 && (!scored[1] || scored[0].score > scored[1].score)) names.push(scored[0].actor.nombre);
   }
   return { ...req, actores: [...new Set(names)] };
 }
