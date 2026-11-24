@@ -393,3 +393,21 @@ describe('permisos por defecto según lo que hace cada requisito', () => {
     expect(resultado.advertencias.join(' ')).not.toContain('RF-10');
   });
 });
+
+describe('AccessControlService: lecturas y alcance propio', () => {
+  const AccessControlService = require('../src/core/services/AccessControlService');
+  const service = new AccessControlService();
+  const req = (identificador, nombre, descripcion, criterios = []) => ({ identificador, tipo: 'RF', aprobado: true, nombre, descripcion, actores: ['Vendedor', 'Administrador'], criterios_aceptacion: criterios });
+
+  test('«Consultar ventas…» da solo lectura y alcance propio cuando un criterio dice «las ventas que él registró»', () => {
+    const { valor } = service.proponer({ requerimientos: [
+      req('RF-03', 'Consultar ventas con detalles', 'El sistema mostrará las ventas registradas.', [{ descripcion: 'Un vendedor consulta ventas y el sistema muestra solo las ventas que él registró.' }])
+    ], verbosPorRf: { 'RF-03': ['consultar', 'crear'] } });
+    expect(valor.permisos.find((item) => item.rol === 'vendedor')).toEqual({ operacion: 'RF-03', rol: 'vendedor', metodos: ['GET'], alcance: 'propios' });
+  });
+
+  test('«Gestionar X» con descripción que no habla de eliminar no da DELETE', () => {
+    const { valor } = service.proponer({ requerimientos: [req('RF-07', 'Gestionar cliente', 'El sistema registra clientes y permite buscarlos.')] });
+    expect(valor.permisos.find((item) => item.rol === 'vendedor').metodos).toEqual(['GET', 'POST', 'PATCH']);
+  });
+});

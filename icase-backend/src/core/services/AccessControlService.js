@@ -27,6 +27,7 @@ const LOGIN = /autenticaci|autenticar|inicio de sesion|iniciar sesion|\blogin\b/
 const CREATES = /\b(?:registr\w*|cre[ao]\w*|compr\w*|reserv\w*|canje\w*|cierre|apertura|agreg\w*|anad\w*|solicit\w*|enviar|emit\w*)\b/;
 const EDITS = /\b(?:actualiz\w*|modific\w*|edit\w*|marc\w*|reasign\w*|cambi\w*|configur\w*|confirm\w*|valid\w*)\b/;
 const DELETES = /\b(?:elimin\w*|cancel\w*|anul\w*|borr\w*|quit\w*|retir\w*)\b/;
+const SOLO_LECTURA = /^(?:consult|visualiz|list|mostr|ver\b|generar (?:reporte|informe))\w*/;
 const MANAGES = /\bgesti\w*\b/;
 
 /** Operación que no es de datos: el acceso lo resuelve la sesión de la aplicación. */
@@ -39,9 +40,12 @@ const esAcceso = (requisito) => LOGIN.test(plain(requisito?.nombre));
  */
 function metodosDe(requisito, verbosPorRf = {}) {
   const verbos = (verbosPorRf[String(requisito?.identificador || '').toUpperCase()] || []).map((verbo) => METHOD_OF_VERB[verbo]).filter(Boolean);
+  // «Consultar ventas…», «Visualizar lista…», «Generar reporte…»: el nombre dice que solo lee, aunque un mockup traiga un botón «Nuevo».
+  if (SOLO_LECTURA.test(plain(requisito?.nombre)) && !MANAGES.test(plain(requisito?.nombre))) return ['GET'];
   if (verbos.length) return METHODS.filter((metodo) => metodo === 'GET' || verbos.includes(metodo));
   const texto = plain(`${requisito?.nombre || ''} ${requisito?.descripcion || ''}`);
-  if (MANAGES.test(plain(requisito?.nombre))) return [...METHODS];
+  // «Gestionar X» da alta y modificación; eliminar solo si el texto lo pide (desactivar o anular no es eliminar); sin descripción, la gestión completa.
+  if (MANAGES.test(plain(requisito?.nombre))) return METHODS.filter((metodo) => metodo !== 'DELETE' || !String(requisito?.descripcion || '').trim() || DELETES.test(texto));
   return METHODS.filter((metodo) => metodo === 'GET'
     || (metodo === 'POST' && CREATES.test(texto)) || (metodo === 'PATCH' && EDITS.test(texto)) || (metodo === 'DELETE' && DELETES.test(texto)));
 }
@@ -65,7 +69,7 @@ const raizRol = (actor) => plano(actor).split(/\s+/).pop().replace(/(?:es|as|os|
 function metodosConEvidencia(requisito, actor, metodos) {
   // «…las ventas que él mismo registró» describe quién hizo el registro, no un permiso para registrar.
   // Los verbos de los mockups aprobados mandan; aquí solo se quitan los que el RF reserva expresamente a otro rol.
-  const texto = textoRequisito(requisito).replace(/\bque\s+(?:el|ella)\s+mism[oa]\s+\p{L}+/gu, ' ');
+  const texto = textoRequisito(requisito).replace(/\bque\s+(?:el|ella)\s+(?:mism[oa]\s+)?\p{L}+/gu, ' ');
   let resultado = [...metodos];
   const propio = raizRol(actor);
   for (const [metodo, patron] of VERBOS_METODO) {
@@ -88,7 +92,7 @@ function metodosConEvidencia(requisito, actor, metodos) {
 function alcancePropio(requisito, actor) {
   const propio = raizRol(actor);
   return textoRequisito(requisito).split(/(?<=[.;|])\s+/).some((frase) => frase.includes(propio)
-    && /\b(?:exclusivamente|solo|solamente|unicamente)\b[^.]{0,80}\bque\s+(?:el|ella)\s+mism[oa]\s+(?:registr|cre|emit|hiz|realiz)/.test(frase));
+    && /\b(?:exclusivamente|solo|solamente|unicamente)\b[^.]{0,80}\bque\s+(?:el|ella)\s+(?:mism[oa]\s+)?(?:registr|cre|emit|hiz|realiz)/.test(frase));
 }
 
 class AccessControlService {
