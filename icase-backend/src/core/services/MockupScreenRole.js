@@ -11,6 +11,17 @@ const PREFIX = /^(?:pantalla de |formulario de |formulario |registrar |agregar |
 /** Sustantivo principal de una pantalla: «Registrar pedido web» → «pedido». */
 const noun = (name) => strip(name).replace(PREFIX, '').replace(/\b(?:web|movil)\b/g, '').replace(/s\b/g, '').trim();
 
+
+/**
+ * `longer` nombra la misma entidad que `base` si empieza por ella y solo añade un adjetivo («mesa asignada»). Si añade un complemento
+ * («producto con stock bajo», «venta por rango») es otra consulta y no comparte formulario; «reporte de venta» ni siquiera empieza por «venta».
+ */
+function related(longer, base) {
+  if (longer === base) return true;
+  if (!longer.startsWith(base + ' ')) return false;
+  return !/\b(?:con|sin|por|en|para|de|del|al)\b/.test(longer.slice(base.length));
+}
+
 class MockupScreenRole {
   /**
    * @param {object} screen pantalla del árbol (`nombre`, `tipo`, `rf_trazabilidad`).
@@ -31,7 +42,7 @@ class MockupScreenRole {
       if (!/^formulario\b/.test(otherName)) return false;
       const shared = (other.rf_trazabilidad || []).some((id) => mine.has(String(id).toUpperCase()));
       const otherNoun = noun(otherName);
-      const sameNoun = mineNoun.length >= 4 && otherNoun.length >= 4 && (mineNoun.includes(otherNoun) || otherNoun.includes(mineNoun));
+      const sameNoun = mineNoun.length >= 4 && otherNoun.length >= 4 && (related(mineNoun, otherNoun) || related(otherNoun, mineNoun));
       return sameNoun || (shared && !mineNoun);
     });
 

@@ -276,6 +276,7 @@ const STYLE = `
   .icase-content img,.icase-content svg,.icase-content video,.icase-content canvas{max-width:100%;height:auto}
   .icase-content form{max-width:100%}.icase-content .h-screen,.icase-content .min-h-screen{height:auto!important;min-height:0!important}.icase-content .w-screen{width:100%!important}
   .icase-content .fixed{position:sticky!important}
+  .modal-hidden,.hidden-modal{display:none!important}
   .icase-auth .icase-content{display:grid;place-items:center;padding:24px}.icase-auth .icase-content>main{width:100%!important;max-width:440px}
   .icase-mobile{max-width:430px;margin:0 auto;border-inline:1px solid #e2e8f0;background:var(--icase-bg,#f8fafc)}.icase-mobile .icase-content{padding:16px}
   .icase-mobile .icase-content .grid{grid-template-columns:minmax(0,1fr)!important}.icase-mobile .icase-content [class*="col-span"]{grid-column:auto!important}

@@ -41,3 +41,14 @@ describe('menú lateral web', () => {
     expect(enDetalle).not.toContain('>Formulario de venta</a>');
   });
 });
+
+describe('papel de la pantalla', () => {
+  const MockupScreenRole = require('../src/core/services/MockupScreenRole');
+  const all = [{ nombre: 'Formulario de venta', slug: 'f' }];
+  test('solo el listado de la entidad recibe el botón Nuevo; consultas, anulaciones y reportes no', () => {
+    expect(MockupScreenRole.of({ nombre: 'Ventas', slug: 'v' }, all).formularioHermano).toBe('Formulario de venta');
+    for (const nombre of ['Anulación de venta', 'Reporte de ventas por rango de fechas', 'Ventas por vendedor']) {
+      expect(MockupScreenRole.of({ nombre, slug: nombre }, all).formularioHermano).toBeNull();
+    }
+  });
+});
