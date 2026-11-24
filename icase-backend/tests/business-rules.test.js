@@ -91,7 +91,10 @@ describe('BusinessRuleService', () => {
     expect(validar([{ ...machine, inicial: 'ARCHIVADA' }]).errores.join(' ')).toContain('inicial');
     expect(validar([{ ...machine, transiciones: [{ de: 'PENDIENTE', a: 'PERDIDA' }] }]).errores.join(' ')).toContain('no pertenecen');
     expect(validar([{ ...machine, transiciones: [] }]).errores.join(' ')).toContain('al menos una transición');
-    expect(validar([machine, { ...machine, id: 'RN-X' }]).errores.join(' ')).toContain('ya existe una máquina');
+    const duplicada = validar([machine, { ...machine, id: 'RN-X' }]);
+    expect(duplicada.errores).toEqual([]);
+    expect(duplicada.reglas.find((item) => item.id === 'RN-X').estado_decision).toBe('rechazado');
+    expect(duplicada.reglas.find((item) => item.id === machine.id).estado_decision).not.toBe('rechazado');
     expect(validar([{ ...RULES[2], con_campo: 'comensales' }]).errores.join(' ')).toContain('no son del mismo tipo');
     expect(validar([{ ...RULES[2], con_campo: undefined }]).errores.join(' ')).toContain('exactamente uno');
     expect(validar([{ ...RULES[2], operador: '=~' }]).errores.join(' ')).toContain('operador');

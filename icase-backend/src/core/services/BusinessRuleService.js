@@ -250,7 +250,13 @@ class BusinessRuleService {
         regla.campo = found.nombre;
         if (found.kind !== 'texto') fail(`"${found.nombre}" no es un texto.`);
         const clave = `${entidad.name}.${found.nombre}`;
-        if (machines.has(clave)) fail(`ya existe una máquina de estados para ${clave}.`);
+        // Una segunda máquina para el mismo campo (la IA propone «RN-09» y «RN-09a») no puede coexistir con la primera: se descarta como
+        // duplicada en lugar de invalidar todas las reglas; la primera sigue vigente.
+        if (machines.has(clave)) {
+          regla.estado_decision = 'rechazado';
+          regla.observaciones = `Duplicada: ya existe una máquina de estados para ${clave}.`;
+          break;
+        }
         machines.add(clave);
         const transiciones = Array.isArray(regla.transiciones) ? regla.transiciones : [];
         if (!transiciones.length) { fail('debe declarar al menos una transición.'); break; }
