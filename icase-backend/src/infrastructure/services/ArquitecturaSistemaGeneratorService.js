@@ -29,9 +29,11 @@ class ArquitecturaSistemaGeneratorService {
     return textOf(requerimientos).split(/(?<=[.;\n])\s+/).some((frase) => /\bm[oó]vil(?:es)?\b|\bsmartphone\b|\bandroid\b|\bios\b|react native|flutter/i.test(frase) && !negada.test(frase));
   }
 
-  generar({ nombreProyecto = 'Sistema', requerimientos = [] } = {}) {
+  generar({ nombreProyecto = 'Sistema', requerimientos = [], contextoTecnico = '' } = {}) {
     const projectName = safe(nombreProyecto) || 'Sistema';
-    const text = textOf(requerimientos);
+    // El stack suele estar en la entrevista o el análisis aprobado, no en los requisitos.
+    const text = textOf(requerimientos) + '
+' + String(contextoTecnico || '');
     const rnfs = requerimientos.filter((item) => String(item.tipo || '').toUpperCase() === 'RNF');
     const hasHA = this.solicitaAltaDisponibilidad(rnfs);
     const hasMobile = this.detectaComponenteMovil(requerimientos);

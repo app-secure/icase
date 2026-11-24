@@ -11,3 +11,14 @@ test('el diagrama de sistema no inventa móvil ni observabilidad', () => {
   expect(codigo).toMatch(/React/);
   expect(codigo).toMatch(/PostgreSQL/);
 });
+
+test('toma el stack del contexto técnico cuando los requisitos no lo nombran', () => {
+  const codigo = new Servicio().generar({
+    nombreProyecto: 'Ventas',
+    requerimientos: [{ tipo: 'RNF', nombre: 'Rendimiento', descripcion: 'Registrar una venta en menos de 2 s' }],
+    contextoTecnico: 'Node.js con Express, PostgreSQL y React con Tailwind CSS. Un solo servidor.'
+  }).codigo_plantuml;
+  expect(codigo).toMatch(/Express/);
+  expect(codigo).toMatch(/PostgreSQL/);
+  expect(codigo).toMatch(/React/);
+});

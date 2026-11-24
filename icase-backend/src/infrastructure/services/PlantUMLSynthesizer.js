@@ -9,6 +9,7 @@ class PlantUMLSynthesizer {
     const nombreProyecto = contexto.nombreProyecto || contexto.nombre_proyecto || 'Sistema de Información';
     const requerimientos = Array.isArray(contexto.requerimientos) ? contexto.requerimientos : [];
 
+    const contextoTecnico = contexto.contextoTecnico || '';
     const softwareGen = new ArquitecturaSoftwareGeneratorService();
     const sistemaGen = new ArquitecturaSistemaGeneratorService();
     const sistemaValidator = new ArquitecturaSistemaValidatorService();
@@ -129,7 +130,7 @@ class PlantUMLSynthesizer {
       // Si es arquitectura de sistema: verificar estricta regla de Alta Disponibilidad
       if (cfg.tipo === DiagramTypes.ARQUITECTURA_SISTEMA) {
         if (!esValido) {
-          const synth = sistemaGen.generar({ nombreProyecto, requerimientos });
+          const synth = sistemaGen.generar({ nombreProyecto, requerimientos, contextoTecnico });
           code = synth.codigo_plantuml;
           esValido = true;
           trazabilidadRnf = synth.trazabilidad_rnf;
@@ -138,11 +139,11 @@ class PlantUMLSynthesizer {
           const validacionHA = sistemaValidator.validar({ codigo: code, rnfList: requerimientos });
           if (!validacionHA.valido && validacionHA.alta_disponibilidad_detectada && !validacionHA.alta_disponibilidad_solicitada) {
             console.warn('[PlantUMLSynthesizer] Corrigiendo diagrama de arquitectura_sistema: Se detectó alta disponibilidad no solicitada.');
-            const synth = sistemaGen.generar({ nombreProyecto, requerimientos });
+            const synth = sistemaGen.generar({ nombreProyecto, requerimientos, contextoTecnico });
             code = synth.codigo_plantuml;
             trazabilidadRnf = synth.trazabilidad_rnf;
           } else if (trazabilidadRnf.length === 0 && requerimientos.length > 0) {
-            const synth = sistemaGen.generar({ nombreProyecto, requerimientos });
+            const synth = sistemaGen.generar({ nombreProyecto, requerimientos, contextoTecnico });
             trazabilidadRnf = synth.trazabilidad_rnf;
           }
         }
