@@ -16,3 +16,15 @@ test('una regla con evidencia válida no se rechaza por citar un objetivo inexis
   expect(rule.objetivos_relacionados).toEqual(['O-09']);
   expect(report.valid.find(item => item.id === 'N-03').objetivos_relacionados).toEqual(['O-09']);
 });
+
+test('un criterio puede verificar una regla ligada al RF (reglas_relacionadas), no solo sus necesidades', () => {
+  const inv = [
+    { id: 'N1', objetivo_id: 'O-01', tipo: 'RF', estado: 'confirmado', necesidad: 'Registrar una venta con productos.' },
+    { id: 'N2', tipo: 'regla_negocio', estado: 'confirmado', necesidad: 'Una venta tiene fecha, vendedor y cliente.' }
+  ];
+  const req = (reglas) => ({ identificador: 'RF-01', tipo: 'RF', nombre: 'Registrar venta', descripcion: 'x', necesidades_origen: ['N1'], reglas_relacionadas: reglas,
+    criterios_aceptacion: [{ descripcion: 'Se registra fecha, vendedor y cliente.', necesidades_origen: ['N1', 'N2'] }] });
+  const falla = (reglas) => new Coverage().problems({ requerimientos: [req(reglas)] }, inv, '', false).some((text) => /referencias ajenas/.test(text));
+  expect(falla(['N2'])).toBe(false);
+  expect(falla([])).toBe(true);
+});

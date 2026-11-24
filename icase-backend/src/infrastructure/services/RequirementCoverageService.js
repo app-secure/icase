@@ -192,7 +192,7 @@ class RequirementCoverageService {
       for (const criterion of criteria) {
         if (!criterion || typeof criterion !== 'object' || !criterion.descripcion ||
             !Array.isArray(criterion.necesidades_origen) || !criterion.necesidades_origen.length ||
-            criterion.necesidades_origen.some((ref) => !refs.includes(ref))) problems.push(`${id}: criterio de aceptación sin descripción o con referencias ajenas.`);
+            criterion.necesidades_origen.some((ref) => !refs.includes(ref) && !(Array.isArray(req.reglas_relacionadas) ? req.reglas_relacionadas : []).includes(ref))) problems.push(`${id}: criterio de aceptación sin descripción o con referencias ajenas.`);
       }
       for (const ref of (Array.isArray(req.reglas_relacionadas) ? req.reglas_relacionadas : [])) {
         const rule = inventory.find((item) => item.id === ref);
