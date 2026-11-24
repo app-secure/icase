@@ -151,6 +151,9 @@ class DomainModelExtractor {
       else if (whole) { holder = to; target = from; cardinality = 'uno_a_uno'; }
       else { holder = from; target = to; cardinality = 'muchos_a_uno'; }
       relation.cardinalidad = cardinality;
+      // Si el otro extremo ya declara el atributo que apunta a este («Factura» con «+Venta venta»), la clave vive allí: una segunda
+      // clave en sentido contrario crearía una referencia circular que no permite sembrar ni insertar datos.
+      if (cardinality !== 'uno_a_muchos' && target.attributes.some((item) => item.referencia === holder.name && !item.collection)) continue;
       const field = `${snake(target.name)}_id`;
       if (holder.attributes.some((item) => item.name === field) || holder.references.some((item) => item.field === field)) continue;
       holder.references.push({ field, entity: target.name, relation: relation.kind, cardinality, label: relation.label });

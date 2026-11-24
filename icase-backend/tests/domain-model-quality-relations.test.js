@@ -63,3 +63,17 @@ class ReporteVentas {\n+String id\n+float totalVentas\n}
     expect(contract.warnings.join(' ')).not.toContain('RF-01 se asoció');
   });
 });
+
+describe('clave foránea cuando un extremo ya declara la referencia', () => {
+  test('«Factura +Venta venta» con «Venta 1 -- 0..1 Factura» deja una sola clave (factura.venta_id), sin referencia circular', () => {
+    const DomainModelExtractor = require('../src/infrastructure/services/DomainModelExtractor');
+    const nl = String.fromCharCode(10);
+    const code = ['@startuml', 'class Venta {', '  +String id', '}', 'class Factura {', '  +String id', '  +Venta venta', '}', 'class LineaVenta {', '  +String id', '  +Venta venta', '}',
+      'Venta "1" -- "*" LineaVenta : contiene', 'Venta "1" -- "0..1" Factura : genera', '@enduml'].join(nl);
+    const modelo = new DomainModelExtractor().fromDiagrams([{ tipo: 'clases_dominio', aprobado: true, estado: 'aprobado', desactualizado: false, codigo_plantuml: code }]);
+    const campos = (nombre) => modelo.entities.find((item) => item.name === nombre).references.map((item) => item.field);
+    expect(campos('Venta')).toEqual([]);
+    expect(campos('Factura')).toEqual(['venta_id']);
+    expect(campos('LineaVenta')).toEqual(['venta_id']);
+  });
+});
