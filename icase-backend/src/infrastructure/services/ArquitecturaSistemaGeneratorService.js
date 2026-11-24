@@ -32,8 +32,7 @@ class ArquitecturaSistemaGeneratorService {
   generar({ nombreProyecto = 'Sistema', requerimientos = [], contextoTecnico = '' } = {}) {
     const projectName = safe(nombreProyecto) || 'Sistema';
     // El stack suele estar en la entrevista o el análisis aprobado, no en los requisitos.
-    const text = textOf(requerimientos) + '
-' + String(contextoTecnico || '');
+    const text = textOf(requerimientos) + String.fromCharCode(10) + String(contextoTecnico || '');
     const rnfs = requerimientos.filter((item) => String(item.tipo || '').toUpperCase() === 'RNF');
     const hasHA = this.solicitaAltaDisponibilidad(rnfs);
     const hasMobile = this.detectaComponenteMovil(requerimientos);

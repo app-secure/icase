@@ -975,8 +975,7 @@ class ModelosIaService {
           const [arquitecturaNormalizada] = PlantUMLSynthesizer.normalizar(diagramas, {
             nombreProyecto: contexto.nombreProyecto || safeProjectName,
             requerimientos: Array.isArray(contexto.requerimientos) ? contexto.requerimientos : [],
-            contextoTecnico: [contexto.insumo, contexto.approvedAnalysis ? JSON.stringify(contexto.approvedAnalysis) : ''].filter(Boolean).join('
-')
+            contextoTecnico: [contexto.insumo, contexto.approvedAnalysis ? JSON.stringify(contexto.approvedAnalysis) : ''].filter(Boolean).join(String.fromCharCode(10))
           }).filter((diagram) => normalizeDiagramType(diagram.tipo) === tipoDiagrama);
           diagramas = arquitecturaNormalizada ? [arquitecturaNormalizada] : diagramas;
         }
