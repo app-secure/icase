@@ -94,8 +94,183 @@ function find(slug, method, hasId) {
   const direct = definitions.find((item) => slugOf(item.name) === slug && item.method === method && Boolean(item.byId) === Boolean(hasId));
   if (direct) return direct;
   // GET de un alta con líneas: las opciones que se pueden elegir en ellas (los platos disponibles), con el permiso de quien la crea.
-  const base = method === 'GET' && !hasId ? definitions.find((item) => slugOf(item.name) === slug && item.lineas && !item.byId) : null;
-  return base ? { name: base.name, type: 'consulta', method: 'GET', byId: false, capability: base.capability, fuente: base.lineas.destinoCapability, entity: base.lineas.destinoClave, filters: base.lineas.filtros || [], inputs: [], output: [] } : null;
+  if (method !== 'GET' || hasId) return null;
+  const base = definitions.find((item) => slugOf(item.name) === slug && item.lineas && !item.byId);
+  if (base) return { name: base.name, type: 'consulta', method: 'GET', byId: false, capability: base.capability, ...(base.permiso ? { permiso: base.permiso } : {}), ...(base.opciones ? { opciones: base.opciones } : {}), requiere: 'POST', fuente: base.lineas.destinoCapability, entity: base.lineas.destinoClave, filters: base.lineas.filtros || [], inputs: [], output: [] };
+  // GET de una operación que pide elegir registros: sus opciones, con el mismo permiso que ejecutarla.
+  const form = definitions.find((item) => slugOf(item.name) === slug && item.opciones);
+  if (!form) return null;
+  const needed = { crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' }[form.type] || 'GET';
+  return { name: form.name, type: 'opciones', method: 'GET', byId: false, capability: form.capability, ...(form.permiso ? { permiso: form.permiso } : {}), opciones: form.opciones, requiere: needed, filters: [], inputs: [], output: [] };
+}
+
+const money = (value) => Math.round(Number(value) * 100) / 100;
+const rowsFrom = (found) => (Array.isArray(found) ? found : found?.data || []).map(flat);
+/** Fecha de hoy (o dentro de `days` días) como AAAA-MM-DD en la zona horaria del servidor. */
+const localDate = (days = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+const empty = (value) => value === undefined || value === null || value === '';
+
+// Un solo servidor: las comprobaciones que dependen de otros registros (cupo, cobro, saldo) se ejecutan de una en una por recurso.
+const queues = new Map();
+async function withLock(key, task) {
+  const previous = queues.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  const tail = previous.then(() => current);
+  queues.set(key, tail);
+  await previous;
+  try { return await task(); } finally {
+    release();
+    if (queues.get(key) === tail) queues.delete(key);
+  }
+}
+
+/** Opciones que la persona puede elegir en un campo: nunca más datos que el nombre con que se reconoce cada registro. */
+async function listOptions(store, def, field, ctx) {
+  const spec = def.opciones?.[field];
+  if (!spec) throw new ActionError(404, 'El campo no tiene opciones.');
+  if (spec.cuentas) {
+    const users = await store.listUsers();
+    return users.filter((user) => user.activo !== false && (spec.rol ? user.rol === spec.rol : user.rol !== 'administrador'))
+      .map((user) => ({ id: String(user.id), etiqueta: user.nombre || user.email }));
+  }
+  let rows = rowsFrom(await store.list(spec.capability, {}, null));
+  // Quien tiene un papel en el registro solo elige los suyos (el mesero, sus mesas).
+  const mine = ctx.user && `${ctx.user.rol}_id`;
+  if (mine) rows = rows.filter((row) => row[mine] === undefined || String(row[mine]) === String(ctx.user.id));
+  if (spec.estado) rows = rows.filter((row) => row[spec.estado.campo] === spec.estado.valor);
+  const names = {};
+  for (const [campo, capability] of Object.entries(spec.referencias || {})) {
+    names[campo] = new Map(rowsFrom(await store.list(capability, {}, null)).map((row) => [String(row.id), labelOf(row)]));
+  }
+  return rows.map((row) => {
+    if (!spec.total) return { id: String(row.id), etiqueta: spec.entidad && /^\d+$/.test(String(labelOf(row))) ? `${spec.entidad} ${labelOf(row)}` : String(labelOf(row)) };
+    const extra = Object.keys(spec.referencias || {}).map((campo) => (names[campo]?.get(String(row[campo])) ? `${campo.replace(/_id$/, '')} ${names[campo].get(String(row[campo]))}` : null)).filter(Boolean);
+    return { id: String(row.id), etiqueta: [`${spec.entidad} #${row.id}`, ...extra, `USD ${money(row[spec.total]).toFixed(2)}`].join(' · '), total: money(row[spec.total]) };
+  });
+}
+
+/** Una cuenta elegida para un papel (el mesero de una mesa) debe existir y tener ese rol. */
+async function checkRoles(store, def, values) {
+  for (const [campo, spec] of Object.entries(def.roles || {})) {
+    if (empty(values[campo]) || typeof store.findUserById !== 'function') continue;
+    const account = await store.findUserById(values[campo]);
+    if (!account || account.activo === false || account.rol !== spec.rol) throw new ActionError(400, `La cuenta elegida no es de un ${spec.nombre.toLowerCase()} activo.`);
+  }
+}
+
+/** Quién queda en cada campo con nombre de rol: quien ejecuta ese rol, lo que dice el registro relacionado o la cuenta elegida. */
+async function fillRoles(store, def, values, body, ctx) {
+  for (const item of def.rolInputs || []) {
+    if (ctx.user && ctx.user.rol === item.rol) { values[item.campo] = String(ctx.user.id); continue; }
+    if (item.heredar) {
+      const sourceId = values[item.heredar.via] ?? body[item.heredar.via];
+      if (empty(sourceId)) throw new ActionError(400, `Indica ${item.heredar.entidad.toLowerCase()}.`);
+      const source = await store.getRecord(item.heredar.capability, sourceId, null);
+      if (!source) throw new ActionError(400, `${item.heredar.entidad} inexistente.`);
+      const inherited = source.data?.[item.heredar.campo];
+      if (empty(inherited)) throw new ActionError(409, `${item.heredar.entidad} no tiene ${item.nombreRol.toLowerCase()} asignado.`);
+      values[item.campo] = String(inherited);
+      continue;
+    }
+    // Lo elige la persona (o queda sin dueño); si quien opera es el administrador en una operación de ese rol, queda a su nombre.
+    if (!item.elegido && ctx.user) values[item.campo] = String(ctx.user.id);
+  }
+}
+
+/** Reserva: la mesa completa ocupa todo; cada silla ocupa una plaza, hasta las que tiene la mesa. */
+async function checkCapacity(store, def, values) {
+  const spec = def.cupo;
+  const resource = values[spec.recurso];
+  const moment = values[spec.momento];
+  if (empty(resource) || empty(moment)) throw new ActionError(400, 'Indica el lugar, la fecha y la hora.');
+  const minute = (value) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 16); };
+  if (!minute(moment)) throw new ActionError(400, 'La fecha y hora no son válidas.');
+  const record = await store.getRecord(spec.capacidad.capability, resource, null);
+  if (!record) throw new ActionError(400, `${spec.capacidad.entidad} inexistente.`);
+  const taken = rowsFrom(await store.list(def.capability, { [spec.recurso]: resource }, null))
+    .filter((row) => minute(row[spec.momento]) === minute(moment) && !/^(anul|cancel|rechaz)/i.test(String(row.estado || '')));
+  const name = spec.capacidad.entidad.toLowerCase();
+  if (taken.some((row) => row[spec.tipo] === spec.completo)) throw new ActionError(409, `Esa ${name} ya está reservada completa para esa fecha y hora.`);
+  if (values[spec.tipo] === spec.completo) {
+    if (taken.length) throw new ActionError(409, `Esa ${name} ya tiene reservas para esa fecha y hora: no puede reservarse completa.`);
+    return;
+  }
+  const places = Number(record.data?.[spec.capacidad.campo]) || 0;
+  if (taken.length >= places) throw new ActionError(409, `No quedan sillas libres en esa ${name} para esa fecha y hora (${places} en total).`);
+}
+
+/** Antes de cobrar: el documento está listo y sin cobro; el monto es su total; el saldo prepagado alcanza. */
+async function prepareSettlement(store, def, values) {
+  const spec = def.liquida;
+  const doc = spec.documento;
+  const name = doc.entidad.toLowerCase();
+  Object.assign(values, spec.fijo || {});
+  const id = values[doc.campo];
+  if (empty(id)) throw new ActionError(400, `Elige el ${name} que se cobra.`);
+  const record = await store.getRecord(doc.capability, id, null);
+  if (!record) throw new ActionError(404, `${doc.entidad} inexistente.`);
+  const state = record.data?.[doc.estado];
+  const paid = rowsFrom(await store.list(def.capability, { [doc.campo]: id }, null));
+  if (state === doc.a || paid.length) throw new ActionError(409, `Ese ${name} ya fue cobrado: se cobra una sola vez.`);
+  if (state !== doc.de) throw new ActionError(409, `Solo se cobra un ${name} en estado ${doc.de} (está ${state || 'sin estado'}).`);
+  const total = money(record.data?.[doc.total]);
+  if (!(total > 0)) throw new ActionError(409, `El ${name} no tiene un total que cobrar.`);
+  values[spec.monto] = total;
+  if (spec.metodo && empty(values[spec.metodo])) throw new ActionError(400, 'Indica el método de pago.');
+  const holder = doc.cliente ? record.data?.[doc.cliente] : null;
+  let balance = null;
+  if (spec.saldo && values[spec.metodo] === spec.saldo.valor) {
+    const rule = spec.saldo;
+    if (empty(holder)) throw new ActionError(409, `El ${name} no tiene un cliente: no puede pagarse con saldo prepagado.`);
+    const today = localDate();
+    const active = rowsFrom(await store.list(rule.capability, { [rule.titular]: holder }, null)).filter((row) => row[rule.estado] === rule.activo);
+    if (!active.length) throw new ActionError(409, 'El cliente no tiene un paquete prepagado activo.');
+    const current = active.filter((row) => String(row[rule.inicio]).slice(0, 10) <= today && today <= String(row[rule.fin]).slice(0, 10));
+    if (!current.length) throw new ActionError(409, 'El paquete prepagado del cliente no está vigente.');
+    balance = current.find((row) => money(row[rule.campo]) >= total);
+    if (!balance) throw new ActionError(409, `Saldo insuficiente: quedan USD ${Math.max(...current.map((row) => money(row[rule.campo]))).toFixed(2)} y se necesitan USD ${total.toFixed(2)}.`);
+  }
+  return { id, total, holder, balance };
+}
+
+/** Después de cobrar: el documento queda pagado, el saldo baja en lo cobrado y el cliente suma sus puntos. */
+async function applySettlement(store, def, plan) {
+  const spec = def.liquida;
+  await store.update(spec.documento.capability, plan.id, { [spec.documento.estado]: spec.documento.a }, null);
+  if (plan.balance) await store.update(spec.saldo.capability, plan.balance.id, { [spec.saldo.campo]: money(money(plan.balance[spec.saldo.campo]) - plan.total) }, null);
+  const points = spec.puntos;
+  if (!points || empty(plan.holder)) return;
+  const lines = points.lineas;
+  let units = 0;
+  for (const line of rowsFrom(await store.list(lines.capability, { [lines.fk]: plan.id }, null))) {
+    const item = await store.getRecord(lines.destinoCapability, line[lines.referencia], null);
+    if (item?.data?.[lines.campo] === lines.valor) units += Number(line[lines.cantidad]) || 0;
+  }
+  if (!units) return;
+  await withLock(`puntos:${points.capability}:${plan.holder}`, async () => {
+    const [account] = rowsFrom(await store.list(points.capability, { [points.titular]: plan.holder }, null));
+    const earned = units * points.porUnidad;
+    if (account) await store.update(points.capability, account.id, { [points.campo]: (Number(account[points.campo]) || 0) + earned }, null);
+    else await store.create(points.capability, { [points.titular]: String(plan.holder), [points.campo]: earned }, null);
+  });
+}
+
+/** Añade a cada documento lo que contiene («2× Lomo saltado, 1× Jugo»). */
+async function withDetail(store, def, rows) {
+  const spec = def.detalle;
+  if (!spec || !rows.length) return rows;
+  const names = new Map(rowsFrom(await store.list(spec.destinoCapability, {}, null)).map((row) => [String(row.id), labelOf(row)]));
+  const lines = new Map();
+  for (const line of rowsFrom(await store.list(spec.capability, {}, null))) {
+    const key = String(line[spec.fk]);
+    lines.set(key, [...(lines.get(key) || []), `${line[spec.cantidad]}× ${names.get(String(line[spec.referencia])) || '?'}`]);
+  }
+  return rows.map((row) => ({ ...row, [spec.campo]: (lines.get(String(row.id)) || []).join(', ') }));
 }
 
 /** Valor de un filtro que depende de la sesión; null si la persona no tiene un registro asociado en la entidad referida. */
@@ -145,7 +320,7 @@ async function resolveFilters(store, def, ctx) {
 
 /** Valor que el servidor pone en un campo que la persona no escribe: la fecha del registro, el estado inicial o un código generado. */
 function autoValue(input) {
-  if (input.valor === 'hoy') return new Date().toISOString().slice(0, 10);
+  if (input.valor === 'hoy') return localDate();
   if (input.valor === 'inicial') return (input.opciones || [])[0] ?? null;
   if (input.valor === 'cero' || input.valor === 'lineas') return 0;
   if (input.valor === 'generado') return crypto.randomBytes(5).toString('hex').toUpperCase();
@@ -169,7 +344,8 @@ async function prepareLines(store, def, body) {
     if (record.data?.disponible === false) throw new ActionError(409, `Línea ${index + 1}: ${labelOf(record.data) || spec.destino} no está disponible.`);
     // Un producto desactivado no se vende.
     if (spec.activo && record.data?.[spec.activo.campo] !== undefined && record.data[spec.activo.campo] !== spec.activo.valor) {
-      throw new ActionError(409, `Línea ${index + 1}: ${labelOf(record.data) || spec.destino} está desactivado y no se puede vender.`);
+      const reason = /disponib/i.test(spec.activo.campo) ? 'está agotado y no se puede pedir' : 'está desactivado y no se puede vender';
+      throw new ActionError(409, `Línea ${index + 1}: ${labelOf(record.data) || spec.destino} ${reason}.`);
     }
     // No se vende más de lo que hay: suma las líneas del mismo producto antes de comparar con su stock.
     if (spec.stock) {
@@ -202,10 +378,61 @@ async function adjustStock(store, spec, lines, sign) {
   }
 }
 
+/** Gestión de usuarios: son cuentas de acceso (contraseña cifrada y rol válido), con los nombres de campo del modelo. */
+async function runAccount(def, ctx, body) {
+  const fields = def.cuenta;
+  const accounts = ctx.accounts;
+  if (!accounts) throw new ActionError(503, 'La gestión de cuentas no está disponible.');
+  const record = (user) => ({
+    id: String(user.id), ...(fields.nombre ? { [fields.nombre]: user.nombre } : {}), [fields.email]: user.email, ...(fields.rol ? { [fields.rol]: user.rol } : {}), activo: user.activo !== false
+  });
+  const input = () => {
+    const values = {};
+    const has = (key) => key && !empty(body[key]);
+    if (has(fields.email)) values.email = body[fields.email];
+    if (has(fields.password)) values.password = body[fields.password];
+    if (has(fields.nombre)) values.nombre = body[fields.nombre];
+    // El modelo puede listar los roles en mayúsculas (CAJERO): las cuentas los guardan en minúsculas.
+    if (has(fields.rol)) values.rol = String(body[fields.rol]).toLowerCase();
+    if (typeof body.activo === 'boolean') values.activo = body.activo;
+    return values;
+  };
+  if (def.type === 'consulta') return (await accounts.list()).map(record);
+  if (def.type === 'crear') return record(await accounts.create(input()));
+  if (def.type === 'actualizar') {
+    const values = input();
+    if (!Object.keys(values).length) throw new ActionError(400, 'No hay cambios que guardar.');
+    const updated = await accounts.update(ctx.id, values);
+    if (!updated) throw new ActionError(404, 'Registro inexistente');
+    return record(updated);
+  }
+  throw new ActionError(405, 'Las cuentas se desactivan, no se eliminan desde esta operación.');
+}
+
+/** Clave del recurso que no pueden tocar dos peticiones a la vez. */
+function lockKey(def, body, ctx) {
+  if (def.liquida) return `cobro:${def.liquida.documento.capability}:${body[def.liquida.documento.campo]}:${def.liquida.saldo ? def.liquida.saldo.capability : ''}`;
+  if (def.cupo) return `cupo:${def.capability}:${body[def.cupo.recurso]}`;
+  if (def.type === 'transicion') return `estado:${def.capability}:${ctx.id}`;
+  return null;
+}
+
 async function run(store, def, ctx = {}) {
   const body = ctx.body && typeof ctx.body === 'object' && !Array.isArray(ctx.body) ? ctx.body : {};
+  if (def.method === 'GET' && ctx.query?.opciones) return listOptions(store, def, ctx.query.opciones, ctx);
+  if (def.cuenta) return runAccount(def, ctx, body);
+  // El saldo de un mismo cliente puede pagar dos pedidos a la vez: los cobros se atienden de uno en uno.
+  const key = def.liquida?.saldo ? `cobro:${def.liquida.saldo.capability}` : lockKey(def, body, ctx);
+  return key ? withLock(key, () => execute(store, def, ctx, body)) : execute(store, def, ctx, body);
+}
+
+async function execute(store, def, ctx, body) {
   switch (def.type) {
+    case 'opciones':
+      throw new ActionError(400, 'Indica el campo del que quieres las opciones.');
     case 'consulta': {
+      // Una búsqueda por código no lista todo mientras no se escriba el código.
+      if (def.exigeParametro && (def.filters || []).filter((filter) => filter.origen === 'parametro').every((filter) => empty(ctx.query?.[filter.valor]))) return [];
       const filters = await resolveFilters(store, def, ctx);
       if (filters.some((filter) => filter.empty)) return [];
       const equality = Object.fromEntries(filters.filter((filter) => filter.operador === '==').map((filter) => [filter.campo, filter.value]));
@@ -215,13 +442,16 @@ async function run(store, def, ctx = {}) {
       const kept = rest.length ? list.filter((row) => rest.every((filter) => row[filter.campo] !== undefined && compare(row[filter.campo], filter.operador, filter.value))) : list;
       const related = await relate(store, def, kept);
       const labelsOf = (row) => Object.fromEntries(Object.entries(row).filter(([key]) => key.endsWith('__etiqueta') && (def.output || []).includes(key.slice(0, -'__etiqueta'.length))));
-      return withLabels(store, def, def.output?.length ? related.map((row) => ({ id: row.id, ...pick(row, def.output), ...labelsOf(row) })) : related);
+      const visible = def.output?.length ? related.map((row) => ({ id: row.id, ...pick(row, def.output), ...labelsOf(row) })) : related;
+      return withDetail(store, def, await withLabels(store, def, visible));
     }
     case 'crear': {
       const values = pick(body, def.inputs || []);
       if (!Object.keys(values).length && (def.inputs || []).length) throw new ActionError(400, `Envía al menos uno de: ${(def.inputs || []).join(', ')}.`);
       // Lo que completa el servidor no se toma de la petición: quien crea es la sesión y la marca de tiempo es la del registro.
       for (const input of def.sessionInputs || []) values[input.campo] = await sessionValue(store, ctx.user, input);
+      await checkRoles(store, def, values);
+      await fillRoles(store, def, values, body, ctx);
       // Emitir para un registro existente (la factura de una venta): debe existir y no tener ya uno vinculado.
       let linked = null;
       if (def.vincula) {
@@ -243,6 +473,13 @@ async function run(store, def, ctx = {}) {
           values[input.campo] = Number(linked?.data?.[input.desde]) || 0;
         } else values[input.campo] = autoValue(input);
       }
+      if (def.periodo) {
+        // Un saldo prepagado nace hoy, vence a los días acordados y sin saldo hasta que se pague.
+        if (def.periodo.positivo && !(Number(values[def.periodo.positivo]) > 0)) throw new ActionError(400, 'El monto debe ser mayor que cero.');
+        Object.assign(values, { [def.periodo.inicio]: localDate(), [def.periodo.fin]: localDate(def.periodo.dias), [def.periodo.saldo]: 0 });
+      }
+      if (def.cupo) await checkCapacity(store, def, values);
+      const settlement = def.liquida ? await prepareSettlement(store, def, values) : null;
       const lines = def.lineas ? await prepareLines(store, def, body) : [];
       if (def.lineas?.total && lines.length) values[def.lineas.total] = Math.round(lines.reduce((sum, line) => sum + line.subtotal, 0) * 100) / 100;
       const created = await store.create(def.capability, values, ctx.scope || null);
@@ -253,6 +490,7 @@ async function run(store, def, ctx = {}) {
         try { await store.remove(def.capability, created.id, ctx.scope || null); } catch { /* se informa el fallo original */ }
         throw error;
       }
+      if (settlement) await applySettlement(store, def, settlement);
       // Al registrar la venta, el stock de cada producto baja automáticamente.
       if (def.lineas?.stock && lines.length) await adjustStock(store, def.lineas, lines.map((line) => line.values), -1);
       if (linked) await store.update(def.vincula.capability, linked.id, { [def.vincula.campo]: created.id, ...(def.anula ? { [def.anula.estado]: def.anula.valor } : {}) }, ctx.scope || null);
@@ -272,6 +510,7 @@ async function run(store, def, ctx = {}) {
     case 'actualizar': {
       const values = pick(body, def.inputs || []);
       if (!Object.keys(values).length) throw new ActionError(400, `Envía al menos uno de: ${(def.inputs || []).join(', ')}.`);
+      await checkRoles(store, def, values);
       const updated = await store.update(def.capability, ctx.id, values, ctx.scope || null);
       if (!updated) throw new ActionError(404, 'Registro inexistente');
       return flat(updated);
@@ -338,7 +577,14 @@ async function run(store, def, ctx = {}) {
       const actual = current.data?.[campo];
       if (de.length && !de.includes(actual)) throw new ActionError(409, `No se puede pasar de «${actual ?? 'sin valor'}» a «${a}»: el estado debe ser ${de.join(' o ')}.`);
       if (actual === a) throw new ActionError(409, `El registro ya está «${a}».`);
-      const updated = flat(await store.update(def.capability, targetId, { [campo]: a }, ctx.scope || null));
+      const changes = { [campo]: a };
+      // Datos que la transición pide (lo pagado al activar un paquete) y los que se derivan de ellos (su saldo).
+      for (const required of def.alCambiar?.exigir || []) {
+        if (empty(body[required]) || !(Number(body[required]) > 0)) throw new ActionError(400, `Indica ${required} (un número mayor que cero).`);
+        changes[required] = money(body[required]);
+      }
+      for (const [target, source] of Object.entries(def.alCambiar?.copiar || {})) changes[target] = changes[source];
+      const updated = flat(await store.update(def.capability, targetId, changes, ctx.scope || null));
       // Anular una venta devuelve al producto el stock que descontaron sus líneas.
       if (def.reponer?.stock) {
         const found = await store.list(def.reponer.capability, { [def.reponer.fk]: targetId }, null);

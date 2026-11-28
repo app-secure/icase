@@ -95,7 +95,10 @@ class DiagramSemanticValidatorService {
 
     for (const requisito of requisitos) {
       const id = idRequisito(requisito);
-      const nombreTokens = tokens(requisito.nombre || requisito.descripcion);
+      // El actor va fuera del óvalo: «Gestión de usuarios por administrador» no puede exigir «administrador» en el nombre del caso.
+      const tokensActor = new Set((requisito.actores || []).flatMap(tokens));
+      const sinActor = tokens(requisito.nombre || requisito.descripcion).filter((token) => !tokensActor.has(token));
+      const nombreTokens = sinActor.length ? sinActor : tokens(requisito.nombre || requisito.descripcion);
       const coincidencias = nombreTokens.filter((token) => tokensCasos.has(token));
       const minimo = nombreTokens.length >= 4 ? 2 : 1;
       const trazado = (id && textoCodigo.includes(id)) || coincidencias.length >= minimo;

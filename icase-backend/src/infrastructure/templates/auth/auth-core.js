@@ -205,7 +205,7 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
       // Una operación de negocio exige el permiso equivalente del CRUD de su requisito.
       const def = require('../actions/actions').find(action[1], method, Boolean(action[2]));
       if (!def) return; // inexistente: responde 404 la ruta
-      const needed = { consulta: 'GET', resumen: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' }[def.type];
+      const needed = def.requiere || { consulta: 'GET', resumen: 'GET', crear: 'POST', actualizar: 'PATCH', transicion: 'PATCH', eliminar: 'DELETE' }[def.type];
       const byRole = policy.operaciones?.[def.permiso || def.capability] || {};
       if (user.rol !== ADMIN && !methodsOf(byRole[user.rol]).includes(needed)) throw new HttpError(403, 'No tienes permiso para esta operación.');
       return;
@@ -214,6 +214,7 @@ function createAuth({ store, env = process.env, now = Date.now } = {}) {
     if (operation) {
       const byRole = Object.prototype.hasOwnProperty.call(policy.operaciones || {}, operation[1]) ? policy.operaciones[operation[1]] : null;
       if (!byRole) return; // operación inexistente: responde 404 la ruta
+      if (user.rol !== ADMIN && method !== 'GET' && (policy.soloAcciones || []).includes(operation[1])) throw new HttpError(403, 'Este dato tiene reglas de negocio: regístralo con su operación, no con la escritura directa.');
       if (user.rol !== ADMIN && !methodsOf(byRole[user.rol]).includes(method)) throw new HttpError(403, 'No tienes permiso para esta operación.');
       return;
     }

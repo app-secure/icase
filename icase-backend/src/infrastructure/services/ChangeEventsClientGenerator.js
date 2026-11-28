@@ -53,6 +53,8 @@ class ChangeEventsClientGenerator {
       mobile.contenido=mobile.contenido.replace('{records.map((item, index) => <Text key={item.id || item._id || index}>{JSON.stringify(item)}</Text>)}','{records.map((item,index)=><React.Fragment key={item.id||item._id||index}><Text>{JSON.stringify(item)}</Text></React.Fragment>)}')
         .replace('{JSON.stringify(item)}</Text>','{JSON.stringify(item)}</Text><Associations relations={relations} operation={operation} record={item} call={call} revision={changesRevision} permissions={permisos}/>');
       mobile.contenido = `import { subscribeChanges } from './change-events-client';\n` + mobile.contenido;
+      // Las pantallas construidas desde la especificación se actualizan solas con los mismos avisos que la web.
+      mobile.contenido = mobile.contenido.replace('  const subscribe = undefined;', '  const subscribe = useCallback((operation, onChange) => (token ? subscribeChanges({ url: API, token, operations: [operation], onChange }) : undefined), [token]);');
       mobile.contenido = mobile.contenido.replace('import { Button,', 'import { AppState, Button,')
         .replace('  const signIn = async', `  useEffect(() => {
     if (!token || !operation?.key) return undefined;

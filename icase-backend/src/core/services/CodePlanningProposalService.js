@@ -62,9 +62,15 @@ class CodePlanningProposalService {
     const stack = this._propuestaAprobada(plan, 'stack_tecnologico');
     const acceso = this._propuestaAprobada(plan, 'control_acceso');
     const compatible = !/spring/i.test(stack.backend) && acceso.autenticacion?.metodo === 'jwt';
+    // Una mención excluida («fuera de alcance: lectura de códigos QR») no pide el módulo.
+    const frases = String(texto || '').split(/(?<=[.;!?\n])\s+|\n+/);
+    const excluida = (frase) => /\b(?:fuera\s+del?\s+alcance|queda\s+fuera|quedan\s+fuera|excluy\w*|exclusi\w*|descart\w*|no\s+(?:incluye|incluir\w*|se\s+\w+|habr\w*))/i.test(frase);
+    const pedida = (patron) => frases.some((frase) => patron.test(frase) && !excluida(frase));
+    // «Se actualizan en las pantallas sin recargar»: eso es avisar de los cambios en vivo, lo diga la pila o el requisito.
+    const enVivo = pedida(/sin\s+(?:necesidad\s+de\s+)?(?:recargar|refrescar)|(?:actualiza\w*|visibles?)\s+en\s+tiempo\s+real/i);
     const sugeridos = {
-      eventos_cambios: compatible && stack.tiempo_real === 'Socket.IO',
-      camara_qr: compatible && /\bqr\b/i.test(texto),
+      eventos_cambios: compatible && (stack.tiempo_real === 'Socket.IO' || enVivo),
+      camara_qr: compatible && pedida(/\bqr\b/i),
       reportes_calculos: compatible && /reportes?|estadísticas/i.test(texto),
       pagos_prueba: compatible && /stripe/i.test(texto) && /sandbox|de prueba/i.test(texto)
     };

@@ -1,4 +1,5 @@
 const { isLoginRequirement, isUsersRequirement, hasCredentials, isSensitiveField } = require('./IdentityRequirements');
+const Behaviors = require('./BusinessBehaviors');
 const { SYNONYMS } = require('./DomainSynonyms');
 const slug = (value) => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -32,6 +33,8 @@ class ApplicationContractBuilder {
    */
   build({ proyecto, requerimientos = [], screens = [], domainModel = null, rules = [], verbosPorRf = null, spec = null }) {
     const approved = requerimientos.filter((item) => item.aprobado === true && item.tipo === 'RF');
+    // Los roles del proyecto: un campo «mesero_id» solo pide una cuenta de mesero si «Mesero» es un actor.
+    this._actors = [...new Set(approved.flatMap((item) => (Array.isArray(item.actores) ? item.actores : [])))];
     const entities = domainModel?.entities || [];
     const warnings = [];
     // Una regla «X es obligatorio» sobre un dato que el alta no pide ni el sistema completa (el motivo de anulación al registrar una venta,
@@ -45,12 +48,16 @@ class ApplicationContractBuilder {
       if (rule.tipo !== 'requerido' || rule.estado_decision === 'rechazado') return true;
       const altas = (spec?.operaciones || []).filter((op) => op.tipo === 'crear' && op.entidad === entidadDe(rule) && op.estado_decision !== 'rechazado');
       if (!altas.length) return true;
-      const provee = (op) => [...(op.entradas || []), ...(op.autoEntradas || []).map((item) => item.campo), ...(op.sesionEntradas || []).map((item) => item.campo), op.lineas?.total].filter(Boolean).some((campo) => norm(campo) === norm(rule.campo));
+      const provee = (op) => [...(op.entradas || []), ...(op.autoEntradas || []).map((item) => item.campo), ...(op.sesionEntradas || []).map((item) => item.campo), op.lineas?.total,
+        ...(op.rolEntradas || []).map((item) => item.campo), ...(op.periodo ? [op.periodo.inicio, op.periodo.fin, op.periodo.saldo] : []), op.liquida?.monto, ...Object.keys(op.liquida?.fijo || {})].filter(Boolean).some((campo) => norm(campo) === norm(rule.campo));
       if (altas.some(provee)) return true;
       warnings.push(`${rule.id}: «${rule.mensaje}» no se aplica al alta de ${entidadDe(rule)}: el dato no se pide ni lo completa el sistema.`);
       return false;
     });
     if ((domainModel?.relations || []).some((r) => r.cardinalidad === 'muchos_a_muchos')) warnings.push('Relaciones N:M: API y panel web generados; MongoDB requiere replica set transaccional. Requiere verificación integral con base real antes de certificar la entrega completa.');
+    // Lo cobrado, los cobros y los cierres no se modifican ni se eliminan; un documento se cobra una sola vez (unicidad en la base de datos).
+    const locks = spec ? Behaviors.locks(spec.operaciones || [], new Map(entities.map((entity) => [entity.name, entity]))) : [];
+    rules = [...rules, ...locks];
     const operations = approved.map((item, index) => {
       const key = this._uniqueKey(slug(item.identificador || item.nombre), approved, index);
       const id = item.identificador || `RF-${String(index + 1).padStart(2, '0')}`;
@@ -78,24 +85,30 @@ class ApplicationContractBuilder {
         relatedEntities: match?.related.map((entity) => entity.key) || [],
         rules: match ? rules.filter((rule) => rule.entidad === match.primary.name) : [],
         schema: match ? match.primary.schema : { ...GENERIC_SCHEMA },
-        ...(specOps.length ? { actions: specOps.map((op) => this._action(op, entities)) } : {})
+        ...(specOps.length ? { actions: specOps.map((op) => this._account(this._action(op, entities), identity, match?.primary)) } : {})
       };
     });
     // Las líneas de un pedido se guardan en su propia entidad: si ningún requisito la gestiona, se le crea un almacén de soporte
     // (sin permisos para nadie salvo el administrador; las escribe el servidor al crear el pedido).
+    const referenced = (value, found = []) => {
+      if (!value || typeof value !== 'object') return found;
+      for (const key of ['entidadClave', 'destinoClave']) if (typeof value[key] === 'string') found.push(value[key]);
+      for (const child of Object.values(value)) referenced(child, found);
+      return found;
+    };
+    const needed = new Set(operations.flatMap((operation) => (operation.actions || []).flatMap((action) => referenced([action.rolInputs, action.liquida, action.cupo, action.detalle]))));
+    for (const entityKey of needed) {
+      const entity = entities.find((item) => item.key === entityKey);
+      if (!entity || operations.some((item) => item.entity === entityKey)) continue;
+      operations.push(this._supportStore(entity, operations, rules, `Datos de ${entity.name}`));
+    }
     for (const operation of [...operations]) {
       for (const action of operation.actions || []) {
         const hijos = [action.lineas, ...(action.relacionadas || []).map((rel) => rel.items)].filter(Boolean).map((linea) => entities.find((entity) => entity.key === linea.entidadClave)).filter(Boolean);
         const hijo = hijos.find((item) => !operations.some((other) => other.entity === item.key));
         if (!hijo) continue;
         const lineas = action.lineas?.entidadClave === hijo.key ? action.lineas : (action.relacionadas || []).map((rel) => rel.items).find((item) => item?.entidadClave === hijo.key);
-        let key = `op-${slug(hijo.name)}`;
-        for (let n = 2; operations.some((item) => item.key === key); n += 1) key = `op-${slug(hijo.name)}-${n}`;
-        operations.push({
-          id: `OP-${slug(hijo.name).toUpperCase()}`, key, name: `Líneas de ${lineas.entidad}`, description: `Almacén de soporte de ${hijo.name}`, actors: [],
-          collectionPath: `/api/operations/${key}`, itemPath: `/api/operations/${key}/:id`, methods: [...ALL_METHODS], entity: hijo.key, relatedEntities: [],
-          rules: rules.filter((rule) => rule.entidad === hijo.name), schema: hijo.schema, support: true
-        });
+        operations.push(this._supportStore(hijo, operations, rules, `Líneas de ${lineas.entidad}`));
       }
     }
     const used = new Set(operations.map((operation) => operation.entity).filter(Boolean));
@@ -168,6 +181,29 @@ class ApplicationContractBuilder {
     };
   }
 
+  /**
+   * «Crear usuario» es crear una cuenta (con su contraseña cifrada), no una fila en una tabla: una fila no puede iniciar sesión.
+   * Las operaciones del requisito de usuarios sobre la entidad de cuentas se ejecutan con las cuentas de la aplicación.
+   */
+  _account(action, identity, entity) {
+    if (identity !== 'usuarios' || !entity || action.entityName !== entity.name) return action;
+    const names = Object.keys(entity.schema?.properties || {});
+    const pick = (pattern) => names.find((name) => pattern.test(name));
+    const cuenta = { email: pick(/^(correo|email|mail)/i), password: names.find((name) => isSensitiveField(name)), nombre: pick(/^(nombre|name)$/i), rol: pick(/^rol$/i) };
+    return cuenta.email && cuenta.password ? { ...action, cuenta } : action;
+  }
+
+  /** Almacén de una entidad que ningún requisito gestiona: solo lo escribe el servidor (y el administrador). */
+  _supportStore(entity, operations, rules, name) {
+    let key = `op-${slug(entity.name)}`;
+    for (let n = 2; operations.some((item) => item.key === key); n += 1) key = `op-${slug(entity.name)}-${n}`;
+    return {
+      id: `OP-${slug(entity.name).toUpperCase()}`, key, name, description: `Almacén de soporte de ${entity.name}`, actors: [],
+      collectionPath: `/api/operations/${key}`, itemPath: `/api/operations/${key}/:id`, methods: [...ALL_METHODS], entity: entity.key, relatedEntities: [],
+      rules: rules.filter((rule) => rule.entidad === entity.name), schema: entity.schema, support: true
+    };
+  }
+
   /** Tipo y opciones de cada campo que la operación lee, escribe o filtra: el frontend arma sus controles con esto. */
   _fieldMeta(op, entities) {
     const entity = entities.find((item) => item.name === op.entidad);
@@ -207,6 +243,13 @@ class ApplicationContractBuilder {
       ...(op.resumen ? { resumen: op.resumen } : {}),
       ...(op.relacionadas?.length ? { relacionadas: op.relacionadas } : {}),
       ...(op.sobre ? { sobre: op.sobre } : {}),
+      ...(op.rolEntradas?.length ? { rolInputs: op.rolEntradas } : {}),
+      ...(op.liquida ? { liquida: op.liquida } : {}),
+      ...(op.periodo ? { periodo: op.periodo } : {}),
+      ...(op.alCambiar ? { alCambiar: op.alCambiar } : {}),
+      ...(op.cupo ? { cupo: op.cupo } : {}),
+      ...(op.detalle ? { detalle: op.detalle } : {}),
+      ...(op.exigeParametro ? { exigeParametro: true } : {}),
       output: op.salida || [],
       ...(op.transicion ? { transition: op.transicion } : {}),
       description: op.descripcion || ''
@@ -303,7 +346,49 @@ class ApplicationContractBuilder {
         ...(objetivo && operationOf.get(objetivo.key) ? { agrupadoCapability: operationOf.get(objetivo.key) } : {})
       };
     }
-    return { ...action, capability, filters, fields, lineas, relacionadas, ...(reponer ? { reponer } : {}), ...(cascada ? { cascada } : {}), ...(vincula ? { vincula } : {}), ...(anula ? { anula } : {}), ...(resumen ? { resumen } : {}) };
+    // Comportamientos de negocio: cada entidad que usan se resuelve a su almacén.
+    const bound = (value) => {
+      if (Array.isArray(value)) return value.map(bound);
+      if (!value || typeof value !== 'object') return value;
+      const result = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, bound(child)]));
+      if (typeof value.entidadClave === 'string') result.capability = operationOf.get(value.entidadClave);
+      if (typeof value.destinoClave === 'string') result.destinoCapability = operationOf.get(value.destinoClave);
+      return result;
+    };
+    const behaviors = Object.fromEntries(['rolInputs', 'liquida', 'cupo', 'detalle'].filter((name) => action[name]).map((name) => [name, bound(action[name])]));
+    const choices = this._choices(action, { entity, entities, operationOf });
+    return { ...action, ...behaviors, ...choices, capability, filters, fields, lineas, relacionadas, ...(reponer ? { reponer } : {}), ...(cascada ? { cascada } : {}), ...(vincula ? { vincula } : {}), ...(anula ? { anula } : {}), ...(resumen ? { resumen } : {}) };
+  }
+
+  /**
+   * Lo que la persona elige de una lista (mesa, cliente, mesero, pedido por cobrar) y las cuentas que debe tener cada rol elegido.
+   * La aplicación pide estas opciones con el permiso de la propia operación: no necesita acceso a las tablas completas.
+   */
+  _choices(action, { entity, entities, operationOf }) {
+    if (!['crear', 'actualizar'].includes(action.type) || !entity) return {};
+    const options = {};
+    const roles = {};
+    for (const field of action.inputs || []) {
+      const definition = entity.schema?.properties?.[field];
+      const targetName = definition?.['x-references'];
+      if (!targetName) continue;
+      if (Behaviors.ACCOUNT.test(targetName)) {
+        const role = Behaviors.roleOfField(field, definition, this._actors || []);
+        options[field] = { cuentas: true, ...(role ? { rol: Behaviors.roleId(role) } : {}) };
+        if (role) roles[field] = { rol: Behaviors.roleId(role), nombre: role };
+        continue;
+      }
+      const target = entities.find((item) => item.name === targetName);
+      const capability = target && operationOf.get(target.key);
+      if (!capability) continue;
+      const settle = action.liquida?.documento.campo === field ? action.liquida.documento : null;
+      const references = settle ? Object.fromEntries(Object.entries(target.schema?.properties || {})
+        .map(([name, property]) => [name, entities.find((item) => item.name === property['x-references'])])
+        .filter(([, other]) => other && !Behaviors.ACCOUNT.test(other.name) && operationOf.get(other.key))
+        .map(([name, other]) => [name, operationOf.get(other.key)])) : null;
+      options[field] = { capability, entidad: target.name, ...(settle ? { estado: { campo: settle.estado, valor: settle.de }, total: settle.total, referencias: references } : {}) };
+    }
+    return { ...(Object.keys(options).length ? { opciones: options } : {}), ...(Object.keys(roles).length ? { roles } : {}) };
   }
 
   /** GET más los métodos de los verbos válidos declarados, en orden canónico; sin verbos, CRUD completo. */

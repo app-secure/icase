@@ -56,3 +56,6 @@ __pycache__/
 # Corridas de prueba del proyecto de Ventas (resultados, hallazgos y salidas generadas)
 /docs/pruebas/ventas/runs/
 /salida-ventas*/
+/salida-prestamos*/
+/docs/pruebas/restaurante/runs/
+/salida-restaurante*/

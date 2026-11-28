@@ -1,0 +1,37 @@
+Sistema de préstamo de herramientas del taller
+
+DESCRIPCIÓN
+Aplicación web, usada desde computadora en el taller de una institución técnica, para controlar el préstamo de herramientas a los estudiantes. No habrá aplicación móvil.
+
+ROLES (solo dos)
+- Encargado: gestiona herramientas y estudiantes, aprueba o rechaza solicitudes, registra la entrega y la devolución, y ve los préstamos vencidos.
+- Estudiante: solicita préstamos y consulta solo sus propias solicitudes.
+
+DATOS
+- Herramienta: nombre, categoría y cantidad disponible.
+- Estudiante: nombre, código de estudiante y correo.
+- Solicitud de préstamo: estudiante, herramienta, fecha de solicitud, fecha de devolución y estado. Los estados son: solicitada, aprobada, rechazada, entregada y devuelta. Si se rechaza, se guarda el motivo.
+
+REQUISITOS FUNCIONALES (ocho)
+1. Gestionar herramientas: el Encargado crea, edita y consulta herramientas.
+2. Gestionar estudiantes: el Encargado crea, edita y consulta estudiantes.
+3. Solicitar préstamo: el Estudiante elige una herramienta y una fecha de devolución. La solicitud nace en estado solicitada.
+4. Aprobar o rechazar solicitud: el Encargado aprueba o rechaza una solicitud; al rechazar indica el motivo.
+5. Registrar entrega: el Encargado registra que entregó la herramienta de una solicitud aprobada. La cantidad disponible baja en una unidad.
+6. Registrar devolución: el Encargado registra que el estudiante devolvió la herramienta. La cantidad disponible sube en una unidad.
+7. Consultar mis solicitudes: el Estudiante ve el estado de sus propias solicitudes. No ve las de otros.
+8. Ver préstamos vencidos: el Encargado ve los préstamos vencidos. Un préstamo está vencido cuando pasó su fecha de devolución y la herramienta no se devolvió.
+
+REGLAS
+- El plazo de un préstamo es de hasta 3 días.
+- No se puede solicitar una herramienta sin unidades disponibles.
+- Un estudiante con un préstamo vencido no puede solicitar otro.
+
+TÉCNICO
+Node.js con Express, PostgreSQL y React con Tailwind CSS. Autenticación con JWT y contraseñas cifradas. Un solo servidor pequeño, sin servicios externos.
+
+FUERA DE ALCANCE
+Multas, reservas anticipadas, avisos por correo y varias sedes.
+
+CRITERIO NO FUNCIONAL
+Registrar una solicitud debe tardar menos de dos segundos con diez personas conectadas.

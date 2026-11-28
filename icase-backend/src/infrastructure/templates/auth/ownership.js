@@ -36,6 +36,10 @@ function sharedTables(policy, user, model) {
   return [...shared];
 }
 
+function createdTables(policy, user, model) {
+  return [...new Set(Object.entries(model?.operations || {}).filter(([key]) => methodsOf(policy?.operaciones?.[key]?.[user.rol]).includes('POST')).map(([, table]) => table))];
+}
+
 function ownerScope(policy, user, operation) {
   if (!user || user.rol === ADMIN) return null;
   if (alcanceOf(policy?.operaciones?.[operation]?.[user.rol]) !== 'propios') return null;
@@ -48,7 +52,10 @@ function scopeOf(policy, user, operation, model) {
   let data = model;
   if (!data) { try { data = require('../data/model'); } catch { data = null; } }
   const shared = sharedTables(policy, user, data);
-  return shared.length ? { ...scope, shared } : scope;
+  // Con columnas de rol («mesero_id»), «lo propio» es donde figura la persona; lo que su rol nunca registra es un catálogo que puede elegir.
+  const byRole = Object.values(data?.tables || {}).some((table) => table.roles?.[user.rol]);
+  const role = byRole ? { rol: user.rol, creates: createdTables(policy, user, data) } : {};
+  return { ...scope, ...role, ...(shared.length ? { shared } : {}) };
 }
 
 function keysForTable(model, tableName) {

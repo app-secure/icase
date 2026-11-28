@@ -1,7 +1,7 @@
 const { MongoClient, ObjectId } = require('mongodb');
 const model = require('./data/model');
 const migrations = require('./data/migrations');
-const { HttpError, withRetry, split, viewOf, toRecord, tableFor, publicColumns, ownerWhere, assignOwner } = require('./data/store-support');
+const { HttpError, withRetry, split, viewOf, toRecord, tableFor, publicColumns, ownerColumn, ownerWhere, assignOwner } = require('./data/store-support');
 const rules = require('./data/rules-engine');
 
 const OPTIONS = { idKind: 'objectid' };
@@ -163,7 +163,9 @@ class RecordStore {
     if (!ObjectId.isValid(id)) return false;
     const filter = { _id: new ObjectId(id) };
     this._applyOwnerFilter(filter, table, scope);
-    if (scope?.ownerId && !(await this.db.collection(name).findOne(filter))) return false;
+    const current = await this.db.collection(name).findOne(filter);
+    if (scope?.ownerId && !current) return false;
+    if (current) { const stored = toRecord(table, operation, current, { includeSensitive: true }).data; rules.check(name, 'delete', stored, stored); }
     const endpoint = (model.associations || []).some((relation) => model.tables[relation.table].columns.some((column) => column.references === name));
     if (endpoint) return require('./data/mongo-associations').remove(this, name, id);
     for (const reference of this.inbound.filter((item) => item.target === name)) {
@@ -233,7 +235,7 @@ class RecordStore {
   _applyOwnerFilter(filter, table, scope) {
     const owner = ownerWhere(table, scope);
     if (!owner) return;
-    filter.owner_id = ObjectId.isValid(owner) ? new ObjectId(owner) : owner;
+    filter[ownerColumn(table, scope)] = ObjectId.isValid(owner) ? new ObjectId(owner) : owner;
   }
 
   async _assertOwnedReferences(table, values, scope) {
@@ -244,9 +246,11 @@ class RecordStore {
       if (id == null) continue;
       if ((scope?.shared || []).includes(reference.table)) continue; // catálogo que el rol consulta completo
       const target = model.tables[reference.table];
-      if (!target || !target.columns.some((column) => column.column === 'owner_id')) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+      if (scope.rol && target && !target.roles?.[scope.rol] && !(scope.creates || []).includes(reference.table)) continue;
+      const column = target && ownerColumn(target, scope);
+      if (!column) throw new HttpError(409, 'El registro referencia un dato ajeno.');
       const row = await this.db.collection(reference.table).findOne({ _id: new ObjectId(id) });
-      if (!row || row.owner_id == null || String(row.owner_id) !== owner) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+      if (!row || row[column] == null || String(row[column]) !== owner) throw new HttpError(409, 'El registro referencia un dato ajeno.');
     }
   }
 

@@ -32,6 +32,36 @@ describe('alcance «solo lo propio» sobre datos compartidos', () => {
     expect(value.operaciones['rf-11'].cliente.alcance).toBe('propios');
   });
 
+  test('un rol que crea registros de una entidad (la solicitud de préstamo de un estudiante) conserva «propios» y POST sin apuntar a un usuario', () => {
+    const prestamos = {
+      entities: [
+        { key: 'herramienta', name: 'Herramienta', references: [] },
+        { key: 'solicitudprestamo', name: 'SolicitudPrestamo', references: [{ entity: 'Herramienta' }, { entity: 'Estudiante' }] }
+      ],
+      operations: [
+        { key: 'rf-01', entity: 'herramienta' },
+        { key: 'rf-03', entity: 'solicitudprestamo' },
+        { key: 'rf-07', entity: 'solicitudprestamo' }
+      ]
+    };
+    const value = {
+      habilitada: true,
+      operaciones: {
+        'rf-01': { encargado: { metodos: ['GET', 'POST'], alcance: 'todos' }, estudiante: { metodos: ['GET'], alcance: 'propios' } },
+        'rf-03': { estudiante: { metodos: ['GET', 'POST'], alcance: 'propios' }, auditor: { metodos: ['GET'], alcance: 'propios' } },
+        'rf-07': { estudiante: { metodos: ['GET'], alcance: 'propios' } }
+      }
+    };
+    new GenericBackendGenerator()._limitScopes(prestamos, value);
+    // El estudiante crea solicitudes: sigue pudiendo crear y solo ve las suyas, también en la consulta (otra operación, misma entidad).
+    expect(value.operaciones['rf-03'].estudiante).toEqual({ metodos: ['GET', 'POST'], alcance: 'propios' });
+    expect(value.operaciones['rf-07'].estudiante).toEqual({ metodos: ['GET'], alcance: 'propios' });
+    // Quien no crea esa entidad no puede ser su dueño: se le degrada a consulta completa.
+    expect(value.operaciones['rf-03'].auditor).toEqual({ metodos: ['GET'], alcance: 'todos' });
+    // El catálogo (herramientas) sigue sin ser de nadie: el estudiante lo consulta completo.
+    expect(value.operaciones['rf-01'].estudiante).toEqual({ metodos: ['GET'], alcance: 'todos' });
+  });
+
   test('sin autenticación no hace nada', () => {
     const value = { habilitada: false, operaciones: policy().operaciones };
     new GenericBackendGenerator()._limitScopes(contract, value);

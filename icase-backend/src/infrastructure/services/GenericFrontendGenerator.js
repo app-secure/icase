@@ -128,7 +128,7 @@ class GenericFrontendGenerator {
       routes.push(`<Route path=${JSON.stringify(view.route)} element={<${name}/>}/>`);
       const screen = screens.find((item) => this._view(item, screens, requerimientos).id === view.id);
       // Una pantalla con componentes aprobados en la especificación se construye con ellos, no con el HTML del mockup.
-      const specPage = this._specPage(view, name, spec);
+      const specPage = this._specPage(view, name, spec, screen?.mockup?.preview_code);
       // El mockup aprobado es la interfaz de la pantalla; la especificación aporta las operaciones con las que sus botones guardan y consultan.
       // Solo si el mockup no se puede convertir a la interfaz, la pantalla se construye únicamente con los componentes de la especificación.
       const specFound = specPage ? this._specBlocks(view, spec) : null;
@@ -138,7 +138,9 @@ class GenericFrontendGenerator {
         : (screen?.mockup?.preview_code ? [] : view.operations);
       const mockupHtml = screen?.mockup?.preview_code;
       const mockupProbe = specPage && mockupHtml ? HtmlToJsxTransformer.analyze(mockupHtml, { operaciones: new Set(views.flatMap((item) => item.operations)), routes: routeSet, referencias: referencias || {} }) : null;
-      if (specPage && !mockupProbe?.jsx) {
+      const functional = specPage && this._businessRules(spec);
+      if (functional) view.operations = this._permissionsOfBlocks(specFound);
+      if (specPage && (functional || !mockupProbe?.jsx)) {
         files.push({ ruta: `frontend/src/pages/${view.id}.jsx`, lenguaje: 'javascript', contenido: specPage.contenido });
         if (mockupHtml) files.push({ ruta: `frontend/mockups-reference/${view.id}.html`, lenguaje: 'html', contenido: mockupHtml });
         specSummaries.set(view.id, specPage.resumen);
@@ -203,6 +205,7 @@ class GenericFrontendGenerator {
       anyReferences = true;
       files.push(
         { ruta: 'frontend/src/SpecComponents.jsx', lenguaje: 'javascript', contenido: `import './spec.css';\n${template('SpecComponents.jsx')}` },
+        { ruta: 'frontend/src/specFormat.js', lenguaje: 'javascript', contenido: template('spec-format.js') },
         { ruta: 'frontend/src/spec.css', lenguaje: 'css', contenido: template('spec.css') },
         { ruta: 'frontend/src/liveTables.js', lenguaje: 'javascript', contenido: template('live-tables.js') }
       );
@@ -239,7 +242,7 @@ class GenericFrontendGenerator {
     if (consoleOps.length) files.push({ ruta: 'frontend/src/DataConsole.jsx', lenguaje: 'javascript', contenido: renderTemplate(template('DataConsole.jsx'), { OPERACIONES: JSON.stringify(consoleOps) }) });
     const first = views[0]?.route || '/';
     files.push({ ruta: 'frontend/src/App.jsx', lenguaje: 'javascript', contenido: auth ? this._appWithAuth(proyecto, views, imports, routes, standalone, consoleOps, uiControls) : this._app(proyecto, views, imports, routes, first, standalone) });
-    if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth, mobileViews, spec));
+    if (platforms.some((item) => /m[oó]vil|android|ios|react native/i.test(item))) files.push(...this._mobile(proyecto.nombre, auth, mobileViews, spec, openRoles));
     if(new ModuleService().activos(decisiones.modulos).includes('procesos_negocio')){
       if(!auth)throw new Error('La bandeja de procesos requiere JWT');
       if(views.some(view=>view.route==='/procesos'))throw new Error('La ruta /procesos está reservada para la bandeja de procesos');
@@ -284,9 +287,51 @@ class GenericFrontendGenerator {
     const used = new Set(blocks.flatMap((block) => [block.operacion, ...block.acciones.map((action) => action.operacion)]));
     const actions = Object.fromEntries([...used].map((operation) => {
       const action = byName.get(operation);
-      return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, ...(action.permission && action.permission !== action.capability ? { permiso: action.permission } : {}), entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output, ...(action.relacionadas?.length ? { relacionadas: action.relacionadas.map((rel) => ({ clave: rel.clave, items: Boolean(rel.items) })) } : {}), ...(action.lineas?.capability ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad, destino: action.lineas.destino, precio: action.lineas.precio?.desde || null, ...(action.lineas.stock ? { stock: action.lineas.stock } : {}) } } : {}), ...(action.vincula ? { vincula: action.vincula } : {}), ...(action.anula ? { anula: action.anula } : {}) }];
+      return [operation, { name: action.name, type: action.type, method: action.method, path: action.path, byId: action.byId, capability: action.capability, ...(action.permission && action.permission !== action.capability ? { permiso: action.permission } : {}), entity: action.entity, filters: action.filters, fields: action.fields, inputs: action.inputs, output: action.output, ...(action.relacionadas?.length ? { relacionadas: action.relacionadas.map((rel) => ({ clave: rel.clave, items: Boolean(rel.items) })) } : {}), ...(action.lineas?.capability ? { lineas: { referencia: action.lineas.referencia, cantidad: action.lineas.cantidad, destino: action.lineas.destino, precio: action.lineas.precio?.desde || null, ...(action.lineas.stock ? { stock: action.lineas.stock } : {}) } } : {}), ...(action.vincula ? { vincula: action.vincula } : {}), ...(action.anula ? { anula: action.anula } : {}), ...this._presentation(action) }];
     }));
     return { blocks, actions, used };
+  }
+
+  /** Lo que la interfaz necesita para presentar una operación: qué se elige, cuándo se ofrece cada botón y qué pide un cambio. */
+  _presentation(action) {
+    const optional = (action.rolInputs || []).filter((item) => item.elegido).map((item) => item.campo);
+    return {
+      ...(action.opciones ? { opciones: Object.keys(action.opciones) } : {}),
+      ...(optional.length ? { opcionales: optional } : {}),
+      ...(action.transition ? { transition: action.transition } : {}),
+      ...(action.alCambiar ? { alCambiar: action.alCambiar } : {}),
+      ...(action.liquida ? { liquida: { campo: action.liquida.documento.campo } } : {}),
+      ...(action.periodo ? { periodo: true } : {}),
+      ...(action.detalle ? { detalle: { campo: action.detalle.campo } } : {}),
+      ...(action.exigeParametro ? { exigeParametro: true } : {}),
+      ...(action.cuenta ? { cuenta: action.cuenta } : {}),
+      ...(action.type === 'resumen' && action.resumen?.agruparPor ? { agrupado: true } : {})
+    };
+  }
+
+  /**
+   * Con reglas de negocio (cobro, cupo, saldo, papeles) cada pantalla se construye con sus operaciones: el HTML del mockup trae datos de
+   * ejemplo y controles que no ejecutan esas reglas, y conectarlo por aproximación dejaba formularios sin enviar o botones de otro rol.
+   */
+  _businessRules(spec) {
+    return (spec?.acciones || []).some((action) => ['rolInputs', 'liquida', 'cupo', 'periodo', 'alCambiar'].some((key) => action[key]));
+  }
+
+  /** Título y explicación que el mockup aprobado le dio a la pantalla. */
+  _heading(mockupHtml, fallback) {
+    const html = String(mockupHtml || '');
+    const title = this._plainText((html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i) || [])[1] || '');
+    const after = title ? html.slice(html.search(/<\/h1>/i)) : '';
+    const lead = this._plainText((after.match(/^<\/h1>\s*(?:<\/?(?:div|header)\b[^>]*>\s*)*<p\b[^>]*>([\s\S]*?)<\/p>/i) || [])[1] || '');
+    const clean = (value) => value.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
+    // La explicación del diseño solo se usa si no trae datos de ejemplo: un nombre propio («las mesas de Carlos Méndez») o cifras.
+    const sample = /\d/.test(lead) || clean(lead).split(/[.!?]\s+/).some((sentence) => /\s[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+/.test(sentence));
+    return { title: clean(title) || fallback, lead: lead.length <= 200 && !sample ? clean(lead) : '' };
+  }
+
+  /** Quien puede abrir una pantalla construida con operaciones es quien puede ejecutar alguna: no las que la trazabilidad le atribuyó. */
+  _permissionsOfBlocks(found) {
+    return [...new Set(found.blocks.map((block) => found.actions[block.operacion]).map((action) => action.permiso || action.capability))];
   }
 
   /** `rf-15.crear` → la operación de la especificación que guarda: un botón del mockup llama a la operación con nombre y no a un CRUD genérico. */
@@ -308,11 +353,12 @@ class GenericFrontendGenerator {
     return map;
   }
 
-  _specPage(view, name, spec) {
+  _specPage(view, name, spec, mockupHtml = '') {
     const found = this._specBlocks(view, spec);
     if (!found) return null;
     const { blocks, actions, used } = found;
-    const contenido = `import React from 'react';\nimport { SpecBlock } from '../SpecComponents';\n\nconst actions = ${JSON.stringify(actions, null, 2)};\nconst blocks = ${JSON.stringify(blocks, null, 2)};\n\nexport default function ${name}() {\n  return (\n    <main className="spec-page" data-screen=${JSON.stringify(view.id)}>\n      <h1>{${JSON.stringify(view.name)}}</h1>\n      {blocks.map((block, index) => <SpecBlock key={index} block={block} actions={actions} />)}\n    </main>\n  );\n}\n`;
+    const heading = this._heading(mockupHtml, view.name);
+    const contenido = `import React from 'react';\nimport { SpecBlock } from '../SpecComponents';\n\nconst actions = ${JSON.stringify(actions, null, 2)};\nconst blocks = ${JSON.stringify(blocks, null, 2)};\n\nexport default function ${name}() {\n  return (\n    <main className="spec-page" data-screen=${JSON.stringify(view.id)}>\n      <header><h1>{${JSON.stringify(heading.title)}}</h1>${heading.lead ? `<p className="lead">{${JSON.stringify(heading.lead)}}</p>` : ''}</header>\n      {blocks.map((block, index) => <SpecBlock key={index} block={block} actions={actions} />)}\n    </main>\n  );\n}\n`;
     return { contenido, resumen: { componentes: blocks.length, operaciones: [...used], bloques: blocks.map((block) => ({ tipo: block.tipo, operacion: block.operacion })) } };
   }
 
@@ -543,19 +589,23 @@ export default function App() {
 `;
   }
 
-  _mobile(name, auth = false, views = [], spec = null) {
-    const screens = views.map((view) => {
+  _mobile(name, auth = false, views = [], spec = null, openRoles = []) {
+    const functional = this._businessRules(spec);
+    // El inicio de sesión y el registro son el acceso de la aplicación, no pantallas del menú.
+    const access = /^(?:pantalla de )?(?:inicio de sesion|iniciar sesion|login|registro de cuenta|crear cuenta|registro de usuario)\b/;
+    const screens = views.filter((view) => !(auth && access.test(String(view.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()))).map((view) => {
       const found = this._specBlocks(view, spec);
-      return { id: view.id, name: view.name, roles: view.roles, operations: view.operations, ...(found ? { blocks: found.blocks, actions: found.actions } : {}) };
+      return { id: view.id, name: view.name, roles: view.roles, operations: found && functional ? this._permissionsOfBlocks(found) : view.operations, ...(found ? { blocks: found.blocks, actions: found.actions, usadas: [...found.used] } : {}) };
     });
     return [
       { ruta: 'mobile/package.json', lenguaje: 'json', contenido: JSON.stringify({ name: `${slug(name)}-mobile`, version: '1.0.0', private: true, engines: { node: MobileRuntime.node }, main: 'node_modules/expo/AppEntry.js', scripts: { start: 'expo start', 'export:android': 'expo export --platform android' }, dependencies: { expo: MobileRuntime.expo, react: MobileRuntime.react, 'react-native': MobileRuntime.reactNative } }, null, 2) },
       { ruta: 'mobile/app.json', lenguaje: 'json', contenido: JSON.stringify({ expo: { name, slug: slug(name), version: '1.0.0', platforms: ['android', 'ios'] } }, null, 2) },
       { ruta: 'mobile/.env.example', lenguaje: 'dotenv', contenido: 'EXPO_PUBLIC_API_URL=http://YOUR_LAN_IP:3000\n' },
-      { ruta: 'mobile/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: name, pantallas: screens.map(({ id, name, roles, operations, blocks }) => ({ id, name, roles, operations, ...(blocks ? { origen: 'especificacion', componentes: blocks.length } : {}) })) }, null, 2) },
+      { ruta: 'mobile/icase.manifest.json', lenguaje: 'json', contenido: JSON.stringify({ proyecto: name, pantallas: screens.map(({ id, name, roles, operations, blocks, usadas }) => ({ id, name, roles, operations, ...(blocks ? { origen: 'especificacion', componentes: blocks.length, especificacion: { operaciones: usadas } } : {}) })) }, null, 2) },
       { ruta: 'mobile/SpecScreen.js', lenguaje: 'javascript', contenido: template('mobile-SpecScreen.js') },
+      { ruta: 'mobile/specFormat.js', lenguaje: 'javascript', contenido: template('spec-format.js') },
       { ruta: 'mobile/README.md', lenguaje: 'markdown', contenido: '# Aplicación móvil\n\n1. Copia `.env.example` a `.env` y sustituye `YOUR_LAN_IP` por una dirección accesible desde el emulador o dispositivo.\n2. Ejecuta `npm install` y `npm start` en esta carpeta.\n3. Inicia el backend y verifica la conexión desde el dispositivo.\n\nEste proyecto Expo no es un APK o IPA firmado. Las pantallas y operaciones incluidas constan en `icase.manifest.json`.\n' },
-      { ruta: 'mobile/App.js', lenguaje: 'javascript', contenido: renderTemplate(template('mobile-App.js'), { AUTH: String(auth), TITLE: JSON.stringify(name), SCREENS: JSON.stringify(screens) }) }
+      { ruta: 'mobile/App.js', lenguaje: 'javascript', contenido: renderTemplate(template('mobile-App.js'), { AUTH: String(auth), TITLE: JSON.stringify(name), SCREENS: JSON.stringify(screens.map(({ usadas, ...screen }) => screen)), REGISTRO: JSON.stringify(openRoles) }) }
     ];
   }
 

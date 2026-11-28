@@ -51,6 +51,17 @@ function prepare(table, body) {
  * @param {object|null} previous datos antes de la modificación (solo en 'update')
  */
 function check(table, mode, next, previous) {
+  // Lo cobrado y los cierres no cambian: ni se modifican ni se eliminan, tampoco por el administrador.
+  if (mode !== 'create') {
+    for (const rule of rules[table] || []) {
+      if (rule.tipo === 'solo_insercion' || (rule.tipo === 'bloqueo' && previous && previous[rule.campo] === rule.valor)) {
+        const error = new HttpError(409, rule.mensaje);
+        error.details = [{ regla: rule.id, mensaje: rule.mensaje }];
+        throw error;
+      }
+    }
+  }
+  if (mode === 'delete') return;
   const violations = [];
   const fail = (rule) => violations.push({ regla: rule.id, mensaje: rule.mensaje, rf: rule.rf });
   for (const rule of rules[table] || []) {

@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { HttpError, split, viewOf, toRecord, tableFor, publicColumns, ownerWhere, assignOwner } = require('../src/infrastructure/templates/data-layer/store-support');
+const { HttpError, split, viewOf, toRecord, tableFor, publicColumns, ownerColumn, ownerWhere, assignOwner } = require('../src/infrastructure/templates/data-layer/store-support');
 
 const model = {
   database: 'postgres',
@@ -23,7 +23,7 @@ function loadStore(filename, database, queryImpl) {
       if (name === 'mongodb') return { MongoClient: class {}, ObjectId: class { constructor(id) { this.id = id; } static isValid() { return true; } } };
       if (name === './data/model') return { ...model, database };
       if (name === './data/migrations') return [];
-      if (name === './data/store-support') return { HttpError, withRetry: (fn) => fn(), split, viewOf, toRecord, tableFor, publicColumns, ownerWhere, assignOwner };
+      if (name === './data/store-support') return { HttpError, withRetry: (fn) => fn(), split, viewOf, toRecord, tableFor, publicColumns, ownerColumn, ownerWhere, assignOwner };
       if (name === './data/rules-engine') return { prepare: (_table, body) => body, derive: (_table, body) => body, check() {} };
       return require(name);
     },
@@ -68,7 +68,7 @@ describe('filtros de propietario en almacenes', () => {
         if (name === 'mongodb') return { MongoClient: class { constructor() { this.db = () => ({}); } }, ObjectId: class ObjectId { constructor(id) { this.id = String(id); } toString() { return this.id; } static isValid() { return true; } } };
         if (name === './data/model') return { ...model, database: 'mongodb' };
         if (name === './data/migrations') return [];
-        if (name === './data/store-support') return { HttpError, withRetry: (fn) => fn(), split, viewOf, toRecord, tableFor, publicColumns, ownerWhere, assignOwner };
+        if (name === './data/store-support') return { HttpError, withRetry: (fn) => fn(), split, viewOf, toRecord, tableFor, publicColumns, ownerColumn, ownerWhere, assignOwner };
         if (name === './data/rules-engine') return { prepare: (_table, body) => body, derive: (_table, body) => body, check() {} };
         return require(name);
       },

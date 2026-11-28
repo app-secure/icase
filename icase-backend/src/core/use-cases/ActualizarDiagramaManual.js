@@ -2,7 +2,8 @@ const { normalizeDiagramType } = require('../constants/DiagramTypes');
 const { DiagramWorkflowService, DIAGRAM_STATES } = require('../services/DiagramWorkflowService');
 
 class ActualizarDiagramaManual {
-  constructor({ diagramaRepository, plantumlValidatorService, proyectoRepository = null }) {
+  constructor({ diagramaRepository, plantumlValidatorService, proyectoRepository = null, requerimientoRepository = null }) {
+    this.requerimientoRepository = requerimientoRepository;
     this.diagramaRepository = diagramaRepository;
     this.plantumlValidatorService = plantumlValidatorService;
     this.proyectoRepository = proyectoRepository;
@@ -19,9 +20,13 @@ class ActualizarDiagramaManual {
 
     const conflicto = () => Object.assign(new Error('El diagrama cambió en otra sesión. Copia tus cambios antes de recargar la versión actual; no se sobrescribió el contenido guardado.'), { status: 409 });
     if (versionEsperada !== undefined && (!Number.isInteger(versionEsperada) || versionEsperada !== Number(existente.version || 1))) throw conflicto();
+    // El límite de casos de uso depende de cuántos RF aprobados hay: sin ellos la edición manual se juzgaba contra «0 RF».
+    const requisitos = this.requerimientoRepository && existente.proyecto_id
+      ? await this.requerimientoRepository.listarPorProyecto(existente.proyecto_id) : [];
     if (datos.codigo_plantuml && this.plantumlValidatorService) {
       const validacion = this.plantumlValidatorService.validar(datos.codigo_plantuml, {
         tipo: datos.tipo || existente.tipo,
+        requisitos,
         rnfList: datos.rnfList,
         trazabilidad_rnf: datos.trazabilidad_rnf || existente.trazabilidad_rnf
       });
@@ -33,7 +38,7 @@ class ActualizarDiagramaManual {
     const cambiaContenido = ['codigo_plantuml', 'codigo_mermaid', 'descripcion', 'titulo']
       .some((field) => Object.prototype.hasOwnProperty.call(datos, field) && datos[field] !== existente[field]);
     const validacion = cambiaContenido && this.plantumlValidatorService
-      ? this.plantumlValidatorService.validar(datos.codigo_plantuml || existente.codigo_plantuml, existente.tipo)
+      ? this.plantumlValidatorService.validar(datos.codigo_plantuml || existente.codigo_plantuml, { tipo: existente.tipo, requisitos })
       : null;
     const cambios = cambiaContenido
       ? {

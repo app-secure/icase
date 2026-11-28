@@ -1,7 +1,7 @@
 const { Pool, types } = require('pg');
 const model = require('./data/model');
 const migrations = require('./data/migrations');
-const { HttpError, withRetry, split, viewOf, toRecord, tableFor, publicColumns, ownerWhere, assignOwner } = require('./data/store-support');
+const { HttpError, withRetry, split, viewOf, toRecord, tableFor, publicColumns, ownerColumn, ownerWhere, assignOwner } = require('./data/store-support');
 const rules = require('./data/rules-engine');
 
 types.setTypeParser(1082, (value) => value); // DATE como texto AAAA-MM-DD, sin desplazamiento de zona horaria
@@ -68,7 +68,7 @@ class RecordStore {
       conditions.push(`capability = $${params.length}`);
     }
     const owner = ownerWhere(table, scope);
-    if (owner) { params.push(owner); conditions.push(`${quote('owner_id')} = $${params.length}`); }
+    if (owner) { params.push(owner); conditions.push(`${quote(ownerColumn(table, scope))} = $${params.length}`); }
 
     if (query && typeof query === 'object') {
       for (const column of publicColumns(table)) {
@@ -159,7 +159,7 @@ class RecordStore {
     let sql = `UPDATE ${quote(name)} SET ${sets.join(', ')} WHERE id = $${params.length}`;
     if (table.generic) { params.push(operation); sql += ` AND capability = $${params.length}`; }
     const owner = ownerWhere(table, scope);
-    if (owner) { params.push(owner); sql += ` AND ${quote('owner_id')} = $${params.length}`; }
+    if (owner) { params.push(owner); sql += ` AND ${quote(ownerColumn(table, scope))} = $${params.length}`; }
     try {
       const result = await this.pool.query(`${sql} RETURNING *`, params);
       return result.rows[0] ? toRecord(table, operation, result.rows[0]) : null;
@@ -169,12 +169,16 @@ class RecordStore {
   async remove(operation, id, scope = null) {
     const { name, table } = tableFor(model, operation);
     if (!/^\d{1,18}$/.test(String(id))) return false;
+    const current = await this._row(name, table, operation, id, scope);
+    if (!current) return false;
+    const stored = toRecord(table, operation, current, { includeSensitive: true }).data;
+    rules.check(name, 'delete', stored, stored);
     try {
       const params = [id];
       let sql = `DELETE FROM ${quote(name)} WHERE id = $1`;
       if (table.generic) { params.push(operation); sql += ` AND capability = $${params.length}`; }
       const owner = ownerWhere(table, scope);
-      if (owner) { params.push(owner); sql += ` AND ${quote('owner_id')} = $${params.length}`; }
+      if (owner) { params.push(owner); sql += ` AND ${quote(ownerColumn(table, scope))} = $${params.length}`; }
       const result = await this.pool.query(sql, params);
       return result.rowCount > 0;
     } catch (error) { throw translate(error); }
@@ -261,7 +265,7 @@ class RecordStore {
       let sql = `SELECT * FROM ${quote(name)} WHERE id = $1`;
       if (table.generic) { params.push(operation); sql += ` AND capability = $${params.length}`; }
       const owner = ownerWhere(table, scope);
-      if (owner) { params.push(owner); sql += ` AND ${quote('owner_id')} = $${params.length}`; }
+      if (owner) { params.push(owner); sql += ` AND ${quote(ownerColumn(table, scope))} = $${params.length}`; }
       const result = await this.pool.query(sql, params);
       return result.rows[0] || null;
     } catch (error) { throw translate(error); }
@@ -275,10 +279,13 @@ class RecordStore {
       if (id == null) continue;
       if ((scope?.shared || []).includes(reference.table)) continue; // catálogo que el rol consulta completo
       const target = model.tables[reference.table];
-      if (!target || !target.columns.some((column) => column.column === 'owner_id')) throw new HttpError(409, 'El registro referencia un dato ajeno.');
-      const result = await this.pool.query(`SELECT owner_id FROM ${quote(reference.table)} WHERE id = $1`, [id]);
+      // Un catálogo sin papel para este rol y que su rol no registra (las mesas que elige un cliente) se puede referenciar.
+      if (scope.rol && target && !target.roles?.[scope.rol] && !(scope.creates || []).includes(reference.table)) continue;
+      const column = target && ownerColumn(target, scope);
+      if (!column) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+      const result = await this.pool.query(`SELECT ${quote(column)} AS owner FROM ${quote(reference.table)} WHERE id = $1`, [id]);
       const row = result.rows[0];
-      if (!row || row.owner_id == null || String(row.owner_id) !== owner) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+      if (!row || row.owner == null || String(row.owner) !== owner) throw new HttpError(409, 'El registro referencia un dato ajeno.');
     }
   }
 

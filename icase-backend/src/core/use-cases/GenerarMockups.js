@@ -791,7 +791,27 @@ REGLAS DE GENERACIÓN BASADA EN EL ÁRBOL:
     this._casosUsoRoles = casos.filter((item) => item.actores.length);
   }
 
+  /**
+   * La rama del árbol que nombra a un actor («Módulo Cajero», «Aplicación Móvil de Clientes») dice de quién son sus pantallas. Manda sobre el
+   * parecido de nombres: «Pedidos listos para cobrar» se parecía más a «Marcar pedido como listo» y quedaba como pantalla del cocinero.
+   */
+  _rolesDeLaRama(ruta) {
+    const actores = this._actoresProyecto || [];
+    const partes = (Array.isArray(ruta) ? ruta : []).slice(1, -1).reverse();
+    for (const parte of partes) {
+      const texto = this._textoRuta(parte);
+      if (!/^(?:modulo|portal|area|panel|perfil|zona|seccion|vista|aplicacion|app)\b/.test(texto)) continue;
+      // «Clientes» → cliente; «Administradores» → administrador.
+      const palabras = new Set(texto.split(/[^a-z0-9]+/).flatMap((palabra) => [palabra, palabra.replace(/s$/, ''), palabra.replace(/es$/, '')]));
+      const nombrados = actores.filter((actor) => palabras.has(this._textoRuta(actor).trim()));
+      if (nombrados.length) return nombrados;
+    }
+    return null;
+  }
+
   _inferirRoles(ruta) {
+    const deLaRama = this._rolesDeLaRama(ruta);
+    if (deLaRama) return deLaRama;
     const desdeCasos = this._rolesDesdeCasosUso(ruta);
     if (desdeCasos) return desdeCasos;
     const texto = this._textoRuta(ruta);

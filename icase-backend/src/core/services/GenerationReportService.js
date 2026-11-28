@@ -39,16 +39,20 @@ class GenerationReportService {
       // Lo que la especificación aprobada sí implementa para este RF no es una carencia: una venta con líneas y total, una factura
       // correlativa vinculada a su venta, una anulación que repone stock, reglas de cálculo (IGV) o reportes agregados (resumen).
       const actions = operation?.actions || [];
+      // Cobrar, controlar un cupo, abrir y activar un saldo o registrar un cierre que ya no cambia son procesos implementados.
+      const businessRule = (action) => action.liquida || action.cupo || action.periodo || action.alCambiar;
       const covered = {
-        calculos: actions.some((action) => action.lineas || action.vincula || action.anula || action.type === 'resumen' || (action.autoInputs || []).some((input) => ['lineas', 'correlativo', 'vinculado'].includes(input.valor)))
-          || (operation?.rules || []).some((rule) => rule.tipo === 'calculo'),
-        reportes: actions.some((action) => action.type === 'resumen')
+        calculos: actions.some((action) => action.lineas || action.vincula || action.anula || businessRule(action) || action.type === 'resumen' || (action.autoInputs || []).some((input) => ['lineas', 'correlativo', 'vinculado'].includes(input.valor)))
+          || (operation?.rules || []).some((rule) => ['calculo', 'solo_insercion'].includes(rule.tipo)),
+        reportes: actions.some((action) => action.type === 'resumen'),
+        // Con los eventos de cambios activos las pantallas se actualizan solas (la comanda nueva, el plato agotado).
+        tiempo_real: Boolean(contrato.eventos_cambios) && actions.length > 0
       };
       const detected = this._capabilities(requirement);
       const capabilities = detected.filter((capability) => !covered[capability.id]);
       const reasons = [];
       const implemented = detected.filter((capability) => covered[capability.id]);
-      if (implemented.length) reasons.push(`Implementado por la especificación aprobada: ${implemented.map((capability) => capability.etiqueta.toLowerCase()).join(', ')} (${actions.filter((action) => action.lineas || action.vincula || action.anula || action.type === 'resumen').map((action) => action.name).join(', ') || 'reglas de cálculo'}).`);
+      if (implemented.length) reasons.push(`Implementado por la especificación aprobada: ${implemented.map((capability) => capability.etiqueta.toLowerCase()).join(', ')} (${actions.filter((action) => action.lineas || action.vincula || action.anula || businessRule(action) || action.type === 'resumen').map((action) => action.name).join(', ') || 'sus operaciones y reglas'}).`);
       let level;
       if (!capabilities.length && entity) level = 'completo';
       else if (capabilities.length && !entity) level = 'no_soportado';

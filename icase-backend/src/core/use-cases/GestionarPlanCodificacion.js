@@ -440,7 +440,7 @@ class GestionarPlanCodificacion {
     // El árbol de navegación aporta los roles de cada pantalla: sin él, «Editar» podía cablearse a la pantalla de otro rol.
     const diseno = this.disenoRepository ? await this.disenoRepository.obtenerPorProyecto(proyectoId) : null;
     const pantallas = Array.isArray(diseno?.manifiesto_navegacion) ? diseno.manifiesto_navegacion : [];
-    const resultado = this.specService.validar({ operaciones, pantallas: propuesta.pantallas }, { modelo, rf, pantallas, verbosPorRf: require('../services/MockupVerbs').verbosPorRf(diseno) });
+    const resultado = this.specService.validar({ operaciones, pantallas: propuesta.pantallas }, { modelo, rf, pantallas, verbosPorRf: require('../services/MockupVerbs').verbosPorRf(diseno), analisis: require('../services/RequirementAnalysisContext').contextOf((await this.proyectoRepository?.obtenerPorId(proyectoId))?.auditoria_requisitos) });
     if (resultado.errores.length) throw new Error(`Especificación inválida: ${resultado.errores.join(' ')}`);
     return { ...propuesta, operaciones: resultado.operaciones, pantallas: resultado.pantallas };
   }

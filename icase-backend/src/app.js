@@ -163,7 +163,8 @@ function createApp({ repositories = {}, env = process.env } = {}) {
   const actualizarDiagramaManualUseCase = new ActualizarDiagramaManual({
     diagramaRepository: diagramaRepo,
     plantumlValidatorService: plantumlValidator,
-    proyectoRepository: proyectoRepo
+    proyectoRepository: proyectoRepo,
+    requerimientoRepository: requerimientoRepo
   });
   const restaurarVersionDiagramaUseCase = new RestaurarVersionDiagrama({
     diagramaRepository: diagramaRepo,

@@ -30,6 +30,7 @@ class BackendDataLayerGenerator {
     const model = this._model(contract, database);
     this._markIdentity(model, contract);
     this._applyOwnership(model, policy);
+    this._markRoleColumns(model, contract, policy);
     const rules = this._rules(contract.rules || [], model);
     this._applyUniques(model, contract.rules || []);
     const migration = database === 'mongodb' ? this._mongoMigration(model) : this._sqlMigration(model, database);
@@ -63,6 +64,26 @@ class BackendDataLayerGenerator {
     const email = pick(/^(correo|email|mail)/i);
     if (!email) return;
     model.identity = { table: found[0], email, rol: pick(/^rol$/i) || null, nombre: pick(/^(nombre|name)$/i) || null };
+  }
+
+  /**
+   * Columnas con nombre de rol que apuntan a la cuenta («mesero_id», «cliente_id»): para ese rol, «solo lo propio» es el registro donde él
+   * figura (la mesa que tiene asignada, el pedido de su cliente), no el que él creó: las mesas las crea el administrador.
+   */
+  _markRoleColumns(model, contract, policy) {
+    const roles = Object.keys(policy?.roles || {});
+    if (!roles.length) return;
+    const accounts = new Set((contract.entities || []).filter((entity) => /^(usuario|cuenta|cuentausuario)$/i.test(entity.name)).map((entity) => entity.name));
+    for (const table of Object.values(model.tables)) {
+      const entity = (contract.entities || []).find((item) => item.name === table.entity);
+      if (!entity) continue;
+      const found = {};
+      for (const role of roles) {
+        const column = table.columns.find((item) => item.column === `${role}_id` && accounts.has(entity.schema?.properties?.[item.name]?.['x-references']));
+        if (column) found[role] = column.column;
+      }
+      if (Object.keys(found).length) table.roles = found;
+    }
   }
 
   _model(contract, database) {

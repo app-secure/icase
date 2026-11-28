@@ -19,7 +19,9 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
     const rf = requerimientos.filter((item) => item.aprobado && item.tipo === 'RF');
     const modulos = [...new Set(rf.map((item) => slug(item.nombre)))].slice(0, 12);
     const domainModel = diagramaDominio?.codigo_plantuml ? new DomainModelExtractor().extract(diagramaDominio.codigo_plantuml) : null;
-    const spec = this._especificacion(decisiones.especificacion_aplicacion, domainModel, rf);
+    // Las reglas del análisis aprobado («1 punto por cada almuerzo») también definen el comportamiento: sin ellas se perdían aquí.
+    const analisis = require('../../core/services/RequirementAnalysisContext').contextOf(proyecto?.auditoria_requisitos);
+    const spec = this._especificacion(decisiones.especificacion_aplicacion, domainModel, rf, analisis);
     const { reglas, descartadas, omitidas } = this._reglas(decisiones.reglas_negocio?.reglas, domainModel, rf, spec);
     const access = this._acceso(decisiones.control_acceso, rf);
     const fresh = new GenericBackendGenerator().generate({ proyecto, requirements: rf, stack, domainModel, rules: reglas, access, modules: decisiones.modulos, verbosPorRf, spec });
@@ -58,10 +60,10 @@ class BackendScaffoldGenerator extends IGeneradorArtefacto {
    * Solo lo confirmado llega al generador. Se revalida antes con el dominio vigente: una especificación aprobada antes de que
    * existieran el estado inicial o los códigos generados por el servidor se completa aquí, sin tener que reabrir la etapa.
    */
-  _especificacion(decision, domainModel = null, rf = []) {
+  _especificacion(decision, domainModel = null, rf = [], analisis = null) {
     const Service = require('./ApplicationSpecService');
     if (!decision || !domainModel) return Service.confirmada(decision);
-    const revisada = new Service({}).validar(decision, { modelo: domainModel, rf, pantallas: [], cablear: false });
+    const revisada = new Service({}).validar(decision, { modelo: domainModel, rf, pantallas: [], cablear: false, analisis });
     if (revisada.errores.length) return Service.confirmada(decision);
     return Service.confirmada({ ...decision, operaciones: revisada.operaciones, pantallas: revisada.pantallas });
   }

@@ -153,8 +153,15 @@ function publicColumns(table) {
   return (table.columns || []).filter((column) => !column.internal && column.column !== 'owner_id' && column.name !== '__owner');
 }
 
+/** Columna que dice de quién es el registro para este alcance: la de su rol («mesero_id») o, si no la tiene, quien lo creó. */
+function ownerColumn(table, scope) {
+  const role = scope?.rol && table.roles?.[scope.rol];
+  if (role) return role;
+  return (table.columns || []).some((column) => column.column === 'owner_id') ? 'owner_id' : null;
+}
+
 function ownerWhere(table, scope) {
-  if (!scope?.ownerId || !(table.columns || []).some((column) => column.column === 'owner_id')) return null;
+  if (!scope?.ownerId || !ownerColumn(table, scope)) return null;
   return String(scope.ownerId);
 }
 
@@ -162,12 +169,18 @@ function assignOwner(table, values, extra, scope) {
   delete values.owner_id;
   if (extra) { delete extra.__owner; delete extra.owner_id; }
   if (scope?.ownerId && (table.columns || []).some((column) => column.column === 'owner_id')) values.owner_id = String(scope.ownerId);
+  const role = scope?.ownerId && scope.rol && table.roles?.[scope.rol];
+  if (!role) return;
+  // Nadie registra algo a nombre de otra persona de su mismo rol.
+  if (values[role] !== undefined && values[role] !== null && String(values[role]) !== String(scope.ownerId)) throw new HttpError(409, 'El registro referencia un dato ajeno.');
+  values[role] = String(scope.ownerId);
 }
 
 function matchesOwner(row, table, scope) {
   const owner = ownerWhere(table, scope);
   if (!owner) return true;
-  return row.owner_id != null && String(row.owner_id) === owner;
+  const value = row[ownerColumn(table, scope)];
+  return value != null && String(value) === owner;
 }
 
-module.exports = { withRetry, HttpError, hashSecret, coerce, split, viewOf, toRecord, tableFor, isObject, publicColumns, ownerWhere, assignOwner, matchesOwner };
+module.exports = { withRetry, HttpError, hashSecret, coerce, split, viewOf, toRecord, tableFor, isObject, publicColumns, ownerColumn, ownerWhere, assignOwner, matchesOwner };

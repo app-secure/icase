@@ -4,6 +4,7 @@ const DomainModelExtractor = require('./DomainModelExtractor');
 const Compatibility = require('../../core/services/RequirementScreenCompatibility');
 const ApplicationContractBuilder = require('./ApplicationContractBuilder');
 const { systemManaged } = require('./MockupFieldPolicy');
+const Behaviors = require('./BusinessBehaviors');
 
 const PROMPT = path.join(__dirname, '..', 'prompts', 'analista_especificacion_aplicacion.md');
 const TIPOS = ['consulta', 'crear', 'actualizar', 'eliminar', 'transicion', 'resumen'];
@@ -84,7 +85,7 @@ class ApplicationSpecService {
     } else {
       advertencias.push('El servicio de IA no está configurado; se derivó una especificación básica de los RF y del dominio.');
     }
-    const resultado = this.depurar(propuesta, { modelo, rf, pantallas });
+    const resultado = this.depurar(propuesta, { modelo, rf, pantallas, analisis });
     return { especificacion: resultado.especificacion, advertencias: [...advertencias, ...resultado.advertencias] };
   }
 
@@ -157,7 +158,7 @@ class ApplicationSpecService {
   }
 
   /** Conserva lo válido, descarta el resto explicando por qué y completa con derivación determinista los RF sin operación. */
-  depurar(propuesta, { modelo, rf, pantallas = [] }) {
+  depurar(propuesta, { modelo, rf, pantallas = [], analisis = null }) {
     this._conocidos = [...new Set(rf.flatMap((item) => list(item.actores).map(text).filter(Boolean)))];
     const advertencias = [];
     const entidades = new Map(modelo.entities.map((entity) => [entity.name, entity]));
@@ -187,21 +188,26 @@ class ApplicationSpecService {
     }
 
     // Los RF de reporte («más vendidos», «reporte de ventas por fechas») necesitan agregados: se derivan como resumen aunque la
-    // IA haya propuesto una consulta plana (que solo listaría registros) o nada.
+    // IA haya propuesto una consulta plana (que solo listaría registros) o nada. Un mismo RF puede pedir los dos.
     for (const requisito of rf) {
       const id = String(requisito.identificador).toUpperCase();
       if (operaciones.some((operacion) => operacion.rf === id && operacion.tipo === 'resumen')) continue;
-      const resumen = this._derivarResumen(requisito, { entidades, operaciones, nombres });
-      if (!resumen) continue;
-      const validado = this._operacion(resumen, { entidades, rfIds, nombres });
-      if (validado.error) { advertencias.push(`${id}: no se pudo derivar el reporte (${validado.error}).`); continue; }
-      nombres.add(validado.operacion.nombre);
+      const derivados = [];
+      for (const resumen of this._derivarResumenes(requisito, { entidades, operaciones, nombres })) {
+        const validado = this._operacion(resumen, { entidades, rfIds, nombres });
+        if (validado.error) { advertencias.push(`${id}: no se pudo derivar el reporte (${validado.error}).`); continue; }
+        nombres.add(validado.operacion.nombre);
+        derivados.push({ ...validado.operacion, origen: 'derivado' });
+      }
+      if (!derivados.length) continue;
       // El reporte agregado reemplaza al listado plano que la IA propuso para el mismo RF: dos tablas en la pantalla repetirían las filas.
       for (let i = operaciones.length - 1; i >= 0; i -= 1) {
         if (operaciones[i].rf === id && operaciones[i].tipo === 'consulta') { nombres.delete(operaciones[i].nombre); operaciones.splice(i, 1); }
       }
-      operaciones.push({ ...validado.operacion, origen: 'derivado' });
-      advertencias.push(`${id}: reporte derivado «${validado.operacion.nombre}» (${validado.operacion.resumen.medidas.map((medida) => medida.nombre).join(', ')}). Revísalo.`);
+      for (const operacion of derivados) {
+        operaciones.push(operacion);
+        advertencias.push(`${id}: reporte derivado «${operacion.nombre}» (${operacion.resumen.medidas.map((medida) => medida.nombre).join(', ')}). Revísalo.`);
+      }
     }
     // Los RF que la IA no cubrió reciben una operación derivada del verbo y de la entidad asociada.
     for (const requisito of rf) {
@@ -227,14 +233,20 @@ class ApplicationSpecService {
     for (const op of operaciones) if (!propias.includes(op) && !propias.some((otra) => otra.nombre === op.nombre)) nombres.delete(op.nombre);
     operaciones.splice(0, operaciones.length, ...propias);
     const gestion = this._completarGestion(operaciones, { rf, entidades, nombres, advertencias });
-    for (const { listar, actualizar } of gestion) operaciones.push(listar, actualizar);
+    for (const { listar, actualizar } of gestion) operaciones.push(...[listar, actualizar].filter(Boolean));
+    const nuevas = this._completarComportamiento(operaciones, { rf, entidades, nombres, advertencias });
+    // Antes de repartir las pantallas: hay que saber qué botón cobra y qué documento cobra. Se repite al final para lo que se añada.
+    this._aplicarComportamientos(operaciones, { rf, entidades, analisis });
     const porNombre = new Map(operaciones.map((operacion) => [operacion.nombre, operacion]));
-    const vistas = this._pantallas(propuesta?.pantallas, { porNombre, entidades, pantallas, advertencias });
+    let vistas = this._pantallas(propuesta?.pantallas, { porNombre, entidades, pantallas, advertencias });
     this._colgarResumenes(operaciones, vistas, pantallas);
-    for (const triple of gestion) this._reorganizarGestion(vistas, triple, advertencias);
+    vistas = Behaviors.wire(vistas, { ...nuevas, operations: operaciones, screens: pantallas, screenId: (screen) => this._screenId(screen), entities: entidades, names: nombres });
+    // El formulario de un documento con líneas sigue siendo su formulario: no se cambia por una lista.
+    for (const triple of gestion) if (triple.actualizar) this._reorganizarGestion(vistas, triple, advertencias);
     operaciones.push(...this._cablearEdicion(operaciones, vistas, pantallas, advertencias));
     operaciones.forEach((operacion, index) => { operacion.id = `OP-${String(index + 1).padStart(2, '0')}`; });
     this._reponerAlAnular(operaciones, entidades);
+    this._aplicarComportamientos(operaciones, { rf, entidades, analisis });
     const sinPantalla = operaciones.filter((operacion) => !vistas.some((vista) => vista.componentes.some((c) => c.operacion === operacion.nombre || c.acciones.some((a) => a.operacion === operacion.nombre))));
     if (vistas.length && sinPantalla.length) advertencias.push(`Operaciones sin ninguna pantalla que las use: ${sinPantalla.map((operacion) => operacion.nombre).join(', ')}.`);
 
@@ -245,7 +257,7 @@ class ApplicationSpecService {
    * Revalida una especificación ya guardada (editada o aprobada) sin derivar nada nuevo. Conserva el origen y la decisión
    * de cada operación; devuelve `errores` si alguna dejó de ser válida (el dominio o los RF cambiaron).
    */
-  validar(guardada, { modelo, rf, pantallas = [], cablear = true, verbosPorRf = null }) {
+  validar(guardada, { modelo, rf, pantallas = [], cablear = true, verbosPorRf = null, analisis = null }) {
     this._conocidos = [...new Set(rf.flatMap((item) => list(item.actores).map(text).filter(Boolean)))];
     const entidades = new Map(modelo.entities.map((entity) => [entity.name, entity]));
     const rfIds = new Set(rf.map((item) => String(item.identificador).toUpperCase()));
@@ -273,7 +285,35 @@ class ApplicationSpecService {
     // También al generar con una especificación ya aprobada: lo que el sistema hace solo no se genera como operación aparte.
     operaciones.splice(0, operaciones.length, ...this._sinOperacionesDeSistema(operaciones, rf, avisos));
     this._reponerAlAnular(operaciones, entidades);
+    this._aplicarComportamientos(operaciones, { rf, entidades, analisis });
     return { operaciones, pantallas: vistas, errores, avisos };
+  }
+
+  /** Operaciones que los requisitos exigen y la propuesta no trae: botones de estado y búsqueda por código antes de cambiar un registro. */
+  _completarComportamiento(operaciones, { rf, entidades, nombres, advertencias }) {
+    const { added, removed } = Behaviors.stateButtons(operaciones, { rf, entities: entidades, names: nombres });
+    for (let i = operaciones.length - 1; i >= 0; i -= 1) {
+      if (!removed.has(operaciones[i].nombre)) continue;
+      advertencias.push(`Se sustituyó «${operaciones[i].nombre}» por los botones de estado: el requisito solo cambia el estado.`);
+      operaciones.splice(i, 1);
+    }
+    operaciones.push(...added);
+    const busquedas = Behaviors.codeSearch(operaciones, { entities: entidades, names: nombres });
+    operaciones.push(...busquedas);
+    for (const operacion of [...added, ...busquedas]) advertencias.push(`${operacion.rf}: se añadió «${operacion.nombre}», que el requisito exige. Revísala.`);
+    return { added: [...added, ...busquedas], removed };
+  }
+
+  /** Quién queda en cada campo, cómo se cobra, cómo nace y se activa un saldo, qué reserva ocupa un cupo y qué detalle se muestra. */
+  _aplicarComportamientos(operaciones, { rf, entidades, analisis = null }) {
+    const textoDe = (item) => [item.nombre, item.descripcion, ...list(item.criterios_aceptacion).map((criterio) => criterio?.descripcion || criterio)].filter(Boolean).join('. ');
+    const reglas = [...list(analisis?.reglas_negocio), ...list(analisis?.restricciones_tecnicas)].map((item) => text(item.necesidad || item.texto || item));
+    const actores = [...new Set(rf.flatMap((item) => list(item.actores).map(text).filter(Boolean)))];
+    Behaviors.apply(operaciones, {
+      entities: entidades, actors: actores, specService: this,
+      texts: [...rf.map(textoDe), ...reglas],
+      textsByRf: new Map(rf.map((item) => [String(item.identificador).toUpperCase(), [textoDe(item)]]))
+    });
   }
 
   /**
@@ -503,45 +543,62 @@ class ApplicationSpecService {
 
   /**
    * Reportes que la IA no logra expresar (agregados): «Productos más vendidos» agrupa las líneas de la venta por producto y
-   * suma la cantidad; «Reporte de ventas por fechas» cuenta las ventas y suma su total. Ambos por rango de fechas de la venta
-   * y sin las anuladas. Se derivan del modelo (la venta con líneas y sus campos), no de un dominio fijo.
+   * suma la cantidad; «Reporte de ventas por fechas» cuenta las ventas y suma su total. Ambos por rango de fechas de la cabecera.
+   * Si el estado distingue lo pagado, solo lo pagado es venta; si no, se excluye lo anulado. Se derivan del modelo (el documento con
+   * líneas y sus campos), no de un dominio fijo. Un requisito puede pedir los dos («ventas con su total y los platos más vendidos»).
    */
-  _derivarResumen(requisito, { entidades, operaciones, nombres }) {
+  _derivarResumenes(requisito, { entidades, operaciones, nombres }) {
     const titulo = strip(`${requisito.nombre || ''}`);
-    if (!/\b(reporte|resumen|informe|ranking|estadistic\w*)\b|mas vendid/.test(titulo)) return null;
+    if (!/\b(reportes?|resumen|resumenes|informes?|ranking|estadistic\w*)\b|mas vendid/.test(titulo)) return [];
+    const declaracion = strip(`${requisito.nombre || ''} ${requisito.descripcion || ''}`);
     const fechaDe = (props) => Object.keys(props).find((campo) => /^(fecha|fechahora|fecha_?registro|creado_?en)$/i.test(campo) || props[campo]?.format === 'date' || props[campo]?.format === 'date-time');
     const estadoDe = (props) => Object.keys(props).find((campo) => /^estado$/i.test(campo));
-    const unico = (base) => { let nombre = base; let n = 2; while (nombres.has(nombre)) nombre = `${base}${n++}`; return nombre; };
+    const soloValidas = (props, extra = {}) => {
+      const estado = estadoDe(props);
+      if (!estado) return null;
+      const pagado = list(props[estado].enum).find((valor) => /^(pagad|cobrad)/i.test(valor));
+      return { campo: estado, patron: pagado ? `^(?!${pagado}$)` : '^(anul|cancel)', ...extra };
+    };
+    const usados = new Set(nombres);
+    const unico = (base) => { let nombre = base; for (let n = 2; usados.has(nombre); n += 1) nombre = `${base}${n}`; usados.add(nombre); return nombre; };
     const rango = (campo, extra = {}) => campo ? [{ campo, operador: '>=', origen: 'parametro', valor: 'desde', ...extra }, { campo, operador: '<=', origen: 'parametro', valor: 'hasta', ...extra }] : [];
     const alta = operaciones.find((op) => op.tipo === 'crear' && op.lineas && op.estado_decision !== 'rechazado');
-    if (/mas vendid|ranking|top\b/.test(titulo) && alta) {
+    const resultado = [];
+    const pideRanking = /mas vendid|ranking|top\b/.test(titulo) || Boolean(alta && /mas vendid/.test(declaracion));
+    // El total de ventas se pide si el título (aparte del ranking) habla de ventas o ingresos.
+    const pideTotal = !pideRanking || /\b(ventas?|ingresos?)\b/.test(titulo.replace(/\w+\s+mas\s+vendid\w*/g, ''));
+    if (pideRanking && alta) {
       const lineas = entidades.get(alta.lineas.entidad);
       const cabecera = entidades.get(alta.entidad);
-      if (!lineas || !cabecera) return null;
-      const fecha = fechaDe(cabecera.schema.properties);
-      const estado = estadoDe(cabecera.schema.properties);
-      const medidas = [{ funcion: 'sumar', campo: alta.lineas.cantidad, nombre: 'cantidadVendida' }];
-      return {
-        nombre: unico(camel(requisito.nombre).slice(0, 40) || 'masVendidos'), rf: String(requisito.identificador).toUpperCase(), tipo: 'resumen', entidad: lineas.name, entidadClave: lineas.key,
-        actores: list(requisito.actores), filtros: rango(fecha, { en: 'via' }), entradas: [], salida: [alta.lineas.referencia, 'cantidadVendida'],
-        resumen: { agruparPor: alta.lineas.referencia, medidas, via: { entidad: cabecera.name, entidadClave: cabecera.key, campo: alta.lineas.fk }, ...(estado ? { excluir: { campo: estado, patron: '^(anul|cancel)', en: 'via' } } : {}), orden: 'desc' },
-        descripcion: `Suma la cantidad vendida de cada ${alta.lineas.destino} en el rango de fechas, sin ${cabecera.name.toLowerCase()}s anuladas.`, estado_decision: 'pendiente', origen: 'derivado'
-      };
+      if (lineas && cabecera) {
+        const fecha = fechaDe(cabecera.schema.properties);
+        const excluir = soloValidas(cabecera.schema.properties, { en: 'via' });
+        const destino = alta.lineas.destino;
+        resultado.push({
+          nombre: unico((!pideTotal && camel(requisito.nombre).slice(0, 40)) || camel(`reporte ${destino}s mas vendidos`)), rf: String(requisito.identificador).toUpperCase(), tipo: 'resumen', entidad: lineas.name, entidadClave: lineas.key,
+          actores: list(requisito.actores), filtros: rango(fecha, { en: 'via' }), entradas: [], salida: [alta.lineas.referencia, 'cantidadVendida'],
+          resumen: { agruparPor: alta.lineas.referencia, medidas: [{ funcion: 'sumar', campo: alta.lineas.cantidad, nombre: 'cantidadVendida' }], via: { entidad: cabecera.name, entidadClave: cabecera.key, campo: alta.lineas.fk }, ...(excluir ? { excluir } : {}), orden: 'desc' },
+          descripcion: `Suma la cantidad vendida de cada ${destino} en el rango de fechas.`, estado_decision: 'pendiente', origen: 'derivado'
+        });
+      }
     }
-    // «Reporte de ventas…»: la entidad nombrada en el título con fecha (y total, si lo tiene).
-    const candidata = [...entidades.values()].find((item) => titulo.includes(strip(item.name)) && fechaDe(item.schema.properties)) || (alta && entidades.get(alta.entidad));
-    if (!candidata) return null;
-    const props = candidata.schema.properties;
-    const total = Object.keys(props).find((campo) => /^total$/i.test(campo) && ['number', 'integer'].includes(props[campo]?.type));
-    const estado = estadoDe(props);
-    const plural = `${strip(candidata.name)}s`;
-    const medidas = [{ funcion: 'contar', nombre: `numero${candidata.name}s` }, ...(total ? [{ funcion: 'sumar', campo: total, nombre: 'totalVendido' }] : [])];
-    return {
-      nombre: unico(camel(requisito.nombre).slice(0, 40) || 'reporte'), rf: String(requisito.identificador).toUpperCase(), tipo: 'resumen', entidad: candidata.name, entidadClave: candidata.key,
-      actores: list(requisito.actores), filtros: rango(fechaDe(props)), entradas: [], salida: medidas.map((medida) => medida.nombre),
-      resumen: { medidas, ...(estado ? { excluir: { campo: estado, patron: '^(anul|cancel)' } } : {}), orden: 'desc' },
-      descripcion: `Número de ${plural} y total en el rango de fechas, sin las anuladas.`, estado_decision: 'pendiente', origen: 'derivado'
-    };
+    if (pideTotal) {
+      // La entidad nombrada en el título con fecha; si no, el documento con líneas (la venta, el pedido).
+      const candidata = [...entidades.values()].find((item) => titulo.includes(strip(item.name)) && fechaDe(item.schema.properties)) || (alta && entidades.get(alta.entidad));
+      if (candidata) {
+        const props = candidata.schema.properties;
+        const total = Object.keys(props).find((campo) => /^total$/i.test(campo) && ['number', 'integer'].includes(props[campo]?.type));
+        const excluir = soloValidas(props);
+        const medidas = [{ funcion: 'contar', nombre: `numero${candidata.name}s` }, ...(total ? [{ funcion: 'sumar', campo: total, nombre: 'totalVendido' }] : [])];
+        resultado.unshift({
+          nombre: unico(camel(requisito.nombre).slice(0, 40) || 'reporte'), rf: String(requisito.identificador).toUpperCase(), tipo: 'resumen', entidad: candidata.name, entidadClave: candidata.key,
+          actores: list(requisito.actores), filtros: rango(fechaDe(props)), entradas: [], salida: medidas.map((medida) => medida.nombre),
+          resumen: { medidas, ...(excluir ? { excluir } : {}), orden: 'desc' },
+          descripcion: `Número de ${strip(candidata.name)}s y total en el rango de fechas.`, estado_decision: 'pendiente', origen: 'derivado'
+        });
+      }
+    }
+    return resultado;
   }
 
   /** Datos del registro relacionado que acompañan a cada fila de una consulta (la mesa y los platos del pedido de una comanda). Se revalida contra el dominio. */
@@ -627,6 +684,10 @@ class ApplicationSpecService {
       const requisito = rf.find((item) => String(item.identificador).toUpperCase() === crear.rf);
       if (!requisito || !GESTION.test(strip(`${requisito.nombre} ${requisito.descripcion}`))) continue;
       if (operaciones.some((operacion) => operacion.rf === crear.rf && operacion.tipo !== 'crear')) continue;
+      // Un documento con líneas (un pedido, una venta) no se corrige campo a campo: como mucho se lista, si quien lo registra no lo ve ya.
+      const documento = Boolean(crear.lineas);
+      const loVe = (otra) => otra.tipo === 'consulta' && otra.entidad === crear.entidad && crear.actores.every((actor) => otra.actores.includes(actor));
+      if (documento && (operaciones.some(loVe) || resultado.some((item) => loVe(item.listar)))) continue;
       const entidad = entidades.get(crear.entidad);
       const editables = crear.entradas.filter((campo) => !SENSIBLE.test(campo));
       if (!entidad || !editables.length) continue;
@@ -635,6 +696,12 @@ class ApplicationSpecService {
       const base = { rf: crear.rf, entidad: crear.entidad, entidadClave: crear.entidadClave, actores: crear.actores, estado_decision: 'pendiente', origen: 'derivado' };
       const listar = { ...base, nombre: unico(`listar${crear.entidad}`), tipo: 'consulta', filtros: [], entradas: [], salida: visibles, descripcion: `Lista los registros de ${crear.entidad} para revisarlos y editarlos.` };
       const actualizar = { ...base, nombre: unico(`actualizar${crear.entidad}`), tipo: 'actualizar', filtros: [], entradas: editables, salida: [], descripcion: `Modifica un registro de ${crear.entidad}.` };
+      if (documento) {
+        nombres.delete(actualizar.nombre);
+        advertencias.push(`${crear.rf}: se añadió «${listar.nombre}» para ver lo registrado; un ${crear.entidad} con líneas no se edita campo a campo.`);
+        resultado.push({ crear, listar, actualizar: null });
+        continue;
+      }
       advertencias.push(`${crear.rf}: el requisito es de gestión y solo traía crear; se añadieron «${listar.nombre}» y «${actualizar.nombre}» para poder listar y editar. Revísalas.`);
       resultado.push({ crear, listar, actualizar });
     }
@@ -769,7 +836,10 @@ class ApplicationSpecService {
       if (union.relation !== 'composicion' && !precioOrigen && !stock) continue;
       // Un producto desactivado no se vende: estado «activo» o bandera booleana activo/disponible.
       const estado = Object.keys(destinoProps).find((campo) => /^estado$/i.test(campo));
-      const activo = destinoProps.disponible?.type === 'boolean' ? { campo: 'disponible', valor: true }
+      // «Disponibilidad: disponible | agotado»: lo agotado no se pide.
+      const disponibilidad = Object.keys(destinoProps).find((campo) => /^(disponibilidad|disponible)$/i.test(campo) && destinoProps[campo].enum?.some((item) => /^disponible$/i.test(item)));
+      const activo = disponibilidad ? { campo: disponibilidad, valor: destinoProps[disponibilidad].enum.find((item) => /^disponible$/i.test(item)) }
+        : destinoProps.disponible?.type === 'boolean' ? { campo: 'disponible', valor: true }
         : destinoProps.activo?.type === 'boolean' ? { campo: 'activo', valor: true }
           : estado ? { campo: estado, valor: (destinoProps[estado].enum || []).find((item) => /^activ/i.test(item)) || 'activo' } : null;
       return {

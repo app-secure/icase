@@ -1,0 +1,63 @@
+Sistema de gestión para restaurante
+
+DESCRIPCIÓN
+Sistema para ordenar la operación de un restaurante: menú, mesas, reservas, pedidos, cocina, caja y reportes. Tiene una aplicación móvil para los clientes y una aplicación web para el personal. Los meseros usan la web en tabletas; cocina, caja y administración la usan en computadoras o pantallas grandes.
+
+ROLES (solo cinco)
+- Cliente (aplicación móvil): crea su cuenta, consulta el menú, hace pedidos, reserva, solicita paquetes semanales y consulta sus pedidos, su saldo y sus puntos. Solo ve sus propios datos.
+- Mesero (web): ve y atiende solo las mesas que tiene asignadas, toma pedidos y valida reservas.
+- Cocinero (web): ve las comandas, marca los pedidos como listos y marca los platos como agotados o disponibles.
+- Cajero (web): cobra pedidos, activa paquetes prepagados y cierra caja.
+- Administrador (web): gestiona usuarios, platos, precios y mesas, asigna meseros y consulta reportes.
+
+DATOS
+- Usuario: nombre, correo y rol.
+- Plato: nombre, categoría (almuerzo, bebida, postre u otro), precio en dólares y disponibilidad (disponible o agotado).
+- Mesa: número, cantidad de sillas, estado (libre u ocupada) y mesero asignado.
+- Reserva: cliente, mesa, tipo (mesa completa o una silla), fecha y hora, código de reserva y estado (pendiente o validada).
+- Pedido: mesa, mesero, cliente (opcional), fecha y hora, estado (pendiente, listo o pagado) y total.
+- Detalle de pedido: pedido, plato, cantidad y precio unitario.
+- Cobro: pedido, cajero, fecha, método (efectivo, transferencia o saldo prepagado) y monto.
+- Paquete prepagado: cliente, fecha de inicio, fecha de fin, monto pagado, saldo y estado (solicitado o activo).
+- Cuenta de puntos: cliente y puntos acumulados.
+- Cierre de caja: cajero, fecha, monto en efectivo y monto en transferencia.
+
+REQUISITOS FUNCIONALES (dieciséis)
+1. Gestionar usuarios: el Administrador crea, edita y consulta usuarios y les asigna un rol.
+2. Gestionar platos: el Administrador crea, edita y consulta platos y cambia sus precios.
+3. Gestionar mesas: el Administrador crea, edita y consulta mesas y asigna o reasigna el mesero de cada una.
+4. Consultar menú: el Cliente y el Mesero ven los platos con su precio y disponibilidad.
+5. Cambiar disponibilidad de un plato: el Cocinero marca un plato como agotado o disponible.
+6. Reservar: el Cliente reserva una mesa completa o una silla para una fecha y hora. El sistema asigna un código de reserva.
+7. Validar reserva: el Mesero busca la reserva por su código y la marca como validada.
+8. Consultar mis mesas: el Mesero ve sus mesas asignadas y marca cada una como libre u ocupada.
+9. Registrar pedido: el Cliente, desde la aplicación móvil, o el Mesero, para una de sus mesas, registra un pedido indicando la mesa, los platos y sus cantidades. El sistema calcula el total y el pedido queda pendiente.
+10. Gestionar comandas: el Cocinero ve los pedidos pendientes con su hora y sus platos, y los marca como listos.
+11. Registrar cobro: el Cajero cobra un pedido listo, indica el método de pago y el pedido queda pagado.
+12. Solicitar paquete semanal: el Cliente solicita un paquete prepagado de una semana y consulta su saldo.
+13. Activar paquete: el Cajero registra el pago de un paquete solicitado y lo activa con su saldo.
+14. Cerrar caja: el Cajero registra el cierre del día con el monto en efectivo y el monto en transferencia.
+15. Consultar mis pedidos y puntos: el Cliente ve el estado de sus pedidos y sus puntos acumulados.
+16. Consultar reportes: el Administrador ve las ventas por rango de fechas con su total y los platos más vendidos en un rango de fechas.
+
+REGLAS
+- No se puede pedir un plato agotado.
+- Un Mesero no puede ver ni modificar las mesas ni los pedidos de otro mesero.
+- Un pedido hecho por el Cliente corresponde al mesero asignado a la mesa elegida.
+- Un Cliente solo ve sus propios pedidos.
+- Una mesa o silla ya reservada para una fecha y hora no se puede reservar de nuevo.
+- Solo el Administrador modifica precios y consulta reportes.
+- Solo se cobra un pedido en estado listo, y un pedido se cobra una sola vez.
+- Para cobrar con saldo prepagado, el paquete del cliente debe estar activo, vigente y con saldo suficiente. El saldo baja en el monto cobrado.
+- El Cliente gana 1 punto por cada almuerzo comprado: cada unidad de un plato de categoría almuerzo en un pedido pagado suma 1 punto.
+- Todos los precios y montos se expresan en dólares estadounidenses (USD).
+- Los pedidos pagados y los cierres de caja no se modifican ni se eliminan.
+
+TÉCNICO
+Aplicación móvil con React Native (Expo). Aplicación web con React y Tailwind CSS. Backend con Node.js y Express. Base de datos PostgreSQL. Autenticación con JWT, permisos por rol y contraseñas cifradas. Un solo servidor, sin servicios externos. Los cambios de disponibilidad de platos y los pedidos nuevos se actualizan en las pantallas sin recargar.
+
+FUERA DE ALCANCE
+Pagos en línea, facturación electrónica, lectura de códigos QR, notificaciones, canje de puntos, varias sedes y publicación en tiendas de aplicaciones.
+
+CRITERIO NO FUNCIONAL
+Un pedido nuevo debe registrarse en menos de un segundo con 150 personas conectadas.

@@ -1,0 +1,2 @@
+Título: Préstamo de herramientas del taller
+Descripción: Aplicación web para el taller de una institución técnica. El Encargado registra las herramientas (nombre, categoría y cantidad disponible) y los Estudiantes solicitan prestar una por un plazo de hasta 3 días. El Encargado aprueba o rechaza la solicitud, entrega la herramienta y registra su devolución. Una herramienta sin unidades disponibles no se puede prestar, y un estudiante con un préstamo vencido no puede pedir otro. El Estudiante consulta el estado de sus solicitudes y el Encargado ve los préstamos vencidos.

@@ -3,6 +3,9 @@ const normalize = (value) => String(value || '').normalize('NFD').replace(/[̀-�
 const slug = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const snake = (value) => slug(value).replace(/-/g, '_');
 
+// La entidad de cuentas: una referencia a ella se nombra por el papel que cumple («+Usuario mesero» → mesero_id).
+const ACCOUNT = /^(?:usuario|cuenta|cuentausuario)$/i;
+
 const SCALARS = [
   [/^(?:uuid|guid)$/i, { type: 'string', format: 'uuid' }],
   [/^(?:datetime|localdatetime|timestamp|instant|zoneddatetime|offsetdatetime)$/i, { type: 'string', format: 'date-time' }],
@@ -151,6 +154,8 @@ class DomainModelExtractor {
       else if (whole) { holder = to; target = from; cardinality = 'uno_a_uno'; }
       else { holder = from; target = to; cardinality = 'muchos_a_uno'; }
       relation.cardinalidad = cardinality;
+      // Los atributos que apuntan a la cuenta ya dicen quién es quién (cliente, mesero): la línea no añade otra clave sin papel.
+      if (ACCOUNT.test(target.name) && holder.attributes.some((item) => item.referencia === target.name && !item.collection)) continue;
       // Si el otro extremo ya declara el atributo que apunta a este («Factura» con «+Venta venta»), la clave vive allí: una segunda
       // clave en sentido contrario crearía una referencia circular que no permite sembrar ni insertar datos.
       if (cardinality !== 'uno_a_muchos' && target.attributes.some((item) => item.referencia === holder.name && !item.collection)) continue;
@@ -164,7 +169,9 @@ class DomainModelExtractor {
         // Una colección respaldada por N:M no es una FK escalar del propietario.
         if (attribute.collection && relations.some((r) => r.cardinalidad === 'muchos_a_muchos' &&
           ((r.from === entity.name && r.to === attribute.referencia) || (r.to === entity.name && r.from === attribute.referencia)))) continue;
-        const field = `${snake(attribute.referencia)}_id`;
+        // Dos papeles sobre la misma cuenta (el mesero y el cliente de un pedido) son dos claves, no una.
+        const byRole = ACCOUNT.test(attribute.referencia) && !attribute.collection;
+        const field = `${snake(byRole ? attribute.name.replace(/(?:_?[Ii]d)$/, '') || attribute.referencia : attribute.referencia)}_id`;
         if (!entity.references.some((item) => item.field === field)) {
           entity.references.push({ field, entity: attribute.referencia, relation: 'atributo', cardinality: attribute.collection ? 'uno_a_muchos' : 'muchos_a_uno', label: attribute.name });
         }

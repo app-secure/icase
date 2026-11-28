@@ -39,6 +39,7 @@ class GenericBackendGenerator {
     this._syncSupportPermissions(contract, policy);
     this._syncActionPermissions(contract, policy);
     this._limitScopes(contract, policy);
+    this._guardRawWrites(contract, policy);
     contract.auth = policy;
     const resolved = StackCatalog.resolve(stack);
     const ownership = require('../templates/auth/ownership');
@@ -409,6 +410,8 @@ ${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/opera
       ...(action.type === 'crear' && action.vincula?.capability ? { vincula: action.vincula } : {}),
       // Anular con motivo: la venta pasa a anulada, devuelve stock y su factura queda anulada.
       ...(action.type === 'crear' && action.vincula?.capability && action.anula ? { anula: action.anula } : {}),
+      // Reglas de negocio de la operación: quién queda en cada rol, cobro, vigencia, cambio con datos, cupo, detalle y opciones.
+      ...Object.fromEntries(['rolInputs', 'liquida', 'periodo', 'alCambiar', 'cupo', 'detalle', 'exigeParametro', 'opciones', 'roles', 'cuenta'].filter((key) => action[key]).map((key) => [key, action[key]])),
       // Reporte: agrupa, cuenta y suma (con la fecha de la cabecera y el nombre del registro agrupado).
       ...(action.type === 'resumen' && action.resumen ? { resumen: action.resumen } : {})
     })));
@@ -418,13 +421,13 @@ ${this._hasActions(contract) ? this._nestActionRoutes() : ''} @Delete('api/opera
 
   _expressActionRoutes() {
     return `const actions=require('./actions/actions');
-const runAction=async(req,res,next)=>{try{const def=actions.find(req.params.name,req.method,req.params.id!==undefined);if(!def)return res.status(404).json({message:'Operación inexistente'});const result=await actions.run(store,def,{user:req.user,query:req.query,body:req.body,id:req.params.id,scope:scope(req,def.capability)});res.status(def.type==='crear'?201:200).json(result)}catch(e){next(e)}};
+const runAction=async(req,res,next)=>{try{const def=actions.find(req.params.name,req.method,req.params.id!==undefined);if(!def)return res.status(404).json({message:'Operación inexistente'});const result=await actions.run(store,def,{user:req.user,query:req.query,body:req.body,id:req.params.id,scope:scope(req,def.permiso||def.capability),accounts:app.locals.auth&&app.locals.auth.users});res.status(def.type==='crear'?201:200).json(result)}catch(e){next(e)}};
 app.get('/api/actions/:name',runAction);app.post('/api/actions/:name',runAction);app.post('/api/actions/:name/:id',runAction);app.patch('/api/actions/:name/:id',runAction);app.delete('/api/actions/:name/:id',runAction);
 `;
   }
 
   _nestActionRoutes() {
-    return ` private async runAction(method:string,name:string,id:string|undefined,query:any,body:any,req:any){const actions=require('./actions/actions');const def=actions.find(name,method,id!==undefined);if(!def)throw new NotFoundException('Operación inexistente');return actions.run(this.store,def,{user:req.user,query,body,id,scope:scope(req.user,def.capability)});}
+    return ` private async runAction(method:string,name:string,id:string|undefined,query:any,body:any,req:any){const actions=require('./actions/actions');const def=actions.find(name,method,id!==undefined);if(!def)throw new NotFoundException('Operación inexistente');const accounts=def.cuenta?require('./auth/auth-core').createAuth({store:this.store}).users:undefined;return actions.run(this.store,def,{user:req.user,query,body,id,scope:scope(req.user,def.permiso||def.capability),accounts});}
  @Get('api/actions/:name') actionGet(@Param('name') name:string,@Query() query:any,@Req() req:any){return this.runAction('GET',name,undefined,query,undefined,req);}
  @Post('api/actions/:name') actionPost(@Param('name') name:string,@Body() body:any,@Req() req:any){return this.runAction('POST',name,undefined,{},body,req);}
  @Post('api/actions/:name/:id') @HttpCode(200) actionPostId(@Param('name') name:string,@Param('id') id:string,@Body() body:any,@Req() req:any){return this.runAction('POST',name,id,{},body,req);}
@@ -549,6 +552,28 @@ ${this._hasActions(contract) ? this._expressActionRoutes() : ''}app.use((error,_
   }
 
   /**
+   * Un dato con reglas de negocio (el pedido que se cobra, la reserva con cupo, el paquete con saldo) solo se escribe por sus operaciones:
+   * con el CRUD genérico cualquier rol con permiso podría saltarse las reglas (marcar pagado, fijar el total o el saldo a mano).
+   * El administrador conserva el CRUD; los bloqueos de lo ya cobrado y de los cierres le aplican también.
+   */
+  _guardRawWrites(contract, policy) {
+    if (!policy?.habilitada) return;
+    const guarded = new Set();
+    for (const operation of contract.operations || []) {
+      for (const action of operation.actions || []) {
+        if (!['rolInputs', 'liquida', 'periodo', 'alCambiar', 'cupo'].some((key) => action[key])) continue;
+        guarded.add(action.entity);
+        for (const related of [action.liquida?.documento, action.liquida?.saldo, action.liquida?.puntos]) if (related?.entidadClave) guarded.add(related.entidadClave);
+        if (action.lineas?.entidadClave) guarded.add(action.lineas.entidadClave);
+      }
+    }
+    const protectedOperations = (contract.operations || []).filter((operation) => guarded.has(operation.entity));
+    // Se anota también en la operación: las pruebas generadas saben que ahí la escritura directa de un rol se rechaza.
+    for (const operation of protectedOperations) operation.soloAcciones = true;
+    if (protectedOperations.length) policy.soloAcciones = protectedOperations.map((operation) => operation.key);
+  }
+
+  /**
    * «Solo lo propio» tiene sentido cuando el dato es de alguien (una reserva, un pedido, un paquete del cliente). Un dato compartido (el
    * menú, el catálogo) no es de nadie: con ese alcance nadie vería nada, y dejar que el cliente lo modifique sería peor. Se consulta
    * completo y no se modifica.
@@ -556,13 +581,25 @@ ${this._hasActions(contract) ? this._expressActionRoutes() : ''}app.use((error,_
   _limitScopes(contract, policy) {
     if (!policy?.habilitada || !policy.operaciones) return;
     const owned = (entity) => !entity || ['cliente', 'usuario'].includes(entity.key) || (entity.references || []).some((reference) => /^(cliente|usuario)$/i.test(String(reference.entity)));
+    // Quién crea registros de cada entidad: el dueño de un registro es quien lo crea (columna interna owner_id), así que «solo lo propio»
+    // tiene sentido para un rol que da de alta esa entidad aunque esta no apunte a un cliente o a un usuario (la solicitud de préstamo de un
+    // estudiante). Un rol que no la crea (el menú que solo consulta) no puede ser su dueño.
+    const creators = new Map();
+    for (const operation of contract.operations || []) {
+      for (const [role, rule] of Object.entries(policy.operaciones[operation.key] || {})) {
+        if (!(rule?.metodos || []).includes('POST')) continue;
+        if (!creators.has(operation.entity)) creators.set(operation.entity, new Set());
+        creators.get(operation.entity).add(role);
+      }
+    }
     for (const operation of contract.operations || []) {
       const entry = policy.operaciones[operation.key];
       if (!entry) continue;
       const entity = (contract.entities || []).find((item) => item.key === operation.entity);
       if (owned(entity)) continue;
       for (const [role, rule] of Object.entries(entry)) {
-        if (rule?.alcance === 'propios') entry[role] = { ...rule, alcance: 'todos', metodos: (rule.metodos || []).filter((method) => method === 'GET') };
+        if (rule?.alcance !== 'propios' || creators.get(operation.entity)?.has(role)) continue;
+        entry[role] = { ...rule, alcance: 'todos', metodos: (rule.metodos || []).filter((method) => method === 'GET') };
       }
     }
   }

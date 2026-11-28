@@ -128,7 +128,7 @@ function salted() {
 }
 
 /** Crea un registro válido, junto con los padres que sus reglas declaran obligatorios. */
-async function createValidRecord(api, operations, target, cleanups, depth) {
+async function createValidRecord(api, operations, target, cleanups, depth, parentApi) {
   const fail = (message) => { throw new Error(target.id + ': ' + message); };
   if (depth > 3) fail('las referencias obligatorias son circulares');
   const sample = samplePayload(target.schema, target.rules, salted());
@@ -142,9 +142,17 @@ async function createValidRecord(api, operations, target, cleanups, depth) {
       const own = me && me.data && (me.data.usuario || me.data.user || me.data);
       if (own && own.id !== undefined) { body[parent.campo] = String(own.id); continue; }
     }
-    body[parent.campo] = parentOperation
-      ? (await createValidRecord(api, operations, parentOperation, cleanups, depth + 1)).id
-      : '1';
+    // El padre lo crea quien crea el registro (así es suyo y puede referenciarlo). Si ese rol no puede crearlo (la herramienta de una
+    // solicitud la da de alta otro rol), se crea con parentApi: la referencia es válida porque el catálogo es de lectura compartida.
+    let parentId = '1';
+    if (parentOperation) {
+      try { parentId = (await createValidRecord(api, operations, parentOperation, cleanups, depth + 1, parentApi)).id; }
+      catch (error) {
+        if (!parentApi || !/ respondió 403 /.test(String(error && error.message))) throw error;
+        parentId = (await createValidRecord(parentApi, operations, parentOperation, cleanups, depth + 1, parentApi)).id;
+      }
+    }
+    body[parent.campo] = parentId;
   }
   const response = await api(target.collectionPath, 'POST', { ...body, verification: 'isolated' });
   if (response.status !== 201) fail('crear respondió ' + response.status + ' (se esperaba 201): ' + JSON.stringify(response.data));
@@ -182,6 +190,8 @@ async function exerciseOperation(api, operations, operation) {
     }
     const main = await createValidRecord(api, operations, operation, cleanups, 0);
     const stored = main.response.data.data;
+    // Un cobro o un cierre de caja no se modifica ni se elimina: lo correcto es que ambos intentos respondan 409.
+    const frozen = (operation.rules || []).some((rule) => rule.tipo === 'solo_insercion');
     for (const name of Object.keys(operation.schema.properties || {}).filter((key) => operation.schema.properties[key]['x-sensitive'])) {
       if (stored[name] !== undefined) fail('el campo ' + name + ' es un secreto y no debe devolverse');
     }
@@ -206,15 +216,29 @@ async function exerciseOperation(api, operations, operation) {
     if (textField) {
       const term = String(textField.value).slice(0, 4);
       if (term) {
-        const searched = await api(operation.collectionPath + '?search=' + encodeURIComponent(term));
+        const searchUrl = operation.collectionPath + '?search=' + encodeURIComponent(term);
+        const searched = await api(searchUrl);
         if (searched.status === 200) {
-          const searchRecords = Array.isArray(searched.data) ? searched.data : (searched.data.data || []);
-          if (!searchRecords.some((item) => String(item.id || item._id) === String(main.id))) fail('la búsqueda por texto no encontró el registro');
+          const rowsOf = (response) => (Array.isArray(response.data) ? response.data : (response.data.data || []));
+          const hasMain = (response) => rowsOf(response).some((item) => String(item.id || item._id) === String(main.id));
+          // Los primeros 4 caracteres de un valor de ejemplo los comparten muchos registros (los que crean las demás pruebas): si hay más de una página, el nuevo puede estar en otra.
+          let found = hasMain(searched);
+          const pages = Number(searched.data && searched.data.pagination && searched.data.pagination.total_pages) || 1;
+          for (let page = 2; !found && page <= Math.min(pages, 50); page += 1) {
+            const next = await api(searchUrl + '&page=' + page);
+            if (next.status !== 200) break;
+            found = hasMain(next);
+          }
+          if (!found) fail('la búsqueda por texto no encontró el registro');
         }
       }
     }
 
-    if (declared('PATCH')) {
+    if (frozen) {
+      if (declared('PATCH')) expectStatus(await api(operation.collectionPath + '/' + main.id, 'PATCH', { verification: 'updated' }), 409, 'modificar un registro que no cambia');
+      if (declared('DELETE')) expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 409, 'eliminar un registro que no cambia');
+    }
+    if (declared('PATCH') && !frozen) {
       const updated = expectStatus(await api(operation.collectionPath + '/' + main.id, 'PATCH', { verification: 'updated' }), 200, 'modificar');
       if (updated.data.data.verification !== 'updated') fail('la modificación no se aplicó');
       if (Object.keys(stored).some((key) => updated.data.data[key] === undefined)) fail('la modificación parcial perdió datos');
@@ -224,7 +248,7 @@ async function exerciseOperation(api, operations, operation) {
     if (wrong) expectStatus(await api(operation.collectionPath, 'POST', { ...main.body, [wrong.name]: 'valor-que-no-corresponde' }), 400, 'rechazar un tipo incorrecto');
 
     for (const item of main.sample.cases) {
-      if (item.accion === 'modificar' && !declared('PATCH')) continue;
+      if (item.accion === 'modificar' && (!declared('PATCH') || frozen)) continue;
       const label = item.regla + ' (' + item.tipo + ')';
       let response;
       if (item.accion === 'modificar') {
@@ -239,7 +263,7 @@ async function exerciseOperation(api, operations, operation) {
       if (item.esperado === 422 && !(response.data.details || []).some((detail) => detail.regla === item.regla)) fail('regla ' + label + ' fue rechazada por otra causa: ' + JSON.stringify(response.data));
     }
 
-    if (declared('DELETE')) {
+    if (declared('DELETE') && !frozen) {
       expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 200, 'eliminar');
       expectStatus(await api(operation.collectionPath + '/' + main.id, 'DELETE'), 404, 'eliminar dos veces');
     }
@@ -312,7 +336,8 @@ async function exerciseAccess(access, operations, operation, matrix) {
     status(await access.invalid(path), 401, 'listar con un token alterado');
     const record = await createValidRecord(access.admin, operations, operation, cleanups, 0);
     for (const [role, session] of Object.entries(access.roles)) {
-      const allowed = permissionMethods(matrix[role]);
+      // Un dato con reglas de negocio se escribe solo por sus operaciones: la escritura directa de un rol se rechaza (403).
+      const allowed = permissionMethods(matrix[role]).filter((method) => method === 'GET' || !operation.soloAcciones);
       const label = 'rol ' + role;
       const check = (response, method, text) => (allowed.includes(method) ? permitted(response, label + ' ' + text) : status(response, 403, label + ' ' + text + ' sin permiso'));
       check(await session.api(path), 'GET', 'listar');
@@ -495,6 +520,8 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
     if (response.status !== expected) fail(label + ' respondió ' + response.status + ' (se esperaba ' + expected + '): ' + JSON.stringify(response.data));
     return response;
   };
+  // Con reglas de negocio no hay escritura directa que ejercer: la propiedad se comprueba en las pruebas de sus operaciones.
+  if (operation.soloAcciones) return;
   const limited = Object.entries(matrix || {}).find(([, entry]) => permissionScope(entry) === 'propios' && permissionMethods(entry).includes('POST') && permissionMethods(entry).includes('GET'));
   if (!limited) return;
   const role = limited[0];
@@ -508,8 +535,8 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
   const second = { api: makeApi(base, session.data.token), userId: createdUser.data.id };
   const cleanups = [() => access.admin('/api/users/' + second.userId, 'DELETE')];
   try {
-    const mine = await createValidRecord(first.api, operations, operation, cleanups, 0);
-    const theirs = await createValidRecord(second.api, operations, operation, cleanups, 1);
+    const mine = await createValidRecord(first.api, operations, operation, cleanups, 0, access.admin);
+    const theirs = await createValidRecord(second.api, operations, operation, cleanups, 1, access.admin);
     const listed = status(await first.api(operation.collectionPath), 200, 'listar propios');
     const rows = Array.isArray(listed.data) ? listed.data : listed.data.data;
     if (!rows.some((row) => String(row.id) === String(mine.id))) fail('el listado omitió el registro propio');
@@ -519,7 +546,7 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
     const allowed = permissionMethods(limited[1]);
     status(await first.api(operation.collectionPath + '/' + theirs.id, 'PATCH', { verification: 'ajeno' }), allowed.includes('PATCH') ? 404 : 403, 'modificar ajeno');
     status(await first.api(operation.collectionPath + '/' + theirs.id, 'DELETE'), allowed.includes('DELETE') ? 404 : 403, 'borrar ajeno');
-    const forged = await first.api(operation.collectionPath, 'POST', { ...(await createValidRecord(first.api, operations, operation, cleanups, 2)).body, owner_id: second.userId, __owner: second.userId });
+    const forged = await first.api(operation.collectionPath, 'POST', { ...(await createValidRecord(first.api, operations, operation, cleanups, 2, access.admin)).body, owner_id: second.userId, __owner: second.userId });
     if (forged.status === 201) {
       cleanups.unshift(() => first.api(operation.collectionPath + '/' + forged.data.id, 'DELETE'));
       const seen = status(await second.api(operation.collectionPath), 200, 'listar tras falsificar propietario');
@@ -537,12 +564,12 @@ async function exerciseOwnership(access, operations, operation, matrix, config =
       if (!operation.entity) break;
       const keyOf = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const reference = Object.entries(candidate.schema?.properties || {}).find(([, schema]) => schema && schema['x-references'] && keyOf(schema['x-references']) === String(operation.entity));
-      if (!reference) continue;
+      if (!reference || candidate.soloAcciones) continue;
       const candidateEntry = (config.auth?.operaciones || {})[candidate.key]?.[role];
       if (permissionScope(candidateEntry) !== 'propios') continue;
       // Una operación reducida pierde POST en la política: el rol recibiría 403 al crear.
       if (!permissionMethods(candidateEntry).includes('POST') || (candidate.methods && !candidate.methods.includes('POST'))) continue;
-      const payload = await createValidRecord(first.api, operations, candidate, cleanups, 0);
+      const payload = await createValidRecord(first.api, operations, candidate, cleanups, 0, access.admin);
       const conflict = await first.api(candidate.collectionPath, 'POST', { ...payload.body, [reference[0]]: theirs.id });
       if (conflict.status !== 409) fail('referencia cruzada en ' + candidate.id + '.' + reference[0] + ' (rol ' + role + ') respondió ' + conflict.status + ': ' + JSON.stringify(conflict.data).slice(0, 300));
     }
@@ -603,18 +630,91 @@ async function exerciseAction(api, operations, action) {
   };
   const itemPath = (id) => target.itemPath.replace(':id', id);
   const route = (id) => action.path.replace(':id', id);
+  const storeOf = (capability) => operations.find((item) => item.key === capability) || fail('no tiene operación de almacén (' + capability + ')');
+  // Una cuenta real con el rol pedido (el mesero de una mesa, el cliente de un pedido).
+  const accounts = {};
+  const accountFor = async (role) => {
+    if (accounts[role]) return accounts[role];
+    const email = 'accion-' + role + '-' + salted() + '@example.test';
+    const created = expectStatus(await api('/api/users', 'POST', { email, password: 'Passw0rd-accion-1', nombre: 'Prueba ' + role, rol: role }), 201, 'crear una cuenta ' + role);
+    cleanups.push(() => api('/api/users/' + created.data.id, 'DELETE'));
+    accounts[role] = String(created.data.id);
+    return accounts[role];
+  };
+  // Lo que cada rol aporta: la cuenta elegida, o el registro relacionado que ya dice quién es.
+  const withRoles = async (body) => {
+    for (const [field, spec] of Object.entries(action.roles || {})) if ((action.inputs || []).includes(field)) body[field] = await accountFor(spec.rol);
+    for (const item of action.rolInputs || []) {
+      if (!item.heredar) continue;
+      const source = storeOf(item.heredar.capability);
+      const record = await createValidRecord(api, operations, source, cleanups, 1);
+      expectStatus(await api(source.itemPath.replace(':id', record.id), 'PATCH', { [item.heredar.campo]: await accountFor(item.rol) }), 200, 'asignar ' + item.rol);
+      body[item.heredar.via] = record.id;
+    }
+    return body;
+  };
   try {
+    if (action.cuenta) {
+      // La gestión de usuarios actúa sobre las cuentas de acceso.
+      if (action.type === 'consulta') {
+        const rows = expectStatus(await api(action.path, 'GET'), 200, 'consultar las cuentas').data;
+        if (!Array.isArray(rows) || !rows.length) fail('debe listar las cuentas');
+        if (rows.some((row) => action.cuenta.password in row || 'password_hash' in row)) fail('expone la contraseña');
+        return;
+      }
+      const role = action.type === 'crear' ? 'administrador' : null;
+      const email = 'cuenta-' + salted() + '@example.test';
+      if (action.type === 'crear') {
+        const created = expectStatus(await api(action.path, 'POST', { [action.cuenta.email]: email, [action.cuenta.password]: 'Passw0rd-cuenta-1', [action.cuenta.nombre || 'nombre']: 'Cuenta', [action.cuenta.rol || 'rol']: role }), 201, 'crear la cuenta');
+        cleanups.push(() => api('/api/users/' + created.data.id, 'DELETE'));
+        expectStatus(await api('/api/auth/login', 'POST', { email, password: 'Passw0rd-cuenta-1' }), 200, 'iniciar sesión con la cuenta creada');
+        return;
+      }
+      const created = expectStatus(await api('/api/users', 'POST', { email, password: 'Passw0rd-cuenta-1', nombre: 'Cuenta', rol: 'administrador' }), 201, 'preparar la cuenta');
+      cleanups.push(() => api('/api/users/' + created.data.id, 'DELETE'));
+      expectStatus(await api(route(created.data.id), 'PATCH', { [action.cuenta.nombre || 'nombre']: 'Cuenta editada' }), 200, 'actualizar la cuenta');
+      return;
+    }
+    if (action.liquida) {
+      // Cobrar: el documento debe estar listo, se cobra por su total y una sola vez.
+      const doc = action.liquida.documento;
+      const source = storeOf(doc.capability);
+      const record = await createValidRecord(api, operations, source, cleanups, 1);
+      const body = { [doc.campo]: record.id };
+      const early = await api(action.path, 'POST', { ...body, ...(action.liquida.metodo && !action.liquida.fijo ? { [action.liquida.metodo]: 'EFECTIVO' } : {}) });
+      if (early.status !== 409) fail('cobrar antes de que esté ' + doc.de + ' respondió ' + early.status + ' (se esperaba 409)');
+      const prepared = { [doc.estado]: doc.de, [doc.total]: 10 };
+      const saldo = action.liquida.saldo;
+      if (action.liquida.fijo && saldo) {
+        const client = await accountFor('cliente');
+        prepared[doc.cliente] = client;
+        const balance = storeOf(saldo.capability);
+        const day = (offset) => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+        const funded = await createValidRecord(api, operations, balance, cleanups, 1);
+        expectStatus(await api(balance.itemPath.replace(':id', funded.id), 'PATCH', { [saldo.titular]: client, [saldo.estado]: saldo.activo, [saldo.campo]: 100, [saldo.inicio]: day(-1), [saldo.fin]: day(6) }), 200, 'preparar el saldo prepagado');
+      } else if (action.liquida.metodo) {
+        const options = target.schema?.properties?.[action.liquida.metodo]?.enum || ['EFECTIVO'];
+        body[action.liquida.metodo] = options.find((item) => !(saldo && item === saldo.valor)) || options[0];
+      }
+      expectStatus(await api(source.itemPath.replace(':id', record.id), 'PATCH', prepared), 200, 'dejar el documento ' + doc.de);
+      const response = expectStatus(await api(action.path, 'POST', body), 201, 'cobrar');
+      if (Number(response.data[action.liquida.monto]) !== 10) fail('el monto debe ser el total del documento');
+      expectStatus(await api(action.path, 'POST', body), 409, 'cobrar dos veces');
+      expectStatus(await api(source.itemPath.replace(':id', record.id), 'PATCH', { verification: 'tras-cobro' }), 409, 'modificar lo ya cobrado');
+      return;
+    }
     if (action.type === 'consulta') {
       const created = await createValidRecord(api, operations, target, cleanups, 0);
       const rows = expectStatus(await api(action.path, 'GET'), 200, 'consultar').data;
       if (!Array.isArray(rows)) fail('la consulta debe devolver una lista');
-      const allowed = new Set(['id', ...(action.output || []), ...(action.output || []).map((name) => name + '__etiqueta')]); // la etiqueta legible de una referencia acompaña a su campo
+      const allowed = new Set(['id', ...(action.output || []), ...(action.output || []).map((name) => name + '__etiqueta'), ...(action.detalle ? [action.detalle.campo] : [])]); // la etiqueta legible de una referencia acompaña a su campo
+      if (action.exigeParametro && rows.length) fail('sin el dato que se busca no debe listar nada');
       for (const row of rows) {
         if (row.id === undefined) fail('cada fila debe traer su id');
         if ((action.output || []).length) for (const key of Object.keys(row)) if (!allowed.has(key)) fail('devolvió el campo no declarado «' + key + '»');
       }
       // Sin filtros, el registro recién creado debe aparecer: comprueba que la consulta lee datos reales.
-      if (!(action.filters || []).length && !rows.some((row) => String(row.id) === String(created.id))) fail('el registro creado no aparece en la consulta');
+      if (!(action.filters || []).length && !action.exigeParametro && !rows.some((row) => String(row.id) === String(created.id))) fail('el registro creado no aparece en la consulta');
     } else if (action.type === 'crear') {
       const seed = await createValidRecord(api, operations, target, cleanups, 0);
       await api(itemPath(seed.id), 'DELETE');
@@ -639,6 +739,7 @@ async function exerciseAction(api, operations, action) {
         owner = await createValidRecord(api, operations, source, cleanups, 1);
         body[action.vincula.parametro] = owner.id;
       }
+      await withRoles(body);
       const response = expectStatus(await api(action.path, 'POST', body), 201, 'crear');
       if (owner) {
         // Se lee por una operación de esa entidad que permita consultar (la de registrar ventas puede ser solo POST).
@@ -665,7 +766,7 @@ async function exerciseAction(api, operations, action) {
       });
     } else if (action.type === 'actualizar') {
       const seed = await createValidRecord(api, operations, target, cleanups, 0);
-      const body = await bodyFor(seed);
+      const body = await withRoles(await bodyFor(seed));
       const response = expectStatus(await api(route(seed.id), 'PATCH', body), 200, 'actualizar');
       if (String(response.data.id) !== String(seed.id)) fail('devolvió otro registro');
       expectStatus(await api(route('no-existe-0'), 'PATCH', body), 404, 'actualizar un registro inexistente');
@@ -685,7 +786,9 @@ async function exerciseAction(api, operations, action) {
         expectStatus(await api(itemPath(seed.id), 'PATCH', { [action.sobre.via]: routeId }), 200, 'vincular el registro relacionado');
       }
       if (de.length) expectStatus(await api(itemPath(seed.id), 'PATCH', { [campo]: de[0] }), 200, 'preparar el estado de origen');
-      const response = expectStatus(await api(route(routeId), 'POST', {}), 200, 'cambiar de estado');
+      // Un cambio que pide datos (lo pagado al activar un paquete) se envía con ellos.
+      const change = Object.fromEntries((action.alCambiar?.exigir || []).map((name) => [name, 5]));
+      const response = expectStatus(await api(route(routeId), 'POST', change), 200, 'cambiar de estado');
       if (response.data[campo] !== a) fail('el estado quedó en ' + response.data[campo] + ' (se esperaba ' + a + ')');
       if (de.length && !de.includes(a)) expectStatus(await api(route(routeId), 'POST', {}), 409, 'repetir una transición no permitida');
     } else if (action.type === 'resumen') {

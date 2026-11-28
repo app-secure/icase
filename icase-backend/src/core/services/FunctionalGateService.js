@@ -9,7 +9,8 @@
 const FILES = Object.freeze({
   backendManifest: 'backend/icase.manifest.json',
   report: 'backend/GENERATION-REPORT.json',
-  frontendManifest: 'frontend/icase.manifest.json'
+  frontendManifest: 'frontend/icase.manifest.json',
+  mobileManifest: 'mobile/icase.manifest.json'
 });
 
 const parse = (archivos, ruta) => {
@@ -51,7 +52,9 @@ class FunctionalGateService {
       for (const action of actions.filter((item) => !tests.includes(item.name))) {
         findings.push(finding({ codigo: 'operacion_sin_prueba', objetivo: action.name, mensaje: `La operación «${action.name}» (${action.requisito}) no tiene prueba.`, donde: 'Generación de pruebas' }));
       }
-      const used = new Set((frontend?.pantallas || []).flatMap((screen) => screen.especificacion?.operaciones || []));
+      // Las pantallas del cliente están en la app móvil: sus operaciones también tienen pantalla.
+      const mobile = parse(archivos, FILES.mobileManifest);
+      const used = new Set([...(frontend?.pantallas || []), ...(mobile?.pantallas || [])].flatMap((screen) => screen.especificacion?.operaciones || []));
       if (frontend && backend.spec) {
         for (const action of actions.filter((item) => !used.has(item.name))) {
           findings.push(finding({ severidad: 'aviso', codigo: 'operacion_sin_pantalla', objetivo: action.name, mensaje: `Ninguna pantalla usa la operación «${action.name}».`, donde: 'Planificación › Comportamiento de la aplicación' }));
